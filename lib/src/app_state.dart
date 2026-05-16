@@ -208,6 +208,21 @@ class TakeALookController extends ChangeNotifier {
     _safeNotify();
   }
 
+  void seedDemoWatches({int count = 4}) {
+    final existingIds = watches.map((watch) => watch.symbol.id).toSet();
+    final candidates = symbols
+        .where((symbol) => !existingIds.contains(symbol.id))
+        .take(count)
+        .toList(growable: false);
+    for (final symbol in candidates) {
+      watches.add(_watchFromSymbol(symbol));
+    }
+    if (candidates.isNotEmpty) {
+      addLog('独立窗口已初始化 ${candidates.length} 条示例曲线');
+      _safeNotify();
+    }
+  }
+
   void removeWatch(WatchVariable watch) {
     watches.remove(watch);
     watch.dispose();

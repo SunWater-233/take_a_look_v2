@@ -29,6 +29,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
             'address': symbol.address,
             'type': symbol.type,
             'size': symbol.size,
+            'section': symbol.section,
             'key': symbol.key,
             'writable': symbol.writable,
             'dataSource': symbol.dataSource,
@@ -158,23 +159,22 @@ extension TakeALookControllerSnapshot on TakeALookController {
         ..addAll((data['selectedSymbols'] as List? ?? const []).cast<String>());
     }
     if (data.containsKey('symbols')) {
-      _symbols
-        ..clear()
-        ..addAll(
-          (data['symbols'] as List? ?? const []).map((raw) {
-            final item = Map<String, dynamic>.from(raw as Map);
-            return SymbolItem(
-              source: item['source'] as String,
-              name: item['name'] as String,
-              address: item['address'] as int,
-              type: item['type'] as String,
-              size: item['size'] as int,
-              backendKey: item['key'] as String?,
-              writable: item['writable'] != false,
-              dataSource: item['dataSource'] as String? ?? 'memory',
-            );
-          }),
-        );
+      _replaceSymbols(
+        (data['symbols'] as List? ?? const []).map((raw) {
+          final item = Map<String, dynamic>.from(raw as Map);
+          return SymbolItem(
+            source: item['source'] as String,
+            name: item['name'] as String,
+            address: item['address'] as int,
+            type: item['type'] as String,
+            size: item['size'] as int,
+            section: item['section'] as String? ?? '',
+            backendKey: item['key'] as String?,
+            writable: item['writable'] != false,
+            dataSource: item['dataSource'] as String? ?? 'memory',
+          );
+        }),
+      );
     }
 
     final symbolsByKey = {for (final symbol in _symbols) symbol.key: symbol};

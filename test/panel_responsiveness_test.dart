@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:take_a_look_v2/src/controller.dart';
@@ -107,6 +108,118 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.text('绘制颜色'), findsOneWidget);
     expect(find.byType(SingleChildScrollView), findsWidgets);
+
+    controller.dispose();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
+  testWidgets('watch columns resize independently and right drag scales rows', (
+    tester,
+  ) async {
+    final controller = TakeALookController()..loadDemoSymbols();
+    controller.selectSymbols([demoSymbols.first.key]);
+    controller.addSelectedToWatch();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTalTheme(),
+        home: Scaffold(
+          body: SizedBox(
+            width: 600,
+            height: 420,
+            child: buildWorkspacePanel(WorkspacePanelId.watch, controller),
+          ),
+        ),
+      ),
+    );
+
+    final content = find.byKey(const ValueKey('watch-table-content'));
+    final resizeRegion = find.byKey(
+      const ValueKey('watch-table-resize-region'),
+    );
+    final row = find.byKey(ValueKey<String>(demoSymbols.first.key));
+    final initialWidth = tester.getSize(content).width;
+    final initialRowHeight = tester.getSize(row).height;
+    for (var index = 0; index < 8; index += 1) {
+      expect(
+        find.byKey(ValueKey('watch-column-resize-$index')),
+        findsOneWidget,
+      );
+    }
+    final columnGesture = await tester.startGesture(
+      tester.getCenter(find.byKey(const ValueKey('watch-column-resize-0'))),
+      kind: PointerDeviceKind.mouse,
+    );
+    await columnGesture.moveBy(const Offset(24, 0));
+    await columnGesture.up();
+    await tester.pump();
+
+    expect(tester.getSize(content).width, closeTo(initialWidth + 24, 0.01));
+    expect(tester.getSize(row).height, initialRowHeight);
+
+    final widthAfterColumnResize = tester.getSize(content).width;
+    final gesture = await tester.startGesture(
+      tester.getTopLeft(resizeRegion) + const Offset(250, 80),
+      kind: PointerDeviceKind.mouse,
+      buttons: kSecondaryMouseButton,
+    );
+    await gesture.moveBy(const Offset(20, 10));
+    await tester.pump();
+
+    expect(
+      tester.getSize(content).width,
+      closeTo(widthAfterColumnResize + 136, 0.01),
+    );
+    expect(tester.getSize(row).height, closeTo(initialRowHeight + 8.5, 0.01));
+
+    await gesture.up();
+    controller.dispose();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
+  testWidgets('watch color picker updates the plotted series color', (
+    tester,
+  ) async {
+    final controller = TakeALookController()..loadDemoSymbols();
+    controller.selectSymbols([demoSymbols.first.key]);
+    controller.addSelectedToWatch();
+    var plotEvents = 0;
+    controller.plotChanges.addListener(() => plotEvents += 1);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTalTheme(),
+        home: Scaffold(
+          body: SizedBox(
+            width: 900,
+            height: 520,
+            child: buildWorkspacePanel(WorkspacePanelId.watch, controller),
+          ),
+        ),
+      ),
+    );
+
+    await tester.drag(
+      find.byType(SingleChildScrollView),
+      const Offset(-180, 0),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(ValueKey('watch-color-${demoSymbols.first.key}')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('选择绘制颜色'), findsOneWidget);
+
+    await tester.tap(
+      find.byKey(ValueKey('watch-color-preset-${TalColors.blue.toARGB32()}')),
+    );
+    await tester.tap(find.byKey(const ValueKey('watch-color-confirm')));
+    await tester.pumpAndSettle();
+
+    expect(controller.watches.single.color, TalColors.blue);
+    expect(plotEvents, 1);
 
     controller.dispose();
     await tester.pumpWidget(const SizedBox.shrink());

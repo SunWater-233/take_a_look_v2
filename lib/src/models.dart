@@ -9,6 +9,7 @@ class SymbolItem {
     required this.address,
     required this.type,
     required this.size,
+    this.section = '',
     this.backendKey,
     this.writable = true,
     this.dataSource = 'memory',
@@ -19,6 +20,7 @@ class SymbolItem {
   final int address;
   final String type;
   final int size;
+  final String section;
   final String? backendKey;
   final bool writable;
   final String dataSource;
@@ -42,7 +44,7 @@ class WatchItem {
   WatchItem({required this.symbol, required this.color});
 
   final SymbolItem symbol;
-  final Color color;
+  Color color;
   final List<Offset> samples = <Offset>[];
   int totalSampleCount = 0;
   bool plotted = true;

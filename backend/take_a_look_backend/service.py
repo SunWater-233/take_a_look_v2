@@ -500,6 +500,7 @@ class BackendService:
             "address": symbol.address,
             "type": symbol.kind,
             "size": symbol.size,
+            "section": symbol.section,
             "writable": symbol.is_writable,
             "dataSource": symbol.data_source,
         }

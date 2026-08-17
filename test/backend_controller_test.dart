@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:take_a_look_v2/src/backend_client.dart';
 import 'package:take_a_look_v2/src/controller.dart';
@@ -62,6 +63,16 @@ void main() {
     expect(commands.single.$1, 'setWatches');
     final watchPayload = Map<String, dynamic>.from(commands.single.$2! as Map);
     expect(watchPayload['watches'], hasLength(1));
+    commands.clear();
+
+    controller.setWatchColor(
+      controller.watches.single.symbol.key,
+      const Color(0xFF2F6FED),
+    );
+    expect(commands.single.$1, 'setWatches');
+    final colorPayload = Map<String, dynamic>.from(commands.single.$2! as Map);
+    final colorWatches = (colorPayload['watches'] as List).cast<Map>();
+    expect(colorWatches.single['color'], '#ff2f6fed');
     commands.clear();
 
     controller.applyBackendEvent('samples', {

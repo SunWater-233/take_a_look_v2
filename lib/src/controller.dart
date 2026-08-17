@@ -43,6 +43,7 @@ class TakeALookController extends ChangeNotifier {
   final List<WatchItem> _watches = <WatchItem>[];
   final List<LogEntry> _logs = <LogEntry>[];
   final Set<String> _selectedSymbols = <String>{};
+  int _symbolRevision = 0;
   Timer? _ticker;
   bool _disposed = false;
   double _phase = 0;
@@ -78,6 +79,7 @@ class TakeALookController extends ChangeNotifier {
   Map<String, dynamic>? lastBackendError;
 
   List<SymbolItem> get symbols => List.unmodifiable(_symbols);
+  int get symbolRevision => _symbolRevision;
   List<WatchItem> get watches => List.unmodifiable(_watches);
   List<LogEntry> get logs => List.unmodifiable(_logs);
   Set<String> get selectedSymbols => Set.unmodifiable(_selectedSymbols);
@@ -161,12 +163,38 @@ class TakeALookController extends ChangeNotifier {
   void loadDemoSymbols() {
     if (_dispatchRemote('loadSymbols')) return;
     symbolFile = 'motor_control_release.axf';
-    _symbols
-      ..clear()
-      ..addAll(demoSymbols);
+    _replaceSymbols(demoSymbols);
     _selectedSymbols.clear();
     _appendLog('已读取符号文件：$symbolFile，变量符号 ${_symbols.length} 个。');
     _emitState([_symbolChanges, _logChanges]);
+  }
+
+  void _replaceSymbols(Iterable<SymbolItem> symbols) {
+    final next = symbols.toList(growable: false);
+    if (_symbols.length == next.length) {
+      var unchanged = true;
+      for (var index = 0; index < next.length; index += 1) {
+        final current = _symbols[index];
+        final replacement = next[index];
+        if (current.source != replacement.source ||
+            current.name != replacement.name ||
+            current.address != replacement.address ||
+            current.type != replacement.type ||
+            current.size != replacement.size ||
+            current.section != replacement.section ||
+            current.backendKey != replacement.backendKey ||
+            current.writable != replacement.writable ||
+            current.dataSource != replacement.dataSource) {
+          unchanged = false;
+          break;
+        }
+      }
+      if (unchanged) return;
+    }
+    _symbols
+      ..clear()
+      ..addAll(next);
+    _symbolRevision += 1;
   }
 
   Future<void> chooseSymbolFile() async {
@@ -335,6 +363,24 @@ class TakeALookController extends ChangeNotifier {
     _emitState([_symbolChanges]);
   }
 
+  void selectSymbols(Iterable<String> keys) {
+    final selected = keys.toSet();
+    if (_isDetachedRemote &&
+        _dispatchRemote('selectSymbols', selected.toList())) {
+      return;
+    }
+    _selectedSymbols
+      ..clear()
+      ..addAll(selected);
+    _emitState([_symbolChanges]);
+  }
+
+  void activateSymbol(String key) {
+    if (_isDetachedRemote && _dispatchRemote('activateSymbol', key)) return;
+    selectSymbols([key]);
+    addSelectedToWatch();
+  }
+
   void addSelectedToWatch() {
     if (_isDetachedRemote && _dispatchRemote('addSelectedToWatch')) return;
     final existing = _watches.map((item) => item.symbol.key).toSet();
@@ -357,8 +403,18 @@ class TakeALookController extends ChangeNotifier {
   }
 
   void removeWatch(String key) {
-    if (_isDetachedRemote && _dispatchRemote('removeWatch', key)) return;
-    _watches.removeWhere((item) => item.symbol.key == key);
+    removeWatches([key]);
+  }
+
+  void removeWatches(Iterable<String> keys) {
+    final removedKeys = keys.toSet();
+    if (_isDetachedRemote &&
+        _dispatchRemote('removeWatches', removedKeys.toList())) {
+      return;
+    }
+    final previousLength = _watches.length;
+    _watches.removeWhere((item) => removedKeys.contains(item.symbol.key));
+    if (_watches.length == previousLength) return;
     _syncWatchesBackend();
     _emitState([_watchChanges, _plotChanges]);
   }
@@ -378,6 +434,76 @@ class TakeALookController extends ChangeNotifier {
     }
     final watch = _watchByKey(key);
     if (watch != null) watch.plotted = value;
+    _syncWatchesBackend();
+    _emitState([_watchChanges, _plotChanges]);
+  }
+
+  void setWatchColor(String key, Color color) {
+    setWatchColors([key], color);
+  }
+
+  void setWatchColors(Iterable<String> keys, Color color) {
+    final colorKeys = keys.toSet();
+    if (_isDetachedRemote &&
+        _dispatchRemote('setWatchColors', {
+          'keys': colorKeys.toList(),
+          'color': color.toARGB32(),
+        })) {
+      return;
+    }
+    var changed = false;
+    for (final watch in _watches) {
+      if (colorKeys.contains(watch.symbol.key) && watch.color != color) {
+        watch.color = color;
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    _syncWatchesBackend();
+    _emitState([_watchChanges, _plotChanges]);
+  }
+
+  void setOnlyWatchesPlotted(Iterable<String> keys) {
+    final plottedKeys = keys.toSet();
+    _setWatchPlotStates(
+      'setOnlyWatchesPlotted',
+      plottedKeys.toList(),
+      (watch) => plottedKeys.contains(watch.symbol.key),
+    );
+  }
+
+  void setAllWatchesPlotted(bool plotted) {
+    _setWatchPlotStates('setAllWatchesPlotted', plotted, (_) => plotted);
+  }
+
+  void invertWatchPlots(Iterable<String> keys) {
+    final invertedKeys = keys.toSet();
+    _setWatchPlotStates(
+      'invertWatchPlots',
+      invertedKeys.toList(),
+      (watch) => invertedKeys.contains(watch.symbol.key)
+          ? !watch.plotted
+          : watch.plotted,
+    );
+  }
+
+  void _setWatchPlotStates(
+    String remoteMethod,
+    Object? remoteArguments,
+    bool Function(WatchItem watch) plottedForWatch,
+  ) {
+    if (_isDetachedRemote && _dispatchRemote(remoteMethod, remoteArguments)) {
+      return;
+    }
+    var changed = false;
+    for (final watch in _watches) {
+      final plotted = plottedForWatch(watch);
+      if (watch.plotted != plotted) {
+        watch.plotted = plotted;
+        changed = true;
+      }
+    }
+    if (!changed) return;
     _syncWatchesBackend();
     _emitState([_watchChanges, _plotChanges]);
   }
@@ -485,15 +611,36 @@ class TakeALookController extends ChangeNotifier {
         await exportCsv();
       case 'toggleSymbol':
         toggleSymbol(arguments as String);
+      case 'selectSymbols':
+        selectSymbols((arguments as List).cast<String>());
+      case 'activateSymbol':
+        activateSymbol(arguments as String);
       case 'addSelectedToWatch':
         addSelectedToWatch();
       case 'removeWatch':
         removeWatch(arguments as String);
+      case 'removeWatches':
+        removeWatches((arguments as List).cast<String>());
       case 'clearWatches':
         clearWatches();
       case 'toggleWatchPlot':
         final values = Map<String, dynamic>.from(arguments as Map);
         toggleWatchPlot(values['key'] as String, values['value'] as bool);
+      case 'setWatchColor':
+        final values = Map<String, dynamic>.from(arguments as Map);
+        setWatchColor(values['key'] as String, Color(values['color'] as int));
+      case 'setWatchColors':
+        final values = Map<String, dynamic>.from(arguments as Map);
+        setWatchColors(
+          (values['keys'] as List).cast<String>(),
+          Color(values['color'] as int),
+        );
+      case 'setOnlyWatchesPlotted':
+        setOnlyWatchesPlotted((arguments as List).cast<String>());
+      case 'setAllWatchesPlotted':
+        setAllWatchesPlotted(arguments as bool);
+      case 'invertWatchPlots':
+        invertWatchPlots((arguments as List).cast<String>());
       case 'writeWatch':
         final values = Map<String, dynamic>.from(arguments as Map);
         writeWatch(values['key'] as String, values['value'] as String);

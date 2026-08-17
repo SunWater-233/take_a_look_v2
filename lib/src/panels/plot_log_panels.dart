@@ -75,19 +75,24 @@ class _LogPanel extends StatelessWidget {
           child: Stack(
             children: [
               Positioned.fill(
-                child: ListView.builder(
-                  padding: const EdgeInsets.all(4),
-                  itemCount: controller.logs.length,
-                  itemBuilder: (context, index) {
-                    final entry = controller.logs[index];
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 3),
-                      child: Text(
-                        '[${entry.timeLabel}] ${entry.message}',
-                        style: talMono,
-                      ),
-                    );
-                  },
+                child: SelectionArea(
+                  key: const ValueKey('log-selection-area'),
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(4),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        for (final entry in controller.logs)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 3),
+                            child: Text(
+                              '[${entry.timeLabel}] ${entry.message}',
+                              style: talMono,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
               Positioned(

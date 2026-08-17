@@ -1,5 +1,147 @@
 part of '../panels.dart';
 
+typedef _ColumnResizeCallback = void Function(int index, double delta);
+typedef _ColumnContextMenuCallback =
+    void Function(int index, Offset globalPosition);
+
+class _ResizableTableHeaderCell extends StatelessWidget {
+  const _ResizableTableHeaderCell({
+    required this.label,
+    required this.width,
+    required this.columnIndex,
+    required this.keyPrefix,
+    required this.onResize,
+    this.selected = false,
+    this.onSelect,
+    this.onContextMenu,
+  });
+
+  final String label;
+  final double width;
+  final int columnIndex;
+  final String keyPrefix;
+  final _ColumnResizeCallback onResize;
+  final bool selected;
+  final ValueChanged<int>? onSelect;
+  final _ColumnContextMenuCallback? onContextMenu;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: width,
+      height: 36,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Material(
+            color: selected ? TalColors.selection : TalColors.surfaceAlt,
+            child: InkWell(
+              onTap: onSelect == null ? null : () => onSelect!(columnIndex),
+              onSecondaryTapUp: onContextMenu == null
+                  ? null
+                  : (details) =>
+                        onContextMenu!(columnIndex, details.globalPosition),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                alignment: Alignment.centerLeft,
+                decoration: const BoxDecoration(
+                  border: Border(right: BorderSide(color: TalColors.border)),
+                ),
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: talStrong,
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            right: 0,
+            top: 0,
+            bottom: 0,
+            width: 8,
+            child: MouseRegion(
+              cursor: SystemMouseCursors.resizeLeftRight,
+              child: GestureDetector(
+                key: ValueKey('$keyPrefix-column-resize-$columnIndex'),
+                behavior: HitTestBehavior.opaque,
+                onHorizontalDragUpdate: (details) =>
+                    onResize(columnIndex, details.delta.dx),
+                child: const SizedBox.expand(),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RightDragResizeRegion extends StatefulWidget {
+  const _RightDragResizeRegion({
+    required this.onResizeStart,
+    required this.onResize,
+    required this.child,
+    this.canStartAt,
+    super.key,
+  });
+
+  final VoidCallback onResizeStart;
+  final ValueChanged<Offset> onResize;
+  final Widget child;
+  final bool Function(Offset position)? canStartAt;
+
+  @override
+  State<_RightDragResizeRegion> createState() => _RightDragResizeRegionState();
+}
+
+class _RightDragResizeRegionState extends State<_RightDragResizeRegion> {
+  int? _pointer;
+  Offset _start = Offset.zero;
+
+  void _handlePointerDown(PointerDownEvent event) {
+    if (event.kind != PointerDeviceKind.mouse ||
+        event.buttons & kSecondaryMouseButton == 0 ||
+        widget.canStartAt?.call(event.localPosition) == false) {
+      return;
+    }
+    _pointer = event.pointer;
+    _start = event.localPosition;
+    widget.onResizeStart();
+    setState(() {});
+  }
+
+  void _handlePointerMove(PointerMoveEvent event) {
+    if (_pointer != event.pointer) return;
+    if (event.buttons & kSecondaryMouseButton == 0) {
+      _finish(event.pointer);
+      return;
+    }
+    widget.onResize(event.localPosition - _start);
+  }
+
+  void _finish(int pointer) {
+    if (_pointer != pointer) return;
+    setState(() => _pointer = null);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: _pointer == null ? MouseCursor.defer : SystemMouseCursors.move,
+      child: Listener(
+        behavior: HitTestBehavior.opaque,
+        onPointerDown: _handlePointerDown,
+        onPointerMove: _handlePointerMove,
+        onPointerUp: (event) => _finish(event.pointer),
+        onPointerCancel: (event) => _finish(event.pointer),
+        child: widget.child,
+      ),
+    );
+  }
+}
+
 class _CompactDropdown<T> extends StatefulWidget {
   const _CompactDropdown({
     required this.value,
@@ -227,47 +369,6 @@ class _LabeledField extends StatelessWidget {
         SizedBox(width: 82, child: Text(label, style: talBody)),
         Expanded(child: child),
       ],
-    );
-  }
-}
-
-class _ColumnSpec {
-  const _ColumnSpec(this.label, this.flex);
-  final String label;
-  final double flex;
-}
-
-class _TableHeader extends StatelessWidget {
-  const _TableHeader({required this.columns});
-
-  final List<_ColumnSpec> columns;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 36,
-      decoration: const BoxDecoration(
-        color: TalColors.surfaceAlt,
-        border: Border.symmetric(
-          horizontal: BorderSide(color: TalColors.border),
-        ),
-      ),
-      child: Row(
-        children: [
-          for (final column in columns)
-            Expanded(
-              flex: (column.flex * 100).round(),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                alignment: Alignment.centerLeft,
-                decoration: const BoxDecoration(
-                  border: Border(right: BorderSide(color: TalColors.border)),
-                ),
-                child: Text(column.label, style: talStrong),
-              ),
-            ),
-        ],
-      ),
     );
   }
 }

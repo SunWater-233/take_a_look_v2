@@ -95,6 +95,7 @@ class BackendServiceTests(unittest.TestCase):
             loaded = self.service.handle("loadSymbols", {"path": str(symbol_path)})
             key = self.symbols[0].key
             self.assertEqual(len(loaded["state"]["symbols"]), 2)  # type: ignore[index]
+            self.assertEqual(loaded["state"]["symbols"][0]["section"], ".data")  # type: ignore[index]
 
             self.service.handle("setWatches", {"watches": [{"key": key, "color": "#00ff00", "plotted": True}]})
             connected = self.service.handle("connect", {"targetName": "STM32F407", "swdClock": "2 MHz"})

@@ -20,6 +20,7 @@ const demoSymbols = <SymbolItem>[
     address: 0x20000010,
     type: 'float',
     size: 4,
+    section: '.bss',
   ),
   SymbolItem(
     source: 'control/foc_current.c',
@@ -27,6 +28,7 @@ const demoSymbols = <SymbolItem>[
     address: 0x20000014,
     type: 'float',
     size: 4,
+    section: '.bss',
   ),
   SymbolItem(
     source: 'control/foc_speed.c',
@@ -34,6 +36,7 @@ const demoSymbols = <SymbolItem>[
     address: 0x20000020,
     type: 'float',
     size: 4,
+    section: '.bss',
   ),
   SymbolItem(
     source: 'control/pid.c',
@@ -41,6 +44,7 @@ const demoSymbols = <SymbolItem>[
     address: 0x20000030,
     type: 'float',
     size: 4,
+    section: '.bss',
   ),
   SymbolItem(
     source: 'driver/adc.c',
@@ -48,6 +52,7 @@ const demoSymbols = <SymbolItem>[
     address: 0x20000100,
     type: 'float',
     size: 4,
+    section: '.bss',
   ),
   SymbolItem(
     source: 'driver/adc.c',
@@ -55,6 +60,7 @@ const demoSymbols = <SymbolItem>[
     address: 0x20000104,
     type: 'float',
     size: 4,
+    section: '.bss',
   ),
   SymbolItem(
     source: 'driver/encoder.c',
@@ -62,6 +68,7 @@ const demoSymbols = <SymbolItem>[
     address: 0x20000120,
     type: 'float',
     size: 4,
+    section: '.bss',
   ),
   SymbolItem(
     source: 'driver/pwm.c',
@@ -69,6 +76,7 @@ const demoSymbols = <SymbolItem>[
     address: 0x20000140,
     type: 'float',
     size: 4,
+    section: '.bss',
   ),
   SymbolItem(
     source: 'safety/fault.c',
@@ -76,6 +84,7 @@ const demoSymbols = <SymbolItem>[
     address: 0x20000200,
     type: 'uint32_t',
     size: 4,
+    section: '.bss',
   ),
   SymbolItem(
     source: 'safety/fault.c',
@@ -83,6 +92,7 @@ const demoSymbols = <SymbolItem>[
     address: 0x20000204,
     type: 'bool',
     size: 1,
+    section: '.bss',
   ),
   SymbolItem(
     source: 'safety/thermal.c',
@@ -90,6 +100,7 @@ const demoSymbols = <SymbolItem>[
     address: 0x20000220,
     type: 'float',
     size: 4,
+    section: '.bss',
   ),
   SymbolItem(
     source: 'comms/canopen.c',
@@ -97,5 +108,6 @@ const demoSymbols = <SymbolItem>[
     address: 0x20000300,
     type: 'uint32_t',
     size: 4,
+    section: '.bss',
   ),
 ];

@@ -1,5 +1,5 @@
 name: take_a_look_v2
-description: "A new Flutter project."
+description: "Take A Look embedded tuning workstation."
 publish_to: 'none'
 version: 0.1.0+1
 
@@ -10,6 +10,7 @@ dependencies:
   desktop_multi_window: ^0.3.0
   flutter:
     sdk: flutter
+  window_manager: ^0.5.1
 
 dev_dependencies:
   flutter_test:

@@ -1,5 +1,6 @@
 #include "win32_window.h"
 
+#include <algorithm>
 #include <dwmapi.h>
 #include <flutter_windows.h>
 
@@ -128,21 +129,41 @@ bool Win32Window::Create(const std::wstring& title,
   const wchar_t* window_class =
       WindowClassRegistrar::GetInstance()->GetWindowClass();
 
-  const POINT target_point = {static_cast<LONG>(origin.x),
-                              static_cast<LONG>(origin.y)};
-  HMONITOR monitor = MonitorFromPoint(target_point, MONITOR_DEFAULTTONEAREST);
-  UINT dpi = FlutterDesktopGetDpiForMonitor(monitor);
-  double scale_factor = dpi / 96.0;
+  const double initial_scale = GetDpiForSystem() / 96.0;
 
   HWND window = CreateWindow(
       window_class, title.c_str(), WS_OVERLAPPEDWINDOW,
-      Scale(origin.x, scale_factor), Scale(origin.y, scale_factor),
-      Scale(size.width, scale_factor), Scale(size.height, scale_factor),
+      Scale(origin.x, initial_scale), Scale(origin.y, initial_scale),
+      Scale(size.width, initial_scale), Scale(size.height, initial_scale),
       nullptr, nullptr, GetModuleHandle(nullptr), this);
 
   if (!window) {
     return false;
   }
+
+  // Per-monitor DPI is only reliable after the native window exists. Size the
+  // child surface before FlutterViewController is created so both stay in sync.
+  const HMONITOR monitor = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
+  MONITORINFO monitor_info = {sizeof(MONITORINFO)};
+  GetMonitorInfo(monitor, &monitor_info);
+  const double scale_factor = GetDpiForWindow(window) / 96.0;
+  const double work_width =
+      (monitor_info.rcWork.right - monitor_info.rcWork.left) / scale_factor;
+  const double work_height =
+      (monitor_info.rcWork.bottom - monitor_info.rcWork.top) / scale_factor;
+  const unsigned int logical_width = static_cast<unsigned int>(
+      std::min<double>(size.width, std::max(560.0, work_width - 16.0)));
+  const unsigned int logical_height = static_cast<unsigned int>(
+      std::min<double>(size.height, std::max(420.0, work_height - 16.0)));
+  const int physical_width = Scale(logical_width, scale_factor);
+  const int physical_height = Scale(logical_height, scale_factor);
+  const int work_area_width = monitor_info.rcWork.right - monitor_info.rcWork.left;
+  const int work_area_height = monitor_info.rcWork.bottom - monitor_info.rcWork.top;
+  SetWindowPos(
+      window, nullptr,
+      monitor_info.rcWork.left + (work_area_width - physical_width) / 2,
+      monitor_info.rcWork.top + (work_area_height - physical_height) / 2,
+      physical_width, physical_height, SWP_NOZORDER | SWP_NOACTIVATE);
 
   UpdateTheme(window);
 

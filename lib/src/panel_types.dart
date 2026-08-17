@@ -115,6 +115,13 @@ class PanelTabInfo {
   final WorkspacePanelId id;
 }
 
+class PanelTabDragData {
+  const PanelTabDragData({required this.sourceGroupId, required this.panel});
+
+  final String sourceGroupId;
+  final WorkspacePanelId panel;
+}
+
 class PanelChrome {
   const PanelChrome({
     required this.tabs,
@@ -128,6 +135,11 @@ class PanelChrome {
     required this.onDragUpdate,
     required this.onDragEnd,
     this.showActions = true,
+    this.draggable = true,
+    this.groupId,
+    this.onTabAccept,
+    this.onTabDragEnd,
+    this.tabsDraggable = false,
   });
 
   final List<WorkspacePanelId> tabs;
@@ -141,4 +153,9 @@ class PanelChrome {
   final GestureDragUpdateCallback onDragUpdate;
   final GestureDragEndCallback onDragEnd;
   final bool showActions;
+  final bool draggable;
+  final String? groupId;
+  final ValueChanged<PanelTabDragData>? onTabAccept;
+  final void Function(PanelTabDragData, DraggableDetails)? onTabDragEnd;
+  final bool tabsDraggable;
 }

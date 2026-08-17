@@ -1,5 +1,13 @@
 import 'package:flutter/material.dart';
 
+const talFontFamily = 'JetBrains Mono';
+const talFontFamilyFallback = <String>['MiSans'];
+const talBrandFontFamily = 'Ibrand';
+const talBrandFontFamilyFallback = <String>[
+  talFontFamily,
+  ...talFontFamilyFallback,
+];
+
 abstract final class TalColors {
   static const accent = Color(0xFFF44A22);
   static const accentPressed = Color(0xFFD83F1D);
@@ -13,6 +21,7 @@ abstract final class TalColors {
   static const hover = Color(0xFF231E20);
   static const selection = Color(0xFF3E3A3C);
   static const border = Color(0xFF494446);
+  static const panelBorder = Color(0xFF696164);
   static const borderSoft = Color(0xFF2D292B);
   static const text = Color(0xFFE4E2E3);
   static const muted = Color(0xFFB7B0B3);
@@ -25,7 +34,8 @@ ThemeData buildTalTheme() {
   final base = ThemeData(
     brightness: Brightness.dark,
     useMaterial3: true,
-    fontFamily: 'Microsoft YaHei UI',
+    fontFamily: talFontFamily,
+    fontFamilyFallback: talFontFamilyFallback,
     scaffoldBackgroundColor: TalColors.background,
     colorScheme: const ColorScheme.dark(
       primary: TalColors.accent,
@@ -42,7 +52,8 @@ ThemeData buildTalTheme() {
     textTheme: base.textTheme.apply(
       bodyColor: TalColors.text,
       displayColor: TalColors.text,
-      fontFamily: 'Microsoft YaHei UI',
+      fontFamily: talFontFamily,
+      fontFamilyFallback: talFontFamilyFallback,
     ),
     tooltipTheme: const TooltipThemeData(
       decoration: BoxDecoration(
@@ -50,14 +61,14 @@ ThemeData buildTalTheme() {
         borderRadius: radius,
         border: Border.fromBorderSide(BorderSide(color: TalColors.border)),
       ),
-      textStyle: TextStyle(color: TalColors.text, fontSize: 12),
+      textStyle: TextStyle(color: TalColors.text, fontSize: 13),
     ),
     inputDecorationTheme: const InputDecorationTheme(
       isDense: true,
       filled: true,
       fillColor: TalColors.input,
-      hintStyle: TextStyle(color: TalColors.muted, fontSize: 12),
-      labelStyle: TextStyle(color: TalColors.muted, fontSize: 12),
+      hintStyle: TextStyle(color: TalColors.muted, fontSize: 13),
+      labelStyle: TextStyle(color: TalColors.muted, fontSize: 13),
       contentPadding: EdgeInsets.symmetric(horizontal: 9, vertical: 9),
       border: OutlineInputBorder(
         borderRadius: radius,
@@ -75,6 +86,9 @@ ThemeData buildTalTheme() {
     filledButtonTheme: FilledButtonThemeData(
       style: ButtonStyle(
         minimumSize: const WidgetStatePropertyAll(Size(0, 32)),
+        maximumSize: const WidgetStatePropertyAll(Size(double.infinity, 32)),
+        visualDensity: VisualDensity.standard,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         padding: const WidgetStatePropertyAll(
           EdgeInsets.symmetric(horizontal: 13),
         ),
@@ -96,13 +110,16 @@ ThemeData buildTalTheme() {
           RoundedRectangleBorder(borderRadius: radius),
         ),
         textStyle: const WidgetStatePropertyAll(
-          TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+          TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
         ),
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: ButtonStyle(
         minimumSize: const WidgetStatePropertyAll(Size(0, 32)),
+        maximumSize: const WidgetStatePropertyAll(Size(double.infinity, 32)),
+        visualDensity: VisualDensity.standard,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         padding: const WidgetStatePropertyAll(
           EdgeInsets.symmetric(horizontal: 12),
         ),
@@ -123,7 +140,7 @@ ThemeData buildTalTheme() {
           RoundedRectangleBorder(borderRadius: radius),
         ),
         textStyle: const WidgetStatePropertyAll(
-          TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+          TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
         ),
       ),
     ),
@@ -167,26 +184,33 @@ ThemeData buildTalTheme() {
 
 const talBody = TextStyle(
   color: TalColors.text,
-  fontSize: 12,
+  fontSize: 13,
+  fontFamily: talFontFamily,
+  fontFamilyFallback: talFontFamilyFallback,
   letterSpacing: 0,
 );
 
 const talMuted = TextStyle(
   color: TalColors.muted,
-  fontSize: 11,
+  fontSize: 12,
+  fontFamily: talFontFamily,
+  fontFamilyFallback: talFontFamilyFallback,
   letterSpacing: 0,
 );
 
 const talStrong = TextStyle(
   color: TalColors.text,
-  fontSize: 12,
+  fontSize: 13,
   fontWeight: FontWeight.w700,
+  fontFamily: talFontFamily,
+  fontFamilyFallback: talFontFamilyFallback,
   letterSpacing: 0,
 );
 
 const talMono = TextStyle(
   color: TalColors.text,
-  fontSize: 11,
-  fontFamily: 'Consolas',
+  fontSize: 12,
+  fontFamily: talFontFamily,
+  fontFamilyFallback: talFontFamilyFallback,
   letterSpacing: 0,
 );

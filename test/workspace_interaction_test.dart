@@ -11,6 +11,236 @@ import 'package:take_a_look_v2/src/window_sync.dart';
 import 'package:take_a_look_v2/src/workspace.dart';
 
 void main() {
+  testWidgets('dragging a tab onto another tab strip combines panels', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1600, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final controller = TakeALookController();
+    final workspaceKey = GlobalKey<DockingWorkspaceState>();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTalTheme(),
+        home: Scaffold(
+          body: DockingWorkspace(
+            key: workspaceKey,
+            controller: controller,
+            windowSync: MainWindowSync(controller),
+          ),
+        ),
+      ),
+    );
+    workspaceKey.currentState!.setGridMode(true);
+    await tester.pump();
+
+    final headerGroup = find.byKey(const ValueKey('workspace-group-header'));
+    final symbolsGroup = find.byKey(const ValueKey('workspace-group-symbols'));
+    final sourceTab = find.descendant(
+      of: headerGroup,
+      matching: find.text(WorkspacePanelId.runControl.title),
+    );
+    final targetTab = find.descendant(
+      of: symbolsGroup,
+      matching: find.text(WorkspacePanelId.watch.title),
+    );
+    await tester.dragFrom(
+      tester.getCenter(sourceTab),
+      tester.getCenter(targetTab) - tester.getCenter(sourceTab),
+    );
+    await tester.pump();
+
+    expect(
+      find.descendant(
+        of: headerGroup,
+        matching: find.text(WorkspacePanelId.runControl.title),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.descendant(
+        of: symbolsGroup,
+        matching: find.text(WorkspacePanelId.runControl.title),
+      ),
+      findsOneWidget,
+    );
+    expect(find.byType(TalPanelFrame), findsNWidgets(4));
+
+    controller.dispose();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 50));
+  });
+
+  testWidgets('dragging a tab out splits it while grid mode is enabled', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1600, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final controller = TakeALookController();
+    final workspaceKey = GlobalKey<DockingWorkspaceState>();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTalTheme(),
+        home: Scaffold(
+          body: DockingWorkspace(
+            key: workspaceKey,
+            controller: controller,
+            windowSync: MainWindowSync(controller),
+          ),
+        ),
+      ),
+    );
+    workspaceKey.currentState!.setGridMode(true);
+    await tester.pump();
+
+    final headerGroup = find.byKey(const ValueKey('workspace-group-header'));
+    final plotGroup = find.byKey(const ValueKey('workspace-group-plot'));
+    final sourceTab = find.descendant(
+      of: headerGroup,
+      matching: find.text(WorkspacePanelId.sampling.title),
+    );
+    await tester.dragFrom(
+      tester.getCenter(sourceTab),
+      tester.getCenter(plotGroup) - tester.getCenter(sourceTab),
+    );
+    await tester.pump();
+
+    expect(
+      find.byKey(const ValueKey('workspace-group-separated_100')),
+      findsOneWidget,
+    );
+    expect(find.byType(TalPanelFrame), findsNWidgets(5));
+
+    controller.dispose();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 50));
+  });
+
+  testWidgets('dragging a tab out opens only that panel in normal mode', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1600, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    const createChannel = MethodChannel('mixin.one/desktop_multi_window');
+    const windowChannel = MethodChannel(
+      'mixin.one/window_controller/tab_window',
+    );
+    Map<String, dynamic>? configuration;
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(createChannel, (call) async {
+      if (call.method == 'createWindow') {
+        configuration = Map<String, dynamic>.from(call.arguments as Map);
+        return 'tab_window';
+      }
+      if (call.method == 'getAllWindows') return <Map<String, dynamic>>[];
+      return null;
+    });
+    messenger.setMockMethodCallHandler(windowChannel, (call) async => null);
+    addTearDown(() {
+      messenger.setMockMethodCallHandler(createChannel, null);
+      messenger.setMockMethodCallHandler(windowChannel, null);
+    });
+
+    final controller = TakeALookController();
+    final workspaceKey = GlobalKey<DockingWorkspaceState>();
+    final windowSync = MainWindowSync(controller);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTalTheme(),
+        home: Scaffold(
+          body: DockingWorkspace(
+            key: workspaceKey,
+            controller: controller,
+            windowSync: windowSync,
+          ),
+        ),
+      ),
+    );
+    workspaceKey.currentState!.setGridMode(false);
+    await tester.pump();
+
+    final headerGroup = find.byKey(const ValueKey('workspace-group-header'));
+    final plotGroup = find.byKey(const ValueKey('workspace-group-plot'));
+    final sourceTab = find.descendant(
+      of: headerGroup,
+      matching: find.text(WorkspacePanelId.sampling.title),
+    );
+    await tester.dragFrom(
+      tester.getCenter(sourceTab),
+      tester.getCenter(plotGroup) - tester.getCenter(sourceTab),
+    );
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 10)),
+    );
+    await tester.pump();
+
+    expect(configuration, isNotNull);
+    final launch = detachedPanelLaunchFromEntrypointArguments([
+      'multi_window',
+      '1',
+      configuration!['arguments'] as String,
+    ]);
+    expect(launch!.groupPanels, [WorkspacePanelId.sampling]);
+    expect(find.byType(TalPanelFrame), findsNWidgets(4));
+    expect(
+      find.descendant(
+        of: headerGroup,
+        matching: find.text(WorkspacePanelId.sampling.title),
+      ),
+      findsNothing,
+    );
+
+    await windowSync.dispose();
+    controller.dispose();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 50));
+  });
+
+  testWidgets('panels only move while grid mode is enabled', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1600, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final controller = TakeALookController();
+    final workspaceKey = GlobalKey<DockingWorkspaceState>();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTalTheme(),
+        home: Scaffold(
+          body: DockingWorkspace(
+            key: workspaceKey,
+            controller: controller,
+            windowSync: MainWindowSync(controller),
+          ),
+        ),
+      ),
+    );
+
+    final header = find.byKey(const ValueKey('workspace-group-header'));
+    final headerTitle = find.text('${WorkspacePanelId.header.title} 组合');
+    final initialRect = tester.getRect(header);
+
+    expect(find.byKey(const ValueKey('workspace-grid')), findsNothing);
+    workspaceKey.currentState!.setGridMode(false);
+    await tester.pump();
+    await tester.drag(headerTitle, const Offset(80, 60));
+    await tester.pump();
+    expect(tester.getRect(header), initialRect);
+
+    workspaceKey.currentState!.setGridMode(true);
+    await tester.pump();
+    expect(find.byKey(const ValueKey('workspace-grid')), findsOneWidget);
+    await tester.drag(headerTitle, const Offset(80, 60));
+    await tester.pump();
+    expect(tester.getRect(header).topLeft, isNot(initialRect.topLeft));
+
+    controller.dispose();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 50));
+  });
+
   testWidgets('floating a grouped panel opens the complete group', (
     tester,
   ) async {
@@ -114,6 +344,8 @@ void main() {
         ),
       ),
     );
+    workspaceKey.currentState!.setGridMode(true);
+    await tester.pump();
 
     expect(find.byType(TalPanelFrame), findsNWidgets(4));
 

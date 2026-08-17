@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -52,14 +53,18 @@ class _TalPanelFrameState extends State<TalPanelFrame> {
     final title = tabs.length > 1
         ? '${widget.panel.title} 组合'
         : widget.panel.title;
-    return DecoratedBox(
+    return Container(
+      key: ValueKey<String>('panel-frame-${widget.panel.name}'),
       decoration: BoxDecoration(
         color: TalColors.surface,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      foregroundDecoration: BoxDecoration(
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
           color: chrome?.highlighted == true
               ? TalColors.accent
-              : TalColors.border,
+              : TalColors.panelBorder,
         ),
       ),
       child: ClipRRect(
@@ -69,13 +74,17 @@ class _TalPanelFrameState extends State<TalPanelFrame> {
             GestureDetector(
               behavior: HitTestBehavior.opaque,
               onDoubleTap: chrome?.onFloat,
-              onPanStart: chrome?.onDragStart,
-              onPanUpdate: chrome?.onDragUpdate,
-              onPanEnd: chrome?.onDragEnd,
+              onPanStart: chrome?.draggable == true
+                  ? chrome!.onDragStart
+                  : null,
+              onPanUpdate: chrome?.draggable == true
+                  ? chrome!.onDragUpdate
+                  : null,
+              onPanEnd: chrome?.draggable == true ? chrome!.onDragEnd : null,
               child: MouseRegion(
-                cursor: chrome == null
-                    ? MouseCursor.defer
-                    : SystemMouseCursors.grab,
+                cursor: chrome?.draggable == true
+                    ? SystemMouseCursors.grab
+                    : MouseCursor.defer,
                 child: Container(
                   height: 34,
                   padding: const EdgeInsets.only(left: 7, right: 4),
@@ -137,6 +146,10 @@ class _TalPanelFrameState extends State<TalPanelFrame> {
                 tabs: tabs,
                 selected: chrome!.activePanel,
                 onSelected: chrome.onSelect,
+                groupId: chrome.groupId,
+                draggable: chrome.tabsDraggable,
+                onAccept: chrome.onTabAccept,
+                onDragEnd: chrome.onTabDragEnd,
               ),
             if (!collapsed) Expanded(child: widget.child),
           ],
@@ -151,51 +164,92 @@ class _PanelTabs extends StatelessWidget {
     required this.tabs,
     required this.selected,
     required this.onSelected,
+    required this.groupId,
+    required this.draggable,
+    required this.onAccept,
+    required this.onDragEnd,
   });
 
   final List<WorkspacePanelId> tabs;
   final WorkspacePanelId selected;
   final ValueChanged<WorkspacePanelId> onSelected;
+  final String? groupId;
+  final bool draggable;
+  final ValueChanged<PanelTabDragData>? onAccept;
+  final void Function(PanelTabDragData, DraggableDetails)? onDragEnd;
 
   @override
   Widget build(BuildContext context) {
+    final tabList = ListView(
+      scrollDirection: Axis.horizontal,
+      children: [for (final tab in tabs) _buildTab(tab)],
+    );
+    if (!draggable || onAccept == null) {
+      return _tabStrip(tabList);
+    }
+    return DragTarget<PanelTabDragData>(
+      onWillAcceptWithDetails: (_) => true,
+      onAcceptWithDetails: (details) => onAccept!(details.data),
+      builder: (context, candidates, rejected) =>
+          _tabStrip(tabList, accepting: candidates.isNotEmpty),
+    );
+  }
+
+  Widget _tabStrip(Widget child, {bool accepting = false}) {
     return Container(
       height: 30,
-      color: TalColors.surface,
+      color: accepting ? TalColors.surfaceAlt : TalColors.surface,
       alignment: Alignment.bottomLeft,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        children: [
-          for (final tab in tabs)
-            InkWell(
-              onTap: () => onSelected(tab),
-              child: Container(
-                height: 29,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                decoration: BoxDecoration(
-                  color: tab == selected
-                      ? TalColors.surface
-                      : TalColors.surfaceAlt,
-                  border: Border(
-                    top: BorderSide(
-                      color: tab == selected
-                          ? TalColors.accent
-                          : TalColors.border,
-                      width: tab == selected ? 2 : 1,
-                    ),
-                    right: const BorderSide(color: TalColors.border),
-                    bottom: BorderSide(
-                      color: tab == selected
-                          ? TalColors.surface
-                          : TalColors.border,
-                    ),
-                  ),
-                ),
-                child: Center(child: Text(tab.title, style: talBody)),
-              ),
-            ),
-        ],
+      child: child,
+    );
+  }
+
+  Widget _buildTab(WorkspacePanelId tab) {
+    final tabWidget = InkWell(
+      onTap: () => onSelected(tab),
+      child: _tabSurface(tab),
+    );
+    final sourceGroupId = groupId;
+    if (!draggable || sourceGroupId == null || onDragEnd == null) {
+      return tabWidget;
+    }
+    final data = PanelTabDragData(sourceGroupId: sourceGroupId, panel: tab);
+    return MouseRegion(
+      cursor: SystemMouseCursors.grab,
+      child: Draggable<PanelTabDragData>(
+        data: data,
+        rootOverlay: true,
+        dragAnchorStrategy: pointerDragAnchorStrategy,
+        onDragStarted: () => onSelected(tab),
+        onDragEnd: (details) => onDragEnd!(data, details),
+        feedback: Material(
+          color: Colors.transparent,
+          child: Opacity(opacity: 0.92, child: _tabSurface(tab)),
+        ),
+        childWhenDragging: Opacity(opacity: 0.35, child: tabWidget),
+        child: tabWidget,
       ),
+    );
+  }
+
+  Widget _tabSurface(WorkspacePanelId tab) {
+    return Container(
+      height: 29,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: tab == selected ? TalColors.surface : TalColors.surfaceAlt,
+        border: Border(
+          top: BorderSide(
+            color: tab == selected ? TalColors.accent : TalColors.border,
+            width: tab == selected ? 2 : 1,
+          ),
+          right: const BorderSide(color: TalColors.border),
+          bottom: BorderSide(
+            color: tab == selected ? TalColors.surface : TalColors.border,
+          ),
+        ),
+      ),
+      child: Center(child: Text(tab.title, style: talBody)),
     );
   }
 }
@@ -373,76 +427,90 @@ class _SamplingPanel extends StatelessWidget {
       animation: controller,
       builder: (context, _) => SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              controller.elapsedLabel,
-              style: const TextStyle(
-                color: TalColors.text,
-                fontFamily: 'Consolas',
-                fontSize: 25,
-                fontWeight: FontWeight.w800,
+        child: Align(
+          alignment: Alignment.topLeft,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                controller.elapsedLabel,
+                style: const TextStyle(
+                  color: TalColors.text,
+                  fontFamily: talFontFamily,
+                  fontFamilyFallback: talFontFamilyFallback,
+                  fontSize: 25,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
-            ),
-            const SizedBox(height: 6),
-            Wrap(
-              crossAxisAlignment: WrapCrossAlignment.center,
-              spacing: 8,
-              runSpacing: 6,
-              children: [
-                const Text('采样率', style: talBody),
-                SizedBox(
-                  width: 96,
-                  child: _CompactDropdown<double>(
-                    value: controller.sampleRateHz,
-                    values: const [50, 100, 200, 500, 1000, 2000, 5000, 7000],
-                    label: _sampleRateText,
-                    onChanged: controller.setSampleRate,
-                  ),
-                ),
-                OutlinedButton(
-                  onPressed: controller.toggleSampling,
-                  child: Text(controller.samplingPaused ? '继续采样' : '采样暂停'),
-                ),
-                OutlinedButton(
-                  onPressed: controller.clearSamples,
-                  child: const Text('清空采样'),
-                ),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Checkbox(
-                      value: controller.rttEnabled,
-                      onChanged: (value) =>
-                          controller.toggleRtt(value ?? false),
-                    ),
-                    const Text('RTT 采样', style: talBody),
-                  ],
-                ),
-              ],
-            ),
-            if (controller.rttEnabled) ...[
               const SizedBox(height: 6),
-              Row(
+              Wrap(
+                alignment: WrapAlignment.start,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                runSpacing: 6,
                 children: [
-                  const SizedBox(
-                    width: 82,
-                    child: Text('RTT 采样率', style: talBody),
-                  ),
+                  const Text('采样率', style: talBody),
                   SizedBox(
-                    width: 112,
+                    width: 96,
                     child: _CompactDropdown<double>(
-                      value: controller.rttSampleRateHz,
+                      value: controller.sampleRateHz,
                       values: const [50, 100, 200, 500, 1000, 2000, 5000, 7000],
                       label: _sampleRateText,
-                      onChanged: controller.setRttSampleRate,
+                      onChanged: controller.setSampleRate,
                     ),
+                  ),
+                  OutlinedButton(
+                    onPressed: controller.toggleSampling,
+                    child: Text(controller.samplingPaused ? '继续采样' : '采样暂停'),
+                  ),
+                  OutlinedButton(
+                    onPressed: controller.clearSamples,
+                    child: const Text('清空采样'),
+                  ),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Checkbox(
+                        value: controller.rttEnabled,
+                        onChanged: (value) =>
+                            controller.toggleRtt(value ?? false),
+                      ),
+                      const Text('RTT 采样', style: talBody),
+                    ],
                   ),
                 ],
               ),
+              if (controller.rttEnabled) ...[
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    const SizedBox(
+                      width: 82,
+                      child: Text('RTT 采样率', style: talBody),
+                    ),
+                    SizedBox(
+                      width: 112,
+                      child: _CompactDropdown<double>(
+                        value: controller.rttSampleRateHz,
+                        values: const [
+                          50,
+                          100,
+                          200,
+                          500,
+                          1000,
+                          2000,
+                          5000,
+                          7000,
+                        ],
+                        label: _sampleRateText,
+                        onChanged: controller.setRttSampleRate,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -1116,7 +1184,7 @@ class _LogPanel extends StatelessWidget {
   }
 }
 
-class _CompactDropdown<T> extends StatelessWidget {
+class _CompactDropdown<T> extends StatefulWidget {
   const _CompactDropdown({
     required this.value,
     required this.values,
@@ -1130,39 +1198,203 @@ class _CompactDropdown<T> extends StatelessWidget {
   final ValueChanged<T> onChanged;
 
   @override
+  State<_CompactDropdown<T>> createState() => _CompactDropdownState<T>();
+}
+
+class _CompactDropdownState<T> extends State<_CompactDropdown<T>>
+    with SingleTickerProviderStateMixin {
+  final LayerLink _layerLink = LayerLink();
+  OverlayEntry? _overlayEntry;
+  late final AnimationController _animationController;
+  late final Animation<double> _animation;
+  bool expanded = false;
+  bool closing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+      reverseDuration: const Duration(milliseconds: 180),
+    );
+    _animation = CurvedAnimation(
+      parent: _animationController,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant _CompactDropdown<T> oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _overlayEntry?.markNeedsBuild();
+  }
+
+  @override
+  void dispose() {
+    _overlayEntry?.remove();
+    _animationController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 32,
-      padding: const EdgeInsets.only(left: 9, right: 5),
-      decoration: BoxDecoration(
-        color: TalColors.input,
-        borderRadius: BorderRadius.circular(7),
-        border: Border.all(color: TalColors.border),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<T>(
-          value: value,
-          isExpanded: true,
-          dropdownColor: TalColors.surfaceAlt,
-          style: talBody,
-          icon: const Icon(Icons.arrow_drop_down, size: 18),
-          items: [
-            for (final item in values)
-              DropdownMenuItem<T>(
-                value: item,
-                child: Text(
-                  label(item),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
+    return LayoutBuilder(
+      builder: (context, constraints) => CompositedTransformTarget(
+        link: _layerLink,
+        child: Semantics(
+          button: true,
+          expanded: expanded,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(7),
+            onTap: expanded
+                ? () => unawaited(_close())
+                : () => _open(constraints.maxWidth),
+            child: Container(
+              key: ValueKey<String>(
+                'compact-dropdown-${widget.label(widget.value)}',
               ),
-          ],
-          onChanged: (value) {
-            if (value != null) onChanged(value);
-          },
+              height: 32,
+              decoration: BoxDecoration(
+                color: TalColors.input,
+                borderRadius: BorderRadius.circular(7),
+                border: Border.all(color: TalColors.border),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 9),
+                      child: Text(
+                        widget.label(widget.value),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: talBody,
+                      ),
+                    ),
+                  ),
+                  Container(
+                    width: 30,
+                    height: double.infinity,
+                    decoration: const BoxDecoration(
+                      border: Border(
+                        left: BorderSide(color: TalColors.borderSoft),
+                      ),
+                    ),
+                    child: const Icon(Icons.arrow_drop_down, size: 18),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );
+  }
+
+  void _open(double width) {
+    if (expanded || closing) return;
+    _overlayEntry = OverlayEntry(builder: (_) => _buildOverlay(width));
+    Overlay.of(context).insert(_overlayEntry!);
+    setState(() => expanded = true);
+    _animationController.forward(from: 0);
+  }
+
+  Widget _buildOverlay(double width) {
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => unawaited(_close()),
+          ),
+        ),
+        CompositedTransformFollower(
+          link: _layerLink,
+          targetAnchor: Alignment.bottomLeft,
+          followerAnchor: Alignment.topLeft,
+          offset: const Offset(0, 2),
+          showWhenUnlinked: false,
+          child: SizedBox(
+            width: width,
+            child: SizeTransition(
+              key: const ValueKey<String>('dropdown-menu-animation'),
+              sizeFactor: _animation,
+              alignment: Alignment.topCenter,
+              child: FadeTransition(
+                opacity: _animation,
+                child: Material(
+                  color: TalColors.input,
+                  elevation: 12,
+                  shadowColor: Colors.black,
+                  clipBehavior: Clip.antiAlias,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(7),
+                    side: const BorderSide(color: TalColors.border),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      for (final item in widget.values) _buildMenuItem(item),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMenuItem(T item) {
+    return InkWell(
+      key: ValueKey<String>('dropdown-item-${widget.label(item)}'),
+      onTap: () => unawaited(_close(selectedValue: item)),
+      overlayColor: WidgetStateProperty.resolveWith((states) {
+        if (states.contains(WidgetState.hovered) ||
+            states.contains(WidgetState.focused)) {
+          return TalColors.hover;
+        }
+        return Colors.transparent;
+      }),
+      child: Container(
+        key: item == widget.value
+            ? ValueKey<String>('dropdown-selected-${widget.label(item)}')
+            : null,
+        height: 32,
+        width: double.infinity,
+        alignment: Alignment.centerLeft,
+        padding: EdgeInsets.only(left: item == widget.value ? 9 : 12, right: 8),
+        decoration: BoxDecoration(
+          color: item == widget.value ? TalColors.selection : TalColors.input,
+          border: item == widget.value
+              ? const Border(
+                  left: BorderSide(color: TalColors.accent, width: 3),
+                )
+              : null,
+        ),
+        child: Text(
+          widget.label(item),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: talBody,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _close({T? selectedValue}) async {
+    if (!expanded || closing) return;
+    closing = true;
+    await _animationController.reverse();
+    _overlayEntry?.remove();
+    _overlayEntry = null;
+    closing = false;
+    if (!mounted) return;
+    setState(() => expanded = false);
+    if (selectedValue != null) widget.onChanged(selectedValue);
   }
 }
 

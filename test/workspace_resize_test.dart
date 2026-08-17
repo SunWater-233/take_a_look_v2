@@ -27,6 +27,8 @@ void main() {
         ),
       ),
     );
+    workspaceKey.currentState!.setGridMode(false);
+    await tester.pump();
 
     final header = find.byKey(const ValueKey('workspace-group-header'));
     final symbols = find.byKey(const ValueKey('workspace-group-symbols'));
@@ -65,6 +67,49 @@ void main() {
     final verticalDelta = resizedHeader.bottom - resetHeader.bottom;
     expect(verticalDelta, greaterThan(0));
     expect(resizedSymbols.top - resetSymbols.top, closeTo(verticalDelta, 1));
+
+    controller.dispose();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 50));
+  });
+
+  testWidgets('grid mode resizes only the selected component', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1600, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final controller = TakeALookController();
+    final workspaceKey = GlobalKey<DockingWorkspaceState>();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTalTheme(),
+        home: Scaffold(
+          body: DockingWorkspace(
+            key: workspaceKey,
+            controller: controller,
+            windowSync: MainWindowSync(controller),
+          ),
+        ),
+      ),
+    );
+    workspaceKey.currentState!.setGridMode(true);
+    await tester.pump();
+
+    final header = find.byKey(const ValueKey('workspace-group-header'));
+    final symbols = find.byKey(const ValueKey('workspace-group-symbols'));
+    final plot = find.byKey(const ValueKey('workspace-group-plot'));
+    final symbolsBefore = tester.getRect(symbols);
+    final plotBefore = tester.getRect(plot);
+    final headerBefore = tester.getRect(header);
+
+    await tester.drag(
+      find.byKey(const ValueKey('resize-header-right')),
+      const Offset(100, 0),
+    );
+    await tester.pump();
+
+    expect(tester.getRect(header).right, greaterThan(headerBefore.right));
+    expect(tester.getRect(symbols).right, closeTo(symbolsBefore.right, 1));
+    expect(tester.getRect(plot).left, closeTo(plotBefore.left, 1));
 
     controller.dispose();
     await tester.pumpWidget(const SizedBox.shrink());

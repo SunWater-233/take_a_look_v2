@@ -150,6 +150,7 @@ class _DetachedPanelWindowState extends State<DetachedPanelWindow> {
             onDragUpdate: (_) {},
             onDragEnd: (_) {},
             showActions: false,
+            draggable: false,
           )
         : null;
     return Scaffold(
@@ -206,17 +207,14 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
   ];
 
   double uiScale = 0.85;
-  bool gridMode = true;
+  bool gridMode = false;
   String rttProtocol = 'normal';
 
   @override
   Widget build(BuildContext context) {
     return Container(
       height: 46,
-      decoration: const BoxDecoration(
-        color: TalColors.input,
-        border: Border(bottom: BorderSide(color: TalColors.borderSoft)),
-      ),
+      color: TalColors.input,
       child: Row(
         children: [
           DragToMoveArea(
@@ -228,8 +226,10 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
                     'Take A Look',
                     style: TextStyle(
                       color: TalColors.text,
-                      fontSize: 16,
+                      fontSize: 18,
                       fontWeight: FontWeight.w800,
+                      fontFamily: talBrandFontFamily,
+                      fontFamilyFallback: talBrandFontFamilyFallback,
                       letterSpacing: 0,
                     ),
                   ),
@@ -237,14 +237,16 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
                     const SizedBox(width: 8),
                     Text(widget.subtitle!, style: talMuted),
                   ],
-                  const SizedBox(width: 12),
-                  Container(width: 2, height: 26, color: TalColors.accent),
+                  const SizedBox(width: 8),
+                  Container(width: 2, height: 24, color: TalColors.accent),
+                  const SizedBox(width: 8),
                 ],
               ),
             ),
           ),
           if (widget.subtitle == null) ...[
             _TitleMenu(label: '视图', menuChildren: _buildViewMenu()),
+            const SizedBox(width: 4),
             _TitleMenu(label: '实时变量', menuChildren: _buildVariableMenu()),
           ],
           const Expanded(child: DragToMoveArea(child: SizedBox.expand())),
@@ -253,6 +255,7 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
             icon: Icons.remove,
             onPressed: windowManager.minimize,
           ),
+          const SizedBox(width: 8),
           _CaptionButton(
             tooltip: '最大化/还原',
             icon: Icons.crop_square,
@@ -264,12 +267,14 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
               }
             },
           ),
+          const SizedBox(width: 8),
           _CaptionButton(
             tooltip: '关闭',
             icon: Icons.close,
             close: true,
             onPressed: windowManager.close,
           ),
+          const SizedBox(width: 10),
         ],
       ),
     );
@@ -486,14 +491,14 @@ class _TitleMenuState extends State<_TitleMenu> {
               onTap: () =>
                   controller.isOpen ? controller.close() : controller.open(),
               child: Container(
-                height: 46,
-                padding: const EdgeInsets.symmetric(horizontal: 18),
+                height: 34,
+                padding: const EdgeInsets.symmetric(horizontal: 14),
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: open || hovered
-                      ? const Color(0xFF343032)
-                      : Colors.transparent,
-                  border: open ? Border.all(color: TalColors.border) : null,
+                  color: open || hovered ? TalColors.hover : Colors.transparent,
+                  border: open || hovered
+                      ? Border.all(color: TalColors.border)
+                      : null,
                   borderRadius: const BorderRadius.all(Radius.circular(7)),
                 ),
                 child: Text(widget.label, style: talStrong),
@@ -607,8 +612,8 @@ class _CaptionButton extends StatelessWidget {
         onTap: onPressed,
         hoverColor: close ? const Color(0xFFC42B1C) : TalColors.hover,
         child: SizedBox(
-          width: 54,
-          height: 46,
+          width: 44,
+          height: 34,
           child: Icon(icon, size: 18, color: TalColors.text),
         ),
       ),

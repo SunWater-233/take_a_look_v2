@@ -87,6 +87,18 @@ void main() {
     expect(find.text('145%'), findsOneWidget);
   });
 
+  testWidgets('window title bar matches the legacy dimensions and brand', (
+    tester,
+  ) async {
+    await pumpTitleBar(tester);
+
+    expect(tester.getSize(find.byType(TalWindowTitleBar)).height, 46);
+    final brand = tester.widget<Text>(find.text('Take A Look'));
+    expect(brand.style?.fontFamily, talBrandFontFamily);
+    expect(brand.style?.fontSize, 18);
+    expect(brand.style?.fontWeight, FontWeight.w800);
+  });
+
   testWidgets('real-time variable menu keeps the three-level RTT menu', (
     tester,
   ) async {

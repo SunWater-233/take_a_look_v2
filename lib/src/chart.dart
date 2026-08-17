@@ -265,7 +265,13 @@ class _TelemetryPainter extends CustomPainter {
     TextAlign align = TextAlign.left,
   }) {
     final painter = TextPainter(
-      text: TextSpan(text: value, style: style),
+      text: TextSpan(
+        text: value,
+        style: style.copyWith(
+          fontFamily: talFontFamily,
+          fontFamilyFallback: talFontFamilyFallback,
+        ),
+      ),
       textDirection: TextDirection.ltr,
       textAlign: align,
       maxLines: 1,

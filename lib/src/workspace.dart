@@ -12,6 +12,8 @@ import 'panels.dart';
 import 'theme.dart';
 import 'window_sync.dart';
 
+const _workspaceGridCellSize = 32.0;
+
 class DockingWorkspace extends StatefulWidget {
   const DockingWorkspace({
     required this.controller,
@@ -45,7 +47,10 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   int idCursor = 100;
   String? draggingGroup;
   String? mergeTarget;
-  bool gridMode = true;
+  Offset dragRemainder = Offset.zero;
+  Offset resizeRemainder = Offset.zero;
+  Size workspaceSize = Size.zero;
+  bool gridMode = false;
 
   @override
   void initState() {
@@ -65,6 +70,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final size = Size(constraints.maxWidth, constraints.maxHeight);
+        workspaceSize = size;
         final sorted = [..._groups]..sort((a, b) => a.z.compareTo(b.z));
         return ClipRect(
           child: Stack(
@@ -75,7 +81,10 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
               if (gridMode)
                 const Positioned.fill(
                   child: IgnorePointer(
-                    child: CustomPaint(painter: _WorkspaceGridPainter()),
+                    child: CustomPaint(
+                      key: ValueKey<String>('workspace-grid'),
+                      painter: _WorkspaceGridPainter(),
+                    ),
                   ),
                 ),
               for (final group in sorted) _buildGroup(group, size),
@@ -120,6 +129,12 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
                   onDragUpdate: (details) =>
                       _moveGroup(group, details.delta, workspaceSize),
                   onDragEnd: (_) => _endDrag(group),
+                  draggable: gridMode,
+                  groupId: group.id,
+                  tabsDraggable: true,
+                  onTabAccept: (data) => _acceptTabDrop(group, data),
+                  onTabDragEnd: (data, details) =>
+                      _finishTabDrag(group, data, details, workspaceSize),
                 ),
               ),
             ),
@@ -129,6 +144,9 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
               cursor: SystemMouseCursors.resizeLeftRight,
               width: 7,
               height: rect.height - 28,
+              enabled: true,
+              onDragStart: _startResize,
+              onDragEnd: _endResize,
               onDrag: (delta) =>
                   _resizeGroup(group, delta, workspaceSize, left: true),
             ),
@@ -138,6 +156,9 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
               cursor: SystemMouseCursors.resizeLeftRight,
               width: 7,
               height: rect.height - 28,
+              enabled: true,
+              onDragStart: _startResize,
+              onDragEnd: _endResize,
               onDrag: (delta) =>
                   _resizeGroup(group, delta, workspaceSize, right: true),
             ),
@@ -147,6 +168,9 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
               cursor: SystemMouseCursors.resizeUpDown,
               width: rect.width - 28,
               height: 7,
+              enabled: true,
+              onDragStart: _startResize,
+              onDragEnd: _endResize,
               onDrag: (delta) =>
                   _resizeGroup(group, delta, workspaceSize, top: true),
             ),
@@ -156,6 +180,9 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
               cursor: SystemMouseCursors.resizeUpDown,
               width: rect.width - 28,
               height: 7,
+              enabled: true,
+              onDragStart: _startResize,
+              onDragEnd: _endResize,
               onDrag: (delta) =>
                   _resizeGroup(group, delta, workspaceSize, bottom: true),
             ),
@@ -165,7 +192,10 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
               cursor: SystemMouseCursors.resizeDownRight,
               width: 18,
               height: 18,
+              enabled: true,
               visible: true,
+              onDragStart: _startResize,
+              onDragEnd: _endResize,
               onDrag: (delta) => _resizeGroup(
                 group,
                 delta,
@@ -227,6 +257,11 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
           .firstOrNull;
       if (group != null) _detachPanel(group, panel);
     }
+    if (gridMode) {
+      for (final group in _groups) {
+        group.rect = _snapRectToGrid(group.rect);
+      }
+    }
   }
 
   Future<void> saveLayout() async {
@@ -269,7 +304,9 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         if (!group.panels.contains(group.activePanel)) {
           group.activePanel = group.panels.first;
         }
-        group.rect = _clampRect(group.rect);
+        group.rect = gridMode
+            ? _snapRectToGrid(group.rect)
+            : _clampRect(group.rect);
         restored.add(group);
       }
       if (!mounted) return;
@@ -297,7 +334,20 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
 
   void setGridMode(bool value) {
     if (gridMode == value) return;
-    setState(() => gridMode = value);
+    setState(() {
+      gridMode = value;
+      dragRemainder = Offset.zero;
+      resizeRemainder = Offset.zero;
+      if (value) {
+        for (final group in _groups) {
+          group.rect = _snapRectToGrid(group.rect);
+        }
+      }
+      if (!value) {
+        draggingGroup = null;
+        mergeTarget = null;
+      }
+    });
   }
 
   Future<void> togglePanelVisibility(WorkspacePanelId panel) async {
@@ -349,28 +399,57 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   }
 
   void _startDrag(_WorkspaceGroup group) {
+    if (!gridMode) return;
     setState(() {
+      dragRemainder = Offset.zero;
       draggingGroup = group.id;
       _bringToFront(group, notify: false);
     });
   }
 
   void _moveGroup(_WorkspaceGroup group, Offset delta, Size workspaceSize) {
-    if (workspaceSize.isEmpty) return;
+    if (!gridMode || workspaceSize.isEmpty) return;
+    final totalDelta = Offset(
+      dragRemainder.dx + delta.dx / workspaceSize.width,
+      dragRemainder.dy + delta.dy / workspaceSize.height,
+    );
+    final snappedDelta = Offset(
+      _wholeGridDelta(
+        totalDelta.dx,
+        _workspaceGridCellSize / workspaceSize.width,
+      ),
+      _wholeGridDelta(
+        totalDelta.dy,
+        _workspaceGridCellSize / workspaceSize.height,
+      ),
+    );
+    if (snappedDelta == Offset.zero) {
+      dragRemainder = totalDelta;
+      return;
+    }
     setState(() {
+      final previousRect = group.rect;
       group.rect = _clampRect(
-        group.rect.translate(
-          delta.dx / workspaceSize.width,
-          delta.dy / workspaceSize.height,
-        ),
+        group.rect.translate(snappedDelta.dx, snappedDelta.dy),
+      );
+      final actualDelta = group.rect.topLeft - previousRect.topLeft;
+      dragRemainder = Offset(
+        _near(actualDelta.dx, snappedDelta.dx)
+            ? totalDelta.dx - snappedDelta.dx
+            : 0,
+        _near(actualDelta.dy, snappedDelta.dy)
+            ? totalDelta.dy - snappedDelta.dy
+            : 0,
       );
       mergeTarget = _findMergeTarget(group);
     });
   }
 
   void _endDrag(_WorkspaceGroup group) {
+    if (!gridMode) return;
     setState(() {
       final target = _findMergeTarget(group);
+      dragRemainder = Offset.zero;
       draggingGroup = null;
       mergeTarget = null;
       if (target != null) _mergeInto(group, target);
@@ -387,37 +466,96 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     bool bottom = false,
   }) {
     if (workspaceSize.isEmpty) return;
+    if (!gridMode) {
+      setState(() {
+        if (left || right) {
+          _resizeAxis(
+            group,
+            delta.dx / workspaceSize.width,
+            horizontal: true,
+            movingEnd: right,
+          );
+        }
+        if (top || bottom) {
+          _resizeAxis(
+            group,
+            delta.dy / workspaceSize.height,
+            horizontal: false,
+            movingEnd: bottom,
+          );
+        }
+        mergeTarget = null;
+        _bringToFront(group, notify: false);
+      });
+      return;
+    }
     setState(() {
       if (left || right) {
-        final requested = delta.dx / workspaceSize.width;
-        _resizeAxis(group, requested, horizontal: true, movingEnd: right);
+        final total = resizeRemainder.dx + delta.dx / workspaceSize.width;
+        final requested = _wholeGridDelta(
+          total,
+          _workspaceGridCellSize / workspaceSize.width,
+        );
+        if (requested != 0) {
+          final applied = _resizeAxis(
+            group,
+            requested,
+            horizontal: true,
+            movingEnd: right,
+          );
+          resizeRemainder = Offset(
+            _near(applied, requested) ? total - requested : 0,
+            resizeRemainder.dy,
+          );
+        } else {
+          resizeRemainder = Offset(total, resizeRemainder.dy);
+        }
       }
       if (top || bottom) {
-        final requested = delta.dy / workspaceSize.height;
-        _resizeAxis(group, requested, horizontal: false, movingEnd: bottom);
+        final total = resizeRemainder.dy + delta.dy / workspaceSize.height;
+        final requested = _wholeGridDelta(
+          total,
+          _workspaceGridCellSize / workspaceSize.height,
+        );
+        if (requested != 0) {
+          final applied = _resizeAxis(
+            group,
+            requested,
+            horizontal: false,
+            movingEnd: bottom,
+          );
+          resizeRemainder = Offset(
+            resizeRemainder.dx,
+            _near(applied, requested) ? total - requested : 0,
+          );
+        } else {
+          resizeRemainder = Offset(resizeRemainder.dx, total);
+        }
       }
       mergeTarget = null;
       _bringToFront(group, notify: false);
     });
   }
 
-  void _resizeAxis(
+  double _resizeAxis(
     _WorkspaceGroup group,
     double requestedDelta, {
     required bool horizontal,
     required bool movingEnd,
   }) {
-    final participants = _resizeParticipants(
-      group,
-      horizontal: horizontal,
-      movingEnd: movingEnd,
-    );
+    final participants = gridMode
+        ? <_WorkspaceGroup, bool>{group: movingEnd}
+        : _resizeParticipants(
+            group,
+            horizontal: horizontal,
+            movingEnd: movingEnd,
+          );
     final delta = _constrainedBoundaryDelta(
       participants,
       requestedDelta,
       horizontal: horizontal,
     );
-    if (delta == 0) return;
+    if (delta == 0) return 0;
 
     for (final entry in participants.entries) {
       entry.key.rect = _moveBoundary(
@@ -427,6 +565,15 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         movingEnd: entry.value,
       );
     }
+    return delta;
+  }
+
+  void _startResize() => resizeRemainder = Offset.zero;
+
+  void _endResize() => resizeRemainder = Offset.zero;
+
+  double _wholeGridDelta(double value, double unit) {
+    return (value / unit).truncate() * unit;
   }
 
   Map<_WorkspaceGroup, bool> _resizeParticipants(
@@ -586,6 +733,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         groupRect: group.rect,
         groupZ: group.z,
         panels: panels,
+        originalPanels: panels,
         activePanel: activePanel,
       );
       for (final groupPanel in panels) {
@@ -598,6 +746,45 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
           ? '${activePanel.title} 组合已弹出为独立窗口。'
           : '${activePanel.title} 已弹出为独立窗口。',
     );
+    await window.show();
+  }
+
+  Future<void> _floatSinglePanel(
+    _WorkspaceGroup group,
+    WorkspacePanelId panel,
+    Size workspaceSize,
+  ) async {
+    final existing = externalWindows[panel];
+    if (existing != null) {
+      await existing.show();
+      return;
+    }
+    final originalPanels = List<WorkspacePanelId>.of(group.panels);
+    final window = await WindowController.create(
+      WindowConfiguration(
+        arguments: encodePanelArguments(
+          panel,
+          _toPixelRect(group.rect, workspaceSize).size,
+          panels: <WorkspacePanelId>[panel],
+        ),
+        hiddenAtLaunch: true,
+      ),
+    );
+    externalWindows[panel] = window;
+    widget.windowSync.registerWindow(panel, window);
+    if (!mounted || !group.panels.contains(panel)) return;
+    setState(() {
+      _detachedPlacements[panel] = _DetachedPanelPlacement(
+        groupId: group.id,
+        groupRect: group.rect,
+        groupZ: group.z,
+        panels: <WorkspacePanelId>[panel],
+        originalPanels: originalPanels,
+        activePanel: panel,
+      );
+      _detachPanel(group, panel);
+    });
+    widget.controller.addLog('${panel.title} 已弹出为独立窗口。');
     await window.show();
   }
 
@@ -617,6 +804,46 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
 
   void _separatePanel(_WorkspaceGroup group, WorkspacePanelId panel) {
     if (group.panels.length < 2) return;
+    _separatePanelToRect(
+      group,
+      panel,
+      _clampRect(group.rect.translate(0.025, 0.025)),
+    );
+  }
+
+  void _separatePanelAt(
+    _WorkspaceGroup group,
+    WorkspacePanelId panel,
+    Offset globalPosition,
+    Size workspaceSize,
+  ) {
+    if (group.panels.length < 2 || workspaceSize.isEmpty) return;
+    final renderObject = context.findRenderObject();
+    if (renderObject is! RenderBox) return;
+    final localPosition = renderObject.globalToLocal(globalPosition);
+    final center = Offset(
+      localPosition.dx / workspaceSize.width,
+      localPosition.dy / workspaceSize.height,
+    );
+    _separatePanelToRect(
+      group,
+      panel,
+      _clampRect(
+        Rect.fromCenter(
+          center: center,
+          width: group.rect.width,
+          height: group.rect.height,
+        ),
+      ),
+    );
+  }
+
+  void _separatePanelToRect(
+    _WorkspaceGroup group,
+    WorkspacePanelId panel,
+    Rect rect,
+  ) {
+    if (gridMode) rect = _snapRectToGrid(rect);
     setState(() {
       _detachPanel(group, panel);
       _groups.add(
@@ -624,12 +851,46 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
           id: 'separated_${idCursor++}',
           panels: [panel],
           activePanel: panel,
-          rect: _clampRect(group.rect.translate(0.025, 0.025)),
+          rect: rect,
           z: _nextZ(),
         ),
       );
     });
     widget.controller.report('已从组合中拆分面板：${panel.title}。');
+  }
+
+  void _acceptTabDrop(_WorkspaceGroup target, PanelTabDragData data) {
+    final source = _groups
+        .where((group) => group.id == data.sourceGroupId)
+        .firstOrNull;
+    if (source == null || !source.panels.contains(data.panel)) return;
+    if (source == target) {
+      setState(() => target.activePanel = data.panel);
+      return;
+    }
+    setState(() {
+      _detachPanel(source, data.panel);
+      if (!target.panels.contains(data.panel)) {
+        target.panels.add(data.panel);
+      }
+      target.activePanel = data.panel;
+      target.z = _nextZ();
+    });
+    widget.controller.report('${data.panel.title} 已加入组件组合。');
+  }
+
+  void _finishTabDrag(
+    _WorkspaceGroup source,
+    PanelTabDragData data,
+    DraggableDetails details,
+    Size workspaceSize,
+  ) {
+    if (details.wasAccepted || !source.panels.contains(data.panel)) return;
+    if (gridMode) {
+      _separatePanelAt(source, data.panel, details.offset, workspaceSize);
+      return;
+    }
+    unawaited(_floatSinglePanel(source, data.panel, workspaceSize));
   }
 
   Future<void> _syncExternalWindows() async {
@@ -678,7 +939,9 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         id: 'restored_${idCursor++}',
         panels: [panel],
         activePanel: panel,
-        rect: _defaultRect(panel),
+        rect: gridMode
+            ? _snapRectToGrid(_defaultRect(panel))
+            : _defaultRect(panel),
         z: _nextZ(),
       ),
     );
@@ -695,12 +958,22 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         .where((group) => group.id == placement.groupId)
         .firstOrNull;
     if (originalGroup != null) {
-      for (final panel in panels) {
-        if (!originalGroup.panels.contains(panel)) {
-          originalGroup.panels.add(panel);
-        }
+      final availablePanels = <WorkspacePanelId>{
+        ...originalGroup.panels,
+        ...panels,
+      };
+      final orderedPanels = <WorkspacePanelId>[
+        for (final panel in placement.originalPanels)
+          if (availablePanels.contains(panel)) panel,
+        for (final panel in originalGroup.panels)
+          if (!placement.originalPanels.contains(panel)) panel,
+      ];
+      originalGroup.panels
+        ..clear()
+        ..addAll(orderedPanels);
+      if (originalGroup.panels.contains(placement.activePanel)) {
+        originalGroup.activePanel = placement.activePanel;
       }
-      originalGroup.activePanel = placement.activePanel;
       originalGroup.z = _nextZ();
       return;
     }
@@ -712,7 +985,9 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         activePanel: panels.contains(placement.activePanel)
             ? placement.activePanel
             : panels.first,
-        rect: _clampRect(placement.groupRect),
+        rect: gridMode
+            ? _snapRectToGrid(placement.groupRect)
+            : _clampRect(placement.groupRect),
         z: _nextZ(),
       ),
     );
@@ -728,6 +1003,50 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     WorkspacePanelId.plot => const Rect.fromLTWH(0.22, 0.05, 0.72, 0.67),
     WorkspacePanelId.log => const Rect.fromLTWH(0.08, 0.68, 0.84, 0.26),
   };
+
+  Rect _snapRectToGrid(Rect rect) {
+    if (workspaceSize.isEmpty) return _clampRect(rect);
+    final minWidthPixels =
+        (minWidth * workspaceSize.width / _workspaceGridCellSize).ceil() *
+        _workspaceGridCellSize;
+    final minHeightPixels =
+        (minHeight * workspaceSize.height / _workspaceGridCellSize).ceil() *
+        _workspaceGridCellSize;
+    var left = _snapPixel(rect.left * workspaceSize.width, workspaceSize.width);
+    var right = _snapPixel(
+      rect.right * workspaceSize.width,
+      workspaceSize.width,
+    );
+    var top = _snapPixel(rect.top * workspaceSize.height, workspaceSize.height);
+    var bottom = _snapPixel(
+      rect.bottom * workspaceSize.height,
+      workspaceSize.height,
+    );
+
+    if (right - left < minWidthPixels) right = left + minWidthPixels;
+    if (right > workspaceSize.width) {
+      right = workspaceSize.width;
+      left = math.max(0, right - minWidthPixels);
+    }
+    if (bottom - top < minHeightPixels) bottom = top + minHeightPixels;
+    if (bottom > workspaceSize.height) {
+      bottom = workspaceSize.height;
+      top = math.max(0, bottom - minHeightPixels);
+    }
+
+    return Rect.fromLTRB(
+      left / workspaceSize.width,
+      top / workspaceSize.height,
+      right / workspaceSize.width,
+      bottom / workspaceSize.height,
+    );
+  }
+
+  double _snapPixel(double value, double maximum) {
+    return ((value / _workspaceGridCellSize).round() * _workspaceGridCellSize)
+        .clamp(0, maximum)
+        .toDouble();
+  }
 
   void _mergeInto(_WorkspaceGroup source, String targetId) {
     final target = _groups.where((group) => group.id == targetId).firstOrNull;
@@ -829,6 +1148,7 @@ class _DetachedPanelPlacement {
     required this.groupRect,
     required this.groupZ,
     required this.panels,
+    required this.originalPanels,
     required this.activePanel,
   });
 
@@ -836,6 +1156,7 @@ class _DetachedPanelPlacement {
   final Rect groupRect;
   final int groupZ;
   final List<WorkspacePanelId> panels;
+  final List<WorkspacePanelId> originalPanels;
   final WorkspacePanelId activePanel;
 }
 
@@ -846,6 +1167,9 @@ class _ResizeHandle extends StatelessWidget {
     required this.width,
     required this.height,
     required this.onDrag,
+    required this.onDragStart,
+    required this.onDragEnd,
+    this.enabled = true,
     this.visible = false,
     this.handleKey,
   });
@@ -855,6 +1179,9 @@ class _ResizeHandle extends StatelessWidget {
   final double width;
   final double height;
   final ValueChanged<Offset> onDrag;
+  final VoidCallback onDragStart;
+  final VoidCallback onDragEnd;
+  final bool enabled;
   final bool visible;
   final Key? handleKey;
 
@@ -863,11 +1190,13 @@ class _ResizeHandle extends StatelessWidget {
     return Align(
       alignment: alignment,
       child: MouseRegion(
-        cursor: cursor,
+        cursor: enabled ? cursor : MouseCursor.defer,
         child: GestureDetector(
           key: handleKey,
           behavior: HitTestBehavior.opaque,
-          onPanUpdate: (details) => onDrag(details.delta),
+          onPanStart: enabled ? (_) => onDragStart() : null,
+          onPanUpdate: enabled ? (details) => onDrag(details.delta) : null,
+          onPanEnd: enabled ? (_) => onDragEnd() : null,
           child: SizedBox(
             width: math.max(1, width),
             height: math.max(1, height),
@@ -893,14 +1222,29 @@ class _WorkspaceGridPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = const Color(0x10494446);
-    for (var i = 1; i < 32; i += 1) {
-      final x = size.width * i / 32;
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
+    final minorPaint = Paint()..color = const Color(0xFF242123);
+    final majorPaint = Paint()..color = const Color(0xFF3A3638);
+    for (
+      var index = 1, x = _workspaceGridCellSize;
+      x < size.width;
+      index += 1, x += _workspaceGridCellSize
+    ) {
+      canvas.drawLine(
+        Offset(x, 0),
+        Offset(x, size.height),
+        index % 4 == 0 ? majorPaint : minorPaint,
+      );
     }
-    for (var i = 1; i < 20; i += 1) {
-      final y = size.height * i / 20;
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
+    for (
+      var index = 1, y = _workspaceGridCellSize;
+      y < size.height;
+      index += 1, y += _workspaceGridCellSize
+    ) {
+      canvas.drawLine(
+        Offset(0, y),
+        Offset(size.width, y),
+        index % 4 == 0 ? majorPaint : minorPaint,
+      );
     }
   }
 

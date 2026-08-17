@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'models.dart';
@@ -25,6 +26,7 @@ class TakeALookController extends ChangeNotifier {
   Timer? _ticker;
   bool _disposed = false;
   double _phase = 0;
+  final ValueNotifier<double> _uiScale = ValueNotifier<double>(1);
 
   ConnectionStatus connectionStatus = ConnectionStatus.disconnected;
   String probeType = '自动发现任意探针';
@@ -44,6 +46,17 @@ class TakeALookController extends ChangeNotifier {
   List<WatchItem> get watches => List.unmodifiable(_watches);
   List<LogEntry> get logs => List.unmodifiable(_logs);
   Set<String> get selectedSymbols => Set.unmodifiable(_selectedSymbols);
+  double get uiScale => _uiScale.value;
+  ValueListenable<double> get uiScaleListenable => _uiScale;
+
+  void setUiScale(double value) {
+    if (_dispatchRemote('setUiScale', value)) return;
+    final normalized = value.clamp(0.5, 2).toDouble();
+    if ((normalized - _uiScale.value).abs() < 0.001) return;
+    _uiScale.value = normalized;
+    addLog('界面缩放已设置为 ${(normalized * 100).round()}%。');
+    notifyListeners();
+  }
 
   String get connectionLabel => switch (connectionStatus) {
     ConnectionStatus.disconnected => '连接探针',
@@ -294,6 +307,8 @@ class TakeALookController extends ChangeNotifier {
         setSwdClock(arguments as String);
       case 'setSerialNumber':
         setSerialNumber(arguments as String);
+      case 'setUiScale':
+        setUiScale((arguments as num).toDouble());
       case 'toggleSampling':
         toggleSampling();
       case 'togglePlotting':
@@ -343,6 +358,7 @@ class TakeALookController extends ChangeNotifier {
       'plottingPaused': plottingPaused,
       'rttEnabled': rttEnabled,
       'followLatest': followLatest,
+      'uiScale': uiScale,
       'selectedSymbols': _selectedSymbols.toList(),
       'symbols': [
         for (final symbol in _symbols)
@@ -395,6 +411,10 @@ class TakeALookController extends ChangeNotifier {
     plottingPaused = data['plottingPaused'] == true;
     rttEnabled = data['rttEnabled'] == true;
     followLatest = data['followLatest'] != false;
+    final nextUiScale = (data['uiScale'] as num?)?.toDouble() ?? uiScale;
+    if ((nextUiScale - uiScale).abs() >= 0.001) {
+      _uiScale.value = nextUiScale.clamp(0.5, 2).toDouble();
+    }
 
     _selectedSymbols
       ..clear()
@@ -487,6 +507,7 @@ class TakeALookController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _ticker?.cancel();
+    _uiScale.dispose();
     super.dispose();
   }
 }

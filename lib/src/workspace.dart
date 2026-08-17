@@ -268,6 +268,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     try {
       final payload = <String, dynamic>{
         'version': 1,
+        'uiScale': widget.controller.uiScale,
         'groups': [for (final group in _groups) group.toJson()],
       };
       final file = _layoutFile();
@@ -316,6 +317,8 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
           ..addAll(restored);
         zCursor = _groups.fold(20, (value, group) => math.max(value, group.z));
       });
+      final savedScale = (raw['uiScale'] as num?)?.toDouble();
+      if (savedScale != null) widget.controller.setUiScale(savedScale);
       widget.controller.report('已恢复保存的工作区布局。');
     } on Object catch (error) {
       widget.controller.report('恢复布局失败：$error');

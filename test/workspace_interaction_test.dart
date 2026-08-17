@@ -402,8 +402,10 @@ void main() {
     await tester.pump();
     expect(find.byType(TalPanelFrame), findsNWidgets(4));
 
+    controller.setUiScale(1.25);
     await tester.runAsync(workspaceKey.currentState!.saveLayout);
     expect(layoutFile.existsSync(), isTrue);
+    controller.setUiScale(0.85);
     final restoredHeader = find.ancestor(
       of: find.text('主标题'),
       matching: find.byType(TalPanelFrame),
@@ -423,6 +425,7 @@ void main() {
     await tester.runAsync(workspaceKey.currentState!.restoreLayout);
     await tester.pump();
     expect(find.byType(TalPanelFrame), findsNWidgets(4));
+    expect(controller.uiScale, 1.25);
 
     controller.dispose();
     await tester.pumpWidget(const SizedBox.shrink());

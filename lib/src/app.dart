@@ -56,6 +56,14 @@ class _TakeALookAppState extends State<TakeALookApp> {
       debugShowCheckedModeBanner: false,
       title: 'Take A Look',
       theme: buildTalTheme(),
+      builder: (context, child) {
+        return ValueListenableBuilder<double>(
+          valueListenable: controller.uiScaleListenable,
+          child: child ?? const SizedBox.shrink(),
+          builder: (context, scale, child) =>
+              TalUiScaleViewport(scale: scale, child: child!),
+        );
+      },
       home: widget.detachedPanel == null
           ? MainWorkbench(controller: controller, windowSync: windowSync!)
           : DetachedPanelWindow(
@@ -63,6 +71,54 @@ class _TakeALookAppState extends State<TakeALookApp> {
               panel: widget.detachedPanel!,
               panels: widget.detachedPanels ?? const <WorkspacePanelId>[],
             ),
+    );
+  }
+}
+
+class TalUiScaleViewport extends StatelessWidget {
+  const TalUiScaleViewport({
+    required this.scale,
+    required this.child,
+    super.key,
+  }) : assert(scale > 0);
+
+  final double scale;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    if ((scale - 1).abs() < 0.001) return child;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (!constraints.hasBoundedWidth || !constraints.hasBoundedHeight) {
+          return child;
+        }
+        final logicalSize = Size(
+          constraints.maxWidth / scale,
+          constraints.maxHeight / scale,
+        );
+        final mediaQuery = MediaQuery.maybeOf(context);
+        final scaledChild = mediaQuery == null
+            ? child
+            : MediaQuery(
+                data: mediaQuery.copyWith(size: logicalSize),
+                child: child,
+              );
+        return ClipRect(
+          child: OverflowBox(
+            alignment: Alignment.topLeft,
+            minWidth: logicalSize.width,
+            maxWidth: logicalSize.width,
+            minHeight: logicalSize.height,
+            maxHeight: logicalSize.height,
+            child: Transform.scale(
+              scale: scale,
+              alignment: Alignment.topLeft,
+              child: scaledChild,
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -206,9 +262,10 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
     WorkspacePanelId.log,
   ];
 
-  double uiScale = 0.85;
   bool gridMode = false;
   String rttProtocol = 'normal';
+
+  double get uiScale => widget.controller?.uiScale ?? 1;
 
   @override
   Widget build(BuildContext context) {
@@ -302,6 +359,8 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
           for (final scale in _uiScales)
             _menuItem(
               label: '${(scale * 100).round()}%',
+              checked: (uiScale - scale).abs() < 0.001,
+              reserveLeading: true,
               onPressed: () => _setUiScale(scale),
             ),
         ],
@@ -420,8 +479,8 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
   }
 
   void _setUiScale(double value) {
-    setState(() => uiScale = value);
-    widget.controller?.report('界面缩放已设置为 ${(value * 100).round()}%。');
+    widget.controller?.setUiScale(value);
+    setState(() {});
   }
 
   void _toggleGridMode() {

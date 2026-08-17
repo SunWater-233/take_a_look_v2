@@ -85,6 +85,10 @@ void main() {
     expect(find.text('100%'), findsOneWidget);
     expect(find.text('125%'), findsOneWidget);
     expect(find.text('145%'), findsOneWidget);
+
+    await tester.tap(find.text('125%'));
+    await tester.pumpAndSettle();
+    expect(controller.uiScale, 1.25);
   });
 
   testWidgets('window title bar matches the legacy dimensions and brand', (

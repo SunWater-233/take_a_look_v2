@@ -1,4 +1,7 @@
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:take_a_look_v2/src/backend_client.dart';
 import 'package:take_a_look_v2/src/controller.dart';
 import 'package:take_a_look_v2/src/models.dart';
 
@@ -76,6 +79,22 @@ void main() {
     controller.applyBackendEvent('samplesCleared', const <String, Object?>{});
     expect(controller.elapsedSeconds, 0);
     expect(controller.watches.single.samples, isEmpty);
+
+    controller.applyBackendEvent(
+      'samples',
+      BackendSampleBatch(
+        schemaId: 1,
+        sequence: 1,
+        keys: const ['20000000:speed'],
+        elapsedSeconds: Float64List.fromList([0.5]),
+        values: Float64List.fromList([13.25]),
+        validity: Uint8List.fromList([1]),
+        validityBytesPerFrame: 1,
+      ),
+    );
+    expect(controller.elapsedSeconds, 0.5);
+    expect(controller.watches.single.value, 13.25);
+    expect(controller.watches.single.samples.single.dy, 13.25);
 
     controller.applyBackendEvent('perf', {
       'effectiveHz': 198.5,

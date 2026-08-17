@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import struct
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
+SAMPLE_PAYLOAD_VERSION = 1
+SAMPLE_FRAME_MARKER = 0
 
 
 @dataclass(frozen=True)
@@ -60,4 +63,50 @@ def event(name: str, params: object) -> dict[str, object]:
 
 
 def encode(message: Mapping[str, Any]) -> str:
-    return json.dumps(message, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    # Keep the wire format ASCII-only. Frozen Python applications on Windows
+    # can inherit a legacy console code page even when stdout is a pipe; JSON
+    # escapes preserve Unicode without making Flutter guess that encoding.
+    return json.dumps(message, ensure_ascii=True, separators=(",", ":"), allow_nan=False)
+
+
+def encode_sample_batch(
+    schema_id: int,
+    sequence: int,
+    keys: list[str],
+    frames: list[tuple[float, Mapping[str, object]]],
+) -> bytes:
+    """Encode high-rate samples without repeating symbol names per value."""
+    if len(keys) > 0xFFFF:
+        raise ValueError("A sample schema cannot contain more than 65535 values.")
+
+    key_indexes = {key: index for index, key in enumerate(keys)}
+    validity_size = (len(keys) + 7) // 8
+    payload = bytearray(
+        struct.pack(
+            "<BIIIH",
+            SAMPLE_PAYLOAD_VERSION,
+            schema_id,
+            sequence,
+            len(frames),
+            len(keys),
+        )
+    )
+    for elapsed, values in frames:
+        validity = bytearray(validity_size)
+        numeric_values: dict[int, float] = {}
+        for key, value in values.items():
+            index = key_indexes.get(key)
+            if index is None or not isinstance(value, (bool, int, float)):
+                continue
+            validity[index // 8] |= 1 << (index % 8)
+            numeric_values[index] = float(value)
+        payload.extend(struct.pack("<d", float(elapsed)))
+        payload.extend(validity)
+        for index in range(len(keys)):
+            if index in numeric_values:
+                payload.extend(struct.pack("<d", numeric_values[index]))
+    return bytes(payload)
+
+
+def frame_sample_payload(payload: bytes) -> bytes:
+    return bytes((SAMPLE_FRAME_MARKER,)) + struct.pack("<I", len(payload)) + payload

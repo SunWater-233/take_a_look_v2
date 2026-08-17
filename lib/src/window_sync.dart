@@ -17,8 +17,12 @@ class MainWindowSync {
   final TakeALookController controller;
   final Map<WorkspacePanelId, WindowController> _windows =
       <WorkspacePanelId, WindowController>{};
+  final Map<WorkspacePanelId, Map<String, int>> _telemetryCursors =
+      <WorkspacePanelId, Map<String, int>>{};
   Timer? _stateBroadcastTimer;
   Timer? _telemetryBroadcastTimer;
+  bool _telemetryBroadcasting = false;
+  bool _telemetryBroadcastPending = false;
   bool _started = false;
 
   Future<void> start() async {
@@ -31,12 +35,14 @@ class MainWindowSync {
 
   void registerWindow(WorkspacePanelId panel, WindowController window) {
     _windows[panel] = window;
+    _telemetryCursors[panel] = controller.telemetryCursors();
     _scheduleStateBroadcast();
     _scheduleTelemetryBroadcast();
   }
 
   void unregisterWindow(WorkspacePanelId panel) {
     _windows.remove(panel);
+    _telemetryCursors.remove(panel);
   }
 
   Future<dynamic> _handleCall(MethodCall call) async {
@@ -53,11 +59,45 @@ class MainWindowSync {
   }
 
   void _scheduleTelemetryBroadcast() {
+    if (_telemetryBroadcasting) {
+      _telemetryBroadcastPending = true;
+      return;
+    }
     if (_windows.isEmpty || _telemetryBroadcastTimer?.isActive == true) return;
     _telemetryBroadcastTimer = Timer(
       const Duration(milliseconds: 80),
-      () => _broadcast('telemetry', controller.telemetrySnapshot()),
+      _broadcastTelemetry,
     );
+  }
+
+  Future<void> _broadcastTelemetry() async {
+    _telemetryBroadcasting = true;
+    try {
+      for (final entry in _windows.entries) {
+        final data = controller.telemetryDeltaSnapshot(
+          _telemetryCursors[entry.key] ?? const <String, int>{},
+        );
+        try {
+          await entry.value.invokeMethod<void>('telemetryDelta', data);
+          final nextCursors = <String, int>{};
+          for (final raw in data['watches'] as List? ?? const []) {
+            final watch = Map<String, dynamic>.from(raw as Map);
+            final key = watch['key'];
+            final cursor = watch['sampleCursor'];
+            if (key is String && cursor is int) nextCursors[key] = cursor;
+          }
+          _telemetryCursors[entry.key] = nextCursors;
+        } on Object {
+          // The next successful delivery resumes from the last acknowledged cursor.
+        }
+      }
+    } finally {
+      _telemetryBroadcasting = false;
+      if (_telemetryBroadcastPending) {
+        _telemetryBroadcastPending = false;
+        _scheduleTelemetryBroadcast();
+      }
+    }
   }
 
   Future<void> _broadcast(String method, Map<String, dynamic> state) async {
@@ -90,6 +130,10 @@ Future<void> initializeDetachedWindow(TakeALookController controller) async {
       );
     } else if (call.method == 'telemetry' && call.arguments is Map) {
       controller.applyTelemetrySnapshot(
+        Map<String, dynamic>.from(call.arguments as Map),
+      );
+    } else if (call.method == 'telemetryDelta' && call.arguments is Map) {
+      controller.applyTelemetryDelta(
         Map<String, dynamic>.from(call.arguments as Map),
       );
     }

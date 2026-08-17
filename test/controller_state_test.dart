@@ -131,12 +131,80 @@ void main() {
 
     final target = TakeALookController()..applySnapshot(source.snapshot());
     expect(target.watches.single.samples, hasLength(2));
+    final sampleCursor = target.watches.single.totalSampleCount;
     source.setSerialNumber('probe-02');
     target.applySnapshot(source.stateSnapshot());
     expect(target.serialNumber, 'probe-02');
     expect(target.watches.single.samples, hasLength(2));
+    expect(target.watches.single.totalSampleCount, sampleCursor);
 
     source.dispose();
     target.dispose();
   });
+
+  test(
+    'telemetry deltas append once, clear, and recover after retention loss',
+    () {
+      final source = TakeALookController();
+      source.loadDemoSymbols();
+      source.toggleSymbol(demoSymbols.first.key);
+      source.addSelectedToWatch();
+      final key = source.watches.single.symbol.key;
+      source.applyBackendEvent('samples', {
+        'frames': [
+          {
+            'elapsed': 1,
+            'values': {key: 1},
+          },
+        ],
+      });
+      final target = TakeALookController()..applySnapshot(source.snapshot());
+      var cursor = source.telemetryCursors();
+
+      source.applyBackendEvent('samples', {
+        'frames': [
+          {
+            'elapsed': 2,
+            'values': {key: 2},
+          },
+        ],
+      });
+      final delta = source.telemetryDeltaSnapshot(cursor);
+      expect(
+        ((delta['watches'] as List).single as Map)['samples'],
+        hasLength(1),
+      );
+      target.applyTelemetryDelta(delta);
+      target.applyTelemetryDelta(delta);
+      expect(target.watches.single.samples, hasLength(2));
+      expect(target.watches.single.value, 2);
+
+      cursor = source.telemetryCursors();
+      source.applyBackendSamplesCleared();
+      final cleared = source.telemetryDeltaSnapshot(cursor);
+      expect(((cleared['watches'] as List).single as Map)['reset'], isTrue);
+      target.applyTelemetryDelta(cleared);
+      expect(target.watches.single.samples, isEmpty);
+
+      source.applyBackendEvent('samples', {
+        'frames': [
+          for (var index = 0; index < 1801; index += 1)
+            {
+              'elapsed': index / 1000,
+              'values': {key: index},
+            },
+        ],
+      });
+      final recovered = source.telemetryDeltaSnapshot({key: 0});
+      final recoveredWatch = (recovered['watches'] as List).single as Map;
+      expect(recoveredWatch['reset'], isTrue);
+      expect(recoveredWatch['samples'], hasLength(1800));
+      target.applyTelemetryDelta(recovered);
+      expect(target.watches.single.samples, hasLength(1800));
+      expect(target.watches.single.totalSampleCount, 1801);
+
+      source.dispose();
+      target.dispose();
+    },
+  );
 }

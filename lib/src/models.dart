@@ -44,6 +44,7 @@ class WatchItem {
   final SymbolItem symbol;
   final Color color;
   final List<Offset> samples = <Offset>[];
+  int totalSampleCount = 0;
   bool plotted = true;
   double value = 0;
 

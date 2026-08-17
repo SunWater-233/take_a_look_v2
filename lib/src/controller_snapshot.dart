@@ -41,6 +41,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
             'color': watch.color.toARGB32(),
             'plotted': watch.plotted,
             'value': watch.value,
+            'sampleCursor': watch.totalSampleCount,
             if (includeSamples)
               'samples': [
                 for (final point in watch.samples.skip(
@@ -70,6 +71,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
           {
             'key': watch.symbol.key,
             'value': watch.value,
+            'sampleCursor': watch.totalSampleCount,
             'samples': [
               for (final point in watch.samples.skip(
                 math.max(0, watch.samples.length - 600),
@@ -77,6 +79,37 @@ extension TakeALookControllerSnapshot on TakeALookController {
                 [point.dx, point.dy],
             ],
           },
+      ],
+    };
+  }
+
+  Map<String, int> telemetryCursors() => {
+    for (final watch in _watches) watch.symbol.key: watch.totalSampleCount,
+  };
+
+  Map<String, dynamic> telemetryDeltaSnapshot(Map<String, int> cursors) {
+    return {
+      'elapsedSeconds': elapsedSeconds,
+      'watches': [
+        for (final watch in _watches)
+          _watchTelemetryDelta(watch, cursors[watch.symbol.key] ?? 0),
+      ],
+    };
+  }
+
+  Map<String, dynamic> _watchTelemetryDelta(WatchItem watch, int cursor) {
+    final retainedStart = watch.totalSampleCount - watch.samples.length;
+    final reset = cursor < retainedStart || cursor > watch.totalSampleCount;
+    final sampleStart = reset ? retainedStart : cursor;
+    final skip = sampleStart - retainedStart;
+    return {
+      'key': watch.symbol.key,
+      'value': watch.value,
+      'sampleStart': sampleStart,
+      'sampleCursor': watch.totalSampleCount,
+      if (reset) 'reset': true,
+      'samples': [
+        for (final point in watch.samples.skip(skip)) [point.dx, point.dy],
       ],
     };
   }
@@ -175,6 +208,9 @@ extension TakeALookControllerSnapshot on TakeALookController {
                 ),
               );
             }
+            watch.totalSampleCount = samples == null
+                ? previousWatches[watch.symbol.key]?.totalSampleCount ?? 0
+                : (item['sampleCursor'] as int?) ?? watch.samples.length;
             return watch;
           }).whereType<WatchItem>(),
         );
@@ -238,7 +274,44 @@ extension TakeALookControllerSnapshot on TakeALookController {
               );
             }),
           );
+        watch.totalSampleCount =
+            (item['sampleCursor'] as int?) ?? watch.samples.length;
       }
+    }
+    _emitTelemetry(sync: false);
+  }
+
+  void applyTelemetryDelta(Map<String, dynamic> data) {
+    elapsedSeconds =
+        (data['elapsedSeconds'] as num?)?.toDouble() ?? elapsedSeconds;
+    final watchesByKey = {
+      for (final watch in _watches) watch.symbol.key: watch,
+    };
+    for (final raw in data['watches'] as List? ?? const []) {
+      final item = Map<String, dynamic>.from(raw as Map);
+      final watch = watchesByKey[item['key'] as String?];
+      if (watch == null) continue;
+      watch.value = _numericValue(item['value'], fallback: watch.value);
+      final sampleStart = item['sampleStart'] as int? ?? 0;
+      final sampleCursor = item['sampleCursor'] as int? ?? sampleStart;
+      if (item['reset'] == true ||
+          watch.totalSampleCount < sampleStart ||
+          watch.totalSampleCount > sampleCursor) {
+        watch.samples.clear();
+        watch.totalSampleCount = sampleStart;
+      }
+      final rawSamples = item['samples'] as List? ?? const [];
+      final alreadyApplied = (watch.totalSampleCount - sampleStart)
+          .clamp(0, rawSamples.length)
+          .toInt();
+      for (final rawPoint in rawSamples.skip(alreadyApplied)) {
+        final point = rawPoint as List;
+        _appendWatchSample(
+          watch,
+          Offset((point[0] as num).toDouble(), (point[1] as num).toDouble()),
+        );
+      }
+      watch.totalSampleCount = sampleCursor;
     }
     _emitTelemetry(sync: false);
   }
@@ -249,8 +322,12 @@ extension TakeALookControllerSnapshot on TakeALookController {
         final state = _asMap(params);
         if (state != null) applySnapshot(state);
       case 'samples':
-        final payload = _asMap(params);
-        if (payload != null) applyBackendSamples(payload);
+        if (params is BackendSampleBatch) {
+          applyBackendSampleBatch(params);
+        } else {
+          final payload = _asMap(params);
+          if (payload != null) applyBackendSamples(payload);
+        }
       case 'samplesCleared':
         applyBackendSamplesCleared();
       case 'log':
@@ -302,8 +379,25 @@ extension TakeALookControllerSnapshot on TakeALookController {
         final watch = watchesByKey[entry.key];
         if (watch == null) continue;
         watch.value = _numericValue(entry.value, fallback: watch.value);
-        watch.samples.add(Offset(elapsed, watch.value));
-        if (watch.samples.length > 1800) watch.samples.removeAt(0);
+        _appendWatchSample(watch, Offset(elapsed, watch.value));
+      }
+    }
+    _emitTelemetry();
+  }
+
+  void applyBackendSampleBatch(BackendSampleBatch batch) {
+    final watchesByKey = {
+      for (final watch in _watches) watch.symbol.key: watch,
+    };
+    final schemaWatches = [for (final key in batch.keys) watchesByKey[key]];
+    for (var frame = 0; frame < batch.frameCount; frame += 1) {
+      final elapsed = batch.elapsedSeconds[frame];
+      elapsedSeconds = math.max(elapsedSeconds, elapsed);
+      for (var variable = 0; variable < batch.variableCount; variable += 1) {
+        final watch = schemaWatches[variable];
+        if (watch == null || !batch.hasValue(frame, variable)) continue;
+        watch.value = batch.valueAt(frame, variable);
+        _appendWatchSample(watch, Offset(elapsed, watch.value));
       }
     }
     _emitTelemetry();
@@ -313,6 +407,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
     elapsedSeconds = 0;
     for (final watch in _watches) {
       watch.samples.clear();
+      watch.totalSampleCount = 0;
     }
     _frozenPlotSamples.clear();
     if (plottingPaused || !followLatest) _frozenPlotEndSeconds = 0;

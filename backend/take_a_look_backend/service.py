@@ -13,7 +13,7 @@ from take_a_look_backend.backends.j_scope_rtt import JScopeRttBackend
 from take_a_look_backend.backends.pyocd_memory import PyOcdConnectionConfig, PyOcdMemoryBackend
 from take_a_look_backend.backends.rtt_plus import JScopeRttPlusBackend
 from take_a_look_backend.models import SymbolInfo, WatchedVariable
-from take_a_look_backend.protocol import ProtocolError
+from take_a_look_backend.protocol import PROTOCOL_VERSION, ProtocolError
 from take_a_look_backend.services.symbols import load_symbols_from_elf
 
 
@@ -82,7 +82,7 @@ class BackendService:
     def handle(self, method: str, params: Mapping[str, object]) -> dict[str, object]:
         if method == "handshake":
             return {
-                "protocolVersion": 1,
+                "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": [
                     "symbols",
                     "memorySampling",

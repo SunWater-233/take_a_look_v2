@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import 'backend_client.dart';
 import 'demo_data.dart';
 import 'models.dart';
 
@@ -285,6 +286,7 @@ class TakeALookController extends ChangeNotifier {
     elapsedSeconds = 0;
     for (final watch in _watches) {
       watch.samples.clear();
+      watch.totalSampleCount = 0;
     }
     _frozenPlotSamples.clear();
     if (plottingPaused || !followLatest) _frozenPlotEndSeconds = 0;
@@ -511,10 +513,7 @@ class TakeALookController extends ChangeNotifier {
           math.sin(_phase * (1.2 + index * 0.23)) * (index + 1) +
           math.sin(_phase * 8.0 + index) * 0.12;
       watch.value = value;
-      watch.samples.add(Offset(elapsedSeconds, value));
-      if (watch.samples.length > 1800) {
-        watch.samples.removeAt(0);
-      }
+      _appendWatchSample(watch, Offset(elapsedSeconds, value));
     }
     _emitTelemetry();
   }
@@ -527,6 +526,14 @@ class TakeALookController extends ChangeNotifier {
   void _appendLog(String message) {
     _logs.add(LogEntry(message));
     if (_logs.length > 500) _logs.removeAt(0);
+  }
+
+  void _appendWatchSample(WatchItem watch, Offset point) {
+    watch.samples.add(point);
+    watch.totalSampleCount += 1;
+    if (watch.samples.length > 1800) {
+      watch.samples.removeRange(0, watch.samples.length - 1800);
+    }
   }
 
   void _freezePlotIfNeeded() {

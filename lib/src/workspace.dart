@@ -1,45 +1,41 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
-import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
 
 import 'controller.dart';
+import 'detached_window_coordinator.dart';
 import 'panel_types.dart';
 import 'panels.dart';
 import 'theme.dart';
 import 'window_sync.dart';
+import 'workspace_geometry.dart';
+import 'workspace_layout.dart';
 
-const _workspaceGridCellSize = 32.0;
+const _geometry = WorkspaceGeometry();
 
 class DockingWorkspace extends StatefulWidget {
   const DockingWorkspace({
     required this.controller,
     required this.windowSync,
     this.layoutFile,
+    this.onPanelVisibilityChanged,
     super.key,
   });
 
   final TakeALookController controller;
   final MainWindowSync windowSync;
   final File? layoutFile;
+  final VoidCallback? onPanelVisibilityChanged;
 
   @override
   DockingWorkspaceState createState() => DockingWorkspaceState();
 }
 
 class DockingWorkspaceState extends State<DockingWorkspace> {
-  static const minWidth = 0.14;
-  static const minHeight = 0.10;
-  // A saved layout can accumulate small floating point errors at shared edges.
-  static const adjacencyTolerance = 0.012;
-  static const overlapTolerance = 0.001;
-
-  final List<_WorkspaceGroup> _groups = <_WorkspaceGroup>[];
-  final Map<WorkspacePanelId, WindowController> externalWindows =
-      <WorkspacePanelId, WindowController>{};
+  final List<WorkspaceGroup> _groups = <WorkspaceGroup>[];
+  late final DetachedWindowCoordinator detachedWindows;
   final Map<WorkspacePanelId, _DetachedPanelPlacement> _detachedPlacements =
       <WorkspacePanelId, _DetachedPanelPlacement>{};
   StreamSubscription<void>? windowSubscription;
@@ -55,8 +51,11 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   @override
   void initState() {
     super.initState();
+    detachedWindows = DetachedWindowCoordinator(widget.windowSync);
     _applyDefaultLayout();
-    windowSubscription = onWindowsChanged.listen((_) => _syncExternalWindows());
+    windowSubscription = detachedWindows.changes.listen(
+      (_) => _syncExternalWindows(),
+    );
   }
 
   @override
@@ -95,7 +94,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     );
   }
 
-  Widget _buildGroup(_WorkspaceGroup group, Size workspaceSize) {
+  Widget _buildGroup(WorkspaceGroup group, Size workspaceSize) {
     final rawRect = _toPixelRect(group.rect, workspaceSize);
     final rect = rawRect.deflate(1.5);
     return Positioned(
@@ -214,7 +213,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     _groups
       ..clear()
       ..addAll([
-        _WorkspaceGroup(
+        WorkspaceGroup(
           id: 'header',
           panels: const [
             WorkspacePanelId.header,
@@ -225,7 +224,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
           rect: const Rect.fromLTWH(0, 0, 0.22, 0.18),
           z: 1,
         ),
-        _WorkspaceGroup(
+        WorkspaceGroup(
           id: 'symbols',
           panels: const [
             WorkspacePanelId.symbols,
@@ -236,14 +235,14 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
           rect: const Rect.fromLTWH(0, 0.18, 0.22, 0.58),
           z: 2,
         ),
-        _WorkspaceGroup(
+        WorkspaceGroup(
           id: 'plot',
           panels: const [WorkspacePanelId.plot],
           activePanel: WorkspacePanelId.plot,
           rect: const Rect.fromLTWH(0.22, 0, 0.78, 0.76),
           z: 3,
         ),
-        _WorkspaceGroup(
+        WorkspaceGroup(
           id: 'log',
           panels: const [WorkspacePanelId.log],
           activePanel: WorkspacePanelId.log,
@@ -251,7 +250,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
           z: 4,
         ),
       ]);
-    for (final panel in externalWindows.keys) {
+    for (final panel in detachedWindows.windows.keys) {
       final group = _groups
           .where((candidate) => candidate.panels.contains(panel))
           .firstOrNull;
@@ -266,14 +265,12 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
 
   Future<void> saveLayout() async {
     try {
-      final payload = <String, dynamic>{
-        'version': 1,
-        'uiScale': widget.controller.uiScale,
-        'groups': [for (final group in _groups) group.toJson()],
-      };
-      final file = _layoutFile();
-      await file.parent.create(recursive: true);
-      await file.writeAsString(jsonEncode(payload), flush: true);
+      await _layoutRepository.save(
+        WorkspaceLayoutSnapshot(
+          groups: _groups,
+          uiScale: widget.controller.uiScale,
+        ),
+      );
       widget.controller.report('工作区布局已保存。');
     } on Object catch (error) {
       widget.controller.report('保存布局失败：$error');
@@ -282,24 +279,18 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
 
   Future<void> restoreLayout() async {
     try {
-      final file = _layoutFile();
-      if (!await file.exists()) {
+      final layout = await _layoutRepository.load();
+      if (layout == null) {
         widget.controller.report('尚未保存过工作区布局。');
         return;
       }
-      final raw = jsonDecode(await file.readAsString());
-      if (raw is! Map || raw['groups'] is! List) {
-        throw const FormatException('布局文件格式无效');
-      }
-      final restored = <_WorkspaceGroup>[];
+      final restored = <WorkspaceGroup>[];
       final seenPanels = <WorkspacePanelId>{};
-      for (final entry in raw['groups'] as List) {
-        final group = _WorkspaceGroup.fromJson(
-          Map<String, dynamic>.from(entry as Map),
-        );
+      for (final group in layout.groups) {
         group.panels.removeWhere(
           (panel) =>
-              externalWindows.containsKey(panel) || !seenPanels.add(panel),
+              detachedWindows.windows.containsKey(panel) ||
+              !seenPanels.add(panel),
         );
         if (group.panels.isEmpty) continue;
         if (!group.panels.contains(group.activePanel)) {
@@ -317,8 +308,8 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
           ..addAll(restored);
         zCursor = _groups.fold(20, (value, group) => math.max(value, group.z));
       });
-      final savedScale = (raw['uiScale'] as num?)?.toDouble();
-      if (savedScale != null) widget.controller.setUiScale(savedScale);
+      widget.onPanelVisibilityChanged?.call();
+      widget.controller.setUiScale(layout.uiScale);
       widget.controller.report('已恢复保存的工作区布局。');
     } on Object catch (error) {
       widget.controller.report('恢复布局失败：$error');
@@ -327,11 +318,12 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
 
   void resetLayout() {
     setState(_applyDefaultLayout);
+    widget.onPanelVisibilityChanged?.call();
     widget.controller.report('已重置为默认工作区布局。');
   }
 
   bool isPanelVisible(WorkspacePanelId panel) {
-    return externalWindows.containsKey(panel) ||
+    return detachedWindows.windows.containsKey(panel) ||
         _groups.any((group) => group.panels.contains(panel));
   }
 
@@ -354,11 +346,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   }
 
   Future<void> togglePanelVisibility(WorkspacePanelId panel) async {
-    final external = externalWindows[panel];
-    if (external != null) {
-      await external.show();
-      return;
-    }
+    if (await detachedWindows.showIfOpen(panel)) return;
     final group = _groups
         .where((candidate) => candidate.panels.contains(panel))
         .firstOrNull;
@@ -370,38 +358,18 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   }
 
   Future<void> showPanel(WorkspacePanelId panel) async {
-    final external = externalWindows[panel];
-    if (external != null) {
-      await external.show();
-      return;
-    }
+    if (await detachedWindows.showIfOpen(panel)) return;
     if (_groups.any((group) => group.panels.contains(panel))) return;
     setState(() => _restorePanel(panel));
+    widget.onPanelVisibilityChanged?.call();
     widget.controller.report('已恢复面板：${panel.title}。');
   }
 
-  File _layoutFile() {
-    final override = widget.layoutFile;
-    if (override != null) return override;
-    final environment = Platform.environment;
-    late final String basePath;
-    if (Platform.isWindows) {
-      basePath = environment['APPDATA'] ?? Directory.current.path;
-    } else if (Platform.isMacOS) {
-      final home = environment['HOME'] ?? Directory.current.path;
-      basePath =
-          '$home${Platform.pathSeparator}Library${Platform.pathSeparator}Application Support';
-    } else {
-      final home = environment['HOME'] ?? Directory.current.path;
-      basePath =
-          environment['XDG_CONFIG_HOME'] ??
-          '$home${Platform.pathSeparator}.config';
-    }
-    final directory = Directory('$basePath${Platform.pathSeparator}TakeALook');
-    return File('${directory.path}${Platform.pathSeparator}layout.json');
-  }
+  WorkspaceLayoutRepository get _layoutRepository => WorkspaceLayoutRepository(
+    widget.layoutFile ?? WorkspaceLayoutRepository.defaultFile(),
+  );
 
-  void _startDrag(_WorkspaceGroup group) {
+  void _startDrag(WorkspaceGroup group) {
     if (!gridMode) return;
     setState(() {
       dragRemainder = Offset.zero;
@@ -410,7 +378,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     });
   }
 
-  void _moveGroup(_WorkspaceGroup group, Offset delta, Size workspaceSize) {
+  void _moveGroup(WorkspaceGroup group, Offset delta, Size workspaceSize) {
     if (!gridMode || workspaceSize.isEmpty) return;
     final totalDelta = Offset(
       dragRemainder.dx + delta.dx / workspaceSize.width,
@@ -419,11 +387,11 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     final snappedDelta = Offset(
       _wholeGridDelta(
         totalDelta.dx,
-        _workspaceGridCellSize / workspaceSize.width,
+        _geometry.gridCellSize / workspaceSize.width,
       ),
       _wholeGridDelta(
         totalDelta.dy,
-        _workspaceGridCellSize / workspaceSize.height,
+        _geometry.gridCellSize / workspaceSize.height,
       ),
     );
     if (snappedDelta == Offset.zero) {
@@ -448,7 +416,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     });
   }
 
-  void _endDrag(_WorkspaceGroup group) {
+  void _endDrag(WorkspaceGroup group) {
     if (!gridMode) return;
     setState(() {
       final target = _findMergeTarget(group);
@@ -460,7 +428,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   }
 
   void _resizeGroup(
-    _WorkspaceGroup group,
+    WorkspaceGroup group,
     Offset delta,
     Size workspaceSize, {
     bool left = false,
@@ -497,7 +465,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         final total = resizeRemainder.dx + delta.dx / workspaceSize.width;
         final requested = _wholeGridDelta(
           total,
-          _workspaceGridCellSize / workspaceSize.width,
+          _geometry.gridCellSize / workspaceSize.width,
         );
         if (requested != 0) {
           final applied = _resizeAxis(
@@ -518,7 +486,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         final total = resizeRemainder.dy + delta.dy / workspaceSize.height;
         final requested = _wholeGridDelta(
           total,
-          _workspaceGridCellSize / workspaceSize.height,
+          _geometry.gridCellSize / workspaceSize.height,
         );
         if (requested != 0) {
           final applied = _resizeAxis(
@@ -541,19 +509,20 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   }
 
   double _resizeAxis(
-    _WorkspaceGroup group,
+    WorkspaceGroup group,
     double requestedDelta, {
     required bool horizontal,
     required bool movingEnd,
   }) {
     final participants = gridMode
-        ? <_WorkspaceGroup, bool>{group: movingEnd}
-        : _resizeParticipants(
+        ? <WorkspaceGroup, bool>{group: movingEnd}
+        : _geometry.resizeParticipants(
+            _groups,
             group,
             horizontal: horizontal,
             movingEnd: movingEnd,
           );
-    final delta = _constrainedBoundaryDelta(
+    final delta = _geometry.constrainedBoundaryDelta(
       participants,
       requestedDelta,
       horizontal: horizontal,
@@ -561,7 +530,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     if (delta == 0) return 0;
 
     for (final entry in participants.entries) {
-      entry.key.rect = _moveBoundary(
+      entry.key.rect = _geometry.moveBoundary(
         entry.key.rect,
         delta,
         horizontal: horizontal,
@@ -576,159 +545,24 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   void _endResize() => resizeRemainder = Offset.zero;
 
   double _wholeGridDelta(double value, double unit) {
-    return (value / unit).truncate() * unit;
+    return _geometry.wholeGridDelta(value, unit);
   }
 
-  Map<_WorkspaceGroup, bool> _resizeParticipants(
-    _WorkspaceGroup source, {
-    required bool horizontal,
-    required bool movingEnd,
-  }) {
-    final boundary = _edge(source.rect, horizontal: horizontal, end: movingEnd);
-    final participants = <_WorkspaceGroup, bool>{source: movingEnd};
-    var changed = true;
-    while (changed) {
-      changed = false;
-      final current = participants.entries.toList();
-      for (final entry in current) {
-        final group = entry.key;
-        final role = entry.value;
-        for (final candidate in _groups) {
-          if (candidate == group || participants.containsKey(candidate)) {
-            continue;
-          }
-          final candidateRole = role;
-          final candidateEdge = _edge(
-            candidate.rect,
-            horizontal: horizontal,
-            end: candidateRole,
-          );
-          if (!_near(candidateEdge, boundary) ||
-              !_touchesPerpendicular(group.rect, candidate.rect, horizontal)) {
-            continue;
-          }
-          // Components on the same side of the split line form one resize
-          // segment, even when they are stacked vertically or horizontally.
-          participants[candidate] = candidateRole;
-          changed = true;
-        }
-
-        final oppositeRole = !role;
-        for (final candidate in _groups) {
-          if (candidate == group || participants.containsKey(candidate)) {
-            continue;
-          }
-          final candidateEdge = _edge(
-            candidate.rect,
-            horizontal: horizontal,
-            end: oppositeRole,
-          );
-          final overlap = _perpendicularOverlap(
-            group.rect,
-            candidate.rect,
-            horizontal,
-          );
-          if (_near(candidateEdge, boundary) && overlap > overlapTolerance) {
-            participants[candidate] = oppositeRole;
-            changed = true;
-          }
-        }
-      }
-    }
-    return participants;
-  }
-
-  double _constrainedBoundaryDelta(
-    Map<_WorkspaceGroup, bool> participants,
-    double requestedDelta, {
-    required bool horizontal,
-  }) {
-    final minSize = horizontal ? minWidth : minHeight;
-    var lower = -double.infinity;
-    var upper = double.infinity;
-
-    for (final entry in participants.entries) {
-      final rect = entry.key.rect;
-      final movingEnd = entry.value;
-      final start = horizontal ? rect.left : rect.top;
-      final end = horizontal ? rect.right : rect.bottom;
-      final size = end - start;
-      if (movingEnd) {
-        lower = math.max(lower, minSize - size);
-        upper = math.min(upper, 1.0 - end);
-      } else {
-        lower = math.max(lower, -start);
-        upper = math.min(upper, size - minSize);
-      }
-    }
-    return requestedDelta.clamp(lower, upper).toDouble();
-  }
-
-  double _edge(Rect rect, {required bool horizontal, required bool end}) {
-    if (horizontal) return end ? rect.right : rect.left;
-    return end ? rect.bottom : rect.top;
-  }
-
-  bool _near(double first, double second) =>
-      (first - second).abs() <= adjacencyTolerance;
-
-  double _perpendicularOverlap(Rect first, Rect second, bool horizontal) {
-    return horizontal
-        ? math.min(first.bottom, second.bottom) -
-              math.max(first.top, second.top)
-        : math.min(first.right, second.right) -
-              math.max(first.left, second.left);
-  }
-
-  bool _touchesPerpendicular(Rect first, Rect second, bool horizontal) {
-    final overlap = _perpendicularOverlap(first, second, horizontal);
-    if (overlap > overlapTolerance) return true;
-    final gap = -overlap;
-    return gap <= adjacencyTolerance;
-  }
-
-  Rect _moveBoundary(
-    Rect rect,
-    double delta, {
-    required bool horizontal,
-    required bool movingEnd,
-  }) {
-    if (horizontal) {
-      return movingEnd
-          ? Rect.fromLTRB(rect.left, rect.top, rect.right + delta, rect.bottom)
-          : Rect.fromLTRB(rect.left + delta, rect.top, rect.right, rect.bottom);
-    }
-    return movingEnd
-        ? Rect.fromLTRB(rect.left, rect.top, rect.right, rect.bottom + delta)
-        : Rect.fromLTRB(rect.left, rect.top + delta, rect.right, rect.bottom);
-  }
+  bool _near(double first, double second) => _geometry.near(first, second);
 
   Future<void> _floatPanel(
-    _WorkspaceGroup group,
+    WorkspaceGroup group,
     WorkspacePanelId panel,
     Size workspaceSize,
   ) async {
-    final existing = externalWindows[panel];
-    if (existing != null) {
-      await existing.show();
-      return;
-    }
+    if (await detachedWindows.showIfOpen(panel)) return;
     final panels = List<WorkspacePanelId>.of(group.panels);
     final activePanel = group.activePanel;
-    final window = await WindowController.create(
-      WindowConfiguration(
-        arguments: encodePanelArguments(
-          activePanel,
-          _toPixelRect(group.rect, workspaceSize).size,
-          panels: panels,
-        ),
-        hiddenAtLaunch: true,
-      ),
+    final window = await detachedWindows.create(
+      activePanel: activePanel,
+      panels: panels,
+      initialSize: _toPixelRect(group.rect, workspaceSize).size,
     );
-    for (final groupPanel in panels) {
-      externalWindows[groupPanel] = window;
-    }
-    widget.windowSync.registerWindow(activePanel, window);
     if (!mounted) return;
     setState(() {
       final placement = _DetachedPanelPlacement(
@@ -744,6 +578,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
       }
       _groups.remove(group);
     });
+    widget.onPanelVisibilityChanged?.call();
     widget.controller.addLog(
       panels.length > 1
           ? '${activePanel.title} 组合已弹出为独立窗口。'
@@ -753,28 +588,17 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   }
 
   Future<void> _floatSinglePanel(
-    _WorkspaceGroup group,
+    WorkspaceGroup group,
     WorkspacePanelId panel,
     Size workspaceSize,
   ) async {
-    final existing = externalWindows[panel];
-    if (existing != null) {
-      await existing.show();
-      return;
-    }
+    if (await detachedWindows.showIfOpen(panel)) return;
     final originalPanels = List<WorkspacePanelId>.of(group.panels);
-    final window = await WindowController.create(
-      WindowConfiguration(
-        arguments: encodePanelArguments(
-          panel,
-          _toPixelRect(group.rect, workspaceSize).size,
-          panels: <WorkspacePanelId>[panel],
-        ),
-        hiddenAtLaunch: true,
-      ),
+    final window = await detachedWindows.create(
+      activePanel: panel,
+      panels: <WorkspacePanelId>[panel],
+      initialSize: _toPixelRect(group.rect, workspaceSize).size,
     );
-    externalWindows[panel] = window;
-    widget.windowSync.registerWindow(panel, window);
     if (!mounted || !group.panels.contains(panel)) return;
     setState(() {
       _detachedPlacements[panel] = _DetachedPanelPlacement(
@@ -787,11 +611,12 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
       );
       _detachPanel(group, panel);
     });
+    widget.onPanelVisibilityChanged?.call();
     widget.controller.addLog('${panel.title} 已弹出为独立窗口。');
     await window.show();
   }
 
-  void _detachPanel(_WorkspaceGroup group, WorkspacePanelId panel) {
+  void _detachPanel(WorkspaceGroup group, WorkspacePanelId panel) {
     group.panels.remove(panel);
     if (group.panels.isEmpty) {
       _groups.remove(group);
@@ -800,12 +625,13 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     }
   }
 
-  void _hidePanel(_WorkspaceGroup group, WorkspacePanelId panel) {
+  void _hidePanel(WorkspaceGroup group, WorkspacePanelId panel) {
     setState(() => _detachPanel(group, panel));
+    widget.onPanelVisibilityChanged?.call();
     widget.controller.report('已隐藏面板：${panel.title}，可从“视图”菜单恢复。');
   }
 
-  void _separatePanel(_WorkspaceGroup group, WorkspacePanelId panel) {
+  void _separatePanel(WorkspaceGroup group, WorkspacePanelId panel) {
     if (group.panels.length < 2) return;
     _separatePanelToRect(
       group,
@@ -815,7 +641,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   }
 
   void _separatePanelAt(
-    _WorkspaceGroup group,
+    WorkspaceGroup group,
     WorkspacePanelId panel,
     Offset globalPosition,
     Size workspaceSize,
@@ -842,7 +668,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   }
 
   void _separatePanelToRect(
-    _WorkspaceGroup group,
+    WorkspaceGroup group,
     WorkspacePanelId panel,
     Rect rect,
   ) {
@@ -850,7 +676,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     setState(() {
       _detachPanel(group, panel);
       _groups.add(
-        _WorkspaceGroup(
+        WorkspaceGroup(
           id: 'separated_${idCursor++}',
           panels: [panel],
           activePanel: panel,
@@ -862,7 +688,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     widget.controller.report('已从组合中拆分面板：${panel.title}。');
   }
 
-  void _acceptTabDrop(_WorkspaceGroup target, PanelTabDragData data) {
+  void _acceptTabDrop(WorkspaceGroup target, PanelTabDragData data) {
     final source = _groups
         .where((group) => group.id == data.sourceGroupId)
         .firstOrNull;
@@ -883,7 +709,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   }
 
   void _finishTabDrag(
-    _WorkspaceGroup source,
+    WorkspaceGroup source,
     PanelTabDragData data,
     DraggableDetails details,
     Size workspaceSize,
@@ -897,24 +723,11 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   }
 
   Future<void> _syncExternalWindows() async {
-    final windows = await WindowController.getAll();
-    final livePanels = <WorkspacePanelId>{};
-    for (final window in windows) {
-      final panels = _panelsFromWindowArguments(window.arguments);
-      for (final panel in panels) {
-        livePanels.add(panel);
-        externalWindows[panel] = window;
-      }
-    }
-    final closed = externalWindows.keys
-        .where((panel) => !livePanels.contains(panel))
-        .toList();
+    final closed = await detachedWindows.reconcile();
     if (!mounted || closed.isEmpty) return;
     setState(() {
       final restoredPlacements = <_DetachedPanelPlacement>{};
       for (final panel in closed) {
-        externalWindows.remove(panel);
-        widget.windowSync.unregisterWindow(panel);
         final placement = _detachedPlacements.remove(panel);
         if (placement == null) {
           _restorePanel(panel);
@@ -924,21 +737,13 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         widget.controller.addLog('${panel.title} 独立窗口已关闭，面板已恢复。');
       }
     });
-  }
-
-  List<WorkspacePanelId> _panelsFromWindowArguments(String arguments) {
-    return detachedPanelLaunchFromEntrypointArguments([
-          'multi_window',
-          '0',
-          arguments,
-        ])?.groupPanels ??
-        const <WorkspacePanelId>[];
+    widget.onPanelVisibilityChanged?.call();
   }
 
   void _restorePanel(WorkspacePanelId panel) {
     if (_groups.any((group) => group.panels.contains(panel))) return;
     _groups.add(
-      _WorkspaceGroup(
+      WorkspaceGroup(
         id: 'restored_${idCursor++}',
         panels: [panel],
         activePanel: panel,
@@ -982,7 +787,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     }
 
     _groups.add(
-      _WorkspaceGroup(
+      WorkspaceGroup(
         id: placement.groupId,
         panels: panels,
         activePanel: panels.contains(placement.activePanel)
@@ -1008,50 +813,10 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   };
 
   Rect _snapRectToGrid(Rect rect) {
-    if (workspaceSize.isEmpty) return _clampRect(rect);
-    final minWidthPixels =
-        (minWidth * workspaceSize.width / _workspaceGridCellSize).ceil() *
-        _workspaceGridCellSize;
-    final minHeightPixels =
-        (minHeight * workspaceSize.height / _workspaceGridCellSize).ceil() *
-        _workspaceGridCellSize;
-    var left = _snapPixel(rect.left * workspaceSize.width, workspaceSize.width);
-    var right = _snapPixel(
-      rect.right * workspaceSize.width,
-      workspaceSize.width,
-    );
-    var top = _snapPixel(rect.top * workspaceSize.height, workspaceSize.height);
-    var bottom = _snapPixel(
-      rect.bottom * workspaceSize.height,
-      workspaceSize.height,
-    );
-
-    if (right - left < minWidthPixels) right = left + minWidthPixels;
-    if (right > workspaceSize.width) {
-      right = workspaceSize.width;
-      left = math.max(0, right - minWidthPixels);
-    }
-    if (bottom - top < minHeightPixels) bottom = top + minHeightPixels;
-    if (bottom > workspaceSize.height) {
-      bottom = workspaceSize.height;
-      top = math.max(0, bottom - minHeightPixels);
-    }
-
-    return Rect.fromLTRB(
-      left / workspaceSize.width,
-      top / workspaceSize.height,
-      right / workspaceSize.width,
-      bottom / workspaceSize.height,
-    );
+    return _geometry.snapRectToGrid(rect, workspaceSize);
   }
 
-  double _snapPixel(double value, double maximum) {
-    return ((value / _workspaceGridCellSize).round() * _workspaceGridCellSize)
-        .clamp(0, maximum)
-        .toDouble();
-  }
-
-  void _mergeInto(_WorkspaceGroup source, String targetId) {
+  void _mergeInto(WorkspaceGroup source, String targetId) {
     final target = _groups.where((group) => group.id == targetId).firstOrNull;
     if (target == null || target == source) return;
     for (final panel in source.panels) {
@@ -1065,7 +830,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     );
   }
 
-  String? _findMergeTarget(_WorkspaceGroup source) {
+  String? _findMergeTarget(WorkspaceGroup source) {
     if (draggingGroup == null) return null;
     final center = source.rect.center;
     final sorted = [..._groups]..sort((a, b) => b.z.compareTo(a.z));
@@ -1077,72 +842,19 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   }
 
   Rect _clampRect(Rect rect) {
-    final width = rect.width.clamp(minWidth, 1.0);
-    final height = rect.height.clamp(minHeight, 1.0);
-    final left = rect.left.clamp(0.0, 1.0 - width);
-    final top = rect.top.clamp(0.0, 1.0 - height);
-    return Rect.fromLTWH(left, top, width, height);
+    return _geometry.clampRect(rect);
   }
 
   Rect _toPixelRect(Rect rect, Size size) {
-    return Rect.fromLTWH(
-      rect.left * size.width,
-      rect.top * size.height,
-      rect.width * size.width,
-      rect.height * size.height,
-    );
+    return _geometry.toPixelRect(rect, size);
   }
 
-  void _bringToFront(_WorkspaceGroup group, {bool notify = true}) {
+  void _bringToFront(WorkspaceGroup group, {bool notify = true}) {
     group.z = _nextZ();
     if (notify) setState(() {});
   }
 
   int _nextZ() => ++zCursor;
-}
-
-class _WorkspaceGroup {
-  _WorkspaceGroup({
-    required this.id,
-    required List<WorkspacePanelId> panels,
-    required this.activePanel,
-    required this.rect,
-    required this.z,
-  }) : panels = List.of(panels);
-
-  final String id;
-  final List<WorkspacePanelId> panels;
-  WorkspacePanelId activePanel;
-  Rect rect;
-  int z;
-
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'panels': [for (final panel in panels) panel.name],
-    'activePanel': activePanel.name,
-    'rect': [rect.left, rect.top, rect.width, rect.height],
-    'z': z,
-  };
-
-  factory _WorkspaceGroup.fromJson(Map<String, dynamic> json) {
-    final panels = (json['panels'] as List)
-        .map((value) => WorkspacePanelId.values.byName(value as String))
-        .toList();
-    if (panels.isEmpty) throw const FormatException('面板组不能为空');
-    final values = (json['rect'] as List)
-        .map((value) => (value as num).toDouble())
-        .toList();
-    if (values.length != 4) throw const FormatException('面板位置无效');
-    return _WorkspaceGroup(
-      id: json['id'] as String,
-      panels: panels,
-      activePanel: WorkspacePanelId.values.byName(
-        json['activePanel'] as String,
-      ),
-      rect: Rect.fromLTWH(values[0], values[1], values[2], values[3]),
-      z: json['z'] as int,
-    );
-  }
 }
 
 class _DetachedPanelPlacement {
@@ -1228,9 +940,9 @@ class _WorkspaceGridPainter extends CustomPainter {
     final minorPaint = Paint()..color = const Color(0xFF242123);
     final majorPaint = Paint()..color = const Color(0xFF3A3638);
     for (
-      var index = 1, x = _workspaceGridCellSize;
+      var index = 1, x = _geometry.gridCellSize;
       x < size.width;
-      index += 1, x += _workspaceGridCellSize
+      index += 1, x += _geometry.gridCellSize
     ) {
       canvas.drawLine(
         Offset(x, 0),
@@ -1239,9 +951,9 @@ class _WorkspaceGridPainter extends CustomPainter {
       );
     }
     for (
-      var index = 1, y = _workspaceGridCellSize;
+      var index = 1, y = _geometry.gridCellSize;
       y < size.height;
-      index += 1, y += _workspaceGridCellSize
+      index += 1, y += _geometry.gridCellSize
     ) {
       canvas.drawLine(
         Offset(0, y),

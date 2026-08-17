@@ -4,7 +4,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:take_a_look_v2/src/app.dart';
 import 'package:take_a_look_v2/src/controller.dart';
+import 'package:take_a_look_v2/src/panel_types.dart';
 import 'package:take_a_look_v2/src/theme.dart';
+import 'package:take_a_look_v2/src/window_sync.dart';
 
 void main() {
   late TakeALookController controller;
@@ -127,5 +129,38 @@ void main() {
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
+  });
+
+  testWidgets('view menu refreshes panel visibility checks', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final windowSync = MainWindowSync(controller);
+    addTearDown(windowSync.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTalTheme(),
+        home: MainWorkbench(controller: controller, windowSync: windowSync),
+      ),
+    );
+
+    Future<Finder> openHeaderMenuItem() async {
+      await tester.tap(find.text('视图'));
+      await tester.pumpAndSettle();
+      return find.widgetWithText(MenuItemButton, WorkspacePanelId.header.title);
+    }
+
+    var headerItem = await openHeaderMenuItem();
+    expect(
+      find.descendant(of: headerItem, matching: find.byIcon(Icons.check)),
+      findsOneWidget,
+    );
+    await tester.tap(headerItem);
+    await tester.pumpAndSettle();
+
+    headerItem = await openHeaderMenuItem();
+    expect(
+      find.descendant(of: headerItem, matching: find.byIcon(Icons.check)),
+      findsNothing,
+    );
   });
 }

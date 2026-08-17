@@ -17,19 +17,22 @@ class MainWindowSync {
   final TakeALookController controller;
   final Map<WorkspacePanelId, WindowController> _windows =
       <WorkspacePanelId, WindowController>{};
-  Timer? _broadcastTimer;
+  Timer? _stateBroadcastTimer;
+  Timer? _telemetryBroadcastTimer;
   bool _started = false;
 
   Future<void> start() async {
     if (_started) return;
     _started = true;
     await _mainChannel.setMethodCallHandler(_handleCall);
-    controller.addListener(_scheduleBroadcast);
+    controller.stateSyncChanges.addListener(_scheduleStateBroadcast);
+    controller.telemetrySyncChanges.addListener(_scheduleTelemetryBroadcast);
   }
 
   void registerWindow(WorkspacePanelId panel, WindowController window) {
     _windows[panel] = window;
-    _scheduleBroadcast();
+    _scheduleStateBroadcast();
+    _scheduleTelemetryBroadcast();
   }
 
   void unregisterWindow(WorkspacePanelId panel) {
@@ -41,29 +44,39 @@ class MainWindowSync {
     return controller.handleCommand(call.method, call.arguments);
   }
 
-  void _scheduleBroadcast() {
-    if (_windows.isEmpty || _broadcastTimer?.isActive == true) return;
-    _broadcastTimer = Timer(const Duration(milliseconds: 80), _broadcast);
+  void _scheduleStateBroadcast() {
+    if (_windows.isEmpty || _stateBroadcastTimer?.isActive == true) return;
+    _stateBroadcastTimer = Timer(
+      const Duration(milliseconds: 20),
+      () => _broadcast('state', controller.stateSnapshot()),
+    );
   }
 
-  Future<void> _broadcast() async {
-    final state = controller.snapshot();
-    final failed = <WorkspacePanelId>[];
+  void _scheduleTelemetryBroadcast() {
+    if (_windows.isEmpty || _telemetryBroadcastTimer?.isActive == true) return;
+    _telemetryBroadcastTimer = Timer(
+      const Duration(milliseconds: 80),
+      () => _broadcast('telemetry', controller.telemetrySnapshot()),
+    );
+  }
+
+  Future<void> _broadcast(String method, Map<String, dynamic> state) async {
     for (final entry in _windows.entries) {
       try {
-        await entry.value.invokeMethod<void>('state', state);
+        await entry.value.invokeMethod<void>(method, state);
       } on Object {
-        failed.add(entry.key);
+        // Window lifecycle reconciliation removes closed windows. A newly
+        // created window may not have installed its handler yet, so a single
+        // failed delivery must not unregister it.
       }
-    }
-    for (final panel in failed) {
-      _windows.remove(panel);
     }
   }
 
   Future<void> dispose() async {
-    controller.removeListener(_scheduleBroadcast);
-    _broadcastTimer?.cancel();
+    controller.stateSyncChanges.removeListener(_scheduleStateBroadcast);
+    controller.telemetrySyncChanges.removeListener(_scheduleTelemetryBroadcast);
+    _stateBroadcastTimer?.cancel();
+    _telemetryBroadcastTimer?.cancel();
     if (_started) await _mainChannel.setMethodCallHandler(null);
   }
 }
@@ -73,6 +86,10 @@ Future<void> initializeDetachedWindow(TakeALookController controller) async {
   await currentWindow.setWindowMethodHandler((call) async {
     if (call.method == 'state' && call.arguments is Map) {
       controller.applySnapshot(
+        Map<String, dynamic>.from(call.arguments as Map),
+      );
+    } else if (call.method == 'telemetry' && call.arguments is Map) {
+      controller.applyTelemetrySnapshot(
         Map<String, dynamic>.from(call.arguments as Map),
       );
     }

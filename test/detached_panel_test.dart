@@ -105,4 +105,30 @@ void main() {
       await tester.pump();
     }
   });
+
+  testWidgets('connection serial number follows synchronized state', (
+    tester,
+  ) async {
+    final controller = TakeALookController();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTalTheme(),
+        home: DetachedPanelWindow(
+          controller: controller,
+          panel: WorkspacePanelId.connection,
+        ),
+      ),
+    );
+
+    controller.applySnapshot({
+      ...controller.snapshot(),
+      'serialNumber': 'remote-probe-42',
+    });
+    await tester.pump();
+
+    final field = tester.widget<TextField>(find.byType(TextField));
+    expect(field.controller?.text, 'remote-probe-42');
+    controller.dispose();
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 }

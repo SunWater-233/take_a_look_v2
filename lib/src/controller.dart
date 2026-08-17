@@ -4,10 +4,18 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import 'demo_data.dart';
 import 'models.dart';
-import 'theme.dart';
+
+export 'demo_data.dart';
+
+part 'controller_snapshot.dart';
 
 typedef RemoteCommand = Future<void> Function(String method, Object? arguments);
+
+class _ControllerSignal extends ChangeNotifier {
+  void emit() => notifyListeners();
+}
 
 class TakeALookController extends ChangeNotifier {
   TakeALookController({this.remoteCommand}) {
@@ -26,7 +34,18 @@ class TakeALookController extends ChangeNotifier {
   Timer? _ticker;
   bool _disposed = false;
   double _phase = 0;
+  double? _frozenPlotEndSeconds;
+  final Map<String, List<Offset>> _frozenPlotSamples = <String, List<Offset>>{};
   final ValueNotifier<double> _uiScale = ValueNotifier<double>(1);
+  final _ControllerSignal _connectionChanges = _ControllerSignal();
+  final _ControllerSignal _samplingChanges = _ControllerSignal();
+  final _ControllerSignal _symbolChanges = _ControllerSignal();
+  final _ControllerSignal _watchChanges = _ControllerSignal();
+  final _ControllerSignal _telemetryChanges = _ControllerSignal();
+  final _ControllerSignal _plotChanges = _ControllerSignal();
+  final _ControllerSignal _logChanges = _ControllerSignal();
+  final _ControllerSignal _stateSyncChanges = _ControllerSignal();
+  final _ControllerSignal _telemetrySyncChanges = _ControllerSignal();
 
   ConnectionStatus connectionStatus = ConnectionStatus.disconnected;
   String probeType = '自动发现任意探针';
@@ -48,14 +67,30 @@ class TakeALookController extends ChangeNotifier {
   Set<String> get selectedSymbols => Set.unmodifiable(_selectedSymbols);
   double get uiScale => _uiScale.value;
   ValueListenable<double> get uiScaleListenable => _uiScale;
+  Listenable get connectionChanges => _connectionChanges;
+  Listenable get samplingChanges => _samplingChanges;
+  Listenable get symbolChanges => _symbolChanges;
+  Listenable get watchChanges => _watchChanges;
+  Listenable get telemetryChanges => _telemetryChanges;
+  Listenable get plotChanges => _plotChanges;
+  Listenable get logChanges => _logChanges;
+  Listenable get stateSyncChanges => _stateSyncChanges;
+  Listenable get telemetrySyncChanges => _telemetrySyncChanges;
+  double get plotWindowEndSeconds => plottingPaused || !followLatest
+      ? (_frozenPlotEndSeconds ?? elapsedSeconds)
+      : elapsedSeconds;
+  Iterable<Offset> plotSamplesFor(WatchItem watch) {
+    if (!plottingPaused && followLatest) return watch.samples;
+    return _frozenPlotSamples[watch.symbol.key] ?? watch.samples;
+  }
 
   void setUiScale(double value) {
     if (_dispatchRemote('setUiScale', value)) return;
     final normalized = value.clamp(0.5, 2).toDouble();
     if ((normalized - _uiScale.value).abs() < 0.001) return;
     _uiScale.value = normalized;
-    addLog('界面缩放已设置为 ${(normalized * 100).round()}%。');
-    notifyListeners();
+    _appendLog('界面缩放已设置为 ${(normalized * 100).round()}%。');
+    _emitState([_logChanges]);
   }
 
   String get connectionLabel => switch (connectionStatus) {
@@ -92,19 +127,19 @@ class TakeALookController extends ChangeNotifier {
     if (connectionStatus == ConnectionStatus.connected) {
       connectionStatus = ConnectionStatus.disconnected;
       samplingPaused = false;
-      addLog('已断开 pyOCD 调试探针。');
-      notifyListeners();
+      _appendLog('已断开 pyOCD 调试探针。');
+      _emitState([_connectionChanges, _samplingChanges, _logChanges]);
       return;
     }
     if (connectionStatus == ConnectionStatus.connecting) return;
     connectionStatus = ConnectionStatus.connecting;
-    addLog('开始连接 pyOCD：正在枚举探针并初始化目标。');
-    notifyListeners();
+    _appendLog('开始连接 pyOCD：正在枚举探针并初始化目标。');
+    _emitState([_connectionChanges, _logChanges]);
     await Future<void>.delayed(const Duration(milliseconds: 650));
     if (_disposed) return;
     connectionStatus = ConnectionStatus.connected;
-    addLog('已连接 pyOCD：target=$targetName，SWD=$swdClock。');
-    notifyListeners();
+    _appendLog('已连接 pyOCD：target=$targetName，SWD=$swdClock。');
+    _emitState([_connectionChanges, _logChanges]);
   }
 
   void loadDemoSymbols() {
@@ -114,71 +149,83 @@ class TakeALookController extends ChangeNotifier {
       ..clear()
       ..addAll(demoSymbols);
     _selectedSymbols.clear();
-    addLog('已读取符号文件：$symbolFile，变量符号 ${_symbols.length} 个。');
-    notifyListeners();
+    _appendLog('已读取符号文件：$symbolFile，变量符号 ${_symbols.length} 个。');
+    _emitState([_symbolChanges, _logChanges]);
   }
 
   void setSampleRate(double value) {
     if (_dispatchRemote('setSampleRate', value)) return;
     sampleRateHz = value;
-    addLog('采样率已设置为 $sampleRateLabel。');
-    notifyListeners();
+    _appendLog('采样率已设置为 $sampleRateLabel。');
+    _emitState([_samplingChanges, _logChanges]);
   }
 
   void setRttSampleRate(double value) {
     if (_dispatchRemote('setRttSampleRate', value)) return;
     rttSampleRateHz = value;
-    notifyListeners();
+    _emitState([_samplingChanges]);
   }
 
   void setProbeType(String value) {
     if (_dispatchRemote('setProbeType', value)) return;
     probeType = value;
-    notifyListeners();
+    _emitState([_connectionChanges]);
   }
 
   void setTargetName(String value) {
     if (_dispatchRemote('setTargetName', value)) return;
     targetName = value;
-    notifyListeners();
+    _emitState([_connectionChanges]);
   }
 
   void setSwdClock(String value) {
     if (_dispatchRemote('setSwdClock', value)) return;
     swdClock = value;
-    notifyListeners();
+    _emitState([_connectionChanges]);
   }
 
   void setSerialNumber(String value) {
     if (_dispatchRemote('setSerialNumber', value)) return;
+    if (serialNumber == value) return;
     serialNumber = value;
+    _emitState([_connectionChanges]);
   }
 
   void toggleSampling() {
     if (_dispatchRemote('toggleSampling')) return;
     samplingPaused = !samplingPaused;
-    addLog(samplingPaused ? '采样已暂停。' : '采样已继续。');
-    notifyListeners();
+    _appendLog(samplingPaused ? '采样已暂停。' : '采样已继续。');
+    _emitState([_samplingChanges, _logChanges]);
   }
 
   void togglePlotting() {
     if (_dispatchRemote('togglePlotting')) return;
     plottingPaused = !plottingPaused;
-    addLog(plottingPaused ? '绘图已暂停，后台继续采样。' : '绘图已恢复。');
-    notifyListeners();
+    if (plottingPaused) {
+      _freezePlotIfNeeded();
+    } else if (followLatest) {
+      _clearFrozenPlot();
+    }
+    _appendLog(plottingPaused ? '绘图已暂停，后台继续采样。' : '绘图已恢复。');
+    _emitState([_plotChanges, _logChanges]);
   }
 
   void toggleRtt(bool value) {
     if (_dispatchRemote('toggleRtt', value)) return;
     rttEnabled = value;
-    addLog(value ? 'RTT 采样已启用。' : 'RTT 采样已关闭。');
-    notifyListeners();
+    _appendLog(value ? 'RTT 采样已启用。' : 'RTT 采样已关闭。');
+    _emitState([_samplingChanges, _logChanges]);
   }
 
   void toggleFollowLatest() {
     if (_dispatchRemote('toggleFollowLatest')) return;
+    if (followLatest) {
+      _freezePlotIfNeeded();
+    } else if (!plottingPaused) {
+      _clearFrozenPlot();
+    }
     followLatest = !followLatest;
-    notifyListeners();
+    _emitState([_plotChanges]);
   }
 
   void clearSamples() {
@@ -187,26 +234,34 @@ class TakeALookController extends ChangeNotifier {
     for (final watch in _watches) {
       watch.samples.clear();
     }
-    addLog('当前采样缓存已清空。');
-    notifyListeners();
+    _frozenPlotSamples.clear();
+    if (plottingPaused || !followLatest) _frozenPlotEndSeconds = 0;
+    _appendLog('当前采样缓存已清空。');
+    _emitState([
+      _samplingChanges,
+      _telemetryChanges,
+      _plotChanges,
+      _logChanges,
+    ]);
+    _telemetrySyncChanges.emit();
   }
 
   void clearLogs() {
     if (_dispatchRemote('clearLogs')) return;
     _logs.clear();
-    notifyListeners();
+    _emitState([_logChanges]);
   }
 
   void resetTarget({required bool halt}) {
     if (_dispatchRemote('resetTarget', halt)) return;
-    addLog(halt ? '目标已复位并暂停。' : '目标已复位并运行。');
-    notifyListeners();
+    _appendLog(halt ? '目标已复位并暂停。' : '目标已复位并运行。');
+    _emitState([_logChanges]);
   }
 
   void exportCsv() {
     if (_dispatchRemote('exportCsv')) return;
-    addLog('导出原始 CSV 任务已创建。');
-    notifyListeners();
+    _appendLog('导出原始 CSV 任务已创建。');
+    _emitState([_logChanges]);
   }
 
   void toggleSymbol(String key) {
@@ -214,7 +269,7 @@ class TakeALookController extends ChangeNotifier {
     if (!_selectedSymbols.add(key)) {
       _selectedSymbols.remove(key);
     }
-    notifyListeners();
+    _emitState([_symbolChanges]);
   }
 
   void addSelectedToWatch() {
@@ -233,21 +288,21 @@ class TakeALookController extends ChangeNotifier {
       );
     }
     _selectedSymbols.clear();
-    addLog('已加入 ${selected.length} 个变量到实时调参列表。');
-    notifyListeners();
+    _appendLog('已加入 ${selected.length} 个变量到实时调参列表。');
+    _emitState([_symbolChanges, _watchChanges, _plotChanges, _logChanges]);
   }
 
   void removeWatch(String key) {
     if (_dispatchRemote('removeWatch', key)) return;
     _watches.removeWhere((item) => item.symbol.key == key);
-    notifyListeners();
+    _emitState([_watchChanges, _plotChanges]);
   }
 
   void clearWatches() {
     if (_dispatchRemote('clearWatches')) return;
     _watches.clear();
-    addLog('已清空实时调参列表。');
-    notifyListeners();
+    _appendLog('已清空实时调参列表。');
+    _emitState([_watchChanges, _plotChanges, _logChanges]);
   }
 
   void toggleWatchPlot(String key, bool value) {
@@ -256,7 +311,7 @@ class TakeALookController extends ChangeNotifier {
     }
     final watch = _watchByKey(key);
     if (watch != null) watch.plotted = value;
-    notifyListeners();
+    _emitState([_watchChanges, _plotChanges]);
   }
 
   void writeWatch(String key, String input) {
@@ -264,12 +319,12 @@ class TakeALookController extends ChangeNotifier {
     final value = double.tryParse(input);
     final watch = _watchByKey(key);
     if (value == null || watch == null) {
-      addLog('变量写入失败：$input 不是有效数值。');
+      _appendLog('变量写入失败：$input 不是有效数值。');
     } else {
       watch.value = value;
-      addLog('${watch.symbol.name} 已写入 $input，并完成回读验证。');
+      _appendLog('${watch.symbol.name} 已写入 $input，并完成回读验证。');
     }
-    notifyListeners();
+    _emitState([_telemetryChanges, _plotChanges, _logChanges]);
   }
 
   WatchItem? _watchByKey(String key) {
@@ -340,137 +395,7 @@ class TakeALookController extends ChangeNotifier {
         final values = Map<String, dynamic>.from(arguments as Map);
         writeWatch(values['key'] as String, values['value'] as String);
     }
-    return snapshot();
-  }
-
-  Map<String, dynamic> snapshot() {
-    return {
-      'connectionStatus': connectionStatus.name,
-      'probeType': probeType,
-      'targetName': targetName,
-      'swdClock': swdClock,
-      'serialNumber': serialNumber,
-      'symbolFile': symbolFile,
-      'sampleRateHz': sampleRateHz,
-      'rttSampleRateHz': rttSampleRateHz,
-      'elapsedSeconds': elapsedSeconds,
-      'samplingPaused': samplingPaused,
-      'plottingPaused': plottingPaused,
-      'rttEnabled': rttEnabled,
-      'followLatest': followLatest,
-      'uiScale': uiScale,
-      'selectedSymbols': _selectedSymbols.toList(),
-      'symbols': [
-        for (final symbol in _symbols)
-          {
-            'source': symbol.source,
-            'name': symbol.name,
-            'address': symbol.address,
-            'type': symbol.type,
-            'size': symbol.size,
-          },
-      ],
-      'watches': [
-        for (final watch in _watches)
-          {
-            'key': watch.symbol.key,
-            'color': watch.color.toARGB32(),
-            'plotted': watch.plotted,
-            'value': watch.value,
-            'samples': [
-              for (final point in watch.samples.skip(
-                math.max(0, watch.samples.length - 600),
-              ))
-                [point.dx, point.dy],
-            ],
-          },
-      ],
-      'logs': [
-        for (final entry in _logs)
-          {
-            'timestamp': entry.timestamp.millisecondsSinceEpoch,
-            'message': entry.message,
-          },
-      ],
-    };
-  }
-
-  void applySnapshot(Map<String, dynamic> data) {
-    connectionStatus = ConnectionStatus.values.byName(
-      data['connectionStatus'] as String? ?? ConnectionStatus.disconnected.name,
-    );
-    probeType = data['probeType'] as String? ?? probeType;
-    targetName = data['targetName'] as String? ?? targetName;
-    swdClock = data['swdClock'] as String? ?? swdClock;
-    serialNumber = data['serialNumber'] as String? ?? serialNumber;
-    symbolFile = data['symbolFile'] as String? ?? '';
-    sampleRateHz = (data['sampleRateHz'] as num?)?.toDouble() ?? 50;
-    rttSampleRateHz = (data['rttSampleRateHz'] as num?)?.toDouble() ?? 1000;
-    elapsedSeconds = (data['elapsedSeconds'] as num?)?.toDouble() ?? 0;
-    samplingPaused = data['samplingPaused'] == true;
-    plottingPaused = data['plottingPaused'] == true;
-    rttEnabled = data['rttEnabled'] == true;
-    followLatest = data['followLatest'] != false;
-    final nextUiScale = (data['uiScale'] as num?)?.toDouble() ?? uiScale;
-    if ((nextUiScale - uiScale).abs() >= 0.001) {
-      _uiScale.value = nextUiScale.clamp(0.5, 2).toDouble();
-    }
-
-    _selectedSymbols
-      ..clear()
-      ..addAll((data['selectedSymbols'] as List? ?? const []).cast<String>());
-    _symbols
-      ..clear()
-      ..addAll(
-        (data['symbols'] as List? ?? const []).map((raw) {
-          final item = Map<String, dynamic>.from(raw as Map);
-          return SymbolItem(
-            source: item['source'] as String,
-            name: item['name'] as String,
-            address: item['address'] as int,
-            type: item['type'] as String,
-            size: item['size'] as int,
-          );
-        }),
-      );
-
-    final symbolsByKey = {for (final symbol in _symbols) symbol.key: symbol};
-    _watches
-      ..clear()
-      ..addAll(
-        (data['watches'] as List? ?? const []).map((raw) {
-          final item = Map<String, dynamic>.from(raw as Map);
-          final symbol = symbolsByKey[item['key'] as String];
-          if (symbol == null) return null;
-          final watch =
-              WatchItem(symbol: symbol, color: Color(item['color'] as int))
-                ..plotted = item['plotted'] == true
-                ..value = (item['value'] as num).toDouble();
-          for (final rawPoint in item['samples'] as List? ?? const []) {
-            final point = rawPoint as List;
-            watch.samples.add(
-              Offset(
-                (point[0] as num).toDouble(),
-                (point[1] as num).toDouble(),
-              ),
-            );
-          }
-          return watch;
-        }).whereType<WatchItem>(),
-      );
-
-    _logs
-      ..clear()
-      ..addAll(
-        (data['logs'] as List? ?? const []).map((raw) {
-          final item = Map<String, dynamic>.from(raw as Map);
-          return LogEntry.at(
-            item['message'] as String,
-            DateTime.fromMillisecondsSinceEpoch(item['timestamp'] as int),
-          );
-        }),
-      );
-    notifyListeners();
+    return stateSnapshot();
   }
 
   void _tick(Timer timer) {
@@ -490,16 +415,55 @@ class TakeALookController extends ChangeNotifier {
         watch.samples.removeAt(0);
       }
     }
-    notifyListeners();
+    _emitTelemetry();
   }
 
   void addLog(String message) {
+    _appendLog(message);
+    _emitState([_logChanges]);
+  }
+
+  void _appendLog(String message) {
     _logs.add(LogEntry(message));
     if (_logs.length > 500) _logs.removeAt(0);
   }
 
+  void _freezePlotIfNeeded() {
+    _frozenPlotEndSeconds ??= elapsedSeconds;
+    if (_frozenPlotSamples.isEmpty) _capturePlotSamples();
+  }
+
+  void _capturePlotSamples() {
+    _frozenPlotSamples
+      ..clear()
+      ..addEntries(
+        _watches.map(
+          (watch) => MapEntry(watch.symbol.key, List<Offset>.of(watch.samples)),
+        ),
+      );
+  }
+
+  void _clearFrozenPlot() {
+    _frozenPlotEndSeconds = null;
+    _frozenPlotSamples.clear();
+  }
+
   void report(String message) {
     addLog(message);
+  }
+
+  void _emitState(Iterable<_ControllerSignal> signals, {bool sync = true}) {
+    for (final signal in signals.toSet()) {
+      signal.emit();
+    }
+    if (sync) _stateSyncChanges.emit();
+    notifyListeners();
+  }
+
+  void _emitTelemetry({bool sync = true}) {
+    _telemetryChanges.emit();
+    if (!plottingPaused && followLatest) _plotChanges.emit();
+    if (sync) _telemetrySyncChanges.emit();
     notifyListeners();
   }
 
@@ -508,103 +472,15 @@ class TakeALookController extends ChangeNotifier {
     _disposed = true;
     _ticker?.cancel();
     _uiScale.dispose();
+    _connectionChanges.dispose();
+    _samplingChanges.dispose();
+    _symbolChanges.dispose();
+    _watchChanges.dispose();
+    _telemetryChanges.dispose();
+    _plotChanges.dispose();
+    _logChanges.dispose();
+    _stateSyncChanges.dispose();
+    _telemetrySyncChanges.dispose();
     super.dispose();
   }
 }
-
-const seriesColors = <Color>[
-  TalColors.accent,
-  TalColors.success,
-  TalColors.blue,
-  TalColors.amber,
-  Color(0xFFC026D3),
-  Color(0xFF0891B2),
-  Color(0xFFDB2777),
-];
-
-const demoSymbols = <SymbolItem>[
-  SymbolItem(
-    source: 'control/foc_current.c',
-    name: 'iq_ref',
-    address: 0x20000010,
-    type: 'float',
-    size: 4,
-  ),
-  SymbolItem(
-    source: 'control/foc_current.c',
-    name: 'id_ref',
-    address: 0x20000014,
-    type: 'float',
-    size: 4,
-  ),
-  SymbolItem(
-    source: 'control/foc_speed.c',
-    name: 'speed_rpm',
-    address: 0x20000020,
-    type: 'float',
-    size: 4,
-  ),
-  SymbolItem(
-    source: 'control/pid.c',
-    name: 'speed_pid_kp',
-    address: 0x20000030,
-    type: 'float',
-    size: 4,
-  ),
-  SymbolItem(
-    source: 'driver/adc.c',
-    name: 'bus_voltage',
-    address: 0x20000100,
-    type: 'float',
-    size: 4,
-  ),
-  SymbolItem(
-    source: 'driver/adc.c',
-    name: 'phase_current_a',
-    address: 0x20000104,
-    type: 'float',
-    size: 4,
-  ),
-  SymbolItem(
-    source: 'driver/encoder.c',
-    name: 'encoder_angle',
-    address: 0x20000120,
-    type: 'float',
-    size: 4,
-  ),
-  SymbolItem(
-    source: 'driver/pwm.c',
-    name: 'pwm_duty_a',
-    address: 0x20000140,
-    type: 'float',
-    size: 4,
-  ),
-  SymbolItem(
-    source: 'safety/fault.c',
-    name: 'fault_code',
-    address: 0x20000200,
-    type: 'uint32_t',
-    size: 4,
-  ),
-  SymbolItem(
-    source: 'safety/fault.c',
-    name: 'fault_latched',
-    address: 0x20000204,
-    type: 'bool',
-    size: 1,
-  ),
-  SymbolItem(
-    source: 'safety/thermal.c',
-    name: 'mos_temp_c',
-    address: 0x20000220,
-    type: 'float',
-    size: 4,
-  ),
-  SymbolItem(
-    source: 'comms/canopen.c',
-    name: 'can_rx_count',
-    address: 0x20000300,
-    type: 'uint32_t',
-    size: 4,
-  ),
-];

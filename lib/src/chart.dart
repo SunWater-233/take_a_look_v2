@@ -22,7 +22,7 @@ class TelemetryChart extends StatelessWidget {
           fit: StackFit.expand,
           children: [
             AnimatedBuilder(
-              animation: controller,
+              animation: controller.plotChanges,
               builder: (context, _) {
                 if (!controller.plottingPaused) {
                   return const SizedBox.shrink();
@@ -53,7 +53,7 @@ class TelemetryChart extends StatelessWidget {
 }
 
 class _TelemetryPainter extends CustomPainter {
-  _TelemetryPainter(this.controller) : super(repaint: controller);
+  _TelemetryPainter(this.controller) : super(repaint: controller.plotChanges);
 
   final TakeALookController controller;
 
@@ -77,12 +77,12 @@ class _TelemetryPainter extends CustomPainter {
       return;
     }
 
-    var xMax = controller.elapsedSeconds;
+    var xMax = controller.plotWindowEndSeconds;
     var xMin = math.max(0.0, xMax - 12.0);
     var yMin = double.infinity;
     var yMax = -double.infinity;
     for (final watch in plotted) {
-      for (final point in watch.samples) {
+      for (final point in controller.plotSamplesFor(watch)) {
         if (point.dx < xMin) continue;
         yMin = math.min(yMin, point.dy);
         yMax = math.max(yMax, point.dy);
@@ -220,7 +220,7 @@ class _TelemetryPainter extends CustomPainter {
   ) {
     final path = Path();
     var started = false;
-    for (final point in watch.samples) {
+    for (final point in controller.plotSamplesFor(watch)) {
       if (point.dx < xMin || point.dx > xMax) continue;
       final x = plot.left + (point.dx - xMin) / (xMax - xMin) * plot.width;
       final y = plot.bottom - (point.dy - yMin) / (yMax - yMin) * plot.height;

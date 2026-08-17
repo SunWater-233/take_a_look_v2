@@ -154,6 +154,9 @@ class _MainWorkbenchState extends State<MainWorkbench> {
               key: workspaceKey,
               controller: widget.controller,
               windowSync: widget.windowSync,
+              onPanelVisibilityChanged: () {
+                if (mounted) setState(() {});
+              },
             ),
           ),
         ],

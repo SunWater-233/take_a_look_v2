@@ -33,6 +33,10 @@ Future<void> main(List<String> args) async {
   }
 
   runApp(
-    TakeALookApp(detachedPanel: panel, detachedPanels: launch?.groupPanels),
+    TakeALookApp(
+      detachedPanel: panel,
+      detachedPanels: launch?.groupPanels,
+      enableBackend: panel == null,
+    ),
   );
 }

@@ -102,6 +102,20 @@ install(CODE "
 install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
   DESTINATION "${INSTALL_BUNDLE_DATA_DIR}" COMPONENT Runtime)
 
+# Bundle the local hardware backend next to the executable. Flutter's asset
+# collector skips ignored PyInstaller output, so the native install step owns
+# the platform runtime.
+set(TAL_BACKEND_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../backend")
+install(FILES "${TAL_BACKEND_SOURCE_DIR}/pyproject.toml"
+  DESTINATION "${CMAKE_INSTALL_PREFIX}/backend" COMPONENT Runtime)
+install(DIRECTORY "${TAL_BACKEND_SOURCE_DIR}/take_a_look_backend"
+  DESTINATION "${CMAKE_INSTALL_PREFIX}/backend" COMPONENT Runtime
+  PATTERN "__pycache__" EXCLUDE PATTERN "*.pyc" EXCLUDE)
+if(EXISTS "${TAL_BACKEND_SOURCE_DIR}/runtime/take_a_look_backend")
+  install(DIRECTORY "${TAL_BACKEND_SOURCE_DIR}/runtime/take_a_look_backend"
+    DESTINATION "${CMAKE_INSTALL_PREFIX}/backend/runtime" COMPONENT Runtime)
+endif()
+
 # Install the AOT library on non-Debug builds only.
 install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   CONFIGURATIONS Profile;Release

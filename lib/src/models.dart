@@ -9,6 +9,9 @@ class SymbolItem {
     required this.address,
     required this.type,
     required this.size,
+    this.backendKey,
+    this.writable = true,
+    this.dataSource = 'memory',
   });
 
   final String source;
@@ -16,10 +19,14 @@ class SymbolItem {
   final int address;
   final String type;
   final int size;
+  final String? backendKey;
+  final bool writable;
+  final String dataSource;
 
-  String get key => '${address.toRadixString(16)}:$name';
-  String get addressLabel =>
-      '0x${address.toRadixString(16).padLeft(8, '0').toUpperCase()}';
+  String get key => backendKey ?? '${address.toRadixString(16)}:$name';
+  String get addressLabel => dataSource == 'rtt'
+      ? 'RTT'
+      : '0x${address.toRadixString(16).padLeft(8, '0').toUpperCase()}';
 
   bool matches(String query) {
     final value = query.trim().toLowerCase();

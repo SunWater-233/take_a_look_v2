@@ -58,7 +58,7 @@ class _SymbolPanelState extends State<_SymbolPanel> {
                   SizedBox(
                     width: 76,
                     child: OutlinedButton(
-                      onPressed: widget.controller.loadDemoSymbols,
+                      onPressed: widget.controller.chooseSymbolFile,
                       child: const Text('选择文件'),
                     ),
                   ),
@@ -68,7 +68,7 @@ class _SymbolPanelState extends State<_SymbolPanel> {
                     child: OutlinedButton(
                       onPressed: widget.controller.symbols.isEmpty
                           ? null
-                          : widget.controller.loadDemoSymbols,
+                          : widget.controller.refreshSymbols,
                       child: const Text('刷新'),
                     ),
                   ),

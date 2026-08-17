@@ -1,0 +1,26 @@
+[project]
+name = "take-a-look-backend"
+version = "0.1.0"
+description = "Local hardware backend for the Take A Look Flutter workstation"
+requires-python = ">=3.11"
+dependencies = [
+    "libusb-package>=1.0.26.3; platform_system == 'Windows'",
+    "pyelftools>=0.32",
+    "pyocd>=0.36",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pyinstaller>=6.0",
+    "pytest>=8.0",
+]
+
+[project.scripts]
+take-a-look-backend = "take_a_look_backend.stdio:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

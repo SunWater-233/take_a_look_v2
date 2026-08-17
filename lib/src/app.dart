@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'backend_client.dart';
 import 'controller.dart';
 import 'panel_types.dart';
 import 'panels.dart';
@@ -12,10 +13,16 @@ import 'window_sync.dart';
 import 'workspace.dart';
 
 class TakeALookApp extends StatefulWidget {
-  const TakeALookApp({this.detachedPanel, this.detachedPanels, super.key});
+  const TakeALookApp({
+    this.detachedPanel,
+    this.detachedPanels,
+    this.enableBackend = false,
+    super.key,
+  });
 
   final WorkspacePanelId? detachedPanel;
   final List<WorkspacePanelId>? detachedPanels;
+  final bool enableBackend;
 
   @override
   State<TakeALookApp> createState() => _TakeALookAppState();
@@ -24,12 +31,25 @@ class TakeALookApp extends StatefulWidget {
 class _TakeALookAppState extends State<TakeALookApp> {
   late final TakeALookController controller;
   MainWindowSync? windowSync;
+  BackendClient? backendClient;
 
   @override
   void initState() {
     super.initState();
     if (widget.detachedPanel == null) {
-      controller = TakeALookController();
+      if (widget.enableBackend) {
+        final client = BackendClient();
+        controller = TakeALookController(
+          backendCommand: client.command,
+          symbolFilePicker: pickSymbolFile,
+          csvExportPathPicker: pickCsvExportPath,
+        );
+        client.eventHandler = controller.applyBackendEvent;
+        backendClient = client;
+        unawaited(client.start());
+      } else {
+        controller = TakeALookController();
+      }
       windowSync = MainWindowSync(controller);
       unawaited(windowSync!.start());
     } else {
@@ -46,6 +66,8 @@ class _TakeALookAppState extends State<TakeALookApp> {
   @override
   void dispose() {
     unawaited(windowSync?.dispose());
+    backendClient?.eventHandler = null;
+    unawaited(backendClient?.close());
     controller.dispose();
     super.dispose();
   }
@@ -266,8 +288,6 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
   ];
 
   bool gridMode = false;
-  String rttProtocol = 'normal';
-
   double get uiScale => widget.controller?.uiScale ?? 1;
 
   @override
@@ -455,13 +475,13 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
             menuChildren: [
               _menuItem(
                 label: 'RTT-Normal',
-                checked: rttProtocol == 'normal',
+                checked: state?.rttProtocol == 'normal',
                 reserveLeading: true,
                 onPressed: () => _setRttProtocol('normal'),
               ),
               _menuItem(
                 label: 'RTT-Plus',
-                checked: rttProtocol == 'plus',
+                checked: state?.rttProtocol == 'plus',
                 reserveLeading: true,
                 onPressed: () => _setRttProtocol('plus'),
               ),
@@ -493,10 +513,8 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
   }
 
   void _setRttProtocol(String protocol) {
-    setState(() => rttProtocol = protocol);
-    widget.controller?.report(
-      protocol == 'normal' ? 'RTT 协议已设置为 RTT-Normal。' : 'RTT 协议已设置为 RTT-Plus。',
-    );
+    widget.controller?.setRttProtocol(protocol);
+    setState(() {});
   }
 
   void _handleViewAction(String action) {

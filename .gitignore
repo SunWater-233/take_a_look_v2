@@ -32,6 +32,9 @@ migrate_working_dir/
 .pub/
 /build/
 /coverage/
+/backend/.venv/
+/backend/runtime/take_a_look_backend/
+/build/backend_pyinstaller/
 
 # Symbolication related
 app.*.symbols

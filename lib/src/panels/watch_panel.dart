@@ -202,7 +202,11 @@ class _WatchRowState extends State<_WatchRow> {
             padding: const EdgeInsets.symmetric(horizontal: 5),
             child: SizedBox(
               height: 30,
-              child: TextField(controller: editor, style: talMono),
+              child: TextField(
+                controller: editor,
+                enabled: watch.symbol.writable,
+                style: talMono,
+              ),
             ),
           ),
           _WatchCell(
@@ -213,10 +217,12 @@ class _WatchRowState extends State<_WatchRow> {
               children: [
                 IconButton(
                   tooltip: '写入',
-                  onPressed: () => widget.controller.writeWatch(
-                    watch.symbol.key,
-                    editor.text,
-                  ),
+                  onPressed: watch.symbol.writable
+                      ? () => widget.controller.writeWatch(
+                          watch.symbol.key,
+                          editor.text,
+                        )
+                      : null,
                   icon: const Icon(Icons.save_outlined, size: 16),
                 ),
                 IconButton(

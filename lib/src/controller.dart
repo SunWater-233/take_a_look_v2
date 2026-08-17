@@ -12,21 +12,32 @@ export 'demo_data.dart';
 part 'controller_snapshot.dart';
 
 typedef RemoteCommand = Future<void> Function(String method, Object? arguments);
+typedef BackendCommand =
+    Future<void> Function(String method, Object? arguments);
+typedef PathPicker = Future<String?> Function();
 
 class _ControllerSignal extends ChangeNotifier {
   void emit() => notifyListeners();
 }
 
 class TakeALookController extends ChangeNotifier {
-  TakeALookController({this.remoteCommand}) {
+  TakeALookController({
+    this.remoteCommand,
+    this.backendCommand,
+    this.symbolFilePicker,
+    this.csvExportPathPicker,
+  }) {
     _logs.add(LogEntry('UI 已从 .ui 文件加载，pyOCD 内存读写后端已就绪。'));
     _logs.add(LogEntry('读取 .elf / .axf 后，可从符号层级中加入变量到实时调参列表。'));
-    if (remoteCommand == null) {
+    if (remoteCommand == null && backendCommand == null) {
       _ticker = Timer.periodic(const Duration(milliseconds: 33), _tick);
     }
   }
 
   final RemoteCommand? remoteCommand;
+  final BackendCommand? backendCommand;
+  final PathPicker? symbolFilePicker;
+  final PathPicker? csvExportPathPicker;
   final List<SymbolItem> _symbols = <SymbolItem>[];
   final List<WatchItem> _watches = <WatchItem>[];
   final List<LogEntry> _logs = <LogEntry>[];
@@ -36,6 +47,7 @@ class TakeALookController extends ChangeNotifier {
   double _phase = 0;
   double? _frozenPlotEndSeconds;
   final Map<String, List<Offset>> _frozenPlotSamples = <String, List<Offset>>{};
+  DateTime? _lastPerformanceLogAt;
   final ValueNotifier<double> _uiScale = ValueNotifier<double>(1);
   final _ControllerSignal _connectionChanges = _ControllerSignal();
   final _ControllerSignal _samplingChanges = _ControllerSignal();
@@ -59,7 +71,10 @@ class TakeALookController extends ChangeNotifier {
   bool samplingPaused = false;
   bool plottingPaused = false;
   bool rttEnabled = false;
+  String rttProtocol = 'normal';
   bool followLatest = true;
+  Map<String, dynamic> performanceStats = <String, dynamic>{};
+  Map<String, dynamic>? lastBackendError;
 
   List<SymbolItem> get symbols => List.unmodifiable(_symbols);
   List<WatchItem> get watches => List.unmodifiable(_watches);
@@ -123,7 +138,7 @@ class TakeALookController extends ChangeNotifier {
   }
 
   Future<void> toggleConnection() async {
-    if (_dispatchRemote('toggleConnection')) return;
+    if (_dispatchCommand('toggleConnection')) return;
     if (connectionStatus == ConnectionStatus.connected) {
       connectionStatus = ConnectionStatus.disconnected;
       samplingPaused = false;
@@ -153,46 +168,75 @@ class TakeALookController extends ChangeNotifier {
     _emitState([_symbolChanges, _logChanges]);
   }
 
+  Future<void> chooseSymbolFile() async {
+    if (_isDetachedRemote) {
+      _dispatchRemote('loadSymbols');
+      return;
+    }
+    final picker = symbolFilePicker;
+    if (picker == null) {
+      loadDemoSymbols();
+      return;
+    }
+    final path = await picker();
+    if (path == null || path.isEmpty) return;
+    loadSymbolsFromPath(path);
+  }
+
+  void loadSymbolsFromPath(String path) {
+    if (_dispatchCommand('loadSymbols', path)) return;
+    loadDemoSymbols();
+  }
+
+  void refreshSymbols() {
+    if (symbolFile.isEmpty) return;
+    if (_isDetachedRemote) {
+      _dispatchRemote('loadSymbols', symbolFile);
+      return;
+    }
+    loadSymbolsFromPath(symbolFile);
+  }
+
   void setSampleRate(double value) {
-    if (_dispatchRemote('setSampleRate', value)) return;
+    if (_dispatchCommand('setSampleRate', value)) return;
     sampleRateHz = value;
     _appendLog('采样率已设置为 $sampleRateLabel。');
     _emitState([_samplingChanges, _logChanges]);
   }
 
   void setRttSampleRate(double value) {
-    if (_dispatchRemote('setRttSampleRate', value)) return;
+    if (_dispatchCommand('setRttSampleRate', value)) return;
     rttSampleRateHz = value;
     _emitState([_samplingChanges]);
   }
 
   void setProbeType(String value) {
-    if (_dispatchRemote('setProbeType', value)) return;
+    if (_dispatchCommand('setProbeType', value)) return;
     probeType = value;
     _emitState([_connectionChanges]);
   }
 
   void setTargetName(String value) {
-    if (_dispatchRemote('setTargetName', value)) return;
+    if (_dispatchCommand('setTargetName', value)) return;
     targetName = value;
     _emitState([_connectionChanges]);
   }
 
   void setSwdClock(String value) {
-    if (_dispatchRemote('setSwdClock', value)) return;
+    if (_dispatchCommand('setSwdClock', value)) return;
     swdClock = value;
     _emitState([_connectionChanges]);
   }
 
   void setSerialNumber(String value) {
-    if (_dispatchRemote('setSerialNumber', value)) return;
+    if (_dispatchCommand('setSerialNumber', value)) return;
     if (serialNumber == value) return;
     serialNumber = value;
     _emitState([_connectionChanges]);
   }
 
   void toggleSampling() {
-    if (_dispatchRemote('toggleSampling')) return;
+    if (_dispatchCommand('toggleSampling')) return;
     samplingPaused = !samplingPaused;
     _appendLog(samplingPaused ? '采样已暂停。' : '采样已继续。');
     _emitState([_samplingChanges, _logChanges]);
@@ -211,9 +255,17 @@ class TakeALookController extends ChangeNotifier {
   }
 
   void toggleRtt(bool value) {
-    if (_dispatchRemote('toggleRtt', value)) return;
+    if (_dispatchCommand('toggleRtt', value)) return;
     rttEnabled = value;
     _appendLog(value ? 'RTT 采样已启用。' : 'RTT 采样已关闭。');
+    _emitState([_samplingChanges, _logChanges]);
+  }
+
+  void setRttProtocol(String value) {
+    if (value != 'normal' && value != 'plus') return;
+    if (_dispatchCommand('setRttProtocol', value)) return;
+    rttProtocol = value;
+    _appendLog('RTT 协议已设置为 ${value == 'normal' ? 'RTT-Normal' : 'RTT-Plus'}。');
     _emitState([_samplingChanges, _logChanges]);
   }
 
@@ -229,7 +281,7 @@ class TakeALookController extends ChangeNotifier {
   }
 
   void clearSamples() {
-    if (_dispatchRemote('clearSamples')) return;
+    if (_dispatchCommand('clearSamples')) return;
     elapsedSeconds = 0;
     for (final watch in _watches) {
       watch.samples.clear();
@@ -253,19 +305,28 @@ class TakeALookController extends ChangeNotifier {
   }
 
   void resetTarget({required bool halt}) {
-    if (_dispatchRemote('resetTarget', halt)) return;
+    if (_dispatchCommand('resetTarget', halt)) return;
     _appendLog(halt ? '目标已复位并暂停。' : '目标已复位并运行。');
     _emitState([_logChanges]);
   }
 
-  void exportCsv() {
-    if (_dispatchRemote('exportCsv')) return;
+  Future<void> exportCsv() async {
+    if (_isDetachedRemote) {
+      _dispatchRemote('exportCsv');
+      return;
+    }
+    final picker = csvExportPathPicker;
+    if (picker != null) {
+      final path = await picker();
+      if (path == null || path.isEmpty) return;
+      if (_dispatchCommand('exportCsv', path)) return;
+    }
     _appendLog('导出原始 CSV 任务已创建。');
     _emitState([_logChanges]);
   }
 
   void toggleSymbol(String key) {
-    if (_dispatchRemote('toggleSymbol', key)) return;
+    if (_isDetachedRemote && _dispatchRemote('toggleSymbol', key)) return;
     if (!_selectedSymbols.add(key)) {
       _selectedSymbols.remove(key);
     }
@@ -273,7 +334,7 @@ class TakeALookController extends ChangeNotifier {
   }
 
   void addSelectedToWatch() {
-    if (_dispatchRemote('addSelectedToWatch')) return;
+    if (_isDetachedRemote && _dispatchRemote('addSelectedToWatch')) return;
     final existing = _watches.map((item) => item.symbol.key).toSet();
     final selected = _symbols
         .where((item) => _selectedSymbols.contains(item.key))
@@ -288,34 +349,39 @@ class TakeALookController extends ChangeNotifier {
       );
     }
     _selectedSymbols.clear();
+    _syncWatchesBackend();
     _appendLog('已加入 ${selected.length} 个变量到实时调参列表。');
     _emitState([_symbolChanges, _watchChanges, _plotChanges, _logChanges]);
   }
 
   void removeWatch(String key) {
-    if (_dispatchRemote('removeWatch', key)) return;
+    if (_isDetachedRemote && _dispatchRemote('removeWatch', key)) return;
     _watches.removeWhere((item) => item.symbol.key == key);
+    _syncWatchesBackend();
     _emitState([_watchChanges, _plotChanges]);
   }
 
   void clearWatches() {
-    if (_dispatchRemote('clearWatches')) return;
+    if (_isDetachedRemote && _dispatchRemote('clearWatches')) return;
     _watches.clear();
+    _syncWatchesBackend();
     _appendLog('已清空实时调参列表。');
     _emitState([_watchChanges, _plotChanges, _logChanges]);
   }
 
   void toggleWatchPlot(String key, bool value) {
-    if (_dispatchRemote('toggleWatchPlot', {'key': key, 'value': value})) {
+    if (_isDetachedRemote &&
+        _dispatchRemote('toggleWatchPlot', {'key': key, 'value': value})) {
       return;
     }
     final watch = _watchByKey(key);
     if (watch != null) watch.plotted = value;
+    _syncWatchesBackend();
     _emitState([_watchChanges, _plotChanges]);
   }
 
   void writeWatch(String key, String input) {
-    if (_dispatchRemote('writeWatch', {'key': key, 'value': input})) return;
+    if (_dispatchCommand('writeWatch', {'key': key, 'value': input})) return;
     final value = double.tryParse(input);
     final watch = _watchByKey(key);
     if (value == null || watch == null) {
@@ -341,6 +407,35 @@ class TakeALookController extends ChangeNotifier {
     return true;
   }
 
+  bool _dispatchCommand(String method, [Object? arguments]) {
+    final sender = backendCommand;
+    if (sender != null) {
+      unawaited(sender(method, arguments));
+      return true;
+    }
+    return _dispatchRemote(method, arguments);
+  }
+
+  bool get _isDetachedRemote => remoteCommand != null && backendCommand == null;
+
+  void _syncWatchesBackend() {
+    final sender = backendCommand;
+    if (sender == null) return;
+    unawaited(
+      sender('setWatches', {
+        'watches': [
+          for (final watch in _watches)
+            {
+              'key': watch.symbol.key,
+              'color':
+                  '#${watch.color.toARGB32().toRadixString(16).padLeft(8, '0')}',
+              'plotted': watch.plotted,
+            },
+        ],
+      }),
+    );
+  }
+
   Future<Map<String, dynamic>> handleCommand(
     String method,
     Object? arguments,
@@ -349,7 +444,11 @@ class TakeALookController extends ChangeNotifier {
       case 'toggleConnection':
         await toggleConnection();
       case 'loadSymbols':
-        loadDemoSymbols();
+        if (arguments is String && arguments.isNotEmpty) {
+          loadSymbolsFromPath(arguments);
+        } else {
+          await chooseSymbolFile();
+        }
       case 'setSampleRate':
         setSampleRate((arguments as num).toDouble());
       case 'setRttSampleRate':
@@ -370,6 +469,8 @@ class TakeALookController extends ChangeNotifier {
         togglePlotting();
       case 'toggleRtt':
         toggleRtt(arguments == true);
+      case 'setRttProtocol':
+        setRttProtocol(arguments as String);
       case 'toggleFollowLatest':
         toggleFollowLatest();
       case 'clearSamples':
@@ -379,7 +480,7 @@ class TakeALookController extends ChangeNotifier {
       case 'resetTarget':
         resetTarget(halt: arguments == true);
       case 'exportCsv':
-        exportCsv();
+        await exportCsv();
       case 'toggleSymbol':
         toggleSymbol(arguments as String);
       case 'addSelectedToWatch':

@@ -121,6 +121,18 @@ install(CODE "
 install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
   DESTINATION "${INSTALL_BUNDLE_DATA_DIR}" COMPONENT Runtime)
 
+# Copy the platform-specific Python backend bundle built on this host.
+set(TAL_BACKEND_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../backend")
+install(FILES "${TAL_BACKEND_SOURCE_DIR}/pyproject.toml"
+  DESTINATION "${CMAKE_INSTALL_PREFIX}/backend" COMPONENT Runtime)
+install(DIRECTORY "${TAL_BACKEND_SOURCE_DIR}/take_a_look_backend"
+  DESTINATION "${CMAKE_INSTALL_PREFIX}/backend" COMPONENT Runtime
+  PATTERN "__pycache__" EXCLUDE PATTERN "*.pyc" EXCLUDE)
+if(EXISTS "${TAL_BACKEND_SOURCE_DIR}/runtime/take_a_look_backend")
+  install(DIRECTORY "${TAL_BACKEND_SOURCE_DIR}/runtime/take_a_look_backend"
+    DESTINATION "${CMAKE_INSTALL_PREFIX}/backend/runtime" COMPONENT Runtime)
+endif()
+
 # Install the AOT library on non-Debug builds only.
 if(NOT CMAKE_BUILD_TYPE MATCHES "Debug")
   install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"

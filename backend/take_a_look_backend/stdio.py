@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from typing import BinaryIO, TextIO
 
 from take_a_look_backend.protocol import (
+    EventName,
     ProtocolError,
     encode,
     encode_sample_batch,
@@ -50,11 +51,11 @@ class StdioServer:
         except Exception as error:  # Never corrupt the protocol stream with a traceback.
             self._write(error_response(request_id, error))
 
-    def _send_event(self, name: str, params: object) -> None:
-        if name == "samples" and isinstance(params, Mapping):
+    def _send_event(self, name: EventName, params: object) -> None:
+        if name is EventName.SAMPLES and isinstance(params, Mapping):
             self._write_samples(params)
             return
-        if name == "state" and isinstance(params, Mapping):
+        if name is EventName.STATE and isinstance(params, Mapping):
             self._update_schema_from_state(params)
         self._write(event(name, params))
 
@@ -116,7 +117,7 @@ class StdioServer:
         self._sample_keys = keys
         self._write_json_unlocked(
             event(
-                "sampleSchema",
+                EventName.SAMPLE_SCHEMA,
                 {"id": self._sample_schema_id, "keys": self._sample_keys},
             )
         )

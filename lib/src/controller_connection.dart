@@ -1,0 +1,219 @@
+part of 'controller.dart';
+
+extension TakeALookControllerConnection on TakeALookController {
+  void setUiScale(double value) {
+    if (_dispatchRemote(ControllerCommand.setUiScale, value)) return;
+    final normalized = value.clamp(0.5, 2).toDouble();
+    if ((normalized - _uiScale.value).abs() < 0.001) return;
+    _uiScale.value = normalized;
+    _appendLog('界面缩放已设置为 ${(normalized * 100).round()}%。');
+    _emitState([signals.logs]);
+  }
+
+  String get connectionLabel => switch (connectionStatus) {
+    ConnectionStatus.disconnected => '连接探针',
+    ConnectionStatus.connecting => '连接中...',
+    ConnectionStatus.connected => '断开探针',
+  };
+
+  String get sampleRateLabel {
+    if (sampleRateHz >= 1000) {
+      return '${(sampleRateHz / 1000).toStringAsFixed(sampleRateHz % 1000 == 0 ? 0 : 1)} kHz';
+    }
+    return '${sampleRateHz.toStringAsFixed(0)} Hz';
+  }
+
+  String get displayRefreshLabel => switch (displayRefreshMode) {
+    'standard' => '标准模式（60 Hz）',
+    'high' => '高频模式（120 Hz）',
+    _ => '实时模式（自适应）',
+  };
+
+  double get plotRefreshRateHz => switch (displayRefreshMode) {
+    'standard' => TakeALookController.standardPlotRefreshRateHz,
+    'high' => TakeALookController.highPlotRefreshRateHz,
+    _ =>
+      sampleRateHz
+          .clamp(1, TakeALookController.maxRealtimePlotRefreshRateHz)
+          .toDouble(),
+  };
+
+  double get samplingElapsedSeconds =>
+      _samplingElapsedBaseSeconds +
+      _samplingElapsedStopwatch.elapsedMicroseconds /
+          Duration.microsecondsPerSecond;
+
+  String get elapsedLabel {
+    final totalCentiseconds = (samplingElapsedSeconds * 100).round();
+    final totalSeconds = totalCentiseconds ~/ 100;
+    final centiseconds = totalCentiseconds % 100;
+    final totalMinutes = totalSeconds ~/ 60;
+    final hours = totalSeconds ~/ 3600;
+    final minutes = totalMinutes % 60;
+    final seconds = totalSeconds % 60;
+    String two(int value) => value.toString().padLeft(2, '0');
+    if (hours > 0) return '${two(hours)}:${two(minutes)}';
+    if (totalMinutes > 0) {
+      return '${two(minutes)}:${two(seconds)}:${two(centiseconds)}';
+    }
+    return '${two(seconds)}:${two(centiseconds)}';
+  }
+
+  Future<void> toggleConnection() async {
+    if (_dispatchCommand(ControllerCommand.toggleConnection)) return;
+    if (connectionStatus == ConnectionStatus.connected) {
+      connectionStatus = ConnectionStatus.disconnected;
+      samplingPaused = false;
+      _reconcileSamplingClock();
+      _resetPlotRefreshSchedule();
+      _appendLog('已断开 pyOCD 调试探针。');
+      _emitState([signals.connection, signals.sampling, signals.logs]);
+      return;
+    }
+    if (connectionStatus == ConnectionStatus.connecting) return;
+    connectionStatus = ConnectionStatus.connecting;
+    _appendLog('开始连接 pyOCD：正在枚举探针并初始化目标。');
+    _emitState([signals.connection, signals.logs]);
+    await Future<void>.delayed(const Duration(milliseconds: 650));
+    if (_disposed) return;
+    connectionStatus = ConnectionStatus.connected;
+    _reconcileSamplingClock();
+    _resetPlotRefreshSchedule();
+    _appendLog('已连接 pyOCD：target=$targetName，SWD=$swdClock。');
+    _emitState([signals.connection, signals.logs]);
+  }
+
+  void loadDemoSymbols() {
+    if (_dispatchRemote(ControllerCommand.loadSymbols)) return;
+    symbolFile = 'motor_control_release.axf';
+    _replaceSymbols(demoSymbols);
+    _selectedSymbols.clear();
+    _appendLog('已读取符号文件：$symbolFile，变量符号 ${_symbols.length} 个。');
+    _emitState([signals.symbols, signals.logs]);
+  }
+
+  void _replaceSymbols(Iterable<SymbolItem> symbols) {
+    final next = symbols.toList(growable: false);
+    if (_symbols.length == next.length) {
+      var unchanged = true;
+      for (var index = 0; index < next.length; index += 1) {
+        final current = _symbols[index];
+        final replacement = next[index];
+        if (current.source != replacement.source ||
+            current.name != replacement.name ||
+            current.address != replacement.address ||
+            current.type != replacement.type ||
+            current.size != replacement.size ||
+            current.section != replacement.section ||
+            current.backendKey != replacement.backendKey ||
+            current.writable != replacement.writable ||
+            current.dataSource != replacement.dataSource) {
+          unchanged = false;
+          break;
+        }
+      }
+      if (unchanged) return;
+    }
+    _symbols
+      ..clear()
+      ..addAll(next);
+    _symbolRevision += 1;
+  }
+
+  Future<void> chooseSymbolFile() async {
+    if (_isDetachedRemote) {
+      _dispatchRemote(ControllerCommand.loadSymbols);
+      return;
+    }
+    final picker = symbolFilePicker;
+    if (picker == null) {
+      loadDemoSymbols();
+      return;
+    }
+    final path = await picker();
+    if (path == null || path.isEmpty) return;
+    loadSymbolsFromPath(path);
+  }
+
+  void loadSymbolsFromPath(String path) {
+    if (_dispatchCommand(ControllerCommand.loadSymbols, path)) return;
+    loadDemoSymbols();
+  }
+
+  void refreshSymbols() {
+    if (symbolFile.isEmpty) return;
+    if (_isDetachedRemote) {
+      _dispatchRemote(ControllerCommand.loadSymbols, symbolFile);
+      return;
+    }
+    loadSymbolsFromPath(symbolFile);
+  }
+
+  void setSampleRate(double value) {
+    if (_dispatchCommand(ControllerCommand.setSampleRate, value)) return;
+    sampleRateHz = value;
+    if (displayRefreshMode == 'realtime') _resetPlotRefreshSchedule();
+    _appendLog('采样率已设置为 $sampleRateLabel。');
+    _emitState([signals.sampling, signals.logs]);
+  }
+
+  void setDisplayRefreshMode(String mode) {
+    if (!const {'standard', 'high', 'realtime'}.contains(mode)) {
+      throw ArgumentError.value(mode, 'mode', '未知的绘图刷新率模式');
+    }
+    if (_dispatchRemote(ControllerCommand.setDisplayRefreshMode, mode)) return;
+    if (displayRefreshMode == mode) return;
+    displayRefreshMode = mode;
+    _resetPlotRefreshSchedule();
+    _appendLog('绘图刷新率已切换为$displayRefreshLabel。');
+    _emitState([signals.plot, signals.logs]);
+  }
+
+  void setRttSampleRate(double value) {
+    if (_dispatchCommand(ControllerCommand.setRttSampleRate, value)) return;
+    rttSampleRateHz = value;
+    _emitState([signals.sampling]);
+  }
+
+  void setProbeType(String value) {
+    if (_dispatchCommand(ControllerCommand.setProbeType, value)) return;
+    probeType = value;
+    _emitState([signals.connection]);
+  }
+
+  void setTargetName(String value) {
+    if (_dispatchCommand(ControllerCommand.setTargetName, value)) return;
+    targetName = value;
+    _emitState([signals.connection]);
+  }
+
+  void setSwdClock(String value) {
+    if (_dispatchCommand(ControllerCommand.setSwdClock, value)) return;
+    swdClock = value;
+    _emitState([signals.connection]);
+  }
+
+  void setSerialNumber(String value) {
+    if (_dispatchCommand(ControllerCommand.setSerialNumber, value)) return;
+    if (serialNumber == value) return;
+    serialNumber = value;
+    _emitState([signals.connection]);
+  }
+
+  void toggleSampling() {
+    if (_isDetachedRemote &&
+        _dispatchRemote(ControllerCommand.toggleSampling)) {
+      return;
+    }
+    final sender = backendCommand;
+    samplingPaused = !samplingPaused;
+    _reconcileSamplingClock();
+    if (sender != null) {
+      unawaited(sender(ControllerCommand.setSamplingPaused, samplingPaused));
+      _emitState([signals.sampling]);
+      return;
+    }
+    _appendLog(samplingPaused ? '采样已暂停。' : '采样已继续。');
+    _emitState([signals.sampling, signals.logs]);
+  }
+}

@@ -10,6 +10,7 @@ import unittest
 from pathlib import Path
 
 from take_a_look_backend.stdio import StdioServer
+from take_a_look_backend.protocol import EventName
 
 
 class StdioIntegrationTests(unittest.TestCase):
@@ -47,9 +48,9 @@ class StdioIntegrationTests(unittest.TestCase):
         output = io.BytesIO()
         server = StdioServer(io.StringIO(), output)
         try:
-            server._send_event("state", {"watches": [{"key": "speed"}]})
+            server._send_event(EventName.STATE, {"watches": [{"key": "speed"}]})
             server._send_event(
-                "samples",
+                EventName.SAMPLES,
                 {"frames": [{"elapsed": 0.25, "values": {"speed": 12.5}}]},
             )
         finally:

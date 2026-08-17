@@ -1,0 +1,170 @@
+part of 'controller.dart';
+
+extension TakeALookControllerTelemetry on TakeALookController {
+  void applyTelemetrySnapshot(Map<String, dynamic> data) {
+    elapsedSeconds =
+        (data['elapsedSeconds'] as num?)?.toDouble() ?? elapsedSeconds;
+    final watchesByKey = {
+      for (final watch in _watches) watch.symbol.key: watch,
+    };
+    for (final raw in data['watches'] as List? ?? const []) {
+      final item = Map<String, dynamic>.from(raw as Map);
+      final watch = watchesByKey[item['key'] as String?];
+      if (watch == null) continue;
+      watch.value = _numericValue(item['value'], fallback: watch.value);
+      final samples = item['samples'] as List?;
+      if (samples != null) {
+        watch.samples
+          ..clear()
+          ..addAll(
+            samples.map((rawPoint) {
+              final point = rawPoint as List;
+              return Offset(
+                (point[0] as num).toDouble(),
+                (point[1] as num).toDouble(),
+              );
+            }),
+          );
+        watch.totalSampleCount =
+            (item['sampleCursor'] as int?) ?? watch.samples.length;
+      }
+    }
+    _emitTelemetry(sync: false);
+  }
+
+  void applyTelemetryDelta(Map<String, dynamic> data) {
+    elapsedSeconds =
+        (data['elapsedSeconds'] as num?)?.toDouble() ?? elapsedSeconds;
+    final watchesByKey = {
+      for (final watch in _watches) watch.symbol.key: watch,
+    };
+    for (final raw in data['watches'] as List? ?? const []) {
+      final item = Map<String, dynamic>.from(raw as Map);
+      final watch = watchesByKey[item['key'] as String?];
+      if (watch == null) continue;
+      watch.value = _numericValue(item['value'], fallback: watch.value);
+      final sampleStart = item['sampleStart'] as int? ?? 0;
+      final sampleCursor = item['sampleCursor'] as int? ?? sampleStart;
+      if (item['reset'] == true ||
+          watch.totalSampleCount < sampleStart ||
+          watch.totalSampleCount > sampleCursor) {
+        watch.samples.clear();
+        watch.totalSampleCount = sampleStart;
+      }
+      final rawSamples = item['samples'] as List? ?? const [];
+      final alreadyApplied = (watch.totalSampleCount - sampleStart)
+          .clamp(0, rawSamples.length)
+          .toInt();
+      for (final rawPoint in rawSamples.skip(alreadyApplied)) {
+        final point = rawPoint as List;
+        telemetryStore.append(
+          watch,
+          Offset((point[0] as num).toDouble(), (point[1] as num).toDouble()),
+        );
+      }
+      watch.totalSampleCount = sampleCursor;
+    }
+    _emitTelemetry(sync: false);
+  }
+
+  void applyBackendEvent(BackendEventType event, Object? params) {
+    switch (event) {
+      case BackendEventType.state:
+        final state = _asMap(params);
+        if (state != null) applySnapshot(state);
+      case BackendEventType.samples:
+        if (params is BackendSampleBatch) {
+          applyBackendSampleBatch(params);
+        } else {
+          final payload = _asMap(params);
+          if (payload != null) applyBackendSamples(payload);
+        }
+      case BackendEventType.samplesCleared:
+        applyBackendSamplesCleared();
+      case BackendEventType.log:
+        final payload = _asMap(params);
+        final message = payload?['message'];
+        if (message is String && message.isNotEmpty) addLog(message);
+      case BackendEventType.error:
+        final payload = _asMap(params);
+        if (payload == null) break;
+        lastBackendError = payload;
+        final message = payload['message'] as String? ?? '后端操作失败。';
+        final details = payload['details'];
+        _appendLog(details == null ? message : '$message（$details）');
+        _emitState([signals.connection, signals.logs]);
+      case BackendEventType.perf:
+        final payload = _asMap(params);
+        if (payload == null) break;
+        performanceStats = payload;
+        final effectiveHz = (payload['effectiveHz'] as num?)?.toDouble() ?? 0;
+        final sampleCount = (payload['sampleCount'] as num?)?.toInt() ?? 0;
+        // Keep idle performance events out of the user-facing log, matching
+        // the original desktop application.
+        if (sampleCount <= 0 && effectiveHz <= 0) break;
+        final now = DateTime.now();
+        if (_lastPerformanceLogAt == null ||
+            now.difference(_lastPerformanceLogAt!) >=
+                const Duration(seconds: 5)) {
+          _lastPerformanceLogAt = now;
+          final watchCount = (payload['watchCount'] as num?)?.toInt() ?? 0;
+          final blockCount = (payload['readBlockCount'] as num?)?.toInt() ?? 0;
+          final byteCount = (payload['readByteCount'] as num?)?.toInt() ?? 0;
+          _appendLog(
+            '采样性能：目标 ${sampleRateHz.toStringAsFixed(0)} Hz，'
+            '实际 ${effectiveHz.toStringAsFixed(1)} Hz，'
+            '样本 $sampleCount，变量 $watchCount，'
+            '读块 $blockCount，字节 $byteCount。',
+          );
+          _emitState([signals.logs]);
+        }
+    }
+  }
+
+  void applyBackendSamples(Map<String, dynamic> payload) {
+    elapsedSeconds = telemetryStore.applyJsonFrames(
+      payload,
+      _watches,
+      currentElapsed: elapsedSeconds,
+    );
+    _emitTelemetry();
+  }
+
+  void applyBackendSampleBatch(BackendSampleBatch batch) {
+    elapsedSeconds = telemetryStore.applyBinaryBatch(
+      batch,
+      _watches,
+      currentElapsed: elapsedSeconds,
+    );
+    _emitTelemetry();
+  }
+
+  void applyBackendSamplesCleared() {
+    elapsedSeconds = 0;
+    telemetryStore.clear(_watches);
+    _frozenPlotSamples.clear();
+    if (plottingPaused || !followLatest) _frozenPlotEndSeconds = 0;
+    _emitState([signals.sampling, signals.telemetry, signals.plot]);
+    signals.telemetrySync.emit();
+  }
+}
+
+Map<String, dynamic>? _asMap(Object? value) {
+  return value is Map ? Map<String, dynamic>.from(value) : null;
+}
+
+double _numericValue(Object? value, {double fallback = 0}) {
+  return TelemetryStore.numericValue(value, fallback: fallback);
+}
+
+Color _colorFromValue(Object? value) {
+  if (value is int) return Color(value);
+  if (value is String) {
+    final normalized = value.replaceFirst('#', '');
+    final parsed = int.tryParse(normalized, radix: 16);
+    if (parsed != null) {
+      return Color(normalized.length <= 6 ? 0xFF000000 | parsed : parsed);
+    }
+  }
+  return seriesColors.first;
+}

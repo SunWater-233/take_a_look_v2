@@ -1,0 +1,29 @@
+{
+  "version": 2,
+  "methods": [
+    "handshake",
+    "getState",
+    "connect",
+    "toggleConnection",
+    "disconnect",
+    "loadSymbols",
+    "setConfig",
+    "setWatches",
+    "writeWatch",
+    "setSamplingPaused",
+    "setRtt",
+    "clearSamples",
+    "resetTarget",
+    "exportCsv",
+    "shutdown"
+  ],
+  "events": [
+    "state",
+    "samples",
+    "samplesCleared",
+    "sampleSchema",
+    "log",
+    "error",
+    "perf"
+  ]
+}

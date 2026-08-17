@@ -1,0 +1,123 @@
+import 'package:flutter/material.dart';
+
+import 'controller.dart';
+import 'protocol/commands.dart';
+
+/// Executes commands arriving from detached windows.
+///
+/// Transport parsing is deliberately outside [TakeALookController], leaving
+/// the controller focused on state transitions and domain operations.
+Future<JsonObject> executeControllerCommand(
+  TakeALookController controller,
+  ControllerCommand command,
+  Object? arguments,
+) async {
+  switch (command) {
+    case ControllerCommand.toggleConnection:
+      await controller.toggleConnection();
+    case ControllerCommand.loadSymbols:
+      if (arguments is String && arguments.isNotEmpty) {
+        controller.loadSymbolsFromPath(arguments);
+      } else {
+        await controller.chooseSymbolFile();
+      }
+    case ControllerCommand.setSampleRate:
+      controller.setSampleRate((arguments as num).toDouble());
+    case ControllerCommand.setDisplayRefreshMode:
+      controller.setDisplayRefreshMode(arguments as String);
+    case ControllerCommand.setRttSampleRate:
+      controller.setRttSampleRate((arguments as num).toDouble());
+    case ControllerCommand.setProbeType:
+      controller.setProbeType(arguments as String);
+    case ControllerCommand.setTargetName:
+      controller.setTargetName(arguments as String);
+    case ControllerCommand.setSwdClock:
+      controller.setSwdClock(arguments as String);
+    case ControllerCommand.setSerialNumber:
+      controller.setSerialNumber(arguments as String);
+    case ControllerCommand.setUiScale:
+      controller.setUiScale((arguments as num).toDouble());
+    case ControllerCommand.toggleSampling:
+      controller.toggleSampling();
+    case ControllerCommand.setSamplingPaused:
+      if (controller.samplingPaused != (arguments == true)) {
+        controller.toggleSampling();
+      }
+    case ControllerCommand.togglePlotting:
+      controller.togglePlotting();
+    case ControllerCommand.toggleRtt:
+      controller.toggleRtt(arguments == true);
+    case ControllerCommand.setRttProtocol:
+      controller.setRttProtocol(arguments as String);
+    case ControllerCommand.toggleFollowLatest:
+      controller.toggleFollowLatest();
+    case ControllerCommand.setPlotViewport:
+      final values = Map<String, Object?>.from(arguments! as Map);
+      controller.setPlotViewport(
+        xMin: (values['xMin'] as num).toDouble(),
+        xMax: (values['xMax'] as num).toDouble(),
+        yMin: (values['yMin'] as num?)?.toDouble(),
+        yMax: (values['yMax'] as num?)?.toDouble(),
+      );
+    case ControllerCommand.configurePlotView:
+      controller.configurePlotView(
+        Map<String, dynamic>.from(arguments! as Map),
+      );
+    case ControllerCommand.showAllPlotSamples:
+      controller.showAllPlotSamples();
+    case ControllerCommand.resetPlotView:
+      controller.resetPlotView();
+    case ControllerCommand.clearSamples:
+      controller.clearSamples();
+    case ControllerCommand.clearLogs:
+      controller.clearLogs();
+    case ControllerCommand.resetTarget:
+      controller.resetTarget(halt: arguments == true);
+    case ControllerCommand.exportCsv:
+      await controller.exportCsv();
+    case ControllerCommand.toggleSymbol:
+      controller.toggleSymbol(arguments as String);
+    case ControllerCommand.selectSymbols:
+      controller.selectSymbols((arguments as List).cast<String>());
+    case ControllerCommand.activateSymbol:
+      controller.activateSymbol(arguments as String);
+    case ControllerCommand.addSelectedToWatch:
+      controller.addSelectedToWatch();
+    case ControllerCommand.removeWatch:
+      controller.removeWatch(arguments as String);
+    case ControllerCommand.removeWatches:
+      controller.removeWatches((arguments as List).cast<String>());
+    case ControllerCommand.clearWatches:
+      controller.clearWatches();
+    case ControllerCommand.toggleWatchPlot:
+      final values = Map<String, Object?>.from(arguments! as Map);
+      controller.toggleWatchPlot(
+        values['key'] as String,
+        values['value'] as bool,
+      );
+    case ControllerCommand.setWatchColor:
+      final values = Map<String, Object?>.from(arguments! as Map);
+      controller.setWatchColor(
+        values['key'] as String,
+        Color(values['color'] as int),
+      );
+    case ControllerCommand.setWatchColors:
+      final values = Map<String, Object?>.from(arguments! as Map);
+      controller.setWatchColors(
+        (values['keys'] as List).cast<String>(),
+        Color(values['color'] as int),
+      );
+    case ControllerCommand.setOnlyWatchesPlotted:
+      controller.setOnlyWatchesPlotted((arguments as List).cast<String>());
+    case ControllerCommand.setAllWatchesPlotted:
+      controller.setAllWatchesPlotted(arguments as bool);
+    case ControllerCommand.invertWatchPlots:
+      controller.invertWatchPlots((arguments as List).cast<String>());
+    case ControllerCommand.writeWatch:
+      final values = Map<String, Object?>.from(arguments! as Map);
+      controller.writeWatch(values['key'] as String, values['value'] as String);
+    case ControllerCommand.setWatches:
+      throw UnsupportedError('setWatches is an internal backend command');
+  }
+  return controller.stateSnapshot();
+}

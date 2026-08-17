@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:take_a_look_v2/src/app.dart';
 import 'package:take_a_look_v2/src/controller.dart';
+import 'package:take_a_look_v2/src/protocol/events.dart';
 import 'package:take_a_look_v2/src/panel_types.dart';
 import 'package:take_a_look_v2/src/theme.dart';
 import 'package:take_a_look_v2/src/window_sync.dart';
@@ -253,7 +254,7 @@ void main() {
       ),
     );
 
-    controller.applyBackendEvent('error', {
+    controller.applyBackendEvent(BackendEventType.error, {
       'code': 'connect_failed',
       'message': '连接失败。',
       'details': '未找到探针',

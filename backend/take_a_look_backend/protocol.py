@@ -4,12 +4,41 @@ import json
 import struct
 from collections.abc import Mapping
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any
 
 
 PROTOCOL_VERSION = 2
 SAMPLE_PAYLOAD_VERSION = 1
 SAMPLE_FRAME_MARKER = 0
+
+
+class RpcMethod(StrEnum):
+    HANDSHAKE = "handshake"
+    GET_STATE = "getState"
+    CONNECT = "connect"
+    TOGGLE_CONNECTION = "toggleConnection"
+    DISCONNECT = "disconnect"
+    LOAD_SYMBOLS = "loadSymbols"
+    SET_CONFIG = "setConfig"
+    SET_WATCHES = "setWatches"
+    WRITE_WATCH = "writeWatch"
+    SET_SAMPLING_PAUSED = "setSamplingPaused"
+    SET_RTT = "setRtt"
+    CLEAR_SAMPLES = "clearSamples"
+    RESET_TARGET = "resetTarget"
+    EXPORT_CSV = "exportCsv"
+    SHUTDOWN = "shutdown"
+
+
+class EventName(StrEnum):
+    STATE = "state"
+    SAMPLES = "samples"
+    SAMPLES_CLEARED = "samplesCleared"
+    SAMPLE_SCHEMA = "sampleSchema"
+    LOG = "log"
+    ERROR = "error"
+    PERF = "perf"
 
 
 @dataclass(frozen=True)
@@ -19,7 +48,7 @@ class ProtocolError(Exception):
     details: object | None = None
 
 
-def parse_request(line: str) -> tuple[object, str, dict[str, object]]:
+def parse_request(line: str) -> tuple[object, RpcMethod, dict[str, object]]:
     try:
         raw = json.loads(line)
     except json.JSONDecodeError as error:
@@ -35,9 +64,13 @@ def parse_request(line: str) -> tuple[object, str, dict[str, object]]:
     request_id = raw.get("id")
     if request_id is None:
         raise ProtocolError("invalid_request", "Request id is required.")
-    method = raw.get("method")
-    if not isinstance(method, str) or not method:
+    raw_method = raw.get("method")
+    if not isinstance(raw_method, str) or not raw_method:
         raise ProtocolError("invalid_request", "Method must be a non-empty string.")
+    try:
+        method = RpcMethod(raw_method)
+    except ValueError as error:
+        raise ProtocolError("unknown_method", f"Unknown backend method: {raw_method}") from error
     params = raw.get("params", {})
     if not isinstance(params, Mapping):
         raise ProtocolError("invalid_request", "Params must be an object.")
@@ -58,8 +91,8 @@ def error_response(request_id: object | None, error: ProtocolError | Exception) 
     return {"v": PROTOCOL_VERSION, "id": request_id, "error": payload}
 
 
-def event(name: str, params: object) -> dict[str, object]:
-    return {"v": PROTOCOL_VERSION, "event": name, "params": params}
+def event(name: EventName, params: object) -> dict[str, object]:
+    return {"v": PROTOCOL_VERSION, "event": name.value, "params": params}
 
 
 def encode(message: Mapping[str, Any]) -> str:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 
@@ -41,3 +42,12 @@ class WatchedVariable:
     color: str
     plot_enabled: bool = True
     value: object = ""
+
+
+def json_value(value: object) -> object:
+    """Normalize hardware values to JSON-safe scalar values."""
+    if isinstance(value, (str, int, bool)) or value is None:
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else str(value)
+    return str(value)

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import 'controller.dart';
 import 'panel_types.dart';
+import 'protocol/commands.dart';
 
 const _mainChannel = WindowMethodChannel(
   'take_a_look/main_state',
@@ -47,7 +48,10 @@ class MainWindowSync {
 
   Future<dynamic> _handleCall(MethodCall call) async {
     if (call.method == 'snapshot') return controller.snapshot();
-    return controller.handleCommand(call.method, call.arguments);
+    return controller.handleCommand(
+      ControllerCommand.parse(call.method),
+      call.arguments,
+    );
   }
 
   void _scheduleStateBroadcast() {
@@ -149,11 +153,11 @@ Future<void> initializeDetachedWindow(TakeALookController controller) async {
 
 Future<void> sendCommandToMain(
   TakeALookController controller,
-  String method,
+  ControllerCommand command,
   Object? arguments,
 ) async {
   final state = await _mainChannel.invokeMethod<Map<Object?, Object?>>(
-    method,
+    command.wireName,
     arguments,
   );
   if (state != null) {

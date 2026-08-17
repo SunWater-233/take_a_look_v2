@@ -32,14 +32,18 @@ class _SymbolPanel extends StatefulWidget {
 }
 
 class _SymbolPanelState extends State<_SymbolPanel> {
-  double _nameWidth = 320;
-  double _addressWidth = 145;
-  double _sizeWidth = 68;
-  double _sectionWidth = 100;
-  double _typeWidth = 160;
-  double _rowHeight = 30;
-  List<double> _resizeColumnWidths = const <double>[];
-  double _resizeRowHeight = 30;
+  final ResizableTableLayout _tableLayout = ResizableTableLayout(
+    widths: const [320, 145, 68, 100, 160],
+    minimumWidths: const [120, 80, 48, 60, 80],
+    rowHeight: 30,
+  );
+
+  double get _nameWidth => _tableLayout.widths[0];
+  double get _addressWidth => _tableLayout.widths[1];
+  double get _sizeWidth => _tableLayout.widths[2];
+  double get _sectionWidth => _tableLayout.widths[3];
+  double get _typeWidth => _tableLayout.widths[4];
+  double get _rowHeight => _tableLayout.rowHeight;
 
   double get _tableWidth =>
       _nameWidth + _addressWidth + _sizeWidth + _sectionWidth + _typeWidth;
@@ -188,45 +192,22 @@ class _SymbolPanelState extends State<_SymbolPanel> {
   }
 
   void _beginTableResize() {
-    _resizeColumnWidths = <double>[
-      _nameWidth,
-      _addressWidth,
-      _sizeWidth,
-      _sectionWidth,
-      _typeWidth,
-    ];
-    _resizeRowHeight = _rowHeight;
+    _tableLayout.beginResize();
   }
 
   void _resizeTable(Offset delta) {
-    if (_resizeColumnWidths.length != 5) return;
-    final columnDelta = delta.dx * 0.75;
-    final rowDelta = delta.dy * 0.75;
-    setState(() {
-      _nameWidth = math.max(120, _resizeColumnWidths[0] + columnDelta);
-      _addressWidth = math.max(80, _resizeColumnWidths[1] + columnDelta);
-      _sizeWidth = math.max(48, _resizeColumnWidths[2] + columnDelta);
-      _sectionWidth = math.max(60, _resizeColumnWidths[3] + columnDelta);
-      _typeWidth = math.max(80, _resizeColumnWidths[4] + columnDelta);
-      _rowHeight = math.max(18, _resizeRowHeight + rowDelta);
-    });
+    if (_tableLayout.resizeAll(
+      delta,
+      columnScale: 0.75,
+      rowScale: 0.75,
+      minimumRowHeight: 18,
+    )) {
+      setState(() {});
+    }
   }
 
   void _resizeColumn(int index, double delta) {
-    setState(() {
-      switch (index) {
-        case 0:
-          _nameWidth = math.max(120, _nameWidth + delta);
-        case 1:
-          _addressWidth = math.max(80, _addressWidth + delta);
-        case 2:
-          _sizeWidth = math.max(48, _sizeWidth + delta);
-        case 3:
-          _sectionWidth = math.max(60, _sectionWidth + delta);
-        case 4:
-          _typeWidth = math.max(80, _typeWidth + delta);
-      }
-    });
+    if (_tableLayout.resizeColumn(index, delta)) setState(() {});
   }
 
   Set<String> _symbolKeysForNode(_SymbolTreeNode node) {

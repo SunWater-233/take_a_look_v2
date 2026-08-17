@@ -26,10 +26,11 @@ class _WatchPanel extends StatefulWidget {
 class _WatchPanelState extends State<_WatchPanel> {
   static const _minimumColumnWidths = <double>[72, 88, 72, 72, 72, 108, 72, 72];
 
-  List<double> _columnWidths = <double>[180, 112, 96, 96, 96, 116, 84, 96];
-  List<double> _resizeColumnWidths = const <double>[];
-  double _rowHeight = 44;
-  double _resizeRowHeight = 44;
+  final ResizableTableLayout _tableLayout = ResizableTableLayout(
+    widths: const [180, 112, 96, 96, 96, 116, 84, 96],
+    minimumWidths: _minimumColumnWidths,
+    rowHeight: 44,
+  );
   final FocusNode _tableFocus = FocusNode(debugLabel: 'watch-table');
   final Set<String> _selectedWatchKeys = <String>{};
   final Set<int> _selectedColumns = <int>{};
@@ -37,6 +38,8 @@ class _WatchPanelState extends State<_WatchPanel> {
   String? _selectionAnchorKey;
 
   TakeALookController get controller => widget.controller;
+  List<double> get _columnWidths => _tableLayout.widths;
+  double get _rowHeight => _tableLayout.rowHeight;
   double get _tableWidth => _columnWidths.indexed
       .where((entry) => !_hiddenColumns.contains(entry.$1))
       .fold(0, (sum, entry) => sum + entry.$2);
@@ -48,33 +51,22 @@ class _WatchPanelState extends State<_WatchPanel> {
   }
 
   void _beginTableResize() {
-    _resizeColumnWidths = List<double>.of(_columnWidths);
-    _resizeRowHeight = _rowHeight;
+    _tableLayout.beginResize();
   }
 
   void _resizeTable(Offset delta) {
-    if (_resizeColumnWidths.length != _columnWidths.length) return;
-    final columnDelta = delta.dx * 0.85;
-    final rowDelta = delta.dy * 0.85;
-    setState(() {
-      _columnWidths = <double>[
-        for (var index = 0; index < _resizeColumnWidths.length; index += 1)
-          math.max(
-            _minimumColumnWidths[index],
-            _resizeColumnWidths[index] + columnDelta,
-          ),
-      ];
-      _rowHeight = math.max(40, _resizeRowHeight + rowDelta);
-    });
+    if (_tableLayout.resizeAll(
+      delta,
+      columnScale: 0.85,
+      rowScale: 0.85,
+      minimumRowHeight: 40,
+    )) {
+      setState(() {});
+    }
   }
 
   void _resizeColumn(int index, double delta) {
-    if (index < 0 || index >= _columnWidths.length) return;
-    setState(() {
-      final next = List<double>.of(_columnWidths);
-      next[index] = math.max(_minimumColumnWidths[index], next[index] + delta);
-      _columnWidths = next;
-    });
+    if (_tableLayout.resizeColumn(index, delta)) setState(() {});
   }
 
   void _normalizeSelection() {
@@ -314,7 +306,7 @@ class _WatchPanelState extends State<_WatchPanel> {
             .color;
         final color = await showDialog<Color>(
           context: context,
-          builder: (context) => _WatchColorDialog(initialColor: initial),
+          builder: (context) => WatchColorDialog(initialColor: initial),
         );
         if (mounted && color != null) controller.setWatchColors(keys, color);
     }
@@ -588,7 +580,7 @@ class _WatchRowState extends State<_WatchRow> {
   Future<void> _chooseColor() async {
     final color = await showDialog<Color>(
       context: context,
-      builder: (context) => _WatchColorDialog(initialColor: widget.watch.color),
+      builder: (context) => WatchColorDialog(initialColor: widget.watch.color),
     );
     if (!mounted || color == null) return;
     widget.controller.setWatchColor(widget.watch.symbol.key, color);
@@ -711,7 +703,7 @@ class _WatchRowState extends State<_WatchRow> {
                 child: Align(
                   alignment: Alignment.centerLeft,
                   child: Tooltip(
-                    message: _colorHex(watch.color),
+                    message: watchColorHex(watch.color),
                     child: Material(
                       color: watch.color,
                       borderRadius: BorderRadius.circular(3),
@@ -738,209 +730,6 @@ class _WatchRowState extends State<_WatchRow> {
     );
   }
 }
-
-class _WatchColorDialog extends StatefulWidget {
-  const _WatchColorDialog({required this.initialColor});
-
-  final Color initialColor;
-
-  @override
-  State<_WatchColorDialog> createState() => _WatchColorDialogState();
-}
-
-class _WatchColorDialogState extends State<_WatchColorDialog> {
-  static const _presets = <Color>[
-    ...seriesColors,
-    Color(0xFFE25858),
-    Color(0xFF22C55E),
-    Color(0xFF06B6D4),
-    Color(0xFFEAB308),
-    Color(0xFFF8FAFC),
-  ];
-
-  late HSVColor _hsv;
-  late final TextEditingController _hexController;
-
-  Color get _color => _hsv.toColor();
-
-  @override
-  void initState() {
-    super.initState();
-    _hsv = HSVColor.fromColor(widget.initialColor);
-    _hexController = TextEditingController(
-      text: _colorHex(widget.initialColor),
-    );
-  }
-
-  @override
-  void dispose() {
-    _hexController.dispose();
-    super.dispose();
-  }
-
-  void _setColor(Color color) {
-    setState(() => _hsv = HSVColor.fromColor(color));
-    _hexController.text = _colorHex(color);
-  }
-
-  void _setHsv(HSVColor color) {
-    setState(() => _hsv = color);
-    _hexController.text = _colorHex(color.toColor());
-  }
-
-  void _applyHex(String value) {
-    if (value.length != 6) return;
-    final parsed = int.tryParse(value, radix: 16);
-    if (parsed == null) return;
-    setState(() => _hsv = HSVColor.fromColor(Color(0xFF000000 | parsed)));
-  }
-
-  Widget _slider({
-    required String label,
-    required double value,
-    required double max,
-    required ValueChanged<double> onChanged,
-  }) {
-    return SizedBox(
-      height: 42,
-      child: Row(
-        children: [
-          SizedBox(width: 48, child: Text(label, style: talMuted)),
-          Expanded(
-            child: Slider(
-              value: value.clamp(0, max),
-              max: max,
-              activeColor: _color,
-              onChanged: onChanged,
-            ),
-          ),
-          SizedBox(
-            width: 42,
-            child: Text(
-              max == 360
-                  ? value.round().toString()
-                  : '${(value * 100).round()}%',
-              textAlign: TextAlign.right,
-              style: talMono,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Row(
-        children: [
-          Icon(Icons.palette_outlined, size: 19),
-          SizedBox(width: 8),
-          Text('选择绘制颜色'),
-        ],
-      ),
-      content: SizedBox(
-        width: 360,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              key: const ValueKey('watch-color-preview'),
-              height: 34,
-              decoration: BoxDecoration(
-                color: _color,
-                borderRadius: BorderRadius.circular(4),
-                border: Border.all(color: TalColors.border),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final color in _presets)
-                  Material(
-                    color: color,
-                    borderRadius: BorderRadius.circular(3),
-                    child: InkWell(
-                      key: ValueKey('watch-color-preset-${color.toARGB32()}'),
-                      onTap: () => _setColor(color),
-                      borderRadius: BorderRadius.circular(3),
-                      child: SizedBox(
-                        width: 26,
-                        height: 22,
-                        child: color == _color
-                            ? Icon(
-                                Icons.check,
-                                size: 15,
-                                color: color.computeLuminance() > 0.5
-                                    ? Colors.black
-                                    : Colors.white,
-                              )
-                            : null,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            _slider(
-              label: '色相',
-              value: _hsv.hue,
-              max: 360,
-              onChanged: (value) => _setHsv(_hsv.withHue(value)),
-            ),
-            _slider(
-              label: '饱和度',
-              value: _hsv.saturation,
-              max: 1,
-              onChanged: (value) => _setHsv(_hsv.withSaturation(value)),
-            ),
-            _slider(
-              label: '亮度',
-              value: _hsv.value,
-              max: 1,
-              onChanged: (value) => _setHsv(_hsv.withValue(value)),
-            ),
-            const SizedBox(height: 6),
-            TextField(
-              key: const ValueKey('watch-color-hex'),
-              controller: _hexController,
-              maxLength: 6,
-              inputFormatters: [
-                FilteringTextInputFormatter.allow(RegExp('[0-9a-fA-F]')),
-              ],
-              textCapitalization: TextCapitalization.characters,
-              style: talMono,
-              decoration: const InputDecoration(
-                labelText: 'HEX',
-                prefixText: '#',
-                counterText: '',
-              ),
-              onChanged: _applyHex,
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('取消'),
-        ),
-        FilledButton(
-          key: const ValueKey('watch-color-confirm'),
-          onPressed: () => Navigator.of(context).pop(_color),
-          child: const Text('确定'),
-        ),
-      ],
-    );
-  }
-}
-
-String _colorHex(Color color) => (color.toARGB32() & 0xFFFFFF)
-    .toRadixString(16)
-    .padLeft(6, '0')
-    .toUpperCase();
 
 PopupMenuEntry<String> _watchPopupItem({
   required String value,

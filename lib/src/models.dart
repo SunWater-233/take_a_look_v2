@@ -25,6 +25,32 @@ class SymbolItem {
   final bool writable;
   final String dataSource;
 
+  factory SymbolItem.fromJson(Map<String, dynamic> json) {
+    return SymbolItem(
+      source: json['source'] as String,
+      name: json['name'] as String,
+      address: json['address'] as int,
+      type: json['type'] as String,
+      size: json['size'] as int,
+      section: json['section'] as String? ?? '',
+      backendKey: json['key'] as String?,
+      writable: json['writable'] != false,
+      dataSource: json['dataSource'] as String? ?? 'memory',
+    );
+  }
+
+  Map<String, Object?> toJson() => {
+    'source': source,
+    'name': name,
+    'address': address,
+    'type': type,
+    'size': size,
+    'section': section,
+    'key': key,
+    'writable': writable,
+    'dataSource': dataSource,
+  };
+
   String get key => backendKey ?? '${address.toRadixString(16)}:$name';
   String get addressLabel => dataSource == 'rtt'
       ? 'RTT'
@@ -67,6 +93,18 @@ class LogEntry {
 
   final DateTime timestamp;
   final String message;
+
+  factory LogEntry.fromJson(Map<String, dynamic> json) {
+    return LogEntry.at(
+      json['message'] as String,
+      DateTime.fromMillisecondsSinceEpoch(json['timestamp'] as int),
+    );
+  }
+
+  Map<String, Object?> toJson() => {
+    'timestamp': timestamp.millisecondsSinceEpoch,
+    'message': message,
+  };
 
   String get timeLabel {
     String two(int value) => value.toString().padLeft(2, '0');

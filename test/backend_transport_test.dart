@@ -19,10 +19,10 @@ void main() {
         ..setUint8(0, 0)
         ..setUint32(1, payload.length, Endian.little);
       final wire = <int>[
-      ...utf8.encode('{"v":2,"event":"sampleSchema"}\n'),
+        ...utf8.encode('{"v":2,"event":"sampleSchema"}\n'),
         ...frameHeader.buffer.asUint8List(),
         ...payload,
-      ...utf8.encode('{"v":2,"id":4,"result":{}}\n'),
+        ...utf8.encode('{"v":2,"id":4,"result":{}}\n'),
       ];
 
       var offset = 0;

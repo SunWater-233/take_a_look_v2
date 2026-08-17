@@ -5,10 +5,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:take_a_look_v2/src/backend_client.dart';
 import 'package:take_a_look_v2/src/controller.dart';
 import 'package:take_a_look_v2/src/models.dart';
+import 'package:take_a_look_v2/src/protocol/commands.dart';
+import 'package:take_a_look_v2/src/protocol/events.dart';
 
 void main() {
   test('controller maps backend state, commands, and sample events', () async {
-    final commands = <(String, Object?)>[];
+    final commands = <(ControllerCommand, Object?)>[];
     final controller = TakeALookController(
       backendCommand: (method, arguments) async {
         commands.add((method, arguments));
@@ -19,9 +21,12 @@ void main() {
     addTearDown(controller.dispose);
 
     await controller.chooseSymbolFile();
-    expect(commands.removeAt(0), ('loadSymbols', r'C:\firmware\motor.axf'));
+    expect(commands.removeAt(0), (
+      ControllerCommand.loadSymbols,
+      r'C:\firmware\motor.axf',
+    ));
 
-    controller.applyBackendEvent('state', {
+    controller.applyBackendEvent(BackendEventType.state, {
       'connectionStatus': 'connected',
       'symbolFile': r'C:\firmware\motor.axf',
       'sampleRateHz': 200,
@@ -60,7 +65,7 @@ void main() {
 
     controller.toggleSymbol(controller.symbols.first.key);
     controller.addSelectedToWatch();
-    expect(commands.single.$1, 'setWatches');
+    expect(commands.single.$1, ControllerCommand.setWatches);
     final watchPayload = Map<String, dynamic>.from(commands.single.$2! as Map);
     expect(watchPayload['watches'], hasLength(1));
     commands.clear();
@@ -69,7 +74,7 @@ void main() {
       controller.watches.single.symbol.key,
       const Color(0xFF2F6FED),
     );
-    expect(commands.single.$1, 'setWatches');
+    expect(commands.single.$1, ControllerCommand.setWatches);
     final colorPayload = Map<String, dynamic>.from(commands.single.$2! as Map);
     final colorWatches = (colorPayload['watches'] as List).cast<Map>();
     expect(colorWatches.single['color'], '#ff2f6fed');
@@ -77,9 +82,9 @@ void main() {
 
     controller.toggleSampling();
     expect(controller.samplingPaused, isTrue);
-    expect(commands.single, ('setSamplingPaused', true));
+    expect(commands.single, (ControllerCommand.setSamplingPaused, true));
     commands.clear();
-    controller.applyBackendEvent('state', {
+    controller.applyBackendEvent(BackendEventType.state, {
       'samplingPaused': true,
       'elapsedSeconds': 0,
     });
@@ -87,7 +92,7 @@ void main() {
     expect(controller.symbols, hasLength(2));
     expect(controller.watches, hasLength(1));
 
-    controller.applyBackendEvent('samples', {
+    controller.applyBackendEvent(BackendEventType.samples, {
       'frames': [
         {
           'elapsed': 0.25,
@@ -99,12 +104,15 @@ void main() {
     expect(controller.watches.single.value, 12.5);
     expect(controller.watches.single.samples.single.dx, 0.25);
 
-    controller.applyBackendEvent('samplesCleared', const <String, Object?>{});
+    controller.applyBackendEvent(
+      BackendEventType.samplesCleared,
+      const <String, Object?>{},
+    );
     expect(controller.elapsedSeconds, 0);
     expect(controller.watches.single.samples, isEmpty);
 
     controller.applyBackendEvent(
-      'samples',
+      BackendEventType.samples,
       BackendSampleBatch(
         schemaId: 1,
         sequence: 1,
@@ -119,7 +127,7 @@ void main() {
     expect(controller.watches.single.value, 13.25);
     expect(controller.watches.single.samples.single.dy, 13.25);
 
-    controller.applyBackendEvent('perf', {
+    controller.applyBackendEvent(BackendEventType.perf, {
       'effectiveHz': 198.5,
       'sampleCount': 199,
       'readBlockCount': 1,
@@ -128,14 +136,14 @@ void main() {
     expect(controller.logs.last.message, contains('采样性能'));
 
     final logCountAfterPerformanceSample = controller.logs.length;
-    controller.applyBackendEvent('perf', {
+    controller.applyBackendEvent(BackendEventType.perf, {
       'effectiveHz': 0.0,
       'sampleCount': 0,
       'readBlockCount': 0,
     });
     expect(controller.logs, hasLength(logCountAfterPerformanceSample));
 
-    controller.applyBackendEvent('error', {
+    controller.applyBackendEvent(BackendEventType.error, {
       'code': 'connect_failed',
       'message': '连接失败。',
       'details': '未找到探针',
@@ -147,9 +155,9 @@ void main() {
     controller.setRttProtocol('plus');
     await controller.exportCsv();
     expect(commands.map((item) => item.$1), [
-      'writeWatch',
-      'setRttProtocol',
-      'exportCsv',
+      ControllerCommand.writeWatch,
+      ControllerCommand.setRttProtocol,
+      ControllerCommand.exportCsv,
     ]);
   });
 
@@ -159,7 +167,7 @@ void main() {
     controller.togglePlotting();
     controller.toggleFollowLatest();
 
-    controller.applyBackendEvent('state', {
+    controller.applyBackendEvent(BackendEventType.state, {
       'connectionStatus': 'disconnected',
       'sampleRateHz': 50,
       'rttSampleRateHz': 1000,

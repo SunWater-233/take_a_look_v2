@@ -5,21 +5,28 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'backend_client.dart';
+import 'controller_command_router.dart';
+import 'controller_signals.dart';
+import 'controller_state.dart';
 import 'demo_data.dart';
 import 'models.dart';
+import 'protocol/commands.dart';
+import 'protocol/events.dart';
+import 'telemetry_store.dart';
 
 export 'demo_data.dart';
 
 part 'controller_snapshot.dart';
+part 'controller_telemetry.dart';
+part 'controller_connection.dart';
+part 'controller_plot.dart';
+part 'controller_watch.dart';
 
-typedef RemoteCommand = Future<void> Function(String method, Object? arguments);
+typedef RemoteCommand =
+    Future<void> Function(ControllerCommand command, Object? arguments);
 typedef BackendCommand =
-    Future<void> Function(String method, Object? arguments);
+    Future<void> Function(ControllerCommand command, Object? arguments);
 typedef PathPicker = Future<String?> Function();
-
-class _ControllerSignal extends ChangeNotifier {
-  void emit() => notifyListeners();
-}
 
 class TakeALookController extends ChangeNotifier {
   static const double standardPlotRefreshRateHz = 60;
@@ -60,45 +67,75 @@ class TakeALookController extends ChangeNotifier {
   final Map<String, List<Offset>> _frozenPlotSamples = <String, List<Offset>>{};
   DateTime? _lastPerformanceLogAt;
   final ValueNotifier<double> _uiScale = ValueNotifier<double>(1);
-  final _ControllerSignal _connectionChanges = _ControllerSignal();
-  final _ControllerSignal _samplingChanges = _ControllerSignal();
-  final _ControllerSignal _symbolChanges = _ControllerSignal();
-  final _ControllerSignal _watchChanges = _ControllerSignal();
-  final _ControllerSignal _telemetryChanges = _ControllerSignal();
-  final _ControllerSignal _plotChanges = _ControllerSignal();
-  final _ControllerSignal _plotControlChanges = _ControllerSignal();
-  final _ControllerSignal _clockChanges = _ControllerSignal();
-  final _ControllerSignal _logChanges = _ControllerSignal();
-  final _ControllerSignal _stateSyncChanges = _ControllerSignal();
-  final _ControllerSignal _telemetrySyncChanges = _ControllerSignal();
+  final ControllerSignals signals = ControllerSignals();
 
-  ConnectionStatus connectionStatus = ConnectionStatus.disconnected;
-  String probeType = '自动发现任意探针';
-  String targetName = 'auto';
-  String swdClock = '4 MHz';
-  String serialNumber = '';
-  String symbolFile = '';
-  double sampleRateHz = 50;
-  double rttSampleRateHz = 1000;
-  String displayRefreshMode = 'standard';
-  double elapsedSeconds = 0;
-  bool samplingPaused = false;
-  bool plottingPaused = false;
-  bool rttEnabled = false;
-  String rttProtocol = 'normal';
-  bool followLatest = true;
-  double plotVisibleWindowSeconds = 12;
-  bool plotAutoY = true;
-  double? plotYMin;
-  double? plotYMax;
-  bool plotShowGrid = true;
-  bool plotShowLegend = true;
-  bool plotMouseXEnabled = true;
-  bool plotMouseYEnabled = true;
-  bool plotInvertX = false;
-  bool plotInvertY = false;
-  Map<String, dynamic> performanceStats = <String, dynamic>{};
-  Map<String, dynamic>? lastBackendError;
+  final ControllerState state = ControllerState();
+  final TelemetryStore telemetryStore = TelemetryStore();
+  final ControllerSnapshotCodec snapshotCodec = const ControllerSnapshotCodec();
+
+  ConnectionStatus get connectionStatus => state.connection.status;
+  set connectionStatus(ConnectionStatus value) =>
+      state.connection.status = value;
+  String get probeType => state.connection.probeType;
+  set probeType(String value) => state.connection.probeType = value;
+  String get targetName => state.connection.targetName;
+  set targetName(String value) => state.connection.targetName = value;
+  String get swdClock => state.connection.swdClock;
+  set swdClock(String value) => state.connection.swdClock = value;
+  String get serialNumber => state.connection.serialNumber;
+  set serialNumber(String value) => state.connection.serialNumber = value;
+  String get symbolFile => state.connection.symbolFile;
+  set symbolFile(String value) => state.connection.symbolFile = value;
+  Map<String, dynamic>? get lastBackendError => state.connection.lastError;
+  set lastBackendError(Map<String, dynamic>? value) =>
+      state.connection.lastError = value;
+
+  double get sampleRateHz => state.acquisition.sampleRateHz;
+  set sampleRateHz(double value) => state.acquisition.sampleRateHz = value;
+  double get rttSampleRateHz => state.acquisition.rttSampleRateHz;
+  set rttSampleRateHz(double value) =>
+      state.acquisition.rttSampleRateHz = value;
+  String get displayRefreshMode => state.acquisition.displayRefreshMode;
+  set displayRefreshMode(String value) =>
+      state.acquisition.displayRefreshMode = value;
+  double get elapsedSeconds => state.acquisition.elapsedSeconds;
+  set elapsedSeconds(double value) => state.acquisition.elapsedSeconds = value;
+  bool get samplingPaused => state.acquisition.samplingPaused;
+  set samplingPaused(bool value) => state.acquisition.samplingPaused = value;
+  bool get rttEnabled => state.acquisition.rttEnabled;
+  set rttEnabled(bool value) => state.acquisition.rttEnabled = value;
+  String get rttProtocol => state.acquisition.rttProtocol;
+  set rttProtocol(String value) => state.acquisition.rttProtocol = value;
+  Map<String, dynamic> get performanceStats =>
+      state.acquisition.performanceStats;
+  set performanceStats(Map<String, dynamic> value) =>
+      state.acquisition.performanceStats = value;
+
+  bool get plottingPaused => state.plot.plottingPaused;
+  set plottingPaused(bool value) => state.plot.plottingPaused = value;
+  bool get followLatest => state.plot.followLatest;
+  set followLatest(bool value) => state.plot.followLatest = value;
+  double get plotVisibleWindowSeconds => state.plot.visibleWindowSeconds;
+  set plotVisibleWindowSeconds(double value) =>
+      state.plot.visibleWindowSeconds = value;
+  bool get plotAutoY => state.plot.autoY;
+  set plotAutoY(bool value) => state.plot.autoY = value;
+  double? get plotYMin => state.plot.yMin;
+  set plotYMin(double? value) => state.plot.yMin = value;
+  double? get plotYMax => state.plot.yMax;
+  set plotYMax(double? value) => state.plot.yMax = value;
+  bool get plotShowGrid => state.plot.showGrid;
+  set plotShowGrid(bool value) => state.plot.showGrid = value;
+  bool get plotShowLegend => state.plot.showLegend;
+  set plotShowLegend(bool value) => state.plot.showLegend = value;
+  bool get plotMouseXEnabled => state.plot.mouseXEnabled;
+  set plotMouseXEnabled(bool value) => state.plot.mouseXEnabled = value;
+  bool get plotMouseYEnabled => state.plot.mouseYEnabled;
+  set plotMouseYEnabled(bool value) => state.plot.mouseYEnabled = value;
+  bool get plotInvertX => state.plot.invertX;
+  set plotInvertX(bool value) => state.plot.invertX = value;
+  bool get plotInvertY => state.plot.invertY;
+  set plotInvertY(bool value) => state.plot.invertY = value;
 
   List<SymbolItem> get symbols => List.unmodifiable(_symbols);
   int get symbolRevision => _symbolRevision;
@@ -107,618 +144,23 @@ class TakeALookController extends ChangeNotifier {
   Set<String> get selectedSymbols => Set.unmodifiable(_selectedSymbols);
   double get uiScale => _uiScale.value;
   ValueListenable<double> get uiScaleListenable => _uiScale;
-  Listenable get connectionChanges => _connectionChanges;
-  Listenable get samplingChanges => _samplingChanges;
-  Listenable get symbolChanges => _symbolChanges;
-  Listenable get watchChanges => _watchChanges;
-  Listenable get telemetryChanges => _telemetryChanges;
-  Listenable get plotChanges => _plotChanges;
-  Listenable get plotControlChanges => _plotControlChanges;
-  Listenable get clockChanges => _clockChanges;
-  Listenable get logChanges => _logChanges;
-  Listenable get stateSyncChanges => _stateSyncChanges;
-  Listenable get telemetrySyncChanges => _telemetrySyncChanges;
+  Listenable get connectionChanges => signals.connection;
+  Listenable get samplingChanges => signals.sampling;
+  Listenable get symbolChanges => signals.symbols;
+  Listenable get watchChanges => signals.watches;
+  Listenable get telemetryChanges => signals.telemetry;
+  Listenable get plotChanges => signals.plot;
+  Listenable get plotControlChanges => signals.plotControls;
+  Listenable get clockChanges => signals.clock;
+  Listenable get logChanges => signals.logs;
+  Listenable get stateSyncChanges => signals.stateSync;
+  Listenable get telemetrySyncChanges => signals.telemetrySync;
   double get plotWindowEndSeconds => plottingPaused || !followLatest
       ? (_frozenPlotEndSeconds ?? elapsedSeconds)
       : elapsedSeconds;
   Iterable<Offset> plotSamplesFor(WatchItem watch) {
     if (!plottingPaused && followLatest) return watch.samples;
     return _frozenPlotSamples[watch.symbol.key] ?? watch.samples;
-  }
-
-  void setUiScale(double value) {
-    if (_dispatchRemote('setUiScale', value)) return;
-    final normalized = value.clamp(0.5, 2).toDouble();
-    if ((normalized - _uiScale.value).abs() < 0.001) return;
-    _uiScale.value = normalized;
-    _appendLog('界面缩放已设置为 ${(normalized * 100).round()}%。');
-    _emitState([_logChanges]);
-  }
-
-  String get connectionLabel => switch (connectionStatus) {
-    ConnectionStatus.disconnected => '连接探针',
-    ConnectionStatus.connecting => '连接中...',
-    ConnectionStatus.connected => '断开探针',
-  };
-
-  String get sampleRateLabel {
-    if (sampleRateHz >= 1000) {
-      return '${(sampleRateHz / 1000).toStringAsFixed(sampleRateHz % 1000 == 0 ? 0 : 1)} kHz';
-    }
-    return '${sampleRateHz.toStringAsFixed(0)} Hz';
-  }
-
-  String get displayRefreshLabel => switch (displayRefreshMode) {
-    'standard' => '标准模式（60 Hz）',
-    'high' => '高频模式（120 Hz）',
-    _ => '实时模式（自适应）',
-  };
-
-  double get plotRefreshRateHz => switch (displayRefreshMode) {
-    'standard' => standardPlotRefreshRateHz,
-    'high' => highPlotRefreshRateHz,
-    _ => sampleRateHz.clamp(1, maxRealtimePlotRefreshRateHz).toDouble(),
-  };
-
-  double get samplingElapsedSeconds =>
-      _samplingElapsedBaseSeconds +
-      _samplingElapsedStopwatch.elapsedMicroseconds /
-          Duration.microsecondsPerSecond;
-
-  String get elapsedLabel {
-    final totalCentiseconds = (samplingElapsedSeconds * 100).round();
-    final totalSeconds = totalCentiseconds ~/ 100;
-    final centiseconds = totalCentiseconds % 100;
-    final totalMinutes = totalSeconds ~/ 60;
-    final hours = totalSeconds ~/ 3600;
-    final minutes = totalMinutes % 60;
-    final seconds = totalSeconds % 60;
-    String two(int value) => value.toString().padLeft(2, '0');
-    if (hours > 0) return '${two(hours)}:${two(minutes)}';
-    if (totalMinutes > 0) {
-      return '${two(minutes)}:${two(seconds)}:${two(centiseconds)}';
-    }
-    return '${two(seconds)}:${two(centiseconds)}';
-  }
-
-  Future<void> toggleConnection() async {
-    if (_dispatchCommand('toggleConnection')) return;
-    if (connectionStatus == ConnectionStatus.connected) {
-      connectionStatus = ConnectionStatus.disconnected;
-      samplingPaused = false;
-      _reconcileSamplingClock();
-      _resetPlotRefreshSchedule();
-      _appendLog('已断开 pyOCD 调试探针。');
-      _emitState([_connectionChanges, _samplingChanges, _logChanges]);
-      return;
-    }
-    if (connectionStatus == ConnectionStatus.connecting) return;
-    connectionStatus = ConnectionStatus.connecting;
-    _appendLog('开始连接 pyOCD：正在枚举探针并初始化目标。');
-    _emitState([_connectionChanges, _logChanges]);
-    await Future<void>.delayed(const Duration(milliseconds: 650));
-    if (_disposed) return;
-    connectionStatus = ConnectionStatus.connected;
-    _reconcileSamplingClock();
-    _resetPlotRefreshSchedule();
-    _appendLog('已连接 pyOCD：target=$targetName，SWD=$swdClock。');
-    _emitState([_connectionChanges, _logChanges]);
-  }
-
-  void loadDemoSymbols() {
-    if (_dispatchRemote('loadSymbols')) return;
-    symbolFile = 'motor_control_release.axf';
-    _replaceSymbols(demoSymbols);
-    _selectedSymbols.clear();
-    _appendLog('已读取符号文件：$symbolFile，变量符号 ${_symbols.length} 个。');
-    _emitState([_symbolChanges, _logChanges]);
-  }
-
-  void _replaceSymbols(Iterable<SymbolItem> symbols) {
-    final next = symbols.toList(growable: false);
-    if (_symbols.length == next.length) {
-      var unchanged = true;
-      for (var index = 0; index < next.length; index += 1) {
-        final current = _symbols[index];
-        final replacement = next[index];
-        if (current.source != replacement.source ||
-            current.name != replacement.name ||
-            current.address != replacement.address ||
-            current.type != replacement.type ||
-            current.size != replacement.size ||
-            current.section != replacement.section ||
-            current.backendKey != replacement.backendKey ||
-            current.writable != replacement.writable ||
-            current.dataSource != replacement.dataSource) {
-          unchanged = false;
-          break;
-        }
-      }
-      if (unchanged) return;
-    }
-    _symbols
-      ..clear()
-      ..addAll(next);
-    _symbolRevision += 1;
-  }
-
-  Future<void> chooseSymbolFile() async {
-    if (_isDetachedRemote) {
-      _dispatchRemote('loadSymbols');
-      return;
-    }
-    final picker = symbolFilePicker;
-    if (picker == null) {
-      loadDemoSymbols();
-      return;
-    }
-    final path = await picker();
-    if (path == null || path.isEmpty) return;
-    loadSymbolsFromPath(path);
-  }
-
-  void loadSymbolsFromPath(String path) {
-    if (_dispatchCommand('loadSymbols', path)) return;
-    loadDemoSymbols();
-  }
-
-  void refreshSymbols() {
-    if (symbolFile.isEmpty) return;
-    if (_isDetachedRemote) {
-      _dispatchRemote('loadSymbols', symbolFile);
-      return;
-    }
-    loadSymbolsFromPath(symbolFile);
-  }
-
-  void setSampleRate(double value) {
-    if (_dispatchCommand('setSampleRate', value)) return;
-    sampleRateHz = value;
-    if (displayRefreshMode == 'realtime') _resetPlotRefreshSchedule();
-    _appendLog('采样率已设置为 $sampleRateLabel。');
-    _emitState([_samplingChanges, _logChanges]);
-  }
-
-  void setDisplayRefreshMode(String mode) {
-    if (!const {'standard', 'high', 'realtime'}.contains(mode)) {
-      throw ArgumentError.value(mode, 'mode', '未知的绘图刷新率模式');
-    }
-    if (_dispatchRemote('setDisplayRefreshMode', mode)) return;
-    if (displayRefreshMode == mode) return;
-    displayRefreshMode = mode;
-    _resetPlotRefreshSchedule();
-    _appendLog('绘图刷新率已切换为$displayRefreshLabel。');
-    _emitState([_plotChanges, _logChanges]);
-  }
-
-  void setRttSampleRate(double value) {
-    if (_dispatchCommand('setRttSampleRate', value)) return;
-    rttSampleRateHz = value;
-    _emitState([_samplingChanges]);
-  }
-
-  void setProbeType(String value) {
-    if (_dispatchCommand('setProbeType', value)) return;
-    probeType = value;
-    _emitState([_connectionChanges]);
-  }
-
-  void setTargetName(String value) {
-    if (_dispatchCommand('setTargetName', value)) return;
-    targetName = value;
-    _emitState([_connectionChanges]);
-  }
-
-  void setSwdClock(String value) {
-    if (_dispatchCommand('setSwdClock', value)) return;
-    swdClock = value;
-    _emitState([_connectionChanges]);
-  }
-
-  void setSerialNumber(String value) {
-    if (_dispatchCommand('setSerialNumber', value)) return;
-    if (serialNumber == value) return;
-    serialNumber = value;
-    _emitState([_connectionChanges]);
-  }
-
-  void toggleSampling() {
-    if (_isDetachedRemote && _dispatchRemote('toggleSampling')) return;
-    final sender = backendCommand;
-    samplingPaused = !samplingPaused;
-    _reconcileSamplingClock();
-    if (sender != null) {
-      unawaited(sender('setSamplingPaused', samplingPaused));
-      _emitState([_samplingChanges]);
-      return;
-    }
-    _appendLog(samplingPaused ? '采样已暂停。' : '采样已继续。');
-    _emitState([_samplingChanges, _logChanges]);
-  }
-
-  void togglePlotting() {
-    if (_dispatchRemote('togglePlotting')) return;
-    plottingPaused = !plottingPaused;
-    _resetPlotRefreshSchedule();
-    if (plottingPaused) {
-      _freezePlotIfNeeded();
-    } else if (followLatest) {
-      _clearFrozenPlot();
-    }
-    _appendLog(plottingPaused ? '绘图已暂停，后台继续采样。' : '绘图已恢复。');
-    _emitState([_plotChanges, _plotControlChanges, _logChanges]);
-  }
-
-  void toggleRtt(bool value) {
-    if (_dispatchCommand('toggleRtt', value)) return;
-    rttEnabled = value;
-    _appendLog(value ? 'RTT 采样已启用。' : 'RTT 采样已关闭。');
-    _emitState([_samplingChanges, _logChanges]);
-  }
-
-  void setRttProtocol(String value) {
-    if (value != 'normal' && value != 'plus') return;
-    if (_dispatchCommand('setRttProtocol', value)) return;
-    rttProtocol = value;
-    _appendLog('RTT 协议已设置为 ${value == 'normal' ? 'RTT-Normal' : 'RTT-Plus'}。');
-    _emitState([_samplingChanges, _logChanges]);
-  }
-
-  void toggleFollowLatest() {
-    if (_dispatchRemote('toggleFollowLatest')) return;
-    _resetPlotRefreshSchedule();
-    if (followLatest) {
-      _freezePlotIfNeeded();
-    } else if (!plottingPaused) {
-      _clearFrozenPlot();
-    }
-    followLatest = !followLatest;
-    _emitState([_plotChanges, _plotControlChanges]);
-  }
-
-  void setPlotViewport({
-    required double xMin,
-    required double xMax,
-    double? yMin,
-    double? yMax,
-  }) {
-    final arguments = <String, double>{
-      'xMin': xMin,
-      'xMax': xMax,
-      'yMin': ?yMin,
-      'yMax': ?yMax,
-    };
-    if (_isDetachedRemote && _dispatchRemote('setPlotViewport', arguments)) {
-      return;
-    }
-    final normalizedXMin = math.max(0, math.min(xMin, xMax));
-    final normalizedXMax = math.max(
-      normalizedXMin + 0.001,
-      math.max(xMin, xMax),
-    );
-    final span = (normalizedXMax - normalizedXMin).clamp(0.2, 120).toDouble();
-    final latest = math.max(elapsedSeconds, span);
-    final end = normalizedXMax.clamp(span, latest).toDouble();
-    if (followLatest) _freezePlotIfNeeded();
-    followLatest = false;
-    plotVisibleWindowSeconds = span;
-    _frozenPlotEndSeconds = end;
-    if (yMin != null &&
-        yMax != null &&
-        yMin.isFinite &&
-        yMax.isFinite &&
-        yMax > yMin) {
-      plotAutoY = false;
-      plotYMin = yMin;
-      plotYMax = yMax;
-    }
-    _emitState([_plotChanges, _plotControlChanges]);
-  }
-
-  void configurePlotView(Map<String, dynamic> values) {
-    if (_isDetachedRemote && _dispatchRemote('configurePlotView', values)) {
-      return;
-    }
-    if (values.containsKey('followLatest')) {
-      final nextFollowLatest = values['followLatest'] == true;
-      if (nextFollowLatest != followLatest) {
-        if (nextFollowLatest && !plottingPaused) {
-          _clearFrozenPlot();
-        } else {
-          _freezePlotIfNeeded();
-        }
-        followLatest = nextFollowLatest;
-      }
-    }
-    final xMin = (values['xMin'] as num?)?.toDouble();
-    final xMax = (values['xMax'] as num?)?.toDouble();
-    if (xMin != null && xMax != null && xMin.isFinite && xMax > xMin) {
-      plotVisibleWindowSeconds = (xMax - xMin).clamp(0.2, 120).toDouble();
-      _frozenPlotEndSeconds = xMax;
-    }
-    if (values.containsKey('plotAutoY')) {
-      plotAutoY = values['plotAutoY'] == true;
-    }
-    final yMin = (values['yMin'] as num?)?.toDouble();
-    final yMax = (values['yMax'] as num?)?.toDouble();
-    if (yMin != null && yMax != null && yMin.isFinite && yMax > yMin) {
-      plotYMin = yMin;
-      plotYMax = yMax;
-    }
-    if (values.containsKey('plotShowGrid')) {
-      plotShowGrid = values['plotShowGrid'] == true;
-    }
-    if (values.containsKey('plotShowLegend')) {
-      plotShowLegend = values['plotShowLegend'] == true;
-    }
-    if (values.containsKey('plotMouseXEnabled')) {
-      plotMouseXEnabled = values['plotMouseXEnabled'] == true;
-    }
-    if (values.containsKey('plotMouseYEnabled')) {
-      plotMouseYEnabled = values['plotMouseYEnabled'] == true;
-    }
-    if (values.containsKey('plotInvertX')) {
-      plotInvertX = values['plotInvertX'] == true;
-    }
-    if (values.containsKey('plotInvertY')) {
-      plotInvertY = values['plotInvertY'] == true;
-    }
-    _emitState([_plotChanges, _plotControlChanges]);
-  }
-
-  void showAllPlotSamples() {
-    if (_isDetachedRemote && _dispatchRemote('showAllPlotSamples')) return;
-    if (followLatest) _freezePlotIfNeeded();
-    followLatest = false;
-    final plottedSamples = _watches
-        .where((watch) => watch.plotted)
-        .expand((watch) => watch.samples);
-    var first = double.infinity;
-    var last = -double.infinity;
-    for (final point in plottedSamples) {
-      first = math.min(first, point.dx);
-      last = math.max(last, point.dx);
-    }
-    if (!first.isFinite || !last.isFinite) {
-      first = 0;
-      last = math.max(0.2, elapsedSeconds);
-    }
-    plotVisibleWindowSeconds = math.max(0.2, last - math.max(0, first));
-    _frozenPlotEndSeconds = math.max(last, plotVisibleWindowSeconds);
-    plotAutoY = true;
-    plotYMin = null;
-    plotYMax = null;
-    _emitState([_plotChanges, _plotControlChanges]);
-  }
-
-  void resetPlotView() {
-    if (_isDetachedRemote && _dispatchRemote('resetPlotView')) return;
-    followLatest = true;
-    plotVisibleWindowSeconds = 12;
-    plotAutoY = true;
-    plotYMin = null;
-    plotYMax = null;
-    plotShowGrid = true;
-    plotShowLegend = true;
-    plotMouseXEnabled = true;
-    plotMouseYEnabled = true;
-    plotInvertX = false;
-    plotInvertY = false;
-    if (!plottingPaused) _clearFrozenPlot();
-    _emitState([_plotChanges, _plotControlChanges]);
-  }
-
-  void clearSamples() {
-    if (_dispatchCommand('clearSamples')) return;
-    elapsedSeconds = 0;
-    _resetSamplingElapsedClock();
-    for (final watch in _watches) {
-      watch.samples.clear();
-      watch.totalSampleCount = 0;
-    }
-    _frozenPlotSamples.clear();
-    if (plottingPaused || !followLatest) _frozenPlotEndSeconds = 0;
-    _appendLog('当前采样缓存已清空。');
-    _emitState([
-      _samplingChanges,
-      _telemetryChanges,
-      _plotChanges,
-      _logChanges,
-    ]);
-    _telemetrySyncChanges.emit();
-  }
-
-  void clearLogs() {
-    if (_dispatchRemote('clearLogs')) return;
-    _logs.clear();
-    _emitState([_logChanges]);
-  }
-
-  void resetTarget({required bool halt}) {
-    if (_dispatchCommand('resetTarget', halt)) return;
-    _appendLog(halt ? '目标已复位并暂停。' : '目标已复位并运行。');
-    _emitState([_logChanges]);
-  }
-
-  Future<void> exportCsv() async {
-    if (_isDetachedRemote) {
-      _dispatchRemote('exportCsv');
-      return;
-    }
-    final picker = csvExportPathPicker;
-    if (picker != null) {
-      final path = await picker();
-      if (path == null || path.isEmpty) return;
-      if (_dispatchCommand('exportCsv', path)) return;
-    }
-    _appendLog('导出原始 CSV 任务已创建。');
-    _emitState([_logChanges]);
-  }
-
-  void toggleSymbol(String key) {
-    if (_isDetachedRemote && _dispatchRemote('toggleSymbol', key)) return;
-    if (!_selectedSymbols.add(key)) {
-      _selectedSymbols.remove(key);
-    }
-    _emitState([_symbolChanges]);
-  }
-
-  void selectSymbols(Iterable<String> keys) {
-    final selected = keys.toSet();
-    if (_isDetachedRemote &&
-        _dispatchRemote('selectSymbols', selected.toList())) {
-      return;
-    }
-    _selectedSymbols
-      ..clear()
-      ..addAll(selected);
-    _emitState([_symbolChanges]);
-  }
-
-  void activateSymbol(String key) {
-    if (_isDetachedRemote && _dispatchRemote('activateSymbol', key)) return;
-    selectSymbols([key]);
-    addSelectedToWatch();
-  }
-
-  void addSelectedToWatch() {
-    if (_isDetachedRemote && _dispatchRemote('addSelectedToWatch')) return;
-    final existing = _watches.map((item) => item.symbol.key).toSet();
-    final selected = _symbols
-        .where((item) => _selectedSymbols.contains(item.key))
-        .where((item) => !existing.contains(item.key))
-        .toList();
-    for (final symbol in selected) {
-      _watches.add(
-        WatchItem(
-          symbol: symbol,
-          color: seriesColors[_watches.length % seriesColors.length],
-        ),
-      );
-    }
-    _selectedSymbols.clear();
-    _syncWatchesBackend();
-    _appendLog('已加入 ${selected.length} 个变量到实时调参列表。');
-    _emitState([_symbolChanges, _watchChanges, _plotChanges, _logChanges]);
-  }
-
-  void removeWatch(String key) {
-    removeWatches([key]);
-  }
-
-  void removeWatches(Iterable<String> keys) {
-    final removedKeys = keys.toSet();
-    if (_isDetachedRemote &&
-        _dispatchRemote('removeWatches', removedKeys.toList())) {
-      return;
-    }
-    final previousLength = _watches.length;
-    _watches.removeWhere((item) => removedKeys.contains(item.symbol.key));
-    if (_watches.length == previousLength) return;
-    _syncWatchesBackend();
-    _emitState([_watchChanges, _plotChanges]);
-  }
-
-  void clearWatches() {
-    if (_isDetachedRemote && _dispatchRemote('clearWatches')) return;
-    _watches.clear();
-    _syncWatchesBackend();
-    _appendLog('已清空实时调参列表。');
-    _emitState([_watchChanges, _plotChanges, _logChanges]);
-  }
-
-  void toggleWatchPlot(String key, bool value) {
-    if (_isDetachedRemote &&
-        _dispatchRemote('toggleWatchPlot', {'key': key, 'value': value})) {
-      return;
-    }
-    final watch = _watchByKey(key);
-    if (watch != null) watch.plotted = value;
-    _syncWatchesBackend();
-    _emitState([_watchChanges, _plotChanges]);
-  }
-
-  void setWatchColor(String key, Color color) {
-    setWatchColors([key], color);
-  }
-
-  void setWatchColors(Iterable<String> keys, Color color) {
-    final colorKeys = keys.toSet();
-    if (_isDetachedRemote &&
-        _dispatchRemote('setWatchColors', {
-          'keys': colorKeys.toList(),
-          'color': color.toARGB32(),
-        })) {
-      return;
-    }
-    var changed = false;
-    for (final watch in _watches) {
-      if (colorKeys.contains(watch.symbol.key) && watch.color != color) {
-        watch.color = color;
-        changed = true;
-      }
-    }
-    if (!changed) return;
-    _syncWatchesBackend();
-    _emitState([_watchChanges, _plotChanges]);
-  }
-
-  void setOnlyWatchesPlotted(Iterable<String> keys) {
-    final plottedKeys = keys.toSet();
-    _setWatchPlotStates(
-      'setOnlyWatchesPlotted',
-      plottedKeys.toList(),
-      (watch) => plottedKeys.contains(watch.symbol.key),
-    );
-  }
-
-  void setAllWatchesPlotted(bool plotted) {
-    _setWatchPlotStates('setAllWatchesPlotted', plotted, (_) => plotted);
-  }
-
-  void invertWatchPlots(Iterable<String> keys) {
-    final invertedKeys = keys.toSet();
-    _setWatchPlotStates(
-      'invertWatchPlots',
-      invertedKeys.toList(),
-      (watch) => invertedKeys.contains(watch.symbol.key)
-          ? !watch.plotted
-          : watch.plotted,
-    );
-  }
-
-  void _setWatchPlotStates(
-    String remoteMethod,
-    Object? remoteArguments,
-    bool Function(WatchItem watch) plottedForWatch,
-  ) {
-    if (_isDetachedRemote && _dispatchRemote(remoteMethod, remoteArguments)) {
-      return;
-    }
-    var changed = false;
-    for (final watch in _watches) {
-      final plotted = plottedForWatch(watch);
-      if (watch.plotted != plotted) {
-        watch.plotted = plotted;
-        changed = true;
-      }
-    }
-    if (!changed) return;
-    _syncWatchesBackend();
-    _emitState([_watchChanges, _plotChanges]);
-  }
-
-  void writeWatch(String key, String input) {
-    if (_dispatchCommand('writeWatch', {'key': key, 'value': input})) return;
-    final value = double.tryParse(input);
-    final watch = _watchByKey(key);
-    if (value == null || watch == null) {
-      _appendLog('变量写入失败：$input 不是有效数值。');
-    } else {
-      watch.value = value;
-      _appendLog('${watch.symbol.name} 已写入 $input，并完成回读验证。');
-    }
-    _emitState([_telemetryChanges, _plotChanges, _logChanges]);
   }
 
   WatchItem? _watchByKey(String key) {
@@ -728,20 +170,20 @@ class TakeALookController extends ChangeNotifier {
     return null;
   }
 
-  bool _dispatchRemote(String method, [Object? arguments]) {
+  bool _dispatchRemote(ControllerCommand command, [Object? arguments]) {
     final sender = remoteCommand;
     if (sender == null) return false;
-    unawaited(sender(method, arguments));
+    unawaited(sender(command, arguments));
     return true;
   }
 
-  bool _dispatchCommand(String method, [Object? arguments]) {
+  bool _dispatchCommand(ControllerCommand command, [Object? arguments]) {
     final sender = backendCommand;
     if (sender != null) {
-      unawaited(sender(method, arguments));
+      unawaited(sender(command, arguments));
       return true;
     }
-    return _dispatchRemote(method, arguments);
+    return _dispatchRemote(command, arguments);
   }
 
   bool get _isDetachedRemote => remoteCommand != null && backendCommand == null;
@@ -750,7 +192,7 @@ class TakeALookController extends ChangeNotifier {
     final sender = backendCommand;
     if (sender == null) return;
     unawaited(
-      sender('setWatches', {
+      sender(ControllerCommand.setWatches, {
         'watches': [
           for (final watch in _watches)
             {
@@ -764,106 +206,11 @@ class TakeALookController extends ChangeNotifier {
     );
   }
 
-  Future<Map<String, dynamic>> handleCommand(
-    String method,
+  Future<JsonObject> handleCommand(
+    ControllerCommand command,
     Object? arguments,
-  ) async {
-    switch (method) {
-      case 'toggleConnection':
-        await toggleConnection();
-      case 'loadSymbols':
-        if (arguments is String && arguments.isNotEmpty) {
-          loadSymbolsFromPath(arguments);
-        } else {
-          await chooseSymbolFile();
-        }
-      case 'setSampleRate':
-        setSampleRate((arguments as num).toDouble());
-      case 'setDisplayRefreshMode':
-        setDisplayRefreshMode(arguments as String);
-      case 'setRttSampleRate':
-        setRttSampleRate((arguments as num).toDouble());
-      case 'setProbeType':
-        setProbeType(arguments as String);
-      case 'setTargetName':
-        setTargetName(arguments as String);
-      case 'setSwdClock':
-        setSwdClock(arguments as String);
-      case 'setSerialNumber':
-        setSerialNumber(arguments as String);
-      case 'setUiScale':
-        setUiScale((arguments as num).toDouble());
-      case 'toggleSampling':
-        toggleSampling();
-      case 'setSamplingPaused':
-        if (samplingPaused != (arguments == true)) toggleSampling();
-      case 'togglePlotting':
-        togglePlotting();
-      case 'toggleRtt':
-        toggleRtt(arguments == true);
-      case 'setRttProtocol':
-        setRttProtocol(arguments as String);
-      case 'toggleFollowLatest':
-        toggleFollowLatest();
-      case 'setPlotViewport':
-        final values = Map<String, dynamic>.from(arguments as Map);
-        setPlotViewport(
-          xMin: (values['xMin'] as num).toDouble(),
-          xMax: (values['xMax'] as num).toDouble(),
-          yMin: (values['yMin'] as num?)?.toDouble(),
-          yMax: (values['yMax'] as num?)?.toDouble(),
-        );
-      case 'configurePlotView':
-        configurePlotView(Map<String, dynamic>.from(arguments as Map));
-      case 'showAllPlotSamples':
-        showAllPlotSamples();
-      case 'resetPlotView':
-        resetPlotView();
-      case 'clearSamples':
-        clearSamples();
-      case 'clearLogs':
-        clearLogs();
-      case 'resetTarget':
-        resetTarget(halt: arguments == true);
-      case 'exportCsv':
-        await exportCsv();
-      case 'toggleSymbol':
-        toggleSymbol(arguments as String);
-      case 'selectSymbols':
-        selectSymbols((arguments as List).cast<String>());
-      case 'activateSymbol':
-        activateSymbol(arguments as String);
-      case 'addSelectedToWatch':
-        addSelectedToWatch();
-      case 'removeWatch':
-        removeWatch(arguments as String);
-      case 'removeWatches':
-        removeWatches((arguments as List).cast<String>());
-      case 'clearWatches':
-        clearWatches();
-      case 'toggleWatchPlot':
-        final values = Map<String, dynamic>.from(arguments as Map);
-        toggleWatchPlot(values['key'] as String, values['value'] as bool);
-      case 'setWatchColor':
-        final values = Map<String, dynamic>.from(arguments as Map);
-        setWatchColor(values['key'] as String, Color(values['color'] as int));
-      case 'setWatchColors':
-        final values = Map<String, dynamic>.from(arguments as Map);
-        setWatchColors(
-          (values['keys'] as List).cast<String>(),
-          Color(values['color'] as int),
-        );
-      case 'setOnlyWatchesPlotted':
-        setOnlyWatchesPlotted((arguments as List).cast<String>());
-      case 'setAllWatchesPlotted':
-        setAllWatchesPlotted(arguments as bool);
-      case 'invertWatchPlots':
-        invertWatchPlots((arguments as List).cast<String>());
-      case 'writeWatch':
-        final values = Map<String, dynamic>.from(arguments as Map);
-        writeWatch(values['key'] as String, values['value'] as String);
-    }
-    return stateSnapshot();
+  ) {
+    return executeControllerCommand(this, command, arguments);
   }
 
   void _tick(Timer timer) {
@@ -878,27 +225,19 @@ class TakeALookController extends ChangeNotifier {
           math.sin(_phase * (1.2 + index * 0.23)) * (index + 1) +
           math.sin(_phase * 8.0 + index) * 0.12;
       watch.value = value;
-      _appendWatchSample(watch, Offset(elapsedSeconds, value));
+      telemetryStore.append(watch, Offset(elapsedSeconds, value));
     }
     _emitTelemetry();
   }
 
   void addLog(String message) {
     _appendLog(message);
-    _emitState([_logChanges]);
+    _emitState([signals.logs]);
   }
 
   void _appendLog(String message) {
     _logs.add(LogEntry(message));
     if (_logs.length > 500) _logs.removeAt(0);
-  }
-
-  void _appendWatchSample(WatchItem watch, Offset point) {
-    watch.samples.add(point);
-    watch.totalSampleCount += 1;
-    if (watch.samples.length > 1800) {
-      watch.samples.removeRange(0, watch.samples.length - 1800);
-    }
   }
 
   void _freezePlotIfNeeded() {
@@ -925,18 +264,21 @@ class TakeALookController extends ChangeNotifier {
     addLog(message);
   }
 
-  void _emitState(Iterable<_ControllerSignal> signals, {bool sync = true}) {
-    for (final signal in signals.toSet()) {
+  void _emitState(
+    Iterable<ControllerSignal> changedSignals, {
+    bool sync = true,
+  }) {
+    for (final signal in changedSignals.toSet()) {
       signal.emit();
     }
-    if (sync) _stateSyncChanges.emit();
+    if (sync) signals.stateSync.emit();
     notifyListeners();
   }
 
   void _emitTelemetry({bool sync = true}) {
     _telemetryDisplayPending = true;
     _schedulePlotRefresh();
-    if (sync) _telemetrySyncChanges.emit();
+    if (sync) signals.telemetrySync.emit();
     notifyListeners();
   }
 
@@ -954,12 +296,12 @@ class TakeALookController extends ChangeNotifier {
   void _emitDisplayFrame() {
     if (_telemetryDisplayPending) {
       _telemetryDisplayPending = false;
-      _telemetryChanges.emit();
+      signals.telemetry.emit();
     }
     if (!plottingPaused &&
         followLatest &&
         _watches.any((watch) => watch.plotted)) {
-      _plotChanges.emit();
+      signals.plot.emit();
     }
   }
 
@@ -968,7 +310,7 @@ class TakeALookController extends ChangeNotifier {
     _plotRefreshTimer = null;
     if (_telemetryDisplayPending && !_disposed) {
       _telemetryDisplayPending = false;
-      _telemetryChanges.emit();
+      signals.telemetry.emit();
     }
     _startPlotRefreshClock();
   }
@@ -1001,7 +343,7 @@ class TakeALookController extends ChangeNotifier {
       if (connectionStatus == ConnectionStatus.disconnected) {
         _samplingElapsedBaseSeconds = 0;
       }
-      _clockChanges.emit();
+      signals.clock.emit();
       return;
     }
     if (!_samplingElapsedStopwatch.isRunning) {
@@ -1010,14 +352,14 @@ class TakeALookController extends ChangeNotifier {
     _samplingClockTimer ??= Timer.periodic(const Duration(milliseconds: 10), (
       _,
     ) {
-      if (!_disposed) _clockChanges.emit();
+      if (!_disposed) signals.clock.emit();
     });
   }
 
   void _resetSamplingElapsedClock() {
     _samplingElapsedBaseSeconds = 0;
     _samplingElapsedStopwatch.reset();
-    _clockChanges.emit();
+    signals.clock.emit();
   }
 
   @override
@@ -1028,17 +370,7 @@ class TakeALookController extends ChangeNotifier {
     _samplingClockTimer?.cancel();
     _samplingElapsedStopwatch.stop();
     _uiScale.dispose();
-    _connectionChanges.dispose();
-    _samplingChanges.dispose();
-    _symbolChanges.dispose();
-    _watchChanges.dispose();
-    _telemetryChanges.dispose();
-    _plotChanges.dispose();
-    _plotControlChanges.dispose();
-    _clockChanges.dispose();
-    _logChanges.dispose();
-    _stateSyncChanges.dispose();
-    _telemetrySyncChanges.dispose();
+    signals.dispose();
     super.dispose();
   }
 }

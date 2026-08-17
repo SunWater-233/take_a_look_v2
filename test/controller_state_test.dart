@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:take_a_look_v2/src/controller.dart';
+import 'package:take_a_look_v2/src/protocol/events.dart';
 import 'package:take_a_look_v2/src/models.dart';
 
 void main() {
@@ -241,7 +242,7 @@ void main() {
       source.toggleSymbol(demoSymbols.first.key);
       source.addSelectedToWatch();
       final key = source.watches.single.symbol.key;
-      source.applyBackendEvent('samples', {
+      source.applyBackendEvent(BackendEventType.samples, {
         'frames': [
           {
             'elapsed': 1,
@@ -252,7 +253,7 @@ void main() {
       final target = TakeALookController()..applySnapshot(source.snapshot());
       var cursor = source.telemetryCursors();
 
-      source.applyBackendEvent('samples', {
+      source.applyBackendEvent(BackendEventType.samples, {
         'frames': [
           {
             'elapsed': 2,
@@ -277,7 +278,7 @@ void main() {
       target.applyTelemetryDelta(cleared);
       expect(target.watches.single.samples, isEmpty);
 
-      source.applyBackendEvent('samples', {
+      source.applyBackendEvent(BackendEventType.samples, {
         'frames': [
           for (var index = 0; index < 1801; index += 1)
             {

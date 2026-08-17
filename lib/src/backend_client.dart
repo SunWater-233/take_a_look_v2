@@ -3,9 +3,15 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:file_selector/file_selector.dart';
+import 'backend_transport.dart';
+import 'protocol/commands.dart';
+import 'protocol/events.dart';
 
-typedef BackendEventHandler = void Function(String event, Object? params);
+export 'backend_transport.dart';
+export 'file_pickers.dart';
+
+typedef BackendEventHandler =
+    void Function(BackendEventType event, Object? params);
 
 class BackendException implements Exception {
   const BackendException(this.code, this.message, [this.details]);
@@ -69,26 +75,26 @@ class BackendClient {
           .transform(const LineSplitter())
           .listen((line) {
             if (line.trim().isNotEmpty) {
-              eventHandler?.call('log', {
+              eventHandler?.call(BackendEventType.log, {
                 'level': 'error',
                 'message': '后端：${line.trim()}',
               });
             }
           });
       unawaited(process.exitCode.then(_handleExit));
-      final handshake = await request('handshake');
+      final handshake = await request(BackendMethod.handshake);
       final state = _map(handshake['state']);
       if (state != null) {
         _state = state;
-        eventHandler?.call('state', state);
+        eventHandler?.call(BackendEventType.state, state);
       }
-      eventHandler?.call('log', {
+      eventHandler?.call(BackendEventType.log, {
         'level': 'info',
         'message': '本机硬件后端已启动，协议版本 $protocolVersion。',
       });
     } catch (error) {
       await close(force: true);
-      eventHandler?.call('error', {
+      eventHandler?.call(BackendEventType.error, {
         'code': 'startup_failed',
         'message': '无法启动本机硬件后端。',
         'details': error.toString(),
@@ -96,20 +102,20 @@ class BackendClient {
     }
   }
 
-  Future<void> command(String method, Object? arguments) async {
+  Future<void> command(ControllerCommand command, Object? arguments) async {
     try {
-      final call = _translateCommand(method, arguments);
+      final call = BackendCommandMapper.translate(command, arguments, _state);
       if (call == null) return;
       await request(call.method, call.params);
     } catch (error) {
       if (error is BackendException) {
-        eventHandler?.call('error', {
+        eventHandler?.call(BackendEventType.error, {
           'code': error.code,
           'message': error.message,
           if (error.details != null) 'details': error.details,
         });
       } else {
-        eventHandler?.call('error', {
+        eventHandler?.call(BackendEventType.error, {
           'code': 'command_failed',
           'message': '后端命令失败。',
           'details': error.toString(),
@@ -119,7 +125,7 @@ class BackendClient {
   }
 
   Future<Map<String, dynamic>> request(
-    String method, [
+    BackendMethod method, [
     Map<String, Object?> params = const {},
   ]) async {
     final process = _process;
@@ -133,7 +139,7 @@ class BackendClient {
       jsonEncode({
         'v': protocolVersion,
         'id': requestId,
-        'method': method,
+        'method': method.wireName,
         'params': params,
       }),
     );
@@ -142,7 +148,7 @@ class BackendClient {
       const Duration(seconds: 30),
       onTimeout: () {
         _pending.remove(requestId);
-        throw BackendException('timeout', '后端命令超时：$method');
+        throw BackendException('timeout', '后端命令超时：${method.wireName}');
       },
     );
   }
@@ -153,7 +159,9 @@ class BackendClient {
     final process = _process;
     if (process != null && !force) {
       try {
-        await request('shutdown').timeout(const Duration(seconds: 2));
+        await request(
+          BackendMethod.shutdown,
+        ).timeout(const Duration(seconds: 2));
       } catch (_) {}
     }
     if (force) process?.kill();
@@ -195,7 +203,7 @@ class BackendClient {
           final patch = _map(params);
           if (patch != null) _state = {..._state, ...patch};
         }
-        eventHandler?.call(event, params);
+        eventHandler?.call(BackendEventType.parse(event), params);
         return;
       }
       final id = message['id'];
@@ -259,17 +267,17 @@ class BackendClient {
     final previousSequence = _lastSampleSequence;
     if (previousSequence != null &&
         batch.sequence != ((previousSequence + 1) & 0xFFFFFFFF)) {
-      eventHandler?.call('log', {
+      eventHandler?.call(BackendEventType.log, {
         'level': 'warning',
         'message': '后端采样序号不连续：$previousSequence -> ${batch.sequence}',
       });
     }
     _lastSampleSequence = batch.sequence;
-    eventHandler?.call('samples', batch);
+    eventHandler?.call(BackendEventType.samples, batch);
   }
 
   void _handleTransportError(Object error) {
-    eventHandler?.call('error', {
+    eventHandler?.call(BackendEventType.error, {
       'code': 'protocol_error',
       'message': '后端协议错误。',
       'details': error.toString(),
@@ -288,65 +296,12 @@ class BackendClient {
       }
     }
     _pending.clear();
-    eventHandler?.call('state', _state);
-    eventHandler?.call('error', {
+    eventHandler?.call(BackendEventType.state, _state);
+    eventHandler?.call(BackendEventType.error, {
       'code': 'process_exited',
       'message': '本机硬件后端意外退出。',
       'details': '退出代码：$exitCode',
     });
-  }
-
-  _BackendCall? _translateCommand(String method, Object? arguments) {
-    switch (method) {
-      case 'toggleConnection':
-        return const _BackendCall('toggleConnection');
-      case 'loadSymbols':
-        return _BackendCall('loadSymbols', {'path': arguments});
-      case 'setSampleRate':
-        return _BackendCall('setConfig', {'sampleRateHz': arguments});
-      case 'setRttSampleRate':
-        return _BackendCall('setConfig', {'rttSampleRateHz': arguments});
-      case 'setProbeType':
-        return _BackendCall('setConfig', {'probeType': arguments});
-      case 'setTargetName':
-        return _BackendCall('setConfig', {'targetName': arguments});
-      case 'setSwdClock':
-        return _BackendCall('setConfig', {'swdClock': arguments});
-      case 'setSerialNumber':
-        return _BackendCall('setConfig', {'serialNumber': arguments});
-      case 'toggleSampling':
-        return _BackendCall('setSamplingPaused', {
-          'paused': !(_state['samplingPaused'] == true),
-        });
-      case 'setSamplingPaused':
-        return _BackendCall('setSamplingPaused', {'paused': arguments == true});
-      case 'toggleRtt':
-        return _BackendCall('setRtt', {
-          'enabled': arguments == true,
-          'protocol': _state['rttProtocol'] ?? 'normal',
-          'rateHz': _state['rttSampleRateHz'] ?? 1000,
-        });
-      case 'setRttProtocol':
-        return _BackendCall('setRtt', {
-          'enabled': _state['rttEnabled'] == true,
-          'protocol': arguments,
-          'rateHz': _state['rttSampleRateHz'] ?? 1000,
-        });
-      case 'clearSamples':
-        return const _BackendCall('clearSamples');
-      case 'resetTarget':
-        return _BackendCall('resetTarget', {'halt': arguments == true});
-      case 'exportCsv':
-        return _BackendCall('exportCsv', {'path': arguments});
-      case 'setWatches':
-      case 'writeWatch':
-        return _BackendCall(
-          method,
-          Map<String, Object?>.from(arguments as Map),
-        );
-      default:
-        return null;
-    }
   }
 
   static Directory _findBackendDirectory() {
@@ -427,250 +382,6 @@ class BackendClient {
   static Map<String, dynamic>? _map(Object? value) {
     return value is Map ? Map<String, dynamic>.from(value) : null;
   }
-}
-
-class BackendSampleBatch {
-  const BackendSampleBatch({
-    required this.schemaId,
-    required this.sequence,
-    required this.keys,
-    required this.elapsedSeconds,
-    required this.values,
-    required this.validity,
-    required this.validityBytesPerFrame,
-  });
-
-  final int schemaId;
-  final int sequence;
-  final List<String> keys;
-  final Float64List elapsedSeconds;
-  final Float64List values;
-  final Uint8List validity;
-  final int validityBytesPerFrame;
-
-  int get frameCount => elapsedSeconds.length;
-  int get variableCount => keys.length;
-
-  bool hasValue(int frameIndex, int variableIndex) {
-    final byte =
-        validity[frameIndex * validityBytesPerFrame + variableIndex ~/ 8];
-    return byte & (1 << (variableIndex % 8)) != 0;
-  }
-
-  double valueAt(int frameIndex, int variableIndex) {
-    return values[frameIndex * variableCount + variableIndex];
-  }
-}
-
-int backendSampleSchemaId(Uint8List payload) {
-  if (payload.length < 15) {
-    throw const FormatException('Backend sample payload is truncated');
-  }
-  return ByteData.sublistView(payload).getUint32(1, Endian.little);
-}
-
-BackendSampleBatch decodeBackendSamplePayload(
-  Uint8List payload,
-  List<String> keys,
-) {
-  if (payload.length < 15) {
-    throw const FormatException('Backend sample payload is truncated');
-  }
-  final data = ByteData.sublistView(payload);
-  if (data.getUint8(0) != 1) {
-    throw FormatException(
-      'Unsupported sample payload version ${data.getUint8(0)}',
-    );
-  }
-  final schemaId = data.getUint32(1, Endian.little);
-  final sequence = data.getUint32(5, Endian.little);
-  final frameCount = data.getUint32(9, Endian.little);
-  final variableCount = data.getUint16(13, Endian.little);
-  if (variableCount != keys.length) {
-    throw FormatException(
-      'Sample schema $schemaId expected ${keys.length} values, got $variableCount',
-    );
-  }
-
-  final validityBytes = (variableCount + 7) ~/ 8;
-  final minimumFrameBytes = 8 + validityBytes;
-  if (frameCount > (payload.length - 15) ~/ minimumFrameBytes) {
-    throw const FormatException('Backend sample frame count is invalid');
-  }
-  if (frameCount * variableCount > 16 * 1024 * 1024) {
-    throw const FormatException('Backend sample matrix is too large');
-  }
-  final elapsed = Float64List(frameCount);
-  final values = Float64List(frameCount * variableCount);
-  final validity = Uint8List(frameCount * validityBytes);
-  var offset = 15;
-  void requireBytes(int count) {
-    if (offset + count > payload.length) {
-      throw const FormatException('Backend sample payload is truncated');
-    }
-  }
-
-  for (var frame = 0; frame < frameCount; frame += 1) {
-    requireBytes(8 + validityBytes);
-    elapsed[frame] = data.getFloat64(offset, Endian.little);
-    offset += 8;
-    final frameValidityOffset = frame * validityBytes;
-    validity.setRange(
-      frameValidityOffset,
-      frameValidityOffset + validityBytes,
-      payload,
-      offset,
-    );
-    offset += validityBytes;
-    for (var variable = 0; variable < variableCount; variable += 1) {
-      final present =
-          validity[frameValidityOffset + variable ~/ 8] &
-              (1 << (variable % 8)) !=
-          0;
-      if (!present) continue;
-      requireBytes(8);
-      values[frame * variableCount + variable] = data.getFloat64(
-        offset,
-        Endian.little,
-      );
-      offset += 8;
-    }
-  }
-  if (offset != payload.length) {
-    throw const FormatException('Backend sample payload has trailing bytes');
-  }
-  return BackendSampleBatch(
-    schemaId: schemaId,
-    sequence: sequence,
-    keys: List<String>.unmodifiable(keys),
-    elapsedSeconds: elapsed,
-    values: values,
-    validity: validity,
-    validityBytesPerFrame: validityBytes,
-  );
-}
-
-class BackendStreamDecoder {
-  BackendStreamDecoder({
-    required this.onJsonLine,
-    required this.onSamplePayload,
-  });
-
-  static const _maxPayloadLength = 64 * 1024 * 1024;
-
-  final void Function(String line) onJsonLine;
-  final void Function(Uint8List payload) onSamplePayload;
-  Uint8List _buffer = Uint8List(4096);
-  int _start = 0;
-  int _end = 0;
-
-  void add(List<int> bytes) {
-    if (bytes.isEmpty) return;
-    _ensureCapacity(bytes.length);
-    _buffer.setRange(_end, _end + bytes.length, bytes);
-    _end += bytes.length;
-
-    while (_start < _end) {
-      if (_buffer[_start] == 0) {
-        if (_end - _start < 5) break;
-        final length = _uint32At(_start + 1);
-        if (length > _maxPayloadLength) {
-          throw FormatException('Backend frame is too large: $length bytes');
-        }
-        if (_end - _start < 5 + length) break;
-        final payload = Uint8List.fromList(
-          _buffer.sublist(_start + 5, _start + 5 + length),
-        );
-        _start += 5 + length;
-        onSamplePayload(payload);
-        continue;
-      }
-
-      var newline = _start;
-      while (newline < _end && _buffer[newline] != 0x0A) {
-        newline += 1;
-      }
-      if (newline == _end) break;
-      var lineEnd = newline;
-      if (lineEnd > _start && _buffer[lineEnd - 1] == 0x0D) {
-        lineEnd -= 1;
-      }
-      final line = utf8.decode(_buffer.sublist(_start, lineEnd));
-      _start = newline + 1;
-      if (line.trim().isNotEmpty) onJsonLine(line);
-    }
-    _compactIfNeeded();
-  }
-
-  void reset() {
-    _start = 0;
-    _end = 0;
-  }
-
-  int _uint32At(int offset) {
-    return _buffer[offset] |
-        (_buffer[offset + 1] << 8) |
-        (_buffer[offset + 2] << 16) |
-        (_buffer[offset + 3] << 24);
-  }
-
-  void _ensureCapacity(int additionalBytes) {
-    final required = _end + additionalBytes;
-    if (required <= _buffer.length) return;
-    if (_start > 0) {
-      _buffer.setRange(0, _end - _start, _buffer, _start);
-      _end -= _start;
-      _start = 0;
-    }
-    if (_end + additionalBytes <= _buffer.length) return;
-    var capacity = _buffer.length;
-    while (capacity < _end + additionalBytes) {
-      capacity *= 2;
-    }
-    final expanded = Uint8List(capacity)..setRange(0, _end, _buffer);
-    _buffer = expanded;
-  }
-
-  void _compactIfNeeded() {
-    if (_start == _end) {
-      reset();
-    } else if (_start > _buffer.length ~/ 2) {
-      _buffer.setRange(0, _end - _start, _buffer, _start);
-      _end -= _start;
-      _start = 0;
-    }
-  }
-}
-
-Future<String?> pickSymbolFile() async {
-  final file = await openFile(
-    acceptedTypeGroups: const [
-      XTypeGroup(label: 'ELF/AXF 固件符号', extensions: ['elf', 'axf']),
-    ],
-  );
-  return file?.path;
-}
-
-Future<String?> pickCsvExportPath() async {
-  final now = DateTime.now();
-  String two(int value) => value.toString().padLeft(2, '0');
-  final name =
-      'raw_samples_${now.year}${two(now.month)}${two(now.day)}_'
-      '${two(now.hour)}${two(now.minute)}${two(now.second)}.csv';
-  final location = await getSaveLocation(
-    suggestedName: name,
-    acceptedTypeGroups: const [
-      XTypeGroup(label: 'CSV 文件', extensions: ['csv']),
-    ],
-  );
-  return location?.path;
-}
-
-class _BackendCall {
-  const _BackendCall(this.method, [this.params = const {}]);
-
-  final String method;
-  final Map<String, Object?> params;
 }
 
 class _PythonLaunch {

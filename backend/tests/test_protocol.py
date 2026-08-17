@@ -4,10 +4,13 @@ import unittest
 
 import json
 import struct
+from pathlib import Path
 
 from take_a_look_backend.protocol import (
+    EventName,
     PROTOCOL_VERSION,
     ProtocolError,
+    RpcMethod,
     encode,
     encode_sample_batch,
     error_response,
@@ -22,7 +25,7 @@ class ProtocolTests(unittest.TestCase):
         request_id, method, params = parse_request('{"v":2,"id":7,"method":"getState","params":{}}')
 
         self.assertEqual(request_id, 7)
-        self.assertEqual(method, "getState")
+        self.assertIs(method, RpcMethod.GET_STATE)
         self.assertEqual(params, {})
 
     def test_rejects_invalid_version_and_params(self) -> None:
@@ -33,7 +36,7 @@ class ProtocolTests(unittest.TestCase):
 
     def test_response_and_event_keep_the_protocol_version(self) -> None:
         self.assertEqual(response("a", {"ok": True})["v"], PROTOCOL_VERSION)
-        self.assertEqual(event("samples", {})["event"], "samples")
+        self.assertEqual(event(EventName.SAMPLES, {})["event"], "samples")
         self.assertEqual(error_response("a", ProtocolError("bad", "No"))["error"], {"code": "bad", "message": "No"})
 
     def test_sample_batch_uses_schema_order_and_validity_bits(self) -> None:
@@ -64,7 +67,14 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(offset + 8, len(payload))
 
     def test_wire_encoding_is_ascii_safe_and_preserves_unicode(self) -> None:
-        payload = encode(event("log", {"message": "探针已连接"}))
+        payload = encode(event(EventName.LOG, {"message": "探针已连接"}))
 
         self.assertTrue(payload.isascii())
         self.assertEqual(json.loads(payload)["params"]["message"], "探针已连接")
+
+    def test_manifest_matches_python_protocol_enums(self) -> None:
+        path = Path(__file__).parents[1] / "protocol_manifest.json"
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["version"], PROTOCOL_VERSION)
+        self.assertEqual(set(manifest["methods"]), {method.value for method in RpcMethod})
+        self.assertEqual(set(manifest["events"]), {name.value for name in EventName})

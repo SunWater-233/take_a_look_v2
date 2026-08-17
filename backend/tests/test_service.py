@@ -9,7 +9,7 @@ from pathlib import Path
 
 from take_a_look_backend.backends.pyocd_memory import PyOcdConnectionConfig
 from take_a_look_backend.models import SymbolInfo
-from take_a_look_backend.protocol import ProtocolError
+from take_a_look_backend.protocol import EventName, ProtocolError, RpcMethod
 from take_a_look_backend.service import BackendService
 
 
@@ -56,7 +56,7 @@ class _FakeRtt:
 
 class BackendServiceTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.events: list[tuple[str, object]] = []
+        self.events: list[tuple[EventName, object]] = []
         self.events_lock = threading.Lock()
         self.memory = _FakeMemory()
         self.symbols = [
@@ -74,11 +74,11 @@ class BackendServiceTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.service.close()
 
-    def _event(self, name: str, params: object) -> None:
+    def _event(self, name: EventName, params: object) -> None:
         with self.events_lock:
             self.events.append((name, params))
 
-    def _eventually(self, name: str, timeout_s: float = 1.0) -> object:
+    def _eventually(self, name: EventName, timeout_s: float = 1.0) -> object:
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
             with self.events_lock:
@@ -92,33 +92,33 @@ class BackendServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             symbol_path = Path(directory) / "firmware.axf"
             symbol_path.write_bytes(b"not parsed by injected loader")
-            loaded = self.service.handle("loadSymbols", {"path": str(symbol_path)})
+            loaded = self.service.handle(RpcMethod.LOAD_SYMBOLS, {"path": str(symbol_path)})
             key = self.symbols[0].key
             self.assertEqual(len(loaded["state"]["symbols"]), 2)  # type: ignore[index]
             self.assertEqual(loaded["state"]["symbols"][0]["section"], ".data")  # type: ignore[index]
 
             watch_result = self.service.handle(
-                "setWatches", {"watches": [{"key": key, "color": "#00ff00", "plotted": True}]}
+                RpcMethod.SET_WATCHES, {"watches": [{"key": key, "color": "#00ff00", "plotted": True}]}
             )
             self.assertNotIn("symbols", watch_result["state"])  # type: ignore[operator]
-            connected = self.service.handle("connect", {"targetName": "STM32F407", "swdClock": "2 MHz"})
+            connected = self.service.handle(RpcMethod.CONNECT, {"targetName": "STM32F407", "swdClock": "2 MHz"})
             self.assertEqual(connected["state"]["connectionStatus"], "connected")  # type: ignore[index]
             self.assertEqual(self.memory.connected.frequency_hz, 2_000_000)  # type: ignore[union-attr]
 
-            samples = self._eventually("samples")
+            samples = self._eventually(EventName.SAMPLES)
             self.assertGreaterEqual(len(samples["frames"]), 1)  # type: ignore[index]
-            self.service.handle("clearSamples", {})
-            self._eventually("samplesCleared")
+            self.service.handle(RpcMethod.CLEAR_SAMPLES, {})
+            self._eventually(EventName.SAMPLES_CLEARED)
             with self.events_lock:
                 self.events.clear()
-            self._eventually("samples")
-            self.service.handle("writeWatch", {"key": key, "value": "0x2A"})
+            self._eventually(EventName.SAMPLES)
+            self.service.handle(RpcMethod.WRITE_WATCH, {"key": key, "value": "0x2A"})
             self.assertEqual(self.memory.values[key], 42)
-            self.service.handle("resetTarget", {"halt": True})
+            self.service.handle(RpcMethod.RESET_TARGET, {"halt": True})
             self.assertEqual(self.memory.reset_calls, [True])
 
             export_path = Path(directory) / "samples"
-            exported = self.service.handle("exportCsv", {"path": str(export_path)})
+            exported = self.service.handle(RpcMethod.EXPORT_CSV, {"path": str(export_path)})
             self.assertEqual(Path(exported["path"]).suffix, ".csv")
             with Path(exported["path"]).open(encoding="utf-8-sig") as handle:
                 rows = list(csv.reader(handle))
@@ -129,22 +129,22 @@ class BackendServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             symbol_path = Path(directory) / "firmware.elf"
             symbol_path.touch()
-            self.service.handle("loadSymbols", {"path": str(symbol_path)})
+            self.service.handle(RpcMethod.LOAD_SYMBOLS, {"path": str(symbol_path)})
             with self.assertRaisesRegex(ProtocolError, "unknown symbol"):
-                self.service.handle("setWatches", {"watches": [{"key": "missing"}]})
+                self.service.handle(RpcMethod.SET_WATCHES, {"watches": [{"key": "missing"}]})
             readonly = self.symbols[1].key
-            self.service.handle("setWatches", {"watches": [{"key": readonly}]})
+            self.service.handle(RpcMethod.SET_WATCHES, {"watches": [{"key": readonly}]})
             with self.assertRaisesRegex(ProtocolError, "read-only"):
-                self.service.handle("writeWatch", {"key": readonly, "value": "1"})
+                self.service.handle(RpcMethod.WRITE_WATCH, {"key": readonly, "value": "1"})
 
     def test_config_and_pause_round_trip_in_state(self) -> None:
         state = self.service.handle(
-            "setConfig",
+            RpcMethod.SET_CONFIG,
             {"probeType": "J-Link", "serialNumber": "123", "sampleRateHz": 200, "rttSampleRateHz": 500},
         )["state"]
         self.assertEqual(state["probeType"], "J-Link")
         self.assertEqual(state["sampleRateHz"], 200.0)
-        paused = self.service.handle("setSamplingPaused", {"paused": True})["state"]
+        paused = self.service.handle(RpcMethod.SET_SAMPLING_PAUSED, {"paused": True})["state"]
         self.assertTrue(paused["samplingPaused"])
         self.assertNotIn("symbols", paused)
         self.assertNotIn("watches", paused)

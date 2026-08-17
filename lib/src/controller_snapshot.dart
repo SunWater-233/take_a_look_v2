@@ -11,12 +11,24 @@ extension TakeALookControllerSnapshot on TakeALookController {
       'symbolFile': symbolFile,
       'sampleRateHz': sampleRateHz,
       'rttSampleRateHz': rttSampleRateHz,
+      'displayRefreshMode': displayRefreshMode,
+      'samplingElapsedSeconds': samplingElapsedSeconds,
       'elapsedSeconds': elapsedSeconds,
       'samplingPaused': samplingPaused,
       'plottingPaused': plottingPaused,
       'rttEnabled': rttEnabled,
       'rttProtocol': rttProtocol,
       'followLatest': followLatest,
+      'plotVisibleWindowSeconds': plotVisibleWindowSeconds,
+      'plotAutoY': plotAutoY,
+      'plotYMin': plotYMin,
+      'plotYMax': plotYMax,
+      'plotShowGrid': plotShowGrid,
+      'plotShowLegend': plotShowLegend,
+      'plotMouseXEnabled': plotMouseXEnabled,
+      'plotMouseYEnabled': plotMouseYEnabled,
+      'plotInvertX': plotInvertX,
+      'plotInvertY': plotInvertY,
       'plotWindowEndSeconds': plotWindowEndSeconds,
       'uiScale': uiScale,
       'lastBackendError': lastBackendError,
@@ -116,9 +128,50 @@ extension TakeALookControllerSnapshot on TakeALookController {
   }
 
   void applySnapshot(Map<String, dynamic> data) {
+    final hasConnectionState = const {
+      'connectionStatus',
+      'probeType',
+      'targetName',
+      'swdClock',
+      'serialNumber',
+      'lastBackendError',
+    }.any(data.containsKey);
+    final hasSamplingState = const {
+      'sampleRateHz',
+      'rttSampleRateHz',
+      'samplingPaused',
+      'rttEnabled',
+      'rttProtocol',
+    }.any(data.containsKey);
+    final hasSymbolState =
+        data.containsKey('selectedSymbols') || data.containsKey('symbols');
+    final hasWatchState = data.containsKey('watches');
+    final hasElapsedState = data.containsKey('elapsedSeconds');
+    final hasPlotState =
+        hasWatchState ||
+        hasElapsedState ||
+        const {
+          'displayRefreshMode',
+          'plottingPaused',
+          'followLatest',
+          'plotVisibleWindowSeconds',
+          'plotAutoY',
+          'plotYMin',
+          'plotYMax',
+          'plotShowGrid',
+          'plotShowLegend',
+          'plotMouseXEnabled',
+          'plotMouseYEnabled',
+          'plotInvertX',
+          'plotInvertY',
+          'plotWindowEndSeconds',
+        }.any(data.containsKey);
     final wasPlotFrozen = plottingPaused || !followLatest;
+    final previousConnectionStatus = connectionStatus;
+    final previousDisplayRefreshMode = displayRefreshMode;
+    final previousSampleRateHz = sampleRateHz;
     connectionStatus = ConnectionStatus.values.byName(
-      data['connectionStatus'] as String? ?? ConnectionStatus.disconnected.name,
+      data['connectionStatus'] as String? ?? connectionStatus.name,
     );
     probeType = data['probeType'] as String? ?? probeType;
     targetName = data['targetName'] as String? ?? targetName;
@@ -128,6 +181,20 @@ extension TakeALookControllerSnapshot on TakeALookController {
     sampleRateHz = (data['sampleRateHz'] as num?)?.toDouble() ?? sampleRateHz;
     rttSampleRateHz =
         (data['rttSampleRateHz'] as num?)?.toDouble() ?? rttSampleRateHz;
+    final nextDisplayRefreshMode = data['displayRefreshMode'] as String?;
+    if (const {
+      'standard',
+      'high',
+      'realtime',
+    }.contains(nextDisplayRefreshMode)) {
+      displayRefreshMode = nextDisplayRefreshMode!;
+    }
+    if (connectionStatus != previousConnectionStatus ||
+        displayRefreshMode != previousDisplayRefreshMode ||
+        (displayRefreshMode == 'realtime' &&
+            sampleRateHz != previousSampleRateHz)) {
+      _resetPlotRefreshSchedule();
+    }
     elapsedSeconds =
         (data['elapsedSeconds'] as num?)?.toDouble() ?? elapsedSeconds;
     if (data.containsKey('samplingPaused')) {
@@ -143,13 +210,55 @@ extension TakeALookControllerSnapshot on TakeALookController {
     if (data.containsKey('followLatest')) {
       followLatest = data['followLatest'] != false;
     }
+    plotVisibleWindowSeconds =
+        (data['plotVisibleWindowSeconds'] as num?)?.toDouble() ??
+        plotVisibleWindowSeconds;
+    if (data.containsKey('plotAutoY')) {
+      plotAutoY = data['plotAutoY'] != false;
+    }
+    if (data.containsKey('plotYMin')) {
+      plotYMin = (data['plotYMin'] as num?)?.toDouble();
+    }
+    if (data.containsKey('plotYMax')) {
+      plotYMax = (data['plotYMax'] as num?)?.toDouble();
+    }
+    if (data.containsKey('plotShowGrid')) {
+      plotShowGrid = data['plotShowGrid'] != false;
+    }
+    if (data.containsKey('plotShowLegend')) {
+      plotShowLegend = data['plotShowLegend'] != false;
+    }
+    if (data.containsKey('plotMouseXEnabled')) {
+      plotMouseXEnabled = data['plotMouseXEnabled'] != false;
+    }
+    if (data.containsKey('plotMouseYEnabled')) {
+      plotMouseYEnabled = data['plotMouseYEnabled'] != false;
+    }
+    if (data.containsKey('plotInvertX')) {
+      plotInvertX = data['plotInvertX'] == true;
+    }
+    if (data.containsKey('plotInvertY')) {
+      plotInvertY = data['plotInvertY'] == true;
+    }
+    if (data.containsKey('samplingElapsedSeconds')) {
+      _samplingElapsedBaseSeconds =
+          (data['samplingElapsedSeconds'] as num?)?.toDouble() ??
+          _samplingElapsedBaseSeconds;
+      _samplingElapsedStopwatch.reset();
+    }
+    if (data.containsKey('connectionStatus') ||
+        data.containsKey('samplingPaused') ||
+        data.containsKey('samplingElapsedSeconds')) {
+      _reconcileSamplingClock();
+    }
     final nextUiScale = (data['uiScale'] as num?)?.toDouble() ?? uiScale;
     if ((nextUiScale - uiScale).abs() >= 0.001) {
       _uiScale.value = nextUiScale.clamp(0.5, 2).toDouble();
     }
     if (data.containsKey('lastBackendError')) {
       lastBackendError = _asMap(data['lastBackendError']);
-    } else if (connectionStatus == ConnectionStatus.connected) {
+    } else if (data.containsKey('connectionStatus') &&
+        connectionStatus == ConnectionStatus.connected) {
       lastBackendError = null;
     }
 
@@ -177,11 +286,11 @@ extension TakeALookControllerSnapshot on TakeALookController {
       );
     }
 
-    final symbolsByKey = {for (final symbol in _symbols) symbol.key: symbol};
-    final previousWatches = {
-      for (final watch in _watches) watch.symbol.key: watch,
-    };
     if (data.containsKey('watches')) {
+      final symbolsByKey = {for (final symbol in _symbols) symbol.key: symbol};
+      final previousWatches = {
+        for (final watch in _watches) watch.symbol.key: watch,
+      };
       _watches
         ..clear()
         ..addAll(
@@ -229,24 +338,27 @@ extension TakeALookControllerSnapshot on TakeALookController {
           }),
         );
     }
-    _frozenPlotEndSeconds = plottingPaused || !followLatest
-        ? (data['plotWindowEndSeconds'] as num?)?.toDouble() ?? elapsedSeconds
-        : null;
-    if (plottingPaused || !followLatest) {
-      if (!wasPlotFrozen || _frozenPlotSamples.isEmpty) {
-        _capturePlotSamples();
+    if (hasPlotState) {
+      _frozenPlotEndSeconds = plottingPaused || !followLatest
+          ? (data['plotWindowEndSeconds'] as num?)?.toDouble() ?? elapsedSeconds
+          : null;
+      if (plottingPaused || !followLatest) {
+        if (!wasPlotFrozen || _frozenPlotSamples.isEmpty) {
+          _capturePlotSamples();
+        }
+      } else {
+        _frozenPlotSamples.clear();
       }
-    } else {
-      _frozenPlotSamples.clear();
     }
     _emitState([
-      _connectionChanges,
-      _samplingChanges,
-      _symbolChanges,
-      _watchChanges,
-      _telemetryChanges,
-      _plotChanges,
-      _logChanges,
+      if (hasConnectionState) _connectionChanges,
+      if (hasSamplingState) _samplingChanges,
+      if (hasSymbolState) _symbolChanges,
+      if (hasWatchState) _watchChanges,
+      if (hasWatchState || hasElapsedState) _telemetryChanges,
+      if (hasPlotState) _plotChanges,
+      if (hasPlotState) _plotControlChanges,
+      if (data.containsKey('logs')) _logChanges,
     ], sync: false);
   }
 
@@ -346,17 +458,24 @@ extension TakeALookControllerSnapshot on TakeALookController {
         final payload = _asMap(params);
         if (payload == null) break;
         performanceStats = payload;
+        final effectiveHz = (payload['effectiveHz'] as num?)?.toDouble() ?? 0;
+        final sampleCount = (payload['sampleCount'] as num?)?.toInt() ?? 0;
+        // Keep idle performance events out of the user-facing log, matching
+        // the original desktop application.
+        if (sampleCount <= 0 && effectiveHz <= 0) break;
         final now = DateTime.now();
         if (_lastPerformanceLogAt == null ||
             now.difference(_lastPerformanceLogAt!) >=
                 const Duration(seconds: 5)) {
           _lastPerformanceLogAt = now;
-          final effectiveHz = (payload['effectiveHz'] as num?)?.toDouble() ?? 0;
-          final sampleCount = payload['sampleCount'] as int? ?? 0;
-          final blockCount = payload['readBlockCount'] as int? ?? 0;
+          final watchCount = (payload['watchCount'] as num?)?.toInt() ?? 0;
+          final blockCount = (payload['readBlockCount'] as num?)?.toInt() ?? 0;
+          final byteCount = (payload['readByteCount'] as num?)?.toInt() ?? 0;
           _appendLog(
-            '采样性能：${effectiveHz.toStringAsFixed(1)} Hz，'
-            '$sampleCount 帧，$blockCount 个读取块。',
+            '采样性能：目标 ${sampleRateHz.toStringAsFixed(0)} Hz，'
+            '实际 ${effectiveHz.toStringAsFixed(1)} Hz，'
+            '样本 $sampleCount，变量 $watchCount，'
+            '读块 $blockCount，字节 $byteCount。',
           );
           _emitState([_logChanges]);
         }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart' show timeDilation;
 
 const talFontFamily = 'JetBrains Mono';
 const talFontFamilyFallback = <String>['MiSans'];
@@ -29,6 +30,199 @@ abstract final class TalColors {
   static const gridMinor = Color(0x19494446);
 }
 
+const talContextMenuAnimationStyle = AnimationStyle(
+  duration: Duration(milliseconds: 300),
+  reverseDuration: Duration(milliseconds: 90),
+  curve: Curves.easeOutCubic,
+  reverseCurve: Curves.easeInCubic,
+);
+
+double? _talMenuPreviousTimeDilation;
+int _talMenuAnimationLeaseCount = 0;
+
+class TalMenuAnimationLease {
+  TalMenuAnimationLease._();
+
+  bool _released = false;
+
+  void release() {
+    if (_released) return;
+    _released = true;
+    _talMenuAnimationLeaseCount -= 1;
+    if (_talMenuAnimationLeaseCount > 0) return;
+    _talMenuAnimationLeaseCount = 0;
+    final previous = _talMenuPreviousTimeDilation;
+    _talMenuPreviousTimeDilation = null;
+    if (previous != null) timeDilation = previous;
+  }
+}
+
+TalMenuAnimationLease beginTalMenuAnimation() {
+  if (_talMenuAnimationLeaseCount == 0) {
+    _talMenuPreviousTimeDilation = timeDilation;
+    final accelerated = timeDilation * 0.6;
+    timeDilation = accelerated < 0.05 ? 0.05 : accelerated;
+  }
+  _talMenuAnimationLeaseCount += 1;
+  return TalMenuAnimationLease._();
+}
+
+const talContextMenuShape = RoundedRectangleBorder(
+  borderRadius: BorderRadius.all(Radius.circular(8)),
+  side: BorderSide(color: TalColors.border),
+);
+
+final MenuStyle talContextMenuStyle = MenuStyle(
+  backgroundColor: const WidgetStatePropertyAll(TalColors.surfaceAlt),
+  surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
+  shadowColor: const WidgetStatePropertyAll(Colors.black),
+  elevation: const WidgetStatePropertyAll(8),
+  padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(vertical: 4)),
+  minimumSize: const WidgetStatePropertyAll(Size(184, 0)),
+  side: const WidgetStatePropertyAll(BorderSide(color: TalColors.border)),
+  shape: const WidgetStatePropertyAll(talContextMenuShape),
+  alignment: AlignmentDirectional.topStart,
+);
+
+final MenuStyle talContextSubmenuStyle = talContextMenuStyle.copyWith(
+  alignment: AlignmentDirectional.topEnd,
+);
+
+final ButtonStyle talContextMenuButtonStyle = ButtonStyle(
+  minimumSize: const WidgetStatePropertyAll(Size(184, 32)),
+  maximumSize: const WidgetStatePropertyAll(Size(double.infinity, 32)),
+  padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 11)),
+  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+  visualDensity: VisualDensity.compact,
+  foregroundColor: const WidgetStatePropertyAll(TalColors.text),
+  backgroundColor: WidgetStateProperty.resolveWith(
+    (states) => states.contains(WidgetState.hovered)
+        ? TalColors.selection
+        : Colors.transparent,
+  ),
+  shape: const WidgetStatePropertyAll(
+    RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+  ),
+  textStyle: const WidgetStatePropertyAll(
+    TextStyle(
+      fontFamily: talFontFamily,
+      fontFamilyFallback: talFontFamilyFallback,
+      fontSize: 13.5,
+      fontWeight: FontWeight.w400,
+    ),
+  ),
+);
+
+Future<T?> showTalContextMenu<T>({
+  required BuildContext context,
+  required RelativeRect position,
+  required List<PopupMenuEntry<T>> items,
+  bool touchOptimized = false,
+}) {
+  return showMenu<T>(
+    context: context,
+    position: position,
+    items: items,
+    constraints: BoxConstraints(
+      minWidth: touchOptimized ? 220 : 184,
+      maxWidth: touchOptimized ? 380 : 340,
+    ),
+    clipBehavior: Clip.antiAlias,
+    popUpAnimationStyle: talContextMenuAnimationStyle,
+  );
+}
+
+class TalSelectionContextMenu extends StatelessWidget {
+  const TalSelectionContextMenu({
+    required this.anchors,
+    required this.buttonItems,
+    required this.touchOptimized,
+    super.key,
+  });
+
+  final TextSelectionToolbarAnchors anchors;
+  final List<ContextMenuButtonItem> buttonItems;
+  final bool touchOptimized;
+
+  @override
+  Widget build(BuildContext context) {
+    if (buttonItems.isEmpty) return const SizedBox.shrink();
+    const screenPadding = 8.0;
+    final paddingAbove = MediaQuery.paddingOf(context).top + screenPadding;
+    final localAdjustment = Offset(screenPadding, paddingAbove);
+    final itemHeight = touchOptimized ? 48.0 : 32.0;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        screenPadding,
+        paddingAbove,
+        screenPadding,
+        screenPadding,
+      ),
+      child: CustomSingleChildLayout(
+        delegate: DesktopTextSelectionToolbarLayoutDelegate(
+          anchor: anchors.primaryAnchor - localAdjustment,
+        ),
+        child: TweenAnimationBuilder<double>(
+          tween: Tween(begin: 0, end: 1),
+          duration: talContextMenuAnimationStyle.duration!,
+          curve: talContextMenuAnimationStyle.curve!,
+          builder: (context, value, child) => Opacity(
+            opacity: value,
+            child: Transform.scale(
+              scale: 0.96 + value * 0.04,
+              alignment: Alignment.topLeft,
+              child: child,
+            ),
+          ),
+          child: SizedBox(
+            width: touchOptimized ? 220 : 184,
+            child: Material(
+              color: TalColors.surfaceAlt,
+              shadowColor: Colors.black,
+              elevation: 8,
+              shape: talContextMenuShape,
+              clipBehavior: Clip.antiAlias,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (final item in buttonItems)
+                      SizedBox(
+                        width: double.infinity,
+                        height: itemHeight,
+                        child: TextButton(
+                          onPressed: item.onPressed,
+                          style: talContextMenuButtonStyle.copyWith(
+                            minimumSize: WidgetStatePropertyAll(
+                              Size(0, itemHeight),
+                            ),
+                            maximumSize: WidgetStatePropertyAll(
+                              Size(double.infinity, itemHeight),
+                            ),
+                          ),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              AdaptiveTextSelectionToolbar.getButtonLabel(
+                                context,
+                                item,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 ThemeData buildTalTheme() {
   const radius = BorderRadius.all(Radius.circular(7));
   final base = ThemeData(
@@ -49,6 +243,31 @@ ThemeData buildTalTheme() {
     splashColor: TalColors.accent.withAlpha(28),
     hoverColor: TalColors.hover,
     dividerColor: TalColors.border,
+    menuTheme: MenuThemeData(style: talContextMenuStyle),
+    popupMenuTheme: PopupMenuThemeData(
+      color: TalColors.surfaceAlt,
+      surfaceTintColor: Colors.transparent,
+      shadowColor: Colors.black,
+      elevation: 8,
+      shape: talContextMenuShape,
+      menuPadding: const EdgeInsets.symmetric(vertical: 4),
+      textStyle: const TextStyle(
+        color: TalColors.text,
+        fontFamily: talFontFamily,
+        fontFamilyFallback: talFontFamilyFallback,
+        fontSize: 13.5,
+      ),
+      labelTextStyle: WidgetStateProperty.resolveWith(
+        (states) => TextStyle(
+          color: states.contains(WidgetState.disabled)
+              ? TalColors.muted
+              : TalColors.text,
+          fontFamily: talFontFamily,
+          fontFamilyFallback: talFontFamilyFallback,
+          fontSize: 13.5,
+        ),
+      ),
+    ),
     textTheme: base.textTheme.apply(
       bodyColor: TalColors.text,
       displayColor: TalColors.text,

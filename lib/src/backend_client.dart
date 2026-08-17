@@ -192,7 +192,8 @@ class BackendClient {
           return;
         }
         if (event == 'state') {
-          _state = _map(params) ?? _state;
+          final patch = _map(params);
+          if (patch != null) _state = {..._state, ...patch};
         }
         eventHandler?.call(event, params);
         return;
@@ -217,7 +218,7 @@ class BackendClient {
         throw const FormatException('Response result is missing');
       }
       final state = _map(result['state']);
-      if (state != null) _state = state;
+      if (state != null) _state = {..._state, ...state};
       completer.complete(result);
     } catch (error) {
       _handleTransportError(error);
@@ -268,7 +269,11 @@ class BackendClient {
   }
 
   void _handleTransportError(Object error) {
-    eventHandler?.call('log', {'level': 'error', 'message': '后端协议错误：$error'});
+    eventHandler?.call('error', {
+      'code': 'protocol_error',
+      'message': '后端协议错误。',
+      'details': error.toString(),
+    });
   }
 
   void _handleExit(int exitCode) {
@@ -284,9 +289,10 @@ class BackendClient {
     }
     _pending.clear();
     eventHandler?.call('state', _state);
-    eventHandler?.call('log', {
-      'level': 'error',
-      'message': '本机硬件后端意外退出，代码 $exitCode。',
+    eventHandler?.call('error', {
+      'code': 'process_exited',
+      'message': '本机硬件后端意外退出。',
+      'details': '退出代码：$exitCode',
     });
   }
 
@@ -312,6 +318,8 @@ class BackendClient {
         return _BackendCall('setSamplingPaused', {
           'paused': !(_state['samplingPaused'] == true),
         });
+      case 'setSamplingPaused':
+        return _BackendCall('setSamplingPaused', {'paused': arguments == true});
       case 'toggleRtt':
         return _BackendCall('setRtt', {
           'enabled': arguments == true,

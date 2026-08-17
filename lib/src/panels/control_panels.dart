@@ -173,10 +173,7 @@ class _SamplingPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: Listenable.merge([
-        controller.samplingChanges,
-        controller.telemetryChanges,
-      ]),
+      animation: controller.samplingChanges,
       builder: (context, _) => SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
         child: Align(
@@ -184,14 +181,17 @@ class _SamplingPanel extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                controller.elapsedLabel,
-                style: const TextStyle(
-                  color: TalColors.text,
-                  fontFamily: talFontFamily,
-                  fontFamilyFallback: talFontFamilyFallback,
-                  fontSize: 25,
-                  fontWeight: FontWeight.w800,
+              AnimatedBuilder(
+                animation: controller.clockChanges,
+                builder: (context, _) => Text(
+                  controller.elapsedLabel,
+                  style: const TextStyle(
+                    color: TalColors.text,
+                    fontFamily: talFontFamily,
+                    fontFamilyFallback: talFontFamilyFallback,
+                    fontSize: 25,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
               ),
               const SizedBox(height: 6),
@@ -218,17 +218,6 @@ class _SamplingPanel extends StatelessWidget {
                   OutlinedButton(
                     onPressed: controller.clearSamples,
                     child: const Text('清空采样'),
-                  ),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Checkbox(
-                        value: controller.rttEnabled,
-                        onChanged: (value) =>
-                            controller.toggleRtt(value ?? false),
-                      ),
-                      const Text('RTT 采样', style: talBody),
-                    ],
                   ),
                 ],
               ),

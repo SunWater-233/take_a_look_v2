@@ -161,6 +161,79 @@ class MainWorkbench extends StatefulWidget {
 
 class _MainWorkbenchState extends State<MainWorkbench> {
   final workspaceKey = GlobalKey<DockingWorkspaceState>();
+  Map<String, dynamic>? _lastObservedBackendError;
+  Map<String, dynamic>? _pendingBackendError;
+  bool _errorDialogScheduled = false;
+  bool _errorDialogShowing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.connectionChanges.addListener(_handleBackendError);
+    _handleBackendError();
+  }
+
+  @override
+  void didUpdateWidget(covariant MainWorkbench oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller == widget.controller) return;
+    oldWidget.controller.connectionChanges.removeListener(_handleBackendError);
+    widget.controller.connectionChanges.addListener(_handleBackendError);
+    _lastObservedBackendError = null;
+    _handleBackendError();
+  }
+
+  @override
+  void dispose() {
+    widget.controller.connectionChanges.removeListener(_handleBackendError);
+    super.dispose();
+  }
+
+  void _handleBackendError() {
+    final error = widget.controller.lastBackendError;
+    if (error == null || identical(error, _lastObservedBackendError)) return;
+    _lastObservedBackendError = error;
+    _pendingBackendError = Map<String, dynamic>.from(error);
+    if (_errorDialogShowing || _errorDialogScheduled) return;
+    _errorDialogScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _errorDialogScheduled = false;
+      if (mounted) unawaited(_showPendingBackendErrors());
+    });
+  }
+
+  Future<void> _showPendingBackendErrors() async {
+    if (_errorDialogShowing) return;
+    _errorDialogShowing = true;
+    try {
+      while (mounted && _pendingBackendError != null) {
+        final error = _pendingBackendError!;
+        _pendingBackendError = null;
+        final message = error['message'] as String? ?? '后端操作失败。';
+        final details = error['details'];
+        await showDialog<void>(
+          context: context,
+          barrierDismissible: false,
+          builder: (dialogContext) => AlertDialog(
+            title: Text(_backendErrorTitle(error)),
+            content: SelectableText(
+              details == null || details.toString().isEmpty
+                  ? message
+                  : '$message\n\n$details',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('确定'),
+              ),
+            ],
+          ),
+        );
+      }
+    } finally {
+      _errorDialogShowing = false;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -185,6 +258,20 @@ class _MainWorkbenchState extends State<MainWorkbench> {
       ),
     );
   }
+}
+
+String _backendErrorTitle(Map<String, dynamic> error) {
+  return switch (error['code']) {
+    'startup_failed' => '后端启动失败',
+    'connect_failed' => 'pyOCD 连接失败',
+    'file_not_found' ||
+    'unsupported_symbol_file' ||
+    'symbol_load_failed' => '读取失败',
+    'write_failed' || 'readonly_symbol' || 'unknown_watch' => '写入失败',
+    'reset_failed' => '目标复位失败',
+    'no_samples' => '导出失败',
+    _ => '操作失败',
+  };
 }
 
 class DetachedPanelWindow extends StatefulWidget {
@@ -291,6 +378,30 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
   double get uiScale => widget.controller?.uiScale ?? 1;
 
   @override
+  void initState() {
+    super.initState();
+    widget.controller?.samplingChanges.addListener(_refreshSamplingMenu);
+  }
+
+  @override
+  void didUpdateWidget(covariant TalWindowTitleBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller == widget.controller) return;
+    oldWidget.controller?.samplingChanges.removeListener(_refreshSamplingMenu);
+    widget.controller?.samplingChanges.addListener(_refreshSamplingMenu);
+  }
+
+  @override
+  void dispose() {
+    widget.controller?.samplingChanges.removeListener(_refreshSamplingMenu);
+    super.dispose();
+  }
+
+  void _refreshSamplingMenu() {
+    if (mounted) setState(() {});
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Container(
       height: 46,
@@ -366,6 +477,7 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
       SubmenuButton(
         style: _menuButtonStyle,
         menuStyle: _submenuStyle,
+        animated: true,
         leadingIcon: const SizedBox(width: 16),
         menuChildren: [
           _menuItem(label: '放大界面', onPressed: () => _stepUiScale(1)),
@@ -398,6 +510,7 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
       SubmenuButton(
         style: _menuButtonStyle,
         menuStyle: _submenuStyle,
+        animated: true,
         leadingIcon: const SizedBox(width: 16),
         menuChildren: [
           _menuItem(
@@ -440,37 +553,57 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
 
   List<Widget> _buildVariableMenu() {
     final state = widget.controller;
-    const sampleRates = <double>[50, 100, 200, 500, 1000, 2000, 5000, 7000];
     return [
       SubmenuButton(
         style: _menuButtonStyle,
         menuStyle: _submenuStyle,
+        animated: true,
         menuChildren: [
-          for (final rate in sampleRates)
-            _menuItem(
-              label: _sampleRateLabel(rate),
-              checked: state?.sampleRateHz == rate,
-              reserveLeading: true,
-              onPressed: state == null ? null : () => state.setSampleRate(rate),
-            ),
+          _menuItem(
+            label: '标准模式（60 Hz）',
+            checked: state?.displayRefreshMode == 'standard',
+            reserveLeading: true,
+            onPressed: state == null
+                ? null
+                : () => _setDisplayRefreshMode('standard'),
+          ),
+          _menuItem(
+            label: '高频模式（120 Hz）',
+            checked: state?.displayRefreshMode == 'high',
+            reserveLeading: true,
+            onPressed: state == null
+                ? null
+                : () => _setDisplayRefreshMode('high'),
+          ),
+          _menuItem(
+            label: '实时模式（自适应）',
+            checked: state?.displayRefreshMode == 'realtime',
+            reserveLeading: true,
+            onPressed: state == null
+                ? null
+                : () => _setDisplayRefreshMode('realtime'),
+          ),
         ],
         child: const Text('刷新率设置'),
       ),
       SubmenuButton(
         style: _menuButtonStyle,
         menuStyle: _submenuStyle,
+        animated: true,
         menuChildren: [
-          _menuItem(
-            label: 'RTT采样',
-            checked: state?.rttEnabled ?? false,
-            reserveLeading: true,
-            onPressed: state == null
+          CheckboxMenuButton(
+            value: state?.rttEnabled ?? false,
+            onChanged: state == null
                 ? null
-                : () => state.toggleRtt(!state.rttEnabled),
+                : (value) => state.toggleRtt(value ?? false),
+            style: _menuButtonStyle,
+            closeOnActivate: false,
+            child: const Text('RTT采样'),
           ),
           SubmenuButton(
             style: _menuButtonStyle,
             menuStyle: _submenuStyle,
+            animated: true,
             leadingIcon: const SizedBox(width: 16),
             menuChildren: [
               _menuItem(
@@ -517,6 +650,11 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
     setState(() {});
   }
 
+  void _setDisplayRefreshMode(String mode) {
+    widget.controller?.setDisplayRefreshMode(mode);
+    setState(() {});
+  }
+
   void _handleViewAction(String action) {
     final workspace = widget.workspaceKey?.currentState;
     if (workspace == null) return;
@@ -548,16 +686,32 @@ class _TitleMenu extends StatefulWidget {
 
 class _TitleMenuState extends State<_TitleMenu> {
   final menuController = MenuController();
+  TalMenuAnimationLease? _menuAnimationLease;
   bool open = false;
   bool hovered = false;
+
+  @override
+  void dispose() {
+    _releaseMenuAnimation();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return MenuAnchor(
       controller: menuController,
       style: _rootMenuStyle,
-      alignmentOffset: const Offset(0, -1),
-      onOpen: () => setState(() => open = true),
+      // The title buttons are 34 px high and vertically centered in the
+      // 46 px title bar. Move the root menu to the bottom edge of that bar.
+      alignmentOffset: const Offset(0, 6),
+      animated: true,
+      onAnimationStatusChanged: (status) {
+        if (status == AnimationStatus.dismissed) _releaseMenuAnimation();
+      },
+      onOpen: () {
+        _menuAnimationLease ??= beginTalMenuAnimation();
+        setState(() => open = true);
+      },
       onClose: () => setState(() => open = false),
       menuChildren: widget.menuChildren,
       builder: (context, controller, child) {
@@ -568,8 +722,14 @@ class _TitleMenuState extends State<_TitleMenu> {
             color: Colors.transparent,
             child: InkWell(
               borderRadius: const BorderRadius.all(Radius.circular(7)),
-              onTap: () =>
-                  controller.isOpen ? controller.close() : controller.open(),
+              onTap: () {
+                if (controller.isOpen) {
+                  controller.close();
+                } else {
+                  _menuAnimationLease ??= beginTalMenuAnimation();
+                  controller.open();
+                }
+              },
               child: Container(
                 height: 34,
                 padding: const EdgeInsets.symmetric(horizontal: 14),
@@ -597,6 +757,11 @@ class _TitleMenuState extends State<_TitleMenu> {
   void _handleHoverExit(PointerExitEvent event) {
     if (mounted) setState(() => hovered = false);
   }
+
+  void _releaseMenuAnimation() {
+    _menuAnimationLease?.release();
+    _menuAnimationLease = null;
+  }
 }
 
 MenuItemButton _menuItem({
@@ -622,45 +787,11 @@ MenuItemButton _menuItem({
   );
 }
 
-String _sampleRateLabel(double value) {
-  if (value >= 1000) return '${(value / 1000).toStringAsFixed(0)} kHz';
-  return '${value.toStringAsFixed(0)} Hz';
-}
-
-final _menuButtonStyle = ButtonStyle(
-  minimumSize: const WidgetStatePropertyAll(Size(150, 36)),
-  padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 10)),
-  foregroundColor: const WidgetStatePropertyAll(TalColors.text),
-  textStyle: const WidgetStatePropertyAll(talBody),
-  backgroundColor: WidgetStateProperty.resolveWith((states) {
-    if (states.contains(WidgetState.hovered) ||
-        states.contains(WidgetState.focused)) {
-      return TalColors.accent;
-    }
-    return Colors.transparent;
-  }),
-  shape: const WidgetStatePropertyAll(RoundedRectangleBorder()),
+final _menuButtonStyle = talContextMenuButtonStyle;
+final _rootMenuStyle = talContextMenuStyle.copyWith(
+  alignment: AlignmentDirectional.bottomStart,
 );
-
-const _rootMenuStyle = MenuStyle(
-  backgroundColor: WidgetStatePropertyAll(TalColors.surfaceAlt),
-  surfaceTintColor: WidgetStatePropertyAll(Colors.transparent),
-  padding: WidgetStatePropertyAll(EdgeInsets.symmetric(vertical: 3)),
-  side: WidgetStatePropertyAll(BorderSide(color: TalColors.border)),
-  shape: WidgetStatePropertyAll(
-    RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(7))),
-  ),
-);
-
-const _submenuStyle = MenuStyle(
-  backgroundColor: WidgetStatePropertyAll(TalColors.surfaceAlt),
-  surfaceTintColor: WidgetStatePropertyAll(Colors.transparent),
-  padding: WidgetStatePropertyAll(EdgeInsets.symmetric(vertical: 3)),
-  side: WidgetStatePropertyAll(BorderSide(color: TalColors.border)),
-  shape: WidgetStatePropertyAll(
-    RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(7))),
-  ),
-);
+final _submenuStyle = talContextSubmenuStyle;
 
 class _MenuDivider extends StatelessWidget {
   const _MenuDivider();

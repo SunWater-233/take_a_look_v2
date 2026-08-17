@@ -12,7 +12,7 @@ const _watchColumnLabels = <String>[
 ];
 
 typedef _WatchRowContextMenuCallback =
-    void Function(String key, Offset globalPosition);
+    void Function(String key, _ContextMenuRequest request);
 
 class _WatchPanel extends StatefulWidget {
   const _WatchPanel({required this.controller});
@@ -187,7 +187,7 @@ class _WatchPanelState extends State<_WatchPanel> {
 
   Future<void> _showHeaderContextMenu(
     int clickedColumn,
-    Offset globalPosition,
+    _ContextMenuRequest request,
   ) async {
     final targetColumns = _selectedColumns.length > 1
         ? (_selectedColumns.toList()..sort())
@@ -196,9 +196,10 @@ class _WatchPanelState extends State<_WatchPanel> {
     final canHide =
         visibleCount > 1 &&
         targetColumns.any((column) => !_hiddenColumns.contains(column));
-    final action = await showMenu<String>(
+    final action = await showTalContextMenu<String>(
       context: context,
-      position: _menuPosition(globalPosition),
+      position: _menuPosition(request.globalPosition),
+      touchOptimized: request.touchOptimized,
       items: [
         _watchPopupItem(
           value: 'hide',
@@ -207,11 +208,13 @@ class _WatchPanelState extends State<_WatchPanel> {
               ? '隐藏该列'
               : '隐藏所选列（${targetColumns.length}）',
           enabled: canHide,
+          touchOptimized: request.touchOptimized,
         ),
         _watchPopupItem(
           value: 'showAll',
           icon: Icons.view_column_outlined,
           label: '显示全列',
+          touchOptimized: request.touchOptimized,
         ),
       ],
     );
@@ -230,51 +233,59 @@ class _WatchPanelState extends State<_WatchPanel> {
 
   Future<void> _showNameContextMenu(
     String clickedKey,
-    Offset globalPosition,
+    _ContextMenuRequest request,
   ) async {
     final keys = _contextWatchKeys(clickedKey);
     if (keys.isEmpty) return;
     final count = keys.length;
-    final action = await showMenu<String>(
+    final action = await showTalContextMenu<String>(
       context: context,
-      position: _menuPosition(globalPosition),
+      position: _menuPosition(request.globalPosition),
+      touchOptimized: request.touchOptimized,
       items: [
         _watchPopupItem(
           value: 'remove',
           icon: Icons.close,
           label: count == 1 ? '移除该变量' : '移除所选变量（$count）',
+          touchOptimized: request.touchOptimized,
         ),
         _watchPopupItem(
           value: 'copy',
           icon: Icons.copy_outlined,
           label: count == 1 ? '复制命令名' : '复制所选命令名（$count）',
+          touchOptimized: request.touchOptimized,
         ),
         const PopupMenuDivider(),
         _watchPopupItem(
           value: 'only',
           icon: Icons.filter_alt_outlined,
           label: count == 1 ? '仅绘制该栏' : '仅绘制所选变量（$count）',
+          touchOptimized: request.touchOptimized,
         ),
         _watchPopupItem(
           value: 'all',
           icon: Icons.check_box_outlined,
           label: '全部绘制',
+          touchOptimized: request.touchOptimized,
         ),
         _watchPopupItem(
           value: 'none',
           icon: Icons.check_box_outline_blank,
           label: '全部不绘制',
+          touchOptimized: request.touchOptimized,
         ),
         _watchPopupItem(
           value: 'invert',
           icon: Icons.swap_vert,
           label: '反转所选变量绘制状态',
+          touchOptimized: request.touchOptimized,
         ),
         const PopupMenuDivider(),
         _watchPopupItem(
           value: 'color',
           icon: Icons.palette_outlined,
           label: count == 1 ? '设置绘制颜色' : '为所选变量设置绘制颜色（$count）',
+          touchOptimized: request.touchOptimized,
         ),
       ],
     );
@@ -311,23 +322,26 @@ class _WatchPanelState extends State<_WatchPanel> {
 
   Future<void> _showPlotContextMenu(
     String clickedKey,
-    Offset globalPosition,
+    _ContextMenuRequest request,
   ) async {
     final keys = _contextWatchKeys(clickedKey);
     if (keys.isEmpty) return;
-    final action = await showMenu<String>(
+    final action = await showTalContextMenu<String>(
       context: context,
-      position: _menuPosition(globalPosition),
+      position: _menuPosition(request.globalPosition),
+      touchOptimized: request.touchOptimized,
       items: [
         _watchPopupItem(
           value: 'only',
           icon: Icons.filter_alt_outlined,
           label: '仅绘制该栏',
+          touchOptimized: request.touchOptimized,
         ),
         _watchPopupItem(
           value: 'all',
           icon: Icons.check_box_outlined,
           label: '全部绘制',
+          touchOptimized: request.touchOptimized,
         ),
       ],
     );
@@ -601,8 +615,8 @@ class _WatchRowState extends State<_WatchRow> {
               _WatchCell(
                 width: widget.columnWidths[0],
                 selected: widget.selectedColumns.contains(0),
-                onSecondaryTap: (position) =>
-                    widget.onNameContextMenu(watch.symbol.key, position),
+                onContextMenu: (request) =>
+                    widget.onNameContextMenu(watch.symbol.key, request),
                 child: Text(
                   watch.symbol.name,
                   maxLines: 1,
@@ -678,8 +692,8 @@ class _WatchRowState extends State<_WatchRow> {
                 width: widget.columnWidths[6],
                 selected: widget.selectedColumns.contains(6),
                 padding: EdgeInsets.zero,
-                onSecondaryTap: (position) =>
-                    widget.onPlotContextMenu(watch.symbol.key, position),
+                onContextMenu: (request) =>
+                    widget.onPlotContextMenu(watch.symbol.key, request),
                 child: Center(
                   child: Checkbox(
                     value: watch.plotted,
@@ -933,10 +947,12 @@ PopupMenuEntry<String> _watchPopupItem({
   required IconData icon,
   required String label,
   bool enabled = true,
+  required bool touchOptimized,
 }) {
   return PopupMenuItem<String>(
     value: value,
     enabled: enabled,
+    height: touchOptimized ? 48 : 32,
     child: Row(
       children: [Icon(icon, size: 17), const SizedBox(width: 9), Text(label)],
     ),
@@ -948,14 +964,14 @@ class _WatchCell extends StatelessWidget {
     required this.width,
     required this.child,
     this.padding = const EdgeInsets.symmetric(horizontal: 8),
-    this.onSecondaryTap,
+    this.onContextMenu,
     this.selected = false,
   });
 
   final double width;
   final Widget child;
   final EdgeInsets padding;
-  final ValueChanged<Offset>? onSecondaryTap;
+  final ValueChanged<_ContextMenuRequest>? onContextMenu;
   final bool selected;
 
   @override
@@ -970,11 +986,22 @@ class _WatchCell extends StatelessWidget {
       ),
       child: child,
     );
-    final callback = onSecondaryTap;
+    final callback = onContextMenu;
     if (callback == null) return cell;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onSecondaryTapUp: (details) => callback(details.globalPosition),
+      onSecondaryTapUp: (details) => callback(
+        _ContextMenuRequest(
+          globalPosition: details.globalPosition,
+          touchOptimized: false,
+        ),
+      ),
+      onLongPressStart: (details) => callback(
+        _ContextMenuRequest(
+          globalPosition: details.globalPosition,
+          touchOptimized: true,
+        ),
+      ),
       child: cell,
     );
   }

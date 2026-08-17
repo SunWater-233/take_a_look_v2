@@ -22,5 +22,8 @@ take-a-look-backend = "take_a_look_backend.stdio:main"
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.packages.find]
+include = ["take_a_look_backend*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

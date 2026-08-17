@@ -128,31 +128,37 @@ class BackendService:
     def state_snapshot(self) -> dict[str, object]:
         with self._lock:
             return {
-                "connectionStatus": self._connection_status,
-                "probeType": self._probe_type,
-                "targetName": self._target_name,
-                "swdClock": self._swd_clock,
-                "serialNumber": self._serial_number,
-                "sampleRateHz": self._sample_rate_hz,
-                "rttSampleRateHz": self._rtt_sample_rate_hz,
-                "samplingPaused": self._sampling_paused,
-                "rttEnabled": self._rtt_enabled,
-                "rttProtocol": self._rtt_protocol,
-                "rttControlBlockAddress": self._rtt_control_block_address,
-                "symbolFile": self._symbol_file,
-                "elapsedSeconds": self._elapsed_locked(),
+                **self._runtime_state_locked(),
                 "symbols": [self._symbol_json(symbol) for symbol in self._symbols.values()],
                 "watches": [self._watch_json(watch) for watch in self._watches.values()],
-                "sampleCount": len(self._samples),
             }
+
+    def _runtime_state_locked(self) -> dict[str, object]:
+        return {
+            "connectionStatus": self._connection_status,
+            "probeType": self._probe_type,
+            "targetName": self._target_name,
+            "swdClock": self._swd_clock,
+            "serialNumber": self._serial_number,
+            "sampleRateHz": self._sample_rate_hz,
+            "rttSampleRateHz": self._rtt_sample_rate_hz,
+            "samplingPaused": self._sampling_paused,
+            "rttEnabled": self._rtt_enabled,
+            "rttProtocol": self._rtt_protocol,
+            "rttControlBlockAddress": self._rtt_control_block_address,
+            "symbolFile": self._symbol_file,
+            "elapsedSeconds": self._elapsed_locked(),
+            "sampleCount": len(self._samples),
+        }
 
     def _connect(self, params: Mapping[str, object]) -> dict[str, object]:
         with self._lock:
             if self._connection_status == "connected":
-                return {"state": self.state_snapshot()}
+                return {"state": self._runtime_state_locked()}
             self._apply_config_locked(params)
             self._connection_status = "connecting"
-        self._emit("state", self.state_snapshot())
+            connecting_state = self._runtime_state_locked()
+        self._emit("state", connecting_state)
         try:
             config = PyOcdConnectionConfig(
                 target=_target_override(self._target_name),
@@ -164,15 +170,16 @@ class BackendService:
         except Exception as error:
             with self._lock:
                 self._connection_status = "disconnected"
+                failed_state = self._runtime_state_locked()
             self._emit("log", {"level": "error", "message": f"连接调试探针失败：{error}"})
-            self._emit("state", self.state_snapshot())
+            self._emit("state", failed_state)
             raise ProtocolError("connect_failed", "Unable to connect to the debug probe.", str(error)) from error
         with self._lock:
             self._connection_status = "connected"
             self._connection_started_at = time.monotonic()
             self._sampling_paused = False
+            state = self._runtime_state_locked()
         self._emit("log", {"level": "info", "message": "已连接 pyOCD 调试探针。"})
-        state = self.state_snapshot()
         self._emit("state", state)
         self._wake.set()
         return {"state": state}
@@ -184,8 +191,8 @@ class BackendService:
             self._connection_status = "disconnected"
             self._connection_started_at = None
             self._sampling_paused = False
+            state = self._runtime_state_locked()
         self._emit("log", {"level": "info", "message": "已断开调试探针。"})
-        state = self.state_snapshot()
         self._emit("state", state)
         return {"state": state}
 
@@ -216,7 +223,7 @@ class BackendService:
     def _set_config(self, params: Mapping[str, object]) -> dict[str, object]:
         with self._lock:
             self._apply_config_locked(params)
-            state = self.state_snapshot()
+            state = self._runtime_state_locked()
         self._emit("state", state)
         self._wake.set()
         return {"state": state}
@@ -244,7 +251,7 @@ class BackendService:
             self._watches = new_watches
             if self._rtt_protocol == "plus":
                 self._stop_rtt_locked()
-            state = self.state_snapshot()
+            state = {"watches": [self._watch_json(watch) for watch in self._watches.values()]}
         self._emit("state", state)
         self._wake.set()
         return {"state": state}
@@ -264,7 +271,7 @@ class BackendService:
                 watch.value = self._memory.write_symbol(watch.symbol, value_text)
             except Exception as error:
                 raise ProtocolError("write_failed", "Unable to write and verify the variable.", str(error)) from error
-            state = self.state_snapshot()
+            state = {"watches": [self._watch_json(item) for item in self._watches.values()]}
         self._emit("log", {"level": "info", "message": f"已写入 {watch.symbol.name} 并完成回读验证。"})
         self._emit("state", state)
         return {"state": state}
@@ -275,7 +282,10 @@ class BackendService:
             raise ProtocolError("invalid_request", "paused must be a boolean.")
         with self._lock:
             self._sampling_paused = paused
-            state = self.state_snapshot()
+            state = {
+                "samplingPaused": self._sampling_paused,
+                "elapsedSeconds": self._elapsed_locked(),
+            }
         self._emit("log", {"level": "info", "message": "采样已暂停。" if paused else "采样已继续。"})
         self._emit("state", state)
         self._wake.set()
@@ -296,7 +306,7 @@ class BackendService:
             if "controlBlockAddress" in params:
                 self._rtt_control_block_address = _optional_address(params["controlBlockAddress"])
             self._stop_rtt_locked()
-            state = self.state_snapshot()
+            state = self._runtime_state_locked()
         self._emit("state", state)
         self._wake.set()
         return {"state": state}
@@ -306,7 +316,7 @@ class BackendService:
             self._samples.clear()
             self._connection_started_at = time.monotonic() if self._connection_status == "connected" else None
             self._sample_count_since_perf = 0
-            state = self.state_snapshot()
+            state = {"elapsedSeconds": 0.0, "sampleCount": 0}
         self._emit("samplesCleared", {})
         self._emit("state", state)
         return {"state": state}
@@ -323,7 +333,8 @@ class BackendService:
             except Exception as error:
                 raise ProtocolError("reset_failed", "Unable to reset target.", str(error)) from error
         self._emit("log", {"level": "info", "message": "目标已复位并暂停。" if halt else "目标已复位并运行。"})
-        return {"state": self.state_snapshot()}
+        with self._lock:
+            return {"state": self._runtime_state_locked()}
 
     def _export_csv(self, params: Mapping[str, object]) -> dict[str, object]:
         path_text = _required_string(params, "path")
@@ -344,7 +355,7 @@ class BackendService:
             for elapsed, values in frames:
                 writer.writerow([f"{elapsed:.9f}", *[_csv_value(values.get(key)) for key in keys]])
         self._emit("log", {"level": "info", "message": f"已导出 {len(frames)} 帧原始采样 CSV：{path}"})
-        return {"path": str(path), "sampleCount": len(frames), "state": self.state_snapshot()}
+        return {"path": str(path), "sampleCount": len(frames)}
 
     def _apply_config_locked(self, params: Mapping[str, object]) -> None:
         if "probeType" in params:
@@ -391,7 +402,7 @@ class BackendService:
                 next_memory_at = time.monotonic() + 0.25
 
             now = time.monotonic()
-            if pending_frames and (len(pending_frames) >= 32 or now - last_emit_at >= 0.05):
+            if pending_frames and (len(pending_frames) >= 64 or now - last_emit_at >= 0.006):
                 self._publish_samples(pending_frames)
                 pending_frames = []
                 last_emit_at = now

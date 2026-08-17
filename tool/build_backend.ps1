@@ -28,6 +28,7 @@ if (-not (Test-Path -LiteralPath $PythonExecutable)) {
     --paths $BackendRoot `
     --additional-hooks-dir (Join-Path $BackendRoot "pyinstaller_hooks") `
     --collect-all pyocd `
+    --collect-all cmsis_pack_manager `
     --collect-all elftools `
     --collect-submodules pylink `
     (Join-Path $BackendRoot "take_a_look_backend\stdio.py")

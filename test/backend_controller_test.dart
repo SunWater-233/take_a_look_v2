@@ -75,6 +75,18 @@ void main() {
     expect(colorWatches.single['color'], '#ff2f6fed');
     commands.clear();
 
+    controller.toggleSampling();
+    expect(controller.samplingPaused, isTrue);
+    expect(commands.single, ('setSamplingPaused', true));
+    commands.clear();
+    controller.applyBackendEvent('state', {
+      'samplingPaused': true,
+      'elapsedSeconds': 0,
+    });
+    expect(controller.connectionStatus, ConnectionStatus.connected);
+    expect(controller.symbols, hasLength(2));
+    expect(controller.watches, hasLength(1));
+
     controller.applyBackendEvent('samples', {
       'frames': [
         {
@@ -114,6 +126,14 @@ void main() {
     });
     expect(controller.performanceStats['effectiveHz'], 198.5);
     expect(controller.logs.last.message, contains('采样性能'));
+
+    final logCountAfterPerformanceSample = controller.logs.length;
+    controller.applyBackendEvent('perf', {
+      'effectiveHz': 0.0,
+      'sampleCount': 0,
+      'readBlockCount': 0,
+    });
+    expect(controller.logs, hasLength(logCountAfterPerformanceSample));
 
     controller.applyBackendEvent('error', {
       'code': 'connect_failed',

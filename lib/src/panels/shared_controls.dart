@@ -2,7 +2,17 @@ part of '../panels.dart';
 
 typedef _ColumnResizeCallback = void Function(int index, double delta);
 typedef _ColumnContextMenuCallback =
-    void Function(int index, Offset globalPosition);
+    void Function(int index, _ContextMenuRequest request);
+
+class _ContextMenuRequest {
+  const _ContextMenuRequest({
+    required this.globalPosition,
+    required this.touchOptimized,
+  });
+
+  final Offset globalPosition;
+  final bool touchOptimized;
+}
 
 class _ResizableTableHeaderCell extends StatelessWidget {
   const _ResizableTableHeaderCell({
@@ -37,10 +47,29 @@ class _ResizableTableHeaderCell extends StatelessWidget {
             color: selected ? TalColors.selection : TalColors.surfaceAlt,
             child: InkWell(
               onTap: onSelect == null ? null : () => onSelect!(columnIndex),
+              onLongPress: onContextMenu == null
+                  ? null
+                  : () {
+                      final box = context.findRenderObject()! as RenderBox;
+                      onContextMenu!(
+                        columnIndex,
+                        _ContextMenuRequest(
+                          globalPosition: box.localToGlobal(
+                            box.size.center(Offset.zero),
+                          ),
+                          touchOptimized: true,
+                        ),
+                      );
+                    },
               onSecondaryTapUp: onContextMenu == null
                   ? null
-                  : (details) =>
-                        onContextMenu!(columnIndex, details.globalPosition),
+                  : (details) => onContextMenu!(
+                      columnIndex,
+                      _ContextMenuRequest(
+                        globalPosition: details.globalPosition,
+                        touchOptimized: false,
+                      ),
+                    ),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 alignment: Alignment.centerLeft,

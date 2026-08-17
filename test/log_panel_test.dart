@@ -56,6 +56,12 @@ void main() {
         .singleWhere((item) => item.type == ContextMenuButtonType.selectAll)
         .onPressed!();
     await tester.pump();
+    final contextMenu = selectionArea.contextMenuBuilder!(
+      tester.element(find.byKey(const ValueKey('log-selection-area'))),
+      selectableRegion,
+    );
+    expect(contextMenu, isA<TalSelectionContextMenu>());
+    expect((contextMenu as TalSelectionContextMenu).touchOptimized, isFalse);
     selectableRegion.contextMenuButtonItems
         .singleWhere((item) => item.type == ContextMenuButtonType.copy)
         .onPressed!();

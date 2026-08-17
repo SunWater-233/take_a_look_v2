@@ -22,6 +22,10 @@ class _ControllerSignal extends ChangeNotifier {
 }
 
 class TakeALookController extends ChangeNotifier {
+  static const double standardPlotRefreshRateHz = 60;
+  static const double highPlotRefreshRateHz = 120;
+  static const double maxRealtimePlotRefreshRateHz = 120;
+
   TakeALookController({
     this.remoteCommand,
     this.backendCommand,
@@ -45,6 +49,11 @@ class TakeALookController extends ChangeNotifier {
   final Set<String> _selectedSymbols = <String>{};
   int _symbolRevision = 0;
   Timer? _ticker;
+  Timer? _plotRefreshTimer;
+  Timer? _samplingClockTimer;
+  final Stopwatch _samplingElapsedStopwatch = Stopwatch();
+  double _samplingElapsedBaseSeconds = 0;
+  bool _telemetryDisplayPending = false;
   bool _disposed = false;
   double _phase = 0;
   double? _frozenPlotEndSeconds;
@@ -57,6 +66,8 @@ class TakeALookController extends ChangeNotifier {
   final _ControllerSignal _watchChanges = _ControllerSignal();
   final _ControllerSignal _telemetryChanges = _ControllerSignal();
   final _ControllerSignal _plotChanges = _ControllerSignal();
+  final _ControllerSignal _plotControlChanges = _ControllerSignal();
+  final _ControllerSignal _clockChanges = _ControllerSignal();
   final _ControllerSignal _logChanges = _ControllerSignal();
   final _ControllerSignal _stateSyncChanges = _ControllerSignal();
   final _ControllerSignal _telemetrySyncChanges = _ControllerSignal();
@@ -69,12 +80,23 @@ class TakeALookController extends ChangeNotifier {
   String symbolFile = '';
   double sampleRateHz = 50;
   double rttSampleRateHz = 1000;
+  String displayRefreshMode = 'standard';
   double elapsedSeconds = 0;
   bool samplingPaused = false;
   bool plottingPaused = false;
   bool rttEnabled = false;
   String rttProtocol = 'normal';
   bool followLatest = true;
+  double plotVisibleWindowSeconds = 12;
+  bool plotAutoY = true;
+  double? plotYMin;
+  double? plotYMax;
+  bool plotShowGrid = true;
+  bool plotShowLegend = true;
+  bool plotMouseXEnabled = true;
+  bool plotMouseYEnabled = true;
+  bool plotInvertX = false;
+  bool plotInvertY = false;
   Map<String, dynamic> performanceStats = <String, dynamic>{};
   Map<String, dynamic>? lastBackendError;
 
@@ -91,6 +113,8 @@ class TakeALookController extends ChangeNotifier {
   Listenable get watchChanges => _watchChanges;
   Listenable get telemetryChanges => _telemetryChanges;
   Listenable get plotChanges => _plotChanges;
+  Listenable get plotControlChanges => _plotControlChanges;
+  Listenable get clockChanges => _clockChanges;
   Listenable get logChanges => _logChanges;
   Listenable get stateSyncChanges => _stateSyncChanges;
   Listenable get telemetrySyncChanges => _telemetrySyncChanges;
@@ -124,8 +148,25 @@ class TakeALookController extends ChangeNotifier {
     return '${sampleRateHz.toStringAsFixed(0)} Hz';
   }
 
+  String get displayRefreshLabel => switch (displayRefreshMode) {
+    'standard' => '标准模式（60 Hz）',
+    'high' => '高频模式（120 Hz）',
+    _ => '实时模式（自适应）',
+  };
+
+  double get plotRefreshRateHz => switch (displayRefreshMode) {
+    'standard' => standardPlotRefreshRateHz,
+    'high' => highPlotRefreshRateHz,
+    _ => sampleRateHz.clamp(1, maxRealtimePlotRefreshRateHz).toDouble(),
+  };
+
+  double get samplingElapsedSeconds =>
+      _samplingElapsedBaseSeconds +
+      _samplingElapsedStopwatch.elapsedMicroseconds /
+          Duration.microsecondsPerSecond;
+
   String get elapsedLabel {
-    final totalCentiseconds = (elapsedSeconds * 100).round();
+    final totalCentiseconds = (samplingElapsedSeconds * 100).round();
     final totalSeconds = totalCentiseconds ~/ 100;
     final centiseconds = totalCentiseconds % 100;
     final totalMinutes = totalSeconds ~/ 60;
@@ -145,6 +186,8 @@ class TakeALookController extends ChangeNotifier {
     if (connectionStatus == ConnectionStatus.connected) {
       connectionStatus = ConnectionStatus.disconnected;
       samplingPaused = false;
+      _reconcileSamplingClock();
+      _resetPlotRefreshSchedule();
       _appendLog('已断开 pyOCD 调试探针。');
       _emitState([_connectionChanges, _samplingChanges, _logChanges]);
       return;
@@ -156,6 +199,8 @@ class TakeALookController extends ChangeNotifier {
     await Future<void>.delayed(const Duration(milliseconds: 650));
     if (_disposed) return;
     connectionStatus = ConnectionStatus.connected;
+    _reconcileSamplingClock();
+    _resetPlotRefreshSchedule();
     _appendLog('已连接 pyOCD：target=$targetName，SWD=$swdClock。');
     _emitState([_connectionChanges, _logChanges]);
   }
@@ -229,8 +274,21 @@ class TakeALookController extends ChangeNotifier {
   void setSampleRate(double value) {
     if (_dispatchCommand('setSampleRate', value)) return;
     sampleRateHz = value;
+    if (displayRefreshMode == 'realtime') _resetPlotRefreshSchedule();
     _appendLog('采样率已设置为 $sampleRateLabel。');
     _emitState([_samplingChanges, _logChanges]);
+  }
+
+  void setDisplayRefreshMode(String mode) {
+    if (!const {'standard', 'high', 'realtime'}.contains(mode)) {
+      throw ArgumentError.value(mode, 'mode', '未知的绘图刷新率模式');
+    }
+    if (_dispatchRemote('setDisplayRefreshMode', mode)) return;
+    if (displayRefreshMode == mode) return;
+    displayRefreshMode = mode;
+    _resetPlotRefreshSchedule();
+    _appendLog('绘图刷新率已切换为$displayRefreshLabel。');
+    _emitState([_plotChanges, _logChanges]);
   }
 
   void setRttSampleRate(double value) {
@@ -265,8 +323,15 @@ class TakeALookController extends ChangeNotifier {
   }
 
   void toggleSampling() {
-    if (_dispatchCommand('toggleSampling')) return;
+    if (_isDetachedRemote && _dispatchRemote('toggleSampling')) return;
+    final sender = backendCommand;
     samplingPaused = !samplingPaused;
+    _reconcileSamplingClock();
+    if (sender != null) {
+      unawaited(sender('setSamplingPaused', samplingPaused));
+      _emitState([_samplingChanges]);
+      return;
+    }
     _appendLog(samplingPaused ? '采样已暂停。' : '采样已继续。');
     _emitState([_samplingChanges, _logChanges]);
   }
@@ -274,13 +339,14 @@ class TakeALookController extends ChangeNotifier {
   void togglePlotting() {
     if (_dispatchRemote('togglePlotting')) return;
     plottingPaused = !plottingPaused;
+    _resetPlotRefreshSchedule();
     if (plottingPaused) {
       _freezePlotIfNeeded();
     } else if (followLatest) {
       _clearFrozenPlot();
     }
     _appendLog(plottingPaused ? '绘图已暂停，后台继续采样。' : '绘图已恢复。');
-    _emitState([_plotChanges, _logChanges]);
+    _emitState([_plotChanges, _plotControlChanges, _logChanges]);
   }
 
   void toggleRtt(bool value) {
@@ -300,18 +366,152 @@ class TakeALookController extends ChangeNotifier {
 
   void toggleFollowLatest() {
     if (_dispatchRemote('toggleFollowLatest')) return;
+    _resetPlotRefreshSchedule();
     if (followLatest) {
       _freezePlotIfNeeded();
     } else if (!plottingPaused) {
       _clearFrozenPlot();
     }
     followLatest = !followLatest;
-    _emitState([_plotChanges]);
+    _emitState([_plotChanges, _plotControlChanges]);
+  }
+
+  void setPlotViewport({
+    required double xMin,
+    required double xMax,
+    double? yMin,
+    double? yMax,
+  }) {
+    final arguments = <String, double>{
+      'xMin': xMin,
+      'xMax': xMax,
+      'yMin': ?yMin,
+      'yMax': ?yMax,
+    };
+    if (_isDetachedRemote && _dispatchRemote('setPlotViewport', arguments)) {
+      return;
+    }
+    final normalizedXMin = math.max(0, math.min(xMin, xMax));
+    final normalizedXMax = math.max(
+      normalizedXMin + 0.001,
+      math.max(xMin, xMax),
+    );
+    final span = (normalizedXMax - normalizedXMin).clamp(0.2, 120).toDouble();
+    final latest = math.max(elapsedSeconds, span);
+    final end = normalizedXMax.clamp(span, latest).toDouble();
+    if (followLatest) _freezePlotIfNeeded();
+    followLatest = false;
+    plotVisibleWindowSeconds = span;
+    _frozenPlotEndSeconds = end;
+    if (yMin != null &&
+        yMax != null &&
+        yMin.isFinite &&
+        yMax.isFinite &&
+        yMax > yMin) {
+      plotAutoY = false;
+      plotYMin = yMin;
+      plotYMax = yMax;
+    }
+    _emitState([_plotChanges, _plotControlChanges]);
+  }
+
+  void configurePlotView(Map<String, dynamic> values) {
+    if (_isDetachedRemote && _dispatchRemote('configurePlotView', values)) {
+      return;
+    }
+    if (values.containsKey('followLatest')) {
+      final nextFollowLatest = values['followLatest'] == true;
+      if (nextFollowLatest != followLatest) {
+        if (nextFollowLatest && !plottingPaused) {
+          _clearFrozenPlot();
+        } else {
+          _freezePlotIfNeeded();
+        }
+        followLatest = nextFollowLatest;
+      }
+    }
+    final xMin = (values['xMin'] as num?)?.toDouble();
+    final xMax = (values['xMax'] as num?)?.toDouble();
+    if (xMin != null && xMax != null && xMin.isFinite && xMax > xMin) {
+      plotVisibleWindowSeconds = (xMax - xMin).clamp(0.2, 120).toDouble();
+      _frozenPlotEndSeconds = xMax;
+    }
+    if (values.containsKey('plotAutoY')) {
+      plotAutoY = values['plotAutoY'] == true;
+    }
+    final yMin = (values['yMin'] as num?)?.toDouble();
+    final yMax = (values['yMax'] as num?)?.toDouble();
+    if (yMin != null && yMax != null && yMin.isFinite && yMax > yMin) {
+      plotYMin = yMin;
+      plotYMax = yMax;
+    }
+    if (values.containsKey('plotShowGrid')) {
+      plotShowGrid = values['plotShowGrid'] == true;
+    }
+    if (values.containsKey('plotShowLegend')) {
+      plotShowLegend = values['plotShowLegend'] == true;
+    }
+    if (values.containsKey('plotMouseXEnabled')) {
+      plotMouseXEnabled = values['plotMouseXEnabled'] == true;
+    }
+    if (values.containsKey('plotMouseYEnabled')) {
+      plotMouseYEnabled = values['plotMouseYEnabled'] == true;
+    }
+    if (values.containsKey('plotInvertX')) {
+      plotInvertX = values['plotInvertX'] == true;
+    }
+    if (values.containsKey('plotInvertY')) {
+      plotInvertY = values['plotInvertY'] == true;
+    }
+    _emitState([_plotChanges, _plotControlChanges]);
+  }
+
+  void showAllPlotSamples() {
+    if (_isDetachedRemote && _dispatchRemote('showAllPlotSamples')) return;
+    if (followLatest) _freezePlotIfNeeded();
+    followLatest = false;
+    final plottedSamples = _watches
+        .where((watch) => watch.plotted)
+        .expand((watch) => watch.samples);
+    var first = double.infinity;
+    var last = -double.infinity;
+    for (final point in plottedSamples) {
+      first = math.min(first, point.dx);
+      last = math.max(last, point.dx);
+    }
+    if (!first.isFinite || !last.isFinite) {
+      first = 0;
+      last = math.max(0.2, elapsedSeconds);
+    }
+    plotVisibleWindowSeconds = math.max(0.2, last - math.max(0, first));
+    _frozenPlotEndSeconds = math.max(last, plotVisibleWindowSeconds);
+    plotAutoY = true;
+    plotYMin = null;
+    plotYMax = null;
+    _emitState([_plotChanges, _plotControlChanges]);
+  }
+
+  void resetPlotView() {
+    if (_isDetachedRemote && _dispatchRemote('resetPlotView')) return;
+    followLatest = true;
+    plotVisibleWindowSeconds = 12;
+    plotAutoY = true;
+    plotYMin = null;
+    plotYMax = null;
+    plotShowGrid = true;
+    plotShowLegend = true;
+    plotMouseXEnabled = true;
+    plotMouseYEnabled = true;
+    plotInvertX = false;
+    plotInvertY = false;
+    if (!plottingPaused) _clearFrozenPlot();
+    _emitState([_plotChanges, _plotControlChanges]);
   }
 
   void clearSamples() {
     if (_dispatchCommand('clearSamples')) return;
     elapsedSeconds = 0;
+    _resetSamplingElapsedClock();
     for (final watch in _watches) {
       watch.samples.clear();
       watch.totalSampleCount = 0;
@@ -579,6 +779,8 @@ class TakeALookController extends ChangeNotifier {
         }
       case 'setSampleRate':
         setSampleRate((arguments as num).toDouble());
+      case 'setDisplayRefreshMode':
+        setDisplayRefreshMode(arguments as String);
       case 'setRttSampleRate':
         setRttSampleRate((arguments as num).toDouble());
       case 'setProbeType':
@@ -593,6 +795,8 @@ class TakeALookController extends ChangeNotifier {
         setUiScale((arguments as num).toDouble());
       case 'toggleSampling':
         toggleSampling();
+      case 'setSamplingPaused':
+        if (samplingPaused != (arguments == true)) toggleSampling();
       case 'togglePlotting':
         togglePlotting();
       case 'toggleRtt':
@@ -601,6 +805,20 @@ class TakeALookController extends ChangeNotifier {
         setRttProtocol(arguments as String);
       case 'toggleFollowLatest':
         toggleFollowLatest();
+      case 'setPlotViewport':
+        final values = Map<String, dynamic>.from(arguments as Map);
+        setPlotViewport(
+          xMin: (values['xMin'] as num).toDouble(),
+          xMax: (values['xMax'] as num).toDouble(),
+          yMin: (values['yMin'] as num?)?.toDouble(),
+          yMax: (values['yMax'] as num?)?.toDouble(),
+        );
+      case 'configurePlotView':
+        configurePlotView(Map<String, dynamic>.from(arguments as Map));
+      case 'showAllPlotSamples':
+        showAllPlotSamples();
+      case 'resetPlotView':
+        resetPlotView();
       case 'clearSamples':
         clearSamples();
       case 'clearLogs':
@@ -716,16 +934,99 @@ class TakeALookController extends ChangeNotifier {
   }
 
   void _emitTelemetry({bool sync = true}) {
-    _telemetryChanges.emit();
-    if (!plottingPaused && followLatest) _plotChanges.emit();
+    _telemetryDisplayPending = true;
+    _schedulePlotRefresh();
     if (sync) _telemetrySyncChanges.emit();
     notifyListeners();
+  }
+
+  Duration get _plotRefreshInterval => Duration(
+    microseconds: (Duration.microsecondsPerSecond / plotRefreshRateHz).round(),
+  );
+
+  void _schedulePlotRefresh() {
+    if (_plotRefreshTimer?.isActive != true) {
+      _emitDisplayFrame();
+      _startPlotRefreshClock();
+    }
+  }
+
+  void _emitDisplayFrame() {
+    if (_telemetryDisplayPending) {
+      _telemetryDisplayPending = false;
+      _telemetryChanges.emit();
+    }
+    if (!plottingPaused &&
+        followLatest &&
+        _watches.any((watch) => watch.plotted)) {
+      _plotChanges.emit();
+    }
+  }
+
+  void _resetPlotRefreshSchedule() {
+    _plotRefreshTimer?.cancel();
+    _plotRefreshTimer = null;
+    if (_telemetryDisplayPending && !_disposed) {
+      _telemetryDisplayPending = false;
+      _telemetryChanges.emit();
+    }
+    _startPlotRefreshClock();
+  }
+
+  void _startPlotRefreshClock() {
+    if (_disposed ||
+        connectionStatus != ConnectionStatus.connected ||
+        _plotRefreshTimer?.isActive == true) {
+      return;
+    }
+    _plotRefreshTimer = Timer.periodic(
+      _plotRefreshInterval,
+      (_) => _emitDisplayFrame(),
+    );
+  }
+
+  void _reconcileSamplingClock() {
+    final shouldRun =
+        connectionStatus == ConnectionStatus.connected && !samplingPaused;
+    if (!shouldRun) {
+      if (_samplingElapsedStopwatch.isRunning) {
+        _samplingElapsedStopwatch.stop();
+        _samplingElapsedBaseSeconds +=
+            _samplingElapsedStopwatch.elapsedMicroseconds /
+            Duration.microsecondsPerSecond;
+        _samplingElapsedStopwatch.reset();
+      }
+      _samplingClockTimer?.cancel();
+      _samplingClockTimer = null;
+      if (connectionStatus == ConnectionStatus.disconnected) {
+        _samplingElapsedBaseSeconds = 0;
+      }
+      _clockChanges.emit();
+      return;
+    }
+    if (!_samplingElapsedStopwatch.isRunning) {
+      _samplingElapsedStopwatch.start();
+    }
+    _samplingClockTimer ??= Timer.periodic(const Duration(milliseconds: 10), (
+      _,
+    ) {
+      if (!_disposed) _clockChanges.emit();
+    });
+  }
+
+  void _resetSamplingElapsedClock() {
+    _samplingElapsedBaseSeconds = 0;
+    _samplingElapsedStopwatch.reset();
+    _clockChanges.emit();
   }
 
   @override
   void dispose() {
     _disposed = true;
     _ticker?.cancel();
+    _plotRefreshTimer?.cancel();
+    _samplingClockTimer?.cancel();
+    _samplingElapsedStopwatch.stop();
     _uiScale.dispose();
     _connectionChanges.dispose();
     _samplingChanges.dispose();
@@ -733,6 +1034,8 @@ class TakeALookController extends ChangeNotifier {
     _watchChanges.dispose();
     _telemetryChanges.dispose();
     _plotChanges.dispose();
+    _plotControlChanges.dispose();
+    _clockChanges.dispose();
     _logChanges.dispose();
     _stateSyncChanges.dispose();
     _telemetrySyncChanges.dispose();

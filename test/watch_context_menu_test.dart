@@ -45,6 +45,22 @@ void main() {
 
     expect(find.text('隐藏所选列（2）'), findsOneWidget);
     expect(find.text('显示全列'), findsOneWidget);
+    final desktopItem = tester.widget<PopupMenuItem<String>>(
+      find
+          .ancestor(
+            of: find.text('显示全列'),
+            matching: find.byType(PopupMenuItem<String>),
+          )
+          .first,
+    );
+    expect(desktopItem.height, 32);
+    final popupShape = Theme.of(
+      tester.element(find.text('显示全列')),
+    ).popupMenuTheme.shape;
+    expect(
+      (popupShape! as RoundedRectangleBorder).borderRadius,
+      BorderRadius.circular(8),
+    );
     await tester.tap(find.text('隐藏所选列（2）'));
     await tester.pumpAndSettle();
     expect(find.text('类型'), findsNothing);
@@ -55,6 +71,51 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('类型'), findsOneWidget);
     expect(find.text('当前值'), findsOneWidget);
+
+    controller.dispose();
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('watch menus use larger touch targets on long press', (
+    tester,
+  ) async {
+    final controller = await pumpWatchTable(tester);
+
+    Future<void> longPress(Finder finder) async {
+      final gesture = await tester.startGesture(
+        tester.getCenter(finder),
+        kind: PointerDeviceKind.touch,
+      );
+      await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
+      await gesture.up();
+      await tester.pumpAndSettle();
+    }
+
+    await longPress(find.text('类型'));
+    expect(find.text('隐藏该列'), findsOneWidget);
+    final headerItem = tester.widget<PopupMenuItem<String>>(
+      find
+          .ancestor(
+            of: find.text('隐藏该列'),
+            matching: find.byType(PopupMenuItem<String>),
+          )
+          .first,
+    );
+    expect(headerItem.height, 48);
+    await tester.tapAt(const Offset(790, 510));
+    await tester.pumpAndSettle();
+
+    await longPress(find.text('iq_ref'));
+    expect(find.text('移除该变量'), findsOneWidget);
+    final rowItem = tester.widget<PopupMenuItem<String>>(
+      find
+          .ancestor(
+            of: find.text('移除该变量'),
+            matching: find.byType(PopupMenuItem<String>),
+          )
+          .first,
+    );
+    expect(rowItem.height, 48);
 
     controller.dispose();
     await tester.pumpWidget(const SizedBox.shrink());

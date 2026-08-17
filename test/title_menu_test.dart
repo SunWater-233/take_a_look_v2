@@ -48,6 +48,12 @@ void main() {
     await tester.pump();
     expect(find.text('视图'), findsOneWidget);
 
+    final viewMenuAnchor = find.ancestor(
+      of: find.text('视图'),
+      matching: find.byType(MenuAnchor),
+    );
+    final viewMenuAnchorRect = tester.getRect(viewMenuAnchor);
+
     await tester.tap(find.text('视图'));
     await tester.pumpAndSettle();
 
@@ -57,6 +63,19 @@ void main() {
     expect(find.text('保存布局'), findsOneWidget);
     expect(find.text('恢复保存的布局'), findsOneWidget);
     expect(find.text('重置默认布局'), findsOneWidget);
+    final titleBarRect = tester.getRect(find.byType(TalWindowTitleBar));
+    final rootMenuFirstItem = find.ancestor(
+      of: find.text('UI 缩放'),
+      matching: find.byType(SubmenuButton),
+    );
+    expect(
+      tester.getRect(rootMenuFirstItem).top,
+      greaterThanOrEqualTo(titleBarRect.bottom),
+    );
+    expect(
+      tester.getRect(rootMenuFirstItem).left,
+      closeTo(viewMenuAnchorRect.left, 0.01),
+    );
 
     const panelLabels = [
       '主标题',
@@ -77,6 +96,12 @@ void main() {
       previousY = y;
     }
 
+    final uiScaleButton = find.ancestor(
+      of: find.text('UI 缩放'),
+      matching: find.byType(SubmenuButton),
+    );
+    final uiScaleButtonRect = tester.getRect(uiScaleButton);
+
     await tester.tap(find.text('UI 缩放'));
     await tester.pumpAndSettle();
 
@@ -87,6 +112,14 @@ void main() {
     expect(find.text('100%'), findsOneWidget);
     expect(find.text('125%'), findsOneWidget);
     expect(find.text('145%'), findsOneWidget);
+    final zoomInItem = find.ancestor(
+      of: find.text('放大界面'),
+      matching: find.byType(MenuItemButton),
+    );
+    expect(
+      tester.getRect(zoomInItem).left,
+      greaterThanOrEqualTo(uiScaleButtonRect.right - 1),
+    );
 
     await tester.tap(find.text('125%'));
     await tester.pumpAndSettle();
@@ -131,6 +164,50 @@ void main() {
     await tester.pumpAndSettle();
   });
 
+  testWidgets('RTT sampling checkbox toggles without closing its menu', (
+    tester,
+  ) async {
+    await pumpTitleBar(tester);
+
+    await tester.tap(find.text('实时变量'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('RTT设置'));
+    await tester.pumpAndSettle();
+
+    final rttSampling = find.byType(CheckboxMenuButton);
+    expect(rttSampling, findsOneWidget);
+    expect(tester.widget<CheckboxMenuButton>(rttSampling).value, isFalse);
+
+    await tester.tap(rttSampling);
+    await tester.pumpAndSettle();
+
+    expect(controller.rttEnabled, isTrue);
+    expect(rttSampling, findsOneWidget);
+    expect(tester.widget<CheckboxMenuButton>(rttSampling).value, isTrue);
+    expect(find.text('RTT协议'), findsOneWidget);
+  });
+
+  testWidgets('refresh-rate menu controls plotting instead of sampling', (
+    tester,
+  ) async {
+    await pumpTitleBar(tester);
+
+    await tester.tap(find.text('实时变量'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('刷新率设置'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('标准模式（60 Hz）'), findsOneWidget);
+    expect(find.text('高频模式（120 Hz）'), findsOneWidget);
+    expect(find.text('实时模式（自适应）'), findsOneWidget);
+    expect(find.text('50 Hz'), findsNothing);
+
+    await tester.tap(find.text('高频模式（120 Hz）'));
+    await tester.pumpAndSettle();
+    expect(controller.displayRefreshMode, 'high');
+    expect(controller.sampleRateHz, 50);
+  });
+
   testWidgets('view menu refreshes panel visibility checks', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1200, 800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -162,5 +239,39 @@ void main() {
       find.descendant(of: headerItem, matching: find.byIcon(Icons.check)),
       findsNothing,
     );
+  });
+
+  testWidgets('backend errors are presented in a modal dialog', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final windowSync = MainWindowSync(controller);
+    addTearDown(windowSync.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTalTheme(),
+        home: MainWorkbench(controller: controller, windowSync: windowSync),
+      ),
+    );
+
+    controller.applyBackendEvent('error', {
+      'code': 'connect_failed',
+      'message': '连接失败。',
+      'details': '未找到探针',
+    });
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(find.text('pyOCD 连接失败'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.textContaining('未找到探针'),
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('确定'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing);
   });
 }

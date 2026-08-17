@@ -13,7 +13,7 @@ class _PlotPanel extends StatelessWidget {
           animation: Listenable.merge([
             controller.watchChanges,
             controller.samplingChanges,
-            controller.plotChanges,
+            controller.plotControlChanges,
           ]),
           builder: (context, _) => Container(
             height: 52,
@@ -56,15 +56,22 @@ class _PlotPanel extends StatelessWidget {
   }
 }
 
-class _LogPanel extends StatelessWidget {
+class _LogPanel extends StatefulWidget {
   const _LogPanel({required this.controller});
 
   final TakeALookController controller;
 
   @override
+  State<_LogPanel> createState() => _LogPanelState();
+}
+
+class _LogPanelState extends State<_LogPanel> {
+  PointerDeviceKind _lastPointerKind = PointerDeviceKind.mouse;
+
+  @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: controller.logChanges,
+      animation: widget.controller.logChanges,
       builder: (context, _) => Padding(
         padding: const EdgeInsets.all(10),
         child: DecoratedBox(
@@ -75,22 +82,32 @@ class _LogPanel extends StatelessWidget {
           child: Stack(
             children: [
               Positioned.fill(
-                child: SelectionArea(
-                  key: const ValueKey('log-selection-area'),
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(4),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        for (final entry in controller.logs)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 3),
-                            child: Text(
-                              '[${entry.timeLabel}] ${entry.message}',
-                              style: talMono,
+                child: Listener(
+                  onPointerDown: (event) => _lastPointerKind = event.kind,
+                  child: SelectionArea(
+                    key: const ValueKey('log-selection-area'),
+                    contextMenuBuilder: (context, state) =>
+                        TalSelectionContextMenu(
+                          anchors: state.contextMenuAnchors,
+                          buttonItems: state.contextMenuButtonItems,
+                          touchOptimized:
+                              _lastPointerKind != PointerDeviceKind.mouse,
+                        ),
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(4),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          for (final entry in widget.controller.logs)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 3),
+                              child: Text(
+                                '[${entry.timeLabel}] ${entry.message}',
+                                style: talMono,
+                              ),
                             ),
-                          ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -100,7 +117,7 @@ class _LogPanel extends StatelessWidget {
                 top: 3,
                 child: IconButton(
                   tooltip: '清空日志',
-                  onPressed: controller.clearLogs,
+                  onPressed: widget.controller.clearLogs,
                   icon: const Icon(Icons.delete_sweep_outlined, size: 17),
                 ),
               ),

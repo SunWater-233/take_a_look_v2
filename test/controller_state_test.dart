@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:take_a_look_v2/src/controller.dart';
+import 'package:take_a_look_v2/src/models.dart';
 
 void main() {
   test('controller emits only the state domains affected by a command', () {
@@ -29,6 +30,96 @@ void main() {
     expect(symbolEvents, 0);
     expect(stateSyncEvents, 2);
 
+    controller.dispose();
+  });
+
+  test('plot refresh mode is independent and synchronized in snapshots', () {
+    final source = TakeALookController();
+    final originalSampleRate = source.sampleRateHz;
+
+    source.setDisplayRefreshMode('high');
+    expect(source.displayRefreshMode, 'high');
+    expect(source.plotRefreshRateHz, 120);
+    expect(source.sampleRateHz, originalSampleRate);
+    expect(source.logs.last.message, contains('高频模式（120 Hz）'));
+
+    final target = TakeALookController()..applySnapshot(source.stateSnapshot());
+    expect(target.displayRefreshMode, 'high');
+
+    source.setSampleRate(25);
+    source.setDisplayRefreshMode('realtime');
+    expect(source.plotRefreshRateHz, 25);
+    source.setSampleRate(1000);
+    expect(source.plotRefreshRateHz, 120);
+
+    expect(() => source.setDisplayRefreshMode('invalid'), throwsArgumentError);
+    source.dispose();
+    target.dispose();
+  });
+
+  test('partial backend state only notifies the affected UI domain', () {
+    final controller = TakeALookController();
+    controller.connectionStatus = ConnectionStatus.connected;
+    controller.loadDemoSymbols();
+    controller.toggleSymbol(demoSymbols.first.key);
+    controller.addSelectedToWatch();
+    final symbolRevision = controller.symbolRevision;
+    var samplingEvents = 0;
+    var symbolEvents = 0;
+    var watchEvents = 0;
+    var telemetryEvents = 0;
+    var plotEvents = 0;
+    controller.samplingChanges.addListener(() => samplingEvents += 1);
+    controller.symbolChanges.addListener(() => symbolEvents += 1);
+    controller.watchChanges.addListener(() => watchEvents += 1);
+    controller.telemetryChanges.addListener(() => telemetryEvents += 1);
+    controller.plotChanges.addListener(() => plotEvents += 1);
+
+    controller.applySnapshot({'samplingPaused': true});
+
+    expect(controller.connectionStatus, ConnectionStatus.connected);
+    expect(controller.symbolRevision, symbolRevision);
+    expect(controller.symbols, hasLength(demoSymbols.length));
+    expect(controller.watches, hasLength(1));
+    expect(samplingEvents, 1);
+    expect(symbolEvents, 0);
+    expect(watchEvents, 0);
+    expect(telemetryEvents, 0);
+    expect(plotEvents, 0);
+    controller.dispose();
+  });
+
+  testWidgets('sampling clock is smooth and plot clock honors refresh mode', (
+    tester,
+  ) async {
+    final controller = TakeALookController();
+    controller.loadDemoSymbols();
+    controller.toggleSymbol(demoSymbols.first.key);
+    controller.addSelectedToWatch();
+    controller.applySnapshot({
+      'connectionStatus': 'connected',
+      'samplingPaused': false,
+    });
+    var clockEvents = 0;
+    var plotEvents = 0;
+    controller.clockChanges.addListener(() => clockEvents += 1);
+    controller.plotChanges.addListener(() => plotEvents += 1);
+
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(clockEvents, inInclusiveRange(9, 11));
+    expect(plotEvents, inInclusiveRange(5, 7));
+
+    controller.setDisplayRefreshMode('high');
+    plotEvents = 0;
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(plotEvents, inInclusiveRange(11, 13));
+
+    controller.toggleSampling();
+    final pausedElapsed = controller.samplingElapsedSeconds;
+    clockEvents = 0;
+    await tester.pump(const Duration(milliseconds: 40));
+    expect(clockEvents, 0);
+    expect(controller.samplingElapsedSeconds, closeTo(pausedElapsed, 0.001));
     controller.dispose();
   });
 

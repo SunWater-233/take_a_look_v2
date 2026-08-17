@@ -97,7 +97,10 @@ class BackendServiceTests(unittest.TestCase):
             self.assertEqual(len(loaded["state"]["symbols"]), 2)  # type: ignore[index]
             self.assertEqual(loaded["state"]["symbols"][0]["section"], ".data")  # type: ignore[index]
 
-            self.service.handle("setWatches", {"watches": [{"key": key, "color": "#00ff00", "plotted": True}]})
+            watch_result = self.service.handle(
+                "setWatches", {"watches": [{"key": key, "color": "#00ff00", "plotted": True}]}
+            )
+            self.assertNotIn("symbols", watch_result["state"])  # type: ignore[operator]
             connected = self.service.handle("connect", {"targetName": "STM32F407", "swdClock": "2 MHz"})
             self.assertEqual(connected["state"]["connectionStatus"], "connected")  # type: ignore[index]
             self.assertEqual(self.memory.connected.frequency_hz, 2_000_000)  # type: ignore[union-attr]
@@ -143,3 +146,5 @@ class BackendServiceTests(unittest.TestCase):
         self.assertEqual(state["sampleRateHz"], 200.0)
         paused = self.service.handle("setSamplingPaused", {"paused": True})["state"]
         self.assertTrue(paused["samplingPaused"])
+        self.assertNotIn("symbols", paused)
+        self.assertNotIn("watches", paused)

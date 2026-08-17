@@ -23,6 +23,7 @@ fi
   --paths "$backend_root" \
   --additional-hooks-dir "$backend_root/pyinstaller_hooks" \
   --collect-all pyocd \
+  --collect-all cmsis_pack_manager \
   --collect-all elftools \
   --collect-submodules pylink \
   "$backend_root/take_a_look_backend/stdio.py"

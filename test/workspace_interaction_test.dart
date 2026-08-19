@@ -11,6 +11,55 @@ import 'package:take_a_look_v2/src/window_sync.dart';
 import 'package:take_a_look_v2/src/workspace.dart';
 
 void main() {
+  testWidgets('dragging a tab within a group changes its order', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1600, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final controller = TakeALookController();
+    final workspaceKey = GlobalKey<DockingWorkspaceState>();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTalTheme(),
+        home: Scaffold(
+          body: DockingWorkspace(
+            key: workspaceKey,
+            controller: controller,
+            windowSync: MainWindowSync(controller),
+          ),
+        ),
+      ),
+    );
+
+    final headerGroup = find.byKey(const ValueKey('workspace-group-header'));
+    Finder tab(WorkspacePanelId panel) => find.descendant(
+      of: headerGroup,
+      matching: find.byKey(ValueKey('panel-tab-${panel.name}')),
+    );
+
+    expect(
+      tester.getCenter(tab(WorkspacePanelId.header)).dx,
+      lessThan(tester.getCenter(tab(WorkspacePanelId.sampling)).dx),
+    );
+    await tester.dragFrom(
+      tester.getCenter(tab(WorkspacePanelId.header)),
+      tester.getCenter(tab(WorkspacePanelId.sampling)) -
+          tester.getCenter(tab(WorkspacePanelId.header)),
+    );
+    await tester.pump();
+
+    expect(
+      tester.getCenter(tab(WorkspacePanelId.header)).dx,
+      greaterThan(tester.getCenter(tab(WorkspacePanelId.sampling)).dx),
+    );
+    expect(find.byType(TalPanelFrame), findsNWidgets(4));
+
+    controller.dispose();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 50));
+  });
+
   testWidgets('dragging a tab onto another tab strip combines panels', (
     tester,
   ) async {

@@ -148,36 +148,31 @@ class _PanelTabs extends StatelessWidget {
   final ValueChanged<WorkspacePanelId> onSelected;
   final String? groupId;
   final bool draggable;
-  final ValueChanged<PanelTabDragData>? onAccept;
+  final void Function(PanelTabDragData, int targetIndex)? onAccept;
   final void Function(PanelTabDragData, DraggableDetails)? onDragEnd;
 
   @override
   Widget build(BuildContext context) {
-    final tabList = ListView(
-      scrollDirection: Axis.horizontal,
-      children: [for (final tab in tabs) _buildTab(tab)],
-    );
-    if (!draggable || onAccept == null) {
-      return _tabStrip(tabList);
-    }
-    return DragTarget<PanelTabDragData>(
-      onWillAcceptWithDetails: (_) => true,
-      onAcceptWithDetails: (details) => onAccept!(details.data),
-      builder: (context, candidates, rejected) =>
-          _tabStrip(tabList, accepting: candidates.isNotEmpty),
+    return _tabStrip(
+      ListView(
+        scrollDirection: Axis.horizontal,
+        children: [
+          for (final (index, tab) in tabs.indexed) _buildTab(tab, index),
+        ],
+      ),
     );
   }
 
-  Widget _tabStrip(Widget child, {bool accepting = false}) {
+  Widget _tabStrip(Widget child) {
     return Container(
       height: 30,
-      color: accepting ? TalColors.surfaceAlt : TalColors.surface,
+      color: TalColors.surface,
       alignment: Alignment.bottomLeft,
       child: child,
     );
   }
 
-  Widget _buildTab(WorkspacePanelId tab) {
+  Widget _buildTab(WorkspacePanelId tab, int index) {
     final tabWidget = InkWell(
       onTap: () => onSelected(tab),
       child: _tabSurface(tab),
@@ -187,7 +182,7 @@ class _PanelTabs extends StatelessWidget {
       return tabWidget;
     }
     final data = PanelTabDragData(sourceGroupId: sourceGroupId, panel: tab);
-    return MouseRegion(
+    final draggableTab = MouseRegion(
       cursor: SystemMouseCursors.grab,
       child: Draggable<PanelTabDragData>(
         data: data,
@@ -203,10 +198,26 @@ class _PanelTabs extends StatelessWidget {
         child: tabWidget,
       ),
     );
+    final accept = onAccept;
+    if (accept == null) return draggableTab;
+    return DragTarget<PanelTabDragData>(
+      onWillAcceptWithDetails: (_) => true,
+      onAcceptWithDetails: (details) => accept(details.data, index),
+      builder: (context, candidates, rejected) => DecoratedBox(
+        decoration: BoxDecoration(
+          color: candidates.isEmpty ? null : TalColors.surfaceAlt,
+          border: candidates.isEmpty
+              ? null
+              : Border.all(color: TalColors.accent),
+        ),
+        child: draggableTab,
+      ),
+    );
   }
 
   Widget _tabSurface(WorkspacePanelId tab) {
     return Container(
+      key: ValueKey<String>('panel-tab-${tab.name}'),
       height: 29,
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(

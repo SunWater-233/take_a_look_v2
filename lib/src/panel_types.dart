@@ -155,7 +155,7 @@ class PanelChrome {
   final bool showActions;
   final bool draggable;
   final String? groupId;
-  final ValueChanged<PanelTabDragData>? onTabAccept;
+  final void Function(PanelTabDragData, int targetIndex)? onTabAccept;
   final void Function(PanelTabDragData, DraggableDetails)? onTabDragEnd;
   final bool tabsDraggable;
 }

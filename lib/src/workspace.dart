@@ -125,7 +125,8 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
                   draggable: _session.gridMode,
                   groupId: group.id,
                   tabsDraggable: true,
-                  onTabAccept: (data) => _acceptTabDrop(group, data),
+                  onTabAccept: (data, targetIndex) =>
+                      _acceptTabDrop(group, data, targetIndex),
                   onTabDragEnd: (data, details) =>
                       _finishTabDrag(group, data, details, workspaceSize),
                 ),
@@ -681,19 +682,32 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     widget.controller.report('已从组合中拆分面板：${panel.title}。');
   }
 
-  void _acceptTabDrop(WorkspaceGroup target, PanelTabDragData data) {
+  void _acceptTabDrop(
+    WorkspaceGroup target,
+    PanelTabDragData data,
+    int targetIndex,
+  ) {
     final source = _session.groups
         .where((group) => group.id == data.sourceGroupId)
         .firstOrNull;
     if (source == null || !source.panels.contains(data.panel)) return;
     if (source == target) {
-      setState(() => target.activePanel = data.panel);
+      final sourceIndex = target.panels.indexOf(data.panel);
+      final insertionIndex = targetIndex.clamp(0, target.panels.length - 1);
+      setState(() {
+        target.panels.removeAt(sourceIndex);
+        target.panels.insert(insertionIndex, data.panel);
+        target.activePanel = data.panel;
+      });
       return;
     }
     setState(() {
       _detachPanel(source, data.panel);
       if (!target.panels.contains(data.panel)) {
-        target.panels.add(data.panel);
+        target.panels.insert(
+          targetIndex.clamp(0, target.panels.length),
+          data.panel,
+        );
       }
       target.activePanel = data.panel;
       target.z = _nextZ();

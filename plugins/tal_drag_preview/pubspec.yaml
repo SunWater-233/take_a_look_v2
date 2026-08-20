@@ -1,0 +1,22 @@
+name: tal_drag_preview
+description: Cross-platform click-through support for Take A Look drag previews.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.11.0
+  flutter: '>=3.35.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      linux:
+        pluginClass: TalDragPreviewPlugin
+      macos:
+        pluginClass: TalDragPreviewPlugin
+      windows:
+        pluginClass: TalDragPreviewPlugin

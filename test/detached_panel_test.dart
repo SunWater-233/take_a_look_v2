@@ -20,6 +20,25 @@ void main() {
     expect(launch!.panel, WorkspacePanelId.plot);
     expect(launch.groupPanels, [WorkspacePanelId.plot]);
     expect(launch.initialSize, sourceSize);
+    expect(launch.role, SecondaryWindowRole.detachedPanel);
+  });
+
+  test('drag preview arguments preserve role and screen position', () {
+    const position = Offset(1180, 240);
+    final arguments = encodePanelArguments(
+      WorkspacePanelId.symbols,
+      const Size(540, 700),
+      role: SecondaryWindowRole.dragPreview,
+      initialPosition: position,
+    );
+    final launch = detachedPanelLaunchFromEntrypointArguments([
+      'multi_window',
+      'preview',
+      arguments,
+    ]);
+
+    expect(launch!.role, SecondaryWindowRole.dragPreview);
+    expect(launch.initialPosition, position);
   });
 
   test('detached panel arguments preserve the complete source group', () {
@@ -79,6 +98,86 @@ void main() {
     controller.dispose();
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(milliseconds: 50));
+  });
+
+  testWidgets('detached window can replace its assigned panel', (tester) async {
+    final controller = TakeALookController();
+
+    Future<void> pumpPanel(WorkspacePanelId panel) {
+      return tester.pumpWidget(
+        MaterialApp(
+          theme: buildTalTheme(),
+          home: DetachedPanelWindow(controller: controller, panel: panel),
+        ),
+      );
+    }
+
+    await pumpPanel(WorkspacePanelId.sampling);
+    expect(
+      tester.widget<TalPanelFrame>(find.byType(TalPanelFrame)).panel,
+      WorkspacePanelId.sampling,
+    );
+
+    await pumpPanel(WorkspacePanelId.plot);
+    expect(
+      tester.widget<TalPanelFrame>(find.byType(TalPanelFrame)).panel,
+      WorkspacePanelId.plot,
+    );
+
+    controller.dispose();
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('detached title bar fits a narrow window', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(340, 100));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTalTheme(),
+        home: const Scaffold(
+          body: Align(
+            alignment: Alignment.topCenter,
+            child: TalWindowTitleBar(subtitle: '实时调参'),
+          ),
+        ),
+      ),
+    );
+
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('drag preview contains only the selected tab and its body', (
+    tester,
+  ) async {
+    final controller = TakeALookController();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTalTheme(),
+        home: SizedBox(
+          width: 440,
+          height: 560,
+          child: TabContentDragPreviewWindow(
+            controller: controller,
+            panel: WorkspacePanelId.connection,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byType(TalPanelTabSurface), findsOneWidget);
+    expect(find.byType(TalPanelFrame), findsNothing);
+    expect(find.byType(TalWindowTitleBar), findsNothing);
+    expect(
+      find.byKey(const ValueKey<String>('tab-content-drag-preview-body')),
+      findsOneWidget,
+    );
+    expect(find.text(WorkspacePanelId.connection.title), findsOneWidget);
+    expect(find.text('探针'), findsOneWidget);
+    expect(find.text(WorkspacePanelId.watch.title), findsNothing);
+
+    controller.dispose();
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 
   testWidgets('every workspace panel can render in an isolated window shell', (

@@ -1,4 +1,5 @@
 import Cocoa
+import desktop_multi_window
 import FlutterMacOS
 
 class MainFlutterWindow: NSWindow {
@@ -9,6 +10,9 @@ class MainFlutterWindow: NSWindow {
     self.setFrame(windowFrame, display: true)
 
     RegisterGeneratedPlugins(registry: flutterViewController)
+    FlutterMultiWindowPlugin.setOnWindowCreatedCallback { controller in
+      RegisterGeneratedPlugins(registry: controller)
+    }
 
     super.awakeFromNib()
   }

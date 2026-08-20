@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:tal_drag_preview/tal_drag_preview.dart';
+import 'package:window_manager/window_manager.dart';
 
 import 'app/title_bar.dart';
 import 'backend_client.dart';
@@ -17,22 +19,31 @@ class TakeALookApp extends StatefulWidget {
   const TakeALookApp({
     this.detachedPanel,
     this.detachedPanels,
+    this.secondaryWindowRole = SecondaryWindowRole.detachedPanel,
     this.enableBackend = false,
     super.key,
   });
 
   final WorkspacePanelId? detachedPanel;
   final List<WorkspacePanelId>? detachedPanels;
+  final SecondaryWindowRole secondaryWindowRole;
   final bool enableBackend;
 
   @override
   State<TakeALookApp> createState() => _TakeALookAppState();
 }
 
-class _TakeALookAppState extends State<TakeALookApp> {
+class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
   late final TakeALookController controller;
   MainWindowSync? windowSync;
   BackendClient? backendClient;
+  WorkspacePanelId? detachedPanel;
+  List<WorkspacePanelId> detachedPanels = const <WorkspacePanelId>[];
+  bool detachedWindowAssigned = false;
+  bool releasingDetachedWindow = false;
+  int _tabDragPreviewSession = 0;
+  bool _tabDragPreviewActive = false;
+  bool _tabDragPreviewVisible = false;
 
   @override
   void initState() {
@@ -54,18 +65,151 @@ class _TakeALookAppState extends State<TakeALookApp> {
       windowSync = MainWindowSync(controller);
       unawaited(windowSync!.start());
     } else {
+      detachedPanel = widget.detachedPanel;
+      detachedPanels = widget.detachedPanels ?? const <WorkspacePanelId>[];
       late final TakeALookController remoteController;
       remoteController = TakeALookController(
         remoteCommand: (method, arguments) =>
             sendCommandToMain(remoteController, method, arguments),
       );
       controller = remoteController;
-      unawaited(initializeDetachedWindow(controller));
+      windowManager.addListener(this);
+      unawaited(windowManager.setPreventClose(true));
+      unawaited(
+        initializeDetachedWindow(
+          controller,
+          onConfigure:
+              widget.secondaryWindowRole == SecondaryWindowRole.detachedPanel
+              ? _configureDetachedWindow
+              : null,
+          onPrepareTabDragPreview:
+              widget.secondaryWindowRole == SecondaryWindowRole.dragPreview
+              ? _prepareTabDragPreview
+              : null,
+          onShowTabDragPreview:
+              widget.secondaryWindowRole == SecondaryWindowRole.dragPreview
+              ? _showTabDragPreview
+              : null,
+          onHideTabDragPreview:
+              widget.secondaryWindowRole == SecondaryWindowRole.dragPreview
+              ? _hideTabDragPreview
+              : null,
+        ),
+      );
+    }
+  }
+
+  Future<void> _configureDetachedWindow(
+    DetachedPanelLaunch configuration,
+  ) async {
+    if (!mounted) return;
+    await windowManager.hide();
+    await windowManager.setTitleBarStyle(
+      TitleBarStyle.hidden,
+      windowButtonVisibility: false,
+    );
+    await windowManager.setBackgroundColor(const Color(0xFF050505));
+    await windowManager.setMinimumSize(Size.zero);
+    await TalDragPreview.setClickThrough(false);
+    await windowManager.setAlwaysOnTop(false);
+    await windowManager.setSkipTaskbar(false);
+    await windowManager.setResizable(true);
+    await windowManager.setOpacity(1);
+    setState(() {
+      detachedPanel = configuration.panel;
+      detachedPanels = configuration.panels;
+      detachedWindowAssigned = true;
+    });
+    await windowManager.setSize(configuration.initialSize);
+    final initialPosition = configuration.initialPosition;
+    if (initialPosition != null) {
+      await windowManager.setPosition(initialPosition);
+    }
+    final panels = configuration.groupPanels;
+    await windowManager.setTitle(
+      panels.length > 1
+          ? 'Take A Look - ${configuration.panel.title} 组合'
+          : 'Take A Look - ${configuration.panel.title}',
+    );
+    await WidgetsBinding.instance.endOfFrame;
+  }
+
+  Future<void> _prepareTabDragPreview(
+    DetachedPanelLaunch configuration,
+    int session,
+  ) async {
+    if (!mounted || session <= _tabDragPreviewSession) return;
+    _tabDragPreviewSession = session;
+    _tabDragPreviewActive = true;
+    _tabDragPreviewVisible = false;
+    await windowManager.hide();
+    await windowManager.setAsFrameless();
+    await windowManager.setBackgroundColor(Colors.transparent);
+    await windowManager.setMinimumSize(Size.zero);
+    await windowManager.setResizable(false);
+    await windowManager.setAlwaysOnTop(true);
+    await windowManager.setSkipTaskbar(true);
+    await TalDragPreview.setClickThrough(true);
+    await windowManager.setOpacity(0.88);
+    if (!_isCurrentTabDragPreview(session)) return;
+    setState(() {
+      detachedPanel = configuration.panel;
+      detachedPanels = const <WorkspacePanelId>[];
+      detachedWindowAssigned = false;
+    });
+    await windowManager.setSize(configuration.initialSize);
+    await windowManager.setTitle(
+      'Take A Look - ${configuration.panel.title} 拖动预览',
+    );
+  }
+
+  Future<void> _showTabDragPreview(Offset screenPosition, int session) async {
+    if (detachedPanel == null || !_isCurrentTabDragPreview(session)) return;
+    await windowManager.setPosition(screenPosition);
+    if (!_isCurrentTabDragPreview(session) || _tabDragPreviewVisible) return;
+    _tabDragPreviewVisible = true;
+    await windowManager.show(inactive: true);
+  }
+
+  Future<void> _hideTabDragPreview(int session) async {
+    if (session < _tabDragPreviewSession) return;
+    _tabDragPreviewSession = session;
+    _tabDragPreviewActive = false;
+    _tabDragPreviewVisible = false;
+    await windowManager.setAlwaysOnTop(false);
+    await windowManager.hide();
+  }
+
+  bool _isCurrentTabDragPreview(int session) =>
+      mounted && _tabDragPreviewActive && _tabDragPreviewSession == session;
+
+  @override
+  void onWindowClose() {
+    if (widget.detachedPanel == null) return;
+    if (widget.secondaryWindowRole == SecondaryWindowRole.dragPreview) {
+      unawaited(_hideTabDragPreview(_tabDragPreviewSession));
+    } else {
+      unawaited(_releaseDetachedWindow());
+    }
+  }
+
+  Future<void> _releaseDetachedWindow() async {
+    if (releasingDetachedWindow) return;
+    releasingDetachedWindow = true;
+    try {
+      if (detachedWindowAssigned) {
+        await releaseDetachedWindow();
+        detachedWindowAssigned = false;
+      }
+      await windowManager.hide();
+    } finally {
+      releasingDetachedWindow = false;
     }
   }
 
   @override
   void dispose() {
+    if (widget.detachedPanel != null) windowManager.removeListener(this);
     unawaited(windowSync?.dispose());
     backendClient?.eventHandler = null;
     unawaited(backendClient?.close());
@@ -89,11 +233,59 @@ class _TakeALookAppState extends State<TakeALookApp> {
       },
       home: widget.detachedPanel == null
           ? MainWorkbench(controller: controller, windowSync: windowSync!)
+          : widget.secondaryWindowRole == SecondaryWindowRole.dragPreview
+          ? TabContentDragPreviewWindow(
+              controller: controller,
+              panel: detachedPanel!,
+            )
           : DetachedPanelWindow(
               controller: controller,
-              panel: widget.detachedPanel!,
-              panels: widget.detachedPanels ?? const <WorkspacePanelId>[],
+              panel: detachedPanel!,
+              panels: detachedPanels,
             ),
+    );
+  }
+}
+
+/// The drag surface mirrors exactly the selected tab and its content area.
+/// Group chrome and native-window chrome deliberately stay outside this tree.
+class TabContentDragPreviewWindow extends StatelessWidget {
+  const TabContentDragPreviewWindow({
+    required this.controller,
+    required this.panel,
+    super.key,
+  });
+
+  final TakeALookController controller;
+  final WorkspacePanelId panel;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            height: talPanelTabStripHeight,
+            child: Align(
+              alignment: Alignment.bottomLeft,
+              child: TalPanelTabSurface(tab: panel, selected: true),
+            ),
+          ),
+          Expanded(
+            child: Container(
+              key: const ValueKey<String>('tab-content-drag-preview-body'),
+              decoration: BoxDecoration(
+                color: TalColors.surface,
+                border: Border.all(color: TalColors.panelBorder),
+              ),
+              clipBehavior: Clip.hardEdge,
+              child: buildWorkspacePanelBody(panel, controller),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -301,6 +493,17 @@ class _DetachedPanelWindowState extends State<DetachedPanelWindow> {
   void initState() {
     super.initState();
     activePanel = widget.panel;
+  }
+
+  @override
+  void didUpdateWidget(covariant DetachedPanelWindow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.panel == widget.panel && oldWidget.panels == widget.panels) {
+      return;
+    }
+    if (!groupPanels.contains(activePanel) || oldWidget.panel != widget.panel) {
+      activePanel = widget.panel;
+    }
   }
 
   @override

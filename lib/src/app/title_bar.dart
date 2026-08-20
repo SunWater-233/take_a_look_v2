@@ -67,44 +67,22 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
 
   @override
   Widget build(BuildContext context) {
+    final detached = widget.subtitle != null;
     return Container(
       height: 46,
       color: TalColors.input,
       child: Row(
         children: [
-          DragToMoveArea(
-            child: Padding(
-              padding: const EdgeInsets.only(left: 14),
-              child: Row(
-                children: [
-                  const Text(
-                    'Take A Look',
-                    style: TextStyle(
-                      color: TalColors.text,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                      fontFamily: talBrandFontFamily,
-                      fontFamilyFallback: talBrandFontFamilyFallback,
-                      letterSpacing: 0,
-                    ),
-                  ),
-                  if (widget.subtitle != null) ...[
-                    const SizedBox(width: 8),
-                    Text(widget.subtitle!, style: talMuted),
-                  ],
-                  const SizedBox(width: 8),
-                  Container(width: 2, height: 24, color: TalColors.accent),
-                  const SizedBox(width: 8),
-                ],
-              ),
-            ),
-          ),
-          if (widget.subtitle == null) ...[
+          if (detached)
+            Expanded(child: _buildDetachedTitle())
+          else
+            _buildMainTitle(),
+          if (!detached) ...[
             _TitleMenu(label: '视图', menuChildren: _buildViewMenu()),
             const SizedBox(width: 4),
             _TitleMenu(label: '实时变量', menuChildren: _buildVariableMenu()),
+            const Expanded(child: DragToMoveArea(child: SizedBox.expand())),
           ],
-          const Expanded(child: DragToMoveArea(child: SizedBox.expand())),
           _CaptionButton(
             tooltip: '最小化',
             icon: Icons.remove,
@@ -134,6 +112,58 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
       ),
     );
   }
+
+  Widget _buildMainTitle() {
+    return DragToMoveArea(
+      child: Padding(
+        padding: const EdgeInsets.only(left: 14),
+        child: Row(
+          children: [
+            const Text('Take A Look', style: _brandStyle),
+            const SizedBox(width: 8),
+            Container(width: 2, height: 24, color: TalColors.accent),
+            const SizedBox(width: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDetachedTitle() {
+    return DragToMoveArea(
+      child: Padding(
+        padding: const EdgeInsets.only(left: 14),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text.rich(
+                TextSpan(
+                  children: [
+                    const TextSpan(text: 'Take A Look', style: _brandStyle),
+                    TextSpan(text: '  ${widget.subtitle}', style: talMuted),
+                  ],
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(width: 2, height: 24, color: TalColors.accent),
+            const SizedBox(width: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static const _brandStyle = TextStyle(
+    color: TalColors.text,
+    fontSize: 18,
+    fontWeight: FontWeight.w800,
+    fontFamily: talBrandFontFamily,
+    fontFamilyFallback: talBrandFontFamilyFallback,
+    letterSpacing: 0,
+  );
 
   List<Widget> _buildViewMenu() {
     final workspace = widget.workspaceKey?.currentState;

@@ -11,6 +11,8 @@ dependencies:
   file_selector: ^1.0.4
   flutter:
     sdk: flutter
+  tal_drag_preview:
+    path: plugins/tal_drag_preview
   window_manager: ^0.5.1
 
 dev_dependencies:

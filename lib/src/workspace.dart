@@ -3,11 +3,13 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:window_manager/window_manager.dart';
 
 import 'controller.dart';
 import 'detached_window_coordinator.dart';
 import 'panel_types.dart';
 import 'panels.dart';
+import 'tab_drag_preview_coordinator.dart';
 import 'theme.dart';
 import 'window_sync.dart';
 import 'workspace_geometry.dart';
@@ -37,24 +39,49 @@ class DockingWorkspace extends StatefulWidget {
 
 class DockingWorkspaceState extends State<DockingWorkspace> {
   late final DetachedWindowCoordinator detachedWindows;
+  late final TabDragPreviewCoordinator tabDragPreview;
   final Map<WorkspacePanelId, DetachedPanelPlacement> _detachedPlacements =
       <WorkspacePanelId, DetachedPanelPlacement>{};
   StreamSubscription<void>? windowSubscription;
   final WorkspaceSession _session = WorkspaceSession();
+  Timer? _tabMergeTimer;
+  String? _tabMergeCandidate;
+  String? _armedTabMergeTarget;
+  String? _draggedTabSource;
+  Offset _mainWindowOrigin = Offset.zero;
+  Offset _tabDragPreviewAnchor = Offset.zero;
+  Offset? _lastTabDragPreviewPosition;
+
+  @visibleForTesting
+  String? get debugTabMergeCandidate => _tabMergeCandidate;
 
   @override
   void initState() {
     super.initState();
     detachedWindows = DetachedWindowCoordinator(widget.windowSync);
+    tabDragPreview = TabDragPreviewCoordinator();
     _applyDefaultLayout();
     windowSubscription = detachedWindows.changes.listen(
       (_) => _syncExternalWindows(),
     );
+    if (widget.windowSync.isStarted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        unawaited(detachedWindows.prewarm());
+        unawaited(tabDragPreview.prewarm());
+      });
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_captureMainWindowOrigin());
+    });
   }
 
   @override
   void dispose() {
     windowSubscription?.cancel();
+    _tabMergeTimer?.cancel();
+    unawaited(tabDragPreview.dispose());
+    unawaited(detachedWindows.dispose());
     super.dispose();
   }
 
@@ -65,23 +92,28 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         final size = Size(constraints.maxWidth, constraints.maxHeight);
         _session.workspaceSize = size;
         final sorted = _session.groupsByZ;
-        return ClipRect(
-          child: Stack(
-            children: [
-              const Positioned.fill(
-                child: ColoredBox(color: TalColors.background),
-              ),
-              if (_session.gridMode)
+        return Listener(
+          behavior: HitTestBehavior.translucent,
+          onPointerUp: (_) => unawaited(tabDragPreview.hide()),
+          onPointerCancel: (_) => unawaited(tabDragPreview.hide()),
+          child: ClipRect(
+            child: Stack(
+              children: [
                 const Positioned.fill(
-                  child: IgnorePointer(
-                    child: CustomPaint(
-                      key: ValueKey<String>('workspace-grid'),
-                      painter: WorkspaceGridPainter(),
+                  child: ColoredBox(color: TalColors.background),
+                ),
+                if (_session.gridMode)
+                  const Positioned.fill(
+                    child: IgnorePointer(
+                      child: CustomPaint(
+                        key: ValueKey<String>('workspace-grid'),
+                        painter: WorkspaceGridPainter(),
+                      ),
                     ),
                   ),
-                ),
-              for (final group in sorted) _buildGroup(group, size),
-            ],
+                for (final group in sorted) _buildGroup(group, size),
+              ],
+            ),
           ),
         );
       },
@@ -127,6 +159,10 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
                   tabsDraggable: true,
                   onTabAccept: (data, targetIndex) =>
                       _acceptTabDrop(group, data, targetIndex),
+                  onTabDragStart: (data) =>
+                      _startTabDrag(group, data, workspaceSize),
+                  onTabDragUpdate: (data, details) =>
+                      _updateTabDrag(data, details, workspaceSize),
                   onTabDragEnd: (data, details) =>
                       _finishTabDrag(group, data, details, workspaceSize),
                 ),
@@ -356,7 +392,6 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     if (_session.groups.any((group) => group.panels.contains(panel))) return;
     setState(() => _restorePanel(panel));
     widget.onPanelVisibilityChanged?.call();
-    widget.controller.report('已恢复面板：${panel.title}。');
   }
 
   WorkspaceLayoutRepository get _layoutRepository => WorkspaceLayoutRepository(
@@ -552,7 +587,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     if (await detachedWindows.showIfOpen(panel)) return;
     final panels = List<WorkspacePanelId>.of(group.panels);
     final activePanel = group.activePanel;
-    final window = await detachedWindows.create(
+    final window = await detachedWindows.acquire(
       activePanel: activePanel,
       panels: panels,
       initialSize: _toPixelRect(group.rect, workspaceSize).size,
@@ -573,25 +608,23 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
       _session.groups.remove(group);
     });
     widget.onPanelVisibilityChanged?.call();
-    widget.controller.addLog(
-      panels.length > 1
-          ? '${activePanel.title} 组合已弹出为独立窗口。'
-          : '${activePanel.title} 已弹出为独立窗口。',
-    );
     await window.show();
+    if (widget.windowSync.isStarted) unawaited(detachedWindows.prewarm());
   }
 
   Future<void> _floatSinglePanel(
     WorkspaceGroup group,
     WorkspacePanelId panel,
-    Size workspaceSize,
-  ) async {
+    Size workspaceSize, {
+    Offset? initialPosition,
+  }) async {
     if (await detachedWindows.showIfOpen(panel)) return;
     final originalPanels = List<WorkspacePanelId>.of(group.panels);
-    final window = await detachedWindows.create(
+    final window = await detachedWindows.acquire(
       activePanel: panel,
       panels: <WorkspacePanelId>[panel],
       initialSize: _toPixelRect(group.rect, workspaceSize).size,
+      initialPosition: initialPosition,
     );
     if (!mounted || !group.panels.contains(panel)) return;
     setState(() {
@@ -606,8 +639,8 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
       _detachPanel(group, panel);
     });
     widget.onPanelVisibilityChanged?.call();
-    widget.controller.addLog('${panel.title} 已弹出为独立窗口。');
     await window.show();
+    if (widget.windowSync.isStarted) unawaited(detachedWindows.prewarm());
   }
 
   void _detachPanel(WorkspaceGroup group, WorkspacePanelId panel) {
@@ -622,7 +655,6 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   void _hidePanel(WorkspaceGroup group, WorkspacePanelId panel) {
     setState(() => _detachPanel(group, panel));
     widget.onPanelVisibilityChanged?.call();
-    widget.controller.report('已隐藏面板：${panel.title}，可从“视图”菜单恢复。');
   }
 
   void _separatePanel(WorkspaceGroup group, WorkspacePanelId panel) {
@@ -631,33 +663,6 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
       group,
       panel,
       _clampRect(group.rect.translate(0.025, 0.025)),
-    );
-  }
-
-  void _separatePanelAt(
-    WorkspaceGroup group,
-    WorkspacePanelId panel,
-    Offset globalPosition,
-    Size workspaceSize,
-  ) {
-    if (group.panels.length < 2 || workspaceSize.isEmpty) return;
-    final renderObject = context.findRenderObject();
-    if (renderObject is! RenderBox) return;
-    final localPosition = renderObject.globalToLocal(globalPosition);
-    final center = Offset(
-      localPosition.dx / workspaceSize.width,
-      localPosition.dy / workspaceSize.height,
-    );
-    _separatePanelToRect(
-      group,
-      panel,
-      _clampRect(
-        Rect.fromCenter(
-          center: center,
-          width: group.rect.width,
-          height: group.rect.height,
-        ),
-      ),
     );
   }
 
@@ -679,13 +684,12 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         ),
       );
     });
-    widget.controller.report('已从组合中拆分面板：${panel.title}。');
   }
 
   void _acceptTabDrop(
     WorkspaceGroup target,
     PanelTabDragData data,
-    int targetIndex,
+    int insertionIndex,
   ) {
     final source = _session.groups
         .where((group) => group.id == data.sourceGroupId)
@@ -693,10 +697,11 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     if (source == null || !source.panels.contains(data.panel)) return;
     if (source == target) {
       final sourceIndex = target.panels.indexOf(data.panel);
-      final insertionIndex = targetIndex.clamp(0, target.panels.length - 1);
+      var adjustedIndex = insertionIndex.clamp(0, target.panels.length);
+      if (sourceIndex < adjustedIndex) adjustedIndex -= 1;
       setState(() {
         target.panels.removeAt(sourceIndex);
-        target.panels.insert(insertionIndex, data.panel);
+        target.panels.insert(adjustedIndex, data.panel);
         target.activePanel = data.panel;
       });
       return;
@@ -705,14 +710,13 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
       _detachPanel(source, data.panel);
       if (!target.panels.contains(data.panel)) {
         target.panels.insert(
-          targetIndex.clamp(0, target.panels.length),
+          insertionIndex.clamp(0, target.panels.length),
           data.panel,
         );
       }
       target.activePanel = data.panel;
       target.z = _nextZ();
     });
-    widget.controller.report('${data.panel.title} 已加入组件组合。');
   }
 
   void _finishTabDrag(
@@ -721,12 +725,176 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     DraggableDetails details,
     Size workspaceSize,
   ) {
-    if (details.wasAccepted || !source.panels.contains(data.panel)) return;
-    if (_session.gridMode) {
-      _separatePanelAt(source, data.panel, details.offset, workspaceSize);
+    final mergeTargetId = _armedTabMergeTarget;
+    final previewPosition = _lastTabDragPreviewPosition;
+    _resetTabDragState();
+    if (details.wasAccepted || !source.panels.contains(data.panel)) {
+      unawaited(tabDragPreview.hide());
       return;
     }
-    unawaited(_floatSinglePanel(source, data.panel, workspaceSize));
+    if (mergeTargetId != null) {
+      final target = _session.groups
+          .where((group) => group.id == mergeTargetId)
+          .firstOrNull;
+      if (target != null && target != source) {
+        unawaited(tabDragPreview.hide());
+        _acceptTabDrop(target, data, target.panels.length);
+        return;
+      }
+    }
+    unawaited(
+      _detachTabAfterPreview(
+        source,
+        data.panel,
+        workspaceSize,
+        previewPosition,
+      ),
+    );
+  }
+
+  Future<void> _detachTabAfterPreview(
+    WorkspaceGroup source,
+    WorkspacePanelId panel,
+    Size workspaceSize,
+    Offset? previewPosition,
+  ) async {
+    await tabDragPreview.hide().timeout(
+      const Duration(milliseconds: 200),
+      onTimeout: () {},
+    );
+    await _floatSinglePanel(
+      source,
+      panel,
+      workspaceSize,
+      initialPosition: previewPosition,
+    );
+  }
+
+  void _startTabDrag(
+    WorkspaceGroup source,
+    PanelTabDragData data,
+    Size workspaceSize,
+  ) {
+    _resetTabDragState(notify: false);
+    setState(() {
+      _draggedTabSource = source.id;
+      if (source.activePanel == data.panel && source.panels.length > 1) {
+        final draggedIndex = source.panels.indexOf(data.panel);
+        final fallbackIndex = draggedIndex > 0 ? draggedIndex - 1 : 1;
+        source.activePanel = source.panels[fallbackIndex];
+      }
+    });
+    final sourceSize = _toPixelRect(source.rect, workspaceSize).size;
+    final previewSize = Size(
+      sourceSize.width,
+      math.max(
+        talPanelTabStripHeight + 1,
+        sourceSize.height - talPanelHeaderHeight,
+      ),
+    );
+    final tabWidth = talPanelTabWidth(
+      data.panel,
+      textScaler: MediaQuery.textScalerOf(context),
+      textDirection: Directionality.of(context),
+    );
+    _tabDragPreviewAnchor = Offset(
+      math.min(tabWidth / 2, previewSize.width / 2),
+      talPanelTabStripHeight / 2,
+    );
+    _lastTabDragPreviewPosition = null;
+    unawaited(_captureMainWindowOrigin());
+    unawaited(tabDragPreview.prepare(panel: data.panel, size: previewSize));
+  }
+
+  Future<void> _captureMainWindowOrigin() async {
+    try {
+      _mainWindowOrigin = await windowManager.getPosition();
+    } on Object {
+      _mainWindowOrigin = Offset.zero;
+    }
+  }
+
+  void _updateTabDrag(
+    PanelTabDragData data,
+    DragUpdateDetails details,
+    Size workspaceSize,
+  ) {
+    if (_draggedTabSource != data.sourceGroupId || workspaceSize.isEmpty) {
+      return;
+    }
+    final renderObject = context.findRenderObject();
+    if (renderObject is! RenderBox) return;
+    final localPosition = renderObject.globalToLocal(details.globalPosition);
+    unawaited(_moveTabDragPreview(details.globalPosition));
+    final insideWorkspace = (Offset.zero & workspaceSize).contains(
+      localPosition,
+    );
+    if (!insideWorkspace) {
+      _clearTabMergeCandidate();
+      return;
+    }
+    final normalizedPosition = Offset(
+      localPosition.dx / workspaceSize.width,
+      localPosition.dy / workspaceSize.height,
+    );
+    WorkspaceGroup? hoveredGroup;
+    for (final group in _session.groupsByZ.reversed) {
+      if (group.rect.contains(normalizedPosition)) {
+        hoveredGroup = group;
+        break;
+      }
+    }
+    final targetId =
+        hoveredGroup == null || hoveredGroup.id == data.sourceGroupId
+        ? null
+        : hoveredGroup.id;
+    _setTabMergeCandidate(targetId, restartTimer: true);
+  }
+
+  Future<void> _moveTabDragPreview(Offset globalPosition) async {
+    if (_draggedTabSource == null) return;
+    final position = _mainWindowOrigin + globalPosition - _tabDragPreviewAnchor;
+    _lastTabDragPreviewPosition = position;
+    await tabDragPreview.showAt(position);
+  }
+
+  void _setTabMergeCandidate(String? targetId, {bool restartTimer = false}) {
+    if (_tabMergeCandidate == targetId &&
+        (!restartTimer || _armedTabMergeTarget == targetId)) {
+      return;
+    }
+    _tabMergeTimer?.cancel();
+    _tabMergeCandidate = targetId;
+    if (_armedTabMergeTarget != null || _session.mergeTarget != null) {
+      setState(() {
+        _armedTabMergeTarget = null;
+        _session.mergeTarget = null;
+      });
+    }
+    if (targetId == null) return;
+    _tabMergeTimer = Timer(const Duration(seconds: 1), () {
+      if (!mounted || _tabMergeCandidate != targetId) return;
+      setState(() {
+        _armedTabMergeTarget = targetId;
+        _session.mergeTarget = targetId;
+      });
+    });
+  }
+
+  void _clearTabMergeCandidate() => _setTabMergeCandidate(null);
+
+  void _resetTabDragState({bool notify = true}) {
+    _tabMergeTimer?.cancel();
+    _tabMergeTimer = null;
+    _tabMergeCandidate = null;
+    _armedTabMergeTarget = null;
+    _draggedTabSource = null;
+    if (_session.mergeTarget == null) return;
+    if (notify && mounted) {
+      setState(() => _session.mergeTarget = null);
+    } else {
+      _session.mergeTarget = null;
+    }
   }
 
   Future<void> _syncExternalWindows() async {
@@ -741,7 +909,6 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         } else if (restoredPlacements.add(placement)) {
           _restoreDetachedGroup(placement);
         }
-        widget.controller.addLog('${panel.title} 独立窗口已关闭，面板已恢复。');
       }
     });
     widget.onPanelVisibilityChanged?.call();
@@ -837,9 +1004,6 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     target.activePanel = source.activePanel;
     target.z = _nextZ();
     _session.groups.remove(source);
-    widget.controller.addLog(
-      '${source.activePanel.title} 已合并到 ${target.id} 组合。',
-    );
   }
 
   String? _findMergeTarget(WorkspaceGroup source) {

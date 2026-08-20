@@ -27,7 +27,18 @@ Widget buildWorkspacePanel(
   TakeALookController controller, {
   PanelChrome? chrome,
 }) {
-  final body = switch (panel) {
+  return TalPanelFrame(
+    panel: panel,
+    chrome: chrome,
+    child: buildWorkspacePanelBody(panel, controller),
+  );
+}
+
+Widget buildWorkspacePanelBody(
+  WorkspacePanelId panel,
+  TakeALookController controller,
+) {
+  return switch (panel) {
     WorkspacePanelId.header => _HeaderPanel(controller: controller),
     WorkspacePanelId.runControl => _RunControlPanel(controller: controller),
     WorkspacePanelId.sampling => _SamplingPanel(controller: controller),
@@ -37,5 +48,4 @@ Widget buildWorkspacePanel(
     WorkspacePanelId.plot => _PlotPanel(controller: controller),
     WorkspacePanelId.log => _LogPanel(controller: controller),
   };
-  return TalPanelFrame(panel: panel, chrome: chrome, child: body);
 }

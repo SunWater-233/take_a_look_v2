@@ -12,6 +12,13 @@ const _mainChannel = WindowMethodChannel(
   mode: ChannelMode.unidirectional,
 );
 
+const configureDetachedPanelMethod = 'configureDetachedPanel';
+const releaseDetachedWindowMethod = 'releaseDetachedWindow';
+const prepareTabDragPreviewMethod = 'prepareTabDragPreview';
+const showTabDragPreviewMethod = 'showTabDragPreview';
+const hideTabDragPreviewMethod = 'hideTabDragPreview';
+const tabDragPreviewSessionKey = 'previewSession';
+
 class MainWindowSync {
   MainWindowSync(this.controller);
 
@@ -25,6 +32,11 @@ class MainWindowSync {
   bool _telemetryBroadcasting = false;
   bool _telemetryBroadcastPending = false;
   bool _started = false;
+  final StreamController<String> _detachedWindowReleases =
+      StreamController<String>.broadcast(sync: true);
+
+  bool get isStarted => _started;
+  Stream<String> get detachedWindowReleases => _detachedWindowReleases.stream;
 
   Future<void> start() async {
     if (_started) return;
@@ -48,10 +60,23 @@ class MainWindowSync {
 
   Future<dynamic> _handleCall(MethodCall call) async {
     if (call.method == 'snapshot') return controller.snapshot();
+    if (call.method == releaseDetachedWindowMethod) {
+      final arguments = call.arguments;
+      if (arguments is Map && arguments['windowId'] is String) {
+        reportDetachedWindowReleased(arguments['windowId'] as String);
+      }
+      return null;
+    }
     return controller.handleCommand(
       ControllerCommand.parse(call.method),
       call.arguments,
     );
+  }
+
+  void reportDetachedWindowReleased(String windowId) {
+    if (!_detachedWindowReleases.isClosed) {
+      _detachedWindowReleases.add(windowId);
+    }
   }
 
   void _scheduleStateBroadcast() {
@@ -122,10 +147,19 @@ class MainWindowSync {
     _stateBroadcastTimer?.cancel();
     _telemetryBroadcastTimer?.cancel();
     if (_started) await _mainChannel.setMethodCallHandler(null);
+    await _detachedWindowReleases.close();
   }
 }
 
-Future<void> initializeDetachedWindow(TakeALookController controller) async {
+Future<void> initializeDetachedWindow(
+  TakeALookController controller, {
+  Future<void> Function(DetachedPanelLaunch configuration)? onConfigure,
+  Future<void> Function(DetachedPanelLaunch configuration, int session)?
+  onPrepareTabDragPreview,
+  Future<void> Function(Offset screenPosition, int session)?
+  onShowTabDragPreview,
+  Future<void> Function(int session)? onHideTabDragPreview,
+}) async {
   final currentWindow = await WindowController.fromCurrentEngine();
   await currentWindow.setWindowMethodHandler((call) async {
     if (call.method == 'state' && call.arguments is Map) {
@@ -140,6 +174,47 @@ Future<void> initializeDetachedWindow(TakeALookController controller) async {
       controller.applyTelemetryDelta(
         Map<String, dynamic>.from(call.arguments as Map),
       );
+    } else if (call.method == configureDetachedPanelMethod) {
+      final configuration = detachedPanelLaunchFromJson(call.arguments);
+      if (configuration == null) {
+        throw ArgumentError.value(call.arguments, 'configuration');
+      }
+      await onConfigure?.call(configuration);
+    } else if (call.method == prepareTabDragPreviewMethod) {
+      final configuration = detachedPanelLaunchFromJson(call.arguments);
+      final arguments = call.arguments;
+      final session = arguments is Map
+          ? arguments[tabDragPreviewSessionKey]
+          : null;
+      if (configuration == null ||
+          configuration.role != SecondaryWindowRole.dragPreview ||
+          session is! int) {
+        throw ArgumentError.value(call.arguments, 'preview');
+      }
+      await onPrepareTabDragPreview?.call(configuration, session);
+    } else if (call.method == showTabDragPreviewMethod) {
+      final arguments = call.arguments;
+      if (arguments is! Map ||
+          arguments[tabDragPreviewSessionKey] is! int ||
+          arguments['x'] is! num ||
+          arguments['y'] is! num) {
+        throw ArgumentError.value(arguments, 'position');
+      }
+      await onShowTabDragPreview?.call(
+        Offset(
+          (arguments['x'] as num).toDouble(),
+          (arguments['y'] as num).toDouble(),
+        ),
+        arguments[tabDragPreviewSessionKey] as int,
+      );
+    } else if (call.method == hideTabDragPreviewMethod) {
+      final arguments = call.arguments;
+      if (arguments is! Map || arguments[tabDragPreviewSessionKey] is! int) {
+        throw ArgumentError.value(arguments, 'preview session');
+      }
+      await onHideTabDragPreview?.call(
+        arguments[tabDragPreviewSessionKey] as int,
+      );
     }
     return null;
   });
@@ -149,6 +224,13 @@ Future<void> initializeDetachedWindow(TakeALookController controller) async {
   if (state != null) {
     controller.applySnapshot(Map<String, dynamic>.from(state));
   }
+}
+
+Future<void> releaseDetachedWindow() async {
+  final currentWindow = await WindowController.fromCurrentEngine();
+  await _mainChannel.invokeMethod<void>(releaseDetachedWindowMethod, {
+    'windowId': currentWindow.windowId,
+  });
 }
 
 Future<void> sendCommandToMain(

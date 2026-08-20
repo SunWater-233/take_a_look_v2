@@ -13,6 +13,8 @@ enum WorkspacePanelId {
   log,
 }
 
+enum SecondaryWindowRole { detachedPanel, dragPreview }
+
 extension WorkspacePanelInfo on WorkspacePanelId {
   String get title => switch (this) {
     WorkspacePanelId.header => '主标题',
@@ -53,23 +55,38 @@ class DetachedPanelLaunch {
     required this.panel,
     required this.initialSize,
     this.panels = const <WorkspacePanelId>[],
+    this.role = SecondaryWindowRole.detachedPanel,
+    this.initialPosition,
   });
 
   final WorkspacePanelId panel;
   final Size initialSize;
   final List<WorkspacePanelId> panels;
+  final SecondaryWindowRole role;
+  final Offset? initialPosition;
 
   List<WorkspacePanelId> get groupPanels =>
       panels.isEmpty ? <WorkspacePanelId>[panel] : panels;
+
+  Map<String, dynamic> toJson() => {
+    'businessId': 'take_a_look_panel',
+    'role': role.name,
+    'panel': panel.name,
+    if (panels.isNotEmpty) 'panels': [for (final item in panels) item.name],
+    'width': initialSize.width,
+    'height': initialSize.height,
+    if (initialPosition case final position?) ...{
+      'x': position.dx,
+      'y': position.dy,
+    },
+  };
 }
 
-DetachedPanelLaunch? detachedPanelLaunchFromEntrypointArguments(
-  List<String> args,
-) {
-  if (args.length < 3 || args.first != 'multi_window') return null;
+DetachedPanelLaunch? detachedPanelLaunchFromJson(Object? value) {
   try {
-    final data = jsonDecode(args[2]) as Map<String, dynamic>;
+    final data = Map<String, dynamic>.from(value as Map);
     if (data['businessId'] != 'take_a_look_panel') return null;
+    final role = SecondaryWindowRole.values.byName(data['role'] as String);
     final panel = WorkspacePanelId.values.byName(data['panel'] as String);
     final panels = (data['panels'] as List<dynamic>?)
         ?.map((value) => WorkspacePanelId.values.byName(value as String))
@@ -81,11 +98,29 @@ DetachedPanelLaunch? detachedPanelLaunchFromEntrypointArguments(
         ? Size(width, height)
         : panel.preferredWindowSize;
     if (size.width <= 0 || size.height <= 0) return null;
+    final x = (data['x'] as num?)?.toDouble();
+    final y = (data['y'] as num?)?.toDouble();
+    final position = x != null && y != null && x.isFinite && y.isFinite
+        ? Offset(x, y)
+        : null;
     return DetachedPanelLaunch(
       panel: panel,
       panels: panels ?? const <WorkspacePanelId>[],
       initialSize: size,
+      role: role,
+      initialPosition: position,
     );
+  } on Object {
+    return null;
+  }
+}
+
+DetachedPanelLaunch? detachedPanelLaunchFromEntrypointArguments(
+  List<String> args,
+) {
+  if (args.length < 3 || args.first != 'multi_window') return null;
+  try {
+    return detachedPanelLaunchFromJson(jsonDecode(args[2]));
   } on Object {
     return null;
   }
@@ -99,15 +134,18 @@ String encodePanelArguments(
   WorkspacePanelId panel,
   Size initialSize, {
   List<WorkspacePanelId>? panels,
+  SecondaryWindowRole role = SecondaryWindowRole.detachedPanel,
+  Offset? initialPosition,
 }) {
-  return jsonEncode({
-    'businessId': 'take_a_look_panel',
-    'panel': panel.name,
-    if (panels != null && panels.isNotEmpty)
-      'panels': [for (final item in panels) item.name],
-    'width': initialSize.width,
-    'height': initialSize.height,
-  });
+  return jsonEncode(
+    DetachedPanelLaunch(
+      panel: panel,
+      panels: panels ?? const <WorkspacePanelId>[],
+      initialSize: initialSize,
+      role: role,
+      initialPosition: initialPosition,
+    ).toJson(),
+  );
 }
 
 class PanelTabInfo {
@@ -138,6 +176,8 @@ class PanelChrome {
     this.draggable = true,
     this.groupId,
     this.onTabAccept,
+    this.onTabDragStart,
+    this.onTabDragUpdate,
     this.onTabDragEnd,
     this.tabsDraggable = false,
   });
@@ -156,6 +196,8 @@ class PanelChrome {
   final bool draggable;
   final String? groupId;
   final void Function(PanelTabDragData, int targetIndex)? onTabAccept;
+  final ValueChanged<PanelTabDragData>? onTabDragStart;
+  final void Function(PanelTabDragData, DragUpdateDetails)? onTabDragUpdate;
   final void Function(PanelTabDragData, DraggableDetails)? onTabDragEnd;
   final bool tabsDraggable;
 }

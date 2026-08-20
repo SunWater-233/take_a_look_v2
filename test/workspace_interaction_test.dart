@@ -11,13 +11,14 @@ import 'package:take_a_look_v2/src/window_sync.dart';
 import 'package:take_a_look_v2/src/workspace.dart';
 
 void main() {
-  testWidgets('dragging a tab within a group changes its order', (
+  testWidgets('dragging a tab animates neighboring tabs before reordering', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(1600, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     final controller = TakeALookController();
+    final windowSync = MainWindowSync(controller);
     final workspaceKey = GlobalKey<DockingWorkspaceState>();
     await tester.pumpWidget(
       MaterialApp(
@@ -26,7 +27,7 @@ void main() {
           body: DockingWorkspace(
             key: workspaceKey,
             controller: controller,
-            windowSync: MainWindowSync(controller),
+            windowSync: windowSync,
           ),
         ),
       ),
@@ -42,12 +43,40 @@ void main() {
       tester.getCenter(tab(WorkspacePanelId.header)).dx,
       lessThan(tester.getCenter(tab(WorkspacePanelId.sampling)).dx),
     );
-    await tester.dragFrom(
+    final gesture = await tester.startGesture(
       tester.getCenter(tab(WorkspacePanelId.header)),
-      tester.getCenter(tab(WorkspacePanelId.sampling)) -
-          tester.getCenter(tab(WorkspacePanelId.header)),
+    );
+    final samplingRect = tester.getRect(tab(WorkspacePanelId.sampling));
+    await gesture.moveTo(
+      Offset(samplingRect.right - 2, samplingRect.center.dy),
     );
     await tester.pump();
+    expect(
+      find.byKey(const ValueKey('panel-tab-drag-feedback-header')),
+      findsOneWidget,
+    );
+    await tester.pump(const Duration(milliseconds: 200));
+    for (var index = 0; index < 4; index++) {
+      await gesture.moveBy(const Offset(-1, 0));
+      await tester.pump(const Duration(milliseconds: 30));
+    }
+    expect(
+      tester
+          .getSize(
+            find.descendant(
+              of: headerGroup,
+              matching: find.byKey(const ValueKey('panel-tab-gap-3')),
+            ),
+          )
+          .width,
+      greaterThan(0),
+    );
+    expect(
+      tester.getCenter(tab(WorkspacePanelId.sampling)).dx,
+      lessThan(samplingRect.center.dx),
+    );
+    await gesture.up();
+    await tester.pumpAndSettle();
 
     expect(
       tester.getCenter(tab(WorkspacePanelId.header)).dx,
@@ -55,6 +84,7 @@ void main() {
     );
     expect(find.byType(TalPanelFrame), findsNWidgets(4));
 
+    await windowSync.dispose();
     controller.dispose();
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(milliseconds: 50));
@@ -67,6 +97,7 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     final controller = TakeALookController();
+    final windowSync = MainWindowSync(controller);
     final workspaceKey = GlobalKey<DockingWorkspaceState>();
     await tester.pumpWidget(
       MaterialApp(
@@ -75,7 +106,7 @@ void main() {
           body: DockingWorkspace(
             key: workspaceKey,
             controller: controller,
-            windowSync: MainWindowSync(controller),
+            windowSync: windowSync,
           ),
         ),
       ),
@@ -97,7 +128,7 @@ void main() {
       tester.getCenter(sourceTab),
       tester.getCenter(targetTab) - tester.getCenter(sourceTab),
     );
-    await tester.pump();
+    await tester.pumpAndSettle();
 
     expect(
       find.descendant(
@@ -113,18 +144,187 @@ void main() {
       ),
       findsOneWidget,
     );
+    expect(
+      tester
+          .getSize(
+            find.descendant(
+              of: symbolsGroup,
+              matching: find.byKey(const ValueKey('panel-tab-slot-runControl')),
+            ),
+          )
+          .width,
+      greaterThan(0),
+    );
     expect(find.byType(TalPanelFrame), findsNWidgets(4));
 
+    await windowSync.dispose();
     controller.dispose();
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(milliseconds: 50));
   });
 
-  testWidgets('dragging a tab out splits it while grid mode is enabled', (
+  testWidgets('dragging beyond the app keeps feedback and opens a window', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(1600, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    const desktopChannel = MethodChannel('mixin.one/desktop_multi_window');
+    const channelsChannel = MethodChannel(
+      'mixin.one/desktop_multi_window/channels',
+    );
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    var windowWasShown = false;
+    Map<String, dynamic>? assignedPanel;
+    DetachedPanelLaunch? previewConfiguration;
+    final invokedMethods = <String>[];
+    messenger.setMockMethodCallHandler(desktopChannel, (call) async {
+      if (call.method == 'createWindow') return 'short_drop_window';
+      if (call.method == 'window_show') windowWasShown = true;
+      if (call.method == 'getAllWindows') return <Map<String, dynamic>>[];
+      return null;
+    });
+    messenger.setMockMethodCallHandler(channelsChannel, (call) async {
+      if (call.method != 'invokeMethod') return null;
+      final arguments = Map<String, dynamic>.from(call.arguments as Map);
+      invokedMethods.add(arguments['method'] as String);
+      if (arguments['method'] == prepareTabDragPreviewMethod) {
+        previewConfiguration = detachedPanelLaunchFromJson(
+          arguments['arguments'],
+        );
+      }
+      if (arguments['method'] == configureDetachedPanelMethod) {
+        assignedPanel = Map<String, dynamic>.from(
+          arguments['arguments'] as Map,
+        );
+      }
+      return null;
+    });
+    addTearDown(() {
+      messenger.setMockMethodCallHandler(desktopChannel, null);
+      messenger.setMockMethodCallHandler(channelsChannel, null);
+    });
+
+    final controller = TakeALookController();
+    final windowSync = MainWindowSync(controller);
+    final workspaceKey = GlobalKey<DockingWorkspaceState>();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTalTheme(),
+        home: Scaffold(
+          body: DockingWorkspace(
+            key: workspaceKey,
+            controller: controller,
+            windowSync: windowSync,
+          ),
+        ),
+      ),
+    );
+    workspaceKey.currentState!.setGridMode(true);
+    await tester.pump();
+
+    final headerGroup = find.byKey(const ValueKey('workspace-group-header'));
+    final sourceTab = find.descendant(
+      of: headerGroup,
+      matching: find.text(WorkspacePanelId.sampling.title),
+    );
+    await tester.tap(sourceTab);
+    await tester.pump();
+    expect(
+      tester
+          .widget<TalPanelFrame>(
+            find.descendant(
+              of: headerGroup,
+              matching: find.byType(TalPanelFrame),
+            ),
+          )
+          .panel,
+      WorkspacePanelId.sampling,
+    );
+    final gesture = await tester.startGesture(tester.getCenter(sourceTab));
+    await gesture.moveBy(const Offset(0, 20));
+    await tester.pump();
+    await gesture.moveTo(const Offset(1700, 450));
+    await tester.pump();
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 10)),
+    );
+    expect(
+      find.descendant(
+        of: headerGroup,
+        matching: find.byKey(
+          const ValueKey<String>('panel-tab-drag-source-sampling'),
+        ),
+      ),
+      findsNothing,
+    );
+    expect(
+      tester
+          .widget<TalPanelFrame>(
+            find.descendant(
+              of: headerGroup,
+              matching: find.byType(TalPanelFrame),
+            ),
+          )
+          .panel,
+      isNot(WorkspacePanelId.sampling),
+    );
+    expect(invokedMethods, contains(showTabDragPreviewMethod));
+    expect(previewConfiguration!.role, SecondaryWindowRole.dragPreview);
+    expect(previewConfiguration!.panel, WorkspacePanelId.sampling);
+    expect(previewConfiguration!.initialSize.width, greaterThan(300));
+    expect(previewConfiguration!.initialSize.height, greaterThan(100));
+    expect(previewConfiguration!.initialSize.height, lessThan(150));
+    await gesture.up();
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 10)),
+    );
+    await tester.pump();
+
+    expect(windowWasShown, isTrue);
+    expect(
+      detachedPanelLaunchFromJson(assignedPanel)!.panel,
+      WorkspacePanelId.sampling,
+    );
+    expect(
+      detachedPanelLaunchFromJson(assignedPanel)!.initialPosition,
+      isNotNull,
+    );
+    expect(
+      find.byKey(const ValueKey('workspace-group-separated_100')),
+      findsNothing,
+    );
+    expect(find.byType(TalPanelFrame), findsNWidgets(4));
+
+    await windowSync.dispose();
+    controller.dispose();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 50));
+  });
+
+  testWidgets('holding over panel content for one second merges the tab', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1600, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    const desktopChannel = MethodChannel('mixin.one/desktop_multi_window');
+    const channelsChannel = MethodChannel(
+      'mixin.one/desktop_multi_window/channels',
+    );
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(desktopChannel, (call) async {
+      if (call.method == 'createWindow') return 'merge_preview_window';
+      if (call.method == 'getAllWindows') return <Map<String, dynamic>>[];
+      return null;
+    });
+    messenger.setMockMethodCallHandler(channelsChannel, (call) async => null);
+    addTearDown(() {
+      messenger.setMockMethodCallHandler(desktopChannel, null);
+      messenger.setMockMethodCallHandler(channelsChannel, null);
+    });
 
     final controller = TakeALookController();
     final workspaceKey = GlobalKey<DockingWorkspaceState>();
@@ -140,8 +340,6 @@ void main() {
         ),
       ),
     );
-    workspaceKey.currentState!.setGridMode(true);
-    await tester.pump();
 
     final headerGroup = find.byKey(const ValueKey('workspace-group-header'));
     final plotGroup = find.byKey(const ValueKey('workspace-group-plot'));
@@ -149,21 +347,46 @@ void main() {
       of: headerGroup,
       matching: find.text(WorkspacePanelId.sampling.title),
     );
-    await tester.dragFrom(
-      tester.getCenter(sourceTab),
-      tester.getCenter(plotGroup) - tester.getCenter(sourceTab),
-    );
+    final gesture = await tester.startGesture(tester.getCenter(sourceTab));
+    await gesture.moveBy(const Offset(0, 20));
     await tester.pump();
+    await gesture.moveTo(tester.getCenter(plotGroup));
+    await tester.pump();
+    expect(workspaceKey.currentState!.debugTabMergeCandidate, 'plot');
+
+    TalPanelFrame plotFrame() => tester.widget<TalPanelFrame>(
+      find.descendant(of: plotGroup, matching: find.byType(TalPanelFrame)),
+    );
+    expect(plotFrame().chrome!.highlighted, isFalse);
+    await tester.pump(const Duration(milliseconds: 750));
+    expect(plotFrame().chrome!.highlighted, isFalse);
+    await gesture.moveBy(const Offset(1, 0));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 999));
+    expect(plotFrame().chrome!.highlighted, isFalse);
+    await tester.pump(const Duration(milliseconds: 1));
+    expect(plotFrame().chrome!.highlighted, isTrue);
+
+    await gesture.up();
+    await tester.pumpAndSettle();
 
     expect(
-      find.byKey(const ValueKey('workspace-group-separated_100')),
+      find.descendant(
+        of: headerGroup,
+        matching: find.text(WorkspacePanelId.sampling.title),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.descendant(
+        of: plotGroup,
+        matching: find.text(WorkspacePanelId.sampling.title),
+      ),
       findsOneWidget,
     );
-    expect(find.byType(TalPanelFrame), findsNWidgets(5));
 
     controller.dispose();
     await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pump(const Duration(milliseconds: 50));
   });
 
   testWidgets('dragging a tab out opens only that panel in normal mode', (
@@ -176,7 +399,12 @@ void main() {
     const windowChannel = MethodChannel(
       'mixin.one/window_controller/tab_window',
     );
+    const channelsChannel = MethodChannel(
+      'mixin.one/desktop_multi_window/channels',
+    );
     Map<String, dynamic>? configuration;
+    Map<String, dynamic>? assignedPanel;
+    var windowWasShown = false;
     final messenger =
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(createChannel, (call) async {
@@ -184,16 +412,30 @@ void main() {
         configuration = Map<String, dynamic>.from(call.arguments as Map);
         return 'tab_window';
       }
+      if (call.method == 'window_show') windowWasShown = true;
       if (call.method == 'getAllWindows') return <Map<String, dynamic>>[];
       return null;
     });
     messenger.setMockMethodCallHandler(windowChannel, (call) async => null);
+    messenger.setMockMethodCallHandler(channelsChannel, (call) async {
+      if (call.method == 'invokeMethod') {
+        final arguments = Map<String, dynamic>.from(call.arguments as Map);
+        if (arguments['method'] == configureDetachedPanelMethod) {
+          assignedPanel = Map<String, dynamic>.from(
+            arguments['arguments'] as Map,
+          );
+        }
+      }
+      return null;
+    });
     addTearDown(() {
       messenger.setMockMethodCallHandler(createChannel, null);
       messenger.setMockMethodCallHandler(windowChannel, null);
+      messenger.setMockMethodCallHandler(channelsChannel, null);
     });
 
     final controller = TakeALookController();
+    final initialLogCount = controller.logs.length;
     final workspaceKey = GlobalKey<DockingWorkspaceState>();
     final windowSync = MainWindowSync(controller);
     await tester.pumpWidget(
@@ -227,11 +469,8 @@ void main() {
     await tester.pump();
 
     expect(configuration, isNotNull);
-    final launch = detachedPanelLaunchFromEntrypointArguments([
-      'multi_window',
-      '1',
-      configuration!['arguments'] as String,
-    ]);
+    expect(windowWasShown, isTrue);
+    final launch = detachedPanelLaunchFromJson(assignedPanel);
     expect(launch!.groupPanels, [WorkspacePanelId.sampling]);
     expect(find.byType(TalPanelFrame), findsNWidgets(4));
     expect(
@@ -241,6 +480,7 @@ void main() {
       ),
       findsNothing,
     );
+    expect(controller.logs, hasLength(initialLogCount));
 
     await windowSync.dispose();
     controller.dispose();
@@ -300,7 +540,12 @@ void main() {
     final windowChannel = const MethodChannel(
       'mixin.one/window_controller/group_window',
     );
+    const channelsChannel = MethodChannel(
+      'mixin.one/desktop_multi_window/channels',
+    );
     Map<String, dynamic>? configuration;
+    Map<String, dynamic>? assignedPanel;
+    var windowWasShown = false;
     final messenger =
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(createChannel, (call) async {
@@ -308,16 +553,30 @@ void main() {
         configuration = Map<String, dynamic>.from(call.arguments as Map);
         return 'group_window';
       }
+      if (call.method == 'window_show') windowWasShown = true;
       if (call.method == 'getAllWindows') return <Map<String, dynamic>>[];
       return null;
     });
     messenger.setMockMethodCallHandler(windowChannel, (call) async => null);
+    messenger.setMockMethodCallHandler(channelsChannel, (call) async {
+      if (call.method == 'invokeMethod') {
+        final arguments = Map<String, dynamic>.from(call.arguments as Map);
+        if (arguments['method'] == configureDetachedPanelMethod) {
+          assignedPanel = Map<String, dynamic>.from(
+            arguments['arguments'] as Map,
+          );
+        }
+      }
+      return null;
+    });
     addTearDown(() {
       messenger.setMockMethodCallHandler(createChannel, null);
       messenger.setMockMethodCallHandler(windowChannel, null);
+      messenger.setMockMethodCallHandler(channelsChannel, null);
     });
 
     final controller = TakeALookController();
+    final initialLogCount = controller.logs.length;
     final windowSync = MainWindowSync(controller);
     await tester.pumpWidget(
       MaterialApp(
@@ -343,22 +602,23 @@ void main() {
     );
     await tester.runAsync(() async {
       tester.widget<IconButton>(floatControl).onPressed!();
-      await Future<void>.delayed(const Duration(milliseconds: 10));
+      for (var attempt = 0; attempt < 50 && assignedPanel == null; attempt++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
     });
-    await tester.pump();
+    await tester.pumpAndSettle();
 
     expect(configuration, isNotNull);
-    final launch = detachedPanelLaunchFromEntrypointArguments([
-      'multi_window',
-      '1',
-      configuration!['arguments'] as String,
-    ]);
+    expect(assignedPanel, isNotNull);
+    expect(windowWasShown, isTrue);
+    final launch = detachedPanelLaunchFromJson(assignedPanel);
     expect(launch!.groupPanels, [
       WorkspacePanelId.header,
       WorkspacePanelId.runControl,
       WorkspacePanelId.sampling,
     ]);
     expect(find.byType(TalPanelFrame), findsNWidgets(3));
+    expect(controller.logs, hasLength(initialLogCount));
 
     controller.dispose();
     await tester.pumpWidget(const SizedBox.shrink());
@@ -372,6 +632,7 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     final controller = TakeALookController();
+    final initialLogCount = controller.logs.length;
     final workspaceKey = GlobalKey<DockingWorkspaceState>();
     final windowSync = MainWindowSync(controller);
     final tempDirectory = Directory.systemTemp.createTempSync(
@@ -450,6 +711,7 @@ void main() {
     await workspaceKey.currentState!.showPanel(WorkspacePanelId.header);
     await tester.pump();
     expect(find.byType(TalPanelFrame), findsNWidgets(4));
+    expect(controller.logs, hasLength(initialLogCount));
 
     controller.setUiScale(1.25);
     await tester.runAsync(workspaceKey.currentState!.saveLayout);

@@ -1,5 +1,83 @@
 part of '../panels.dart';
 
+const double talPanelHeaderHeight = 34;
+const double talPanelTabStripHeight = 30;
+const double talPanelTabHeight = 29;
+
+double talPanelTabWidth(
+  WorkspacePanelId tab, {
+  required TextScaler textScaler,
+  required TextDirection textDirection,
+}) {
+  final painter = TextPainter(
+    text: TextSpan(text: tab.title, style: talBody),
+    textDirection: textDirection,
+    textScaler: textScaler,
+    maxLines: 1,
+  )..layout();
+  final scaledFontSize = textScaler.scale(talBody.fontSize ?? 13);
+  final textWidth = math.max(
+    painter.width,
+    scaledFontSize * tab.title.runes.length,
+  );
+  final width = textWidth.ceilToDouble() + 24;
+  painter.dispose();
+  return width;
+}
+
+class TalPanelTabSurface extends StatelessWidget {
+  const TalPanelTabSurface({
+    required this.tab,
+    required this.selected,
+    this.width,
+    this.surfaceKey,
+    super.key,
+  });
+
+  final WorkspacePanelId tab;
+  final bool selected;
+  final double? width;
+  final Key? surfaceKey;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: surfaceKey,
+      width:
+          width ??
+          talPanelTabWidth(
+            tab,
+            textScaler: MediaQuery.textScalerOf(context),
+            textDirection: Directionality.of(context),
+          ),
+      height: talPanelTabHeight,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: selected ? TalColors.surface : TalColors.surfaceAlt,
+        border: Border(
+          top: BorderSide(
+            color: selected ? TalColors.accent : TalColors.border,
+            width: selected ? 2 : 1,
+          ),
+          right: const BorderSide(color: TalColors.border),
+          bottom: BorderSide(
+            color: selected ? TalColors.surface : TalColors.border,
+          ),
+        ),
+      ),
+      child: Center(
+        child: Text(
+          tab.title,
+          maxLines: 1,
+          softWrap: false,
+          overflow: TextOverflow.clip,
+          style: talBody,
+        ),
+      ),
+    );
+  }
+}
+
 class TalPanelFrame extends StatefulWidget {
   const TalPanelFrame({
     required this.panel,
@@ -27,7 +105,11 @@ class _TalPanelFrameState extends State<TalPanelFrame> {
         ? '${widget.panel.title} 组合'
         : widget.panel.title;
     return Container(
-      key: ValueKey<String>('panel-frame-${widget.panel.name}'),
+      key: ValueKey<String>(
+        chrome?.groupId == null
+            ? 'panel-frame-${widget.panel.name}'
+            : 'panel-frame-group-${chrome!.groupId}',
+      ),
       decoration: BoxDecoration(
         color: TalColors.surface,
         borderRadius: BorderRadius.circular(8),
@@ -38,6 +120,7 @@ class _TalPanelFrameState extends State<TalPanelFrame> {
           color: chrome?.highlighted == true
               ? TalColors.accent
               : TalColors.panelBorder,
+          width: chrome?.highlighted == true ? 3 : 1,
         ),
       ),
       child: ClipRRect(
@@ -59,7 +142,7 @@ class _TalPanelFrameState extends State<TalPanelFrame> {
                     ? SystemMouseCursors.grab
                     : MouseCursor.defer,
                 child: Container(
-                  height: 34,
+                  height: talPanelHeaderHeight,
                   padding: const EdgeInsets.only(left: 7, right: 4),
                   decoration: const BoxDecoration(
                     color: TalColors.surfaceAlt,
@@ -122,6 +205,8 @@ class _TalPanelFrameState extends State<TalPanelFrame> {
                 groupId: chrome.groupId,
                 draggable: chrome.tabsDraggable,
                 onAccept: chrome.onTabAccept,
+                onDragStart: chrome.onTabDragStart,
+                onDragUpdate: chrome.onTabDragUpdate,
                 onDragEnd: chrome.onTabDragEnd,
               ),
             if (!collapsed) Expanded(child: widget.child),
@@ -132,7 +217,7 @@ class _TalPanelFrameState extends State<TalPanelFrame> {
   }
 }
 
-class _PanelTabs extends StatelessWidget {
+class _PanelTabs extends StatefulWidget {
   const _PanelTabs({
     required this.tabs,
     required this.selected,
@@ -140,6 +225,8 @@ class _PanelTabs extends StatelessWidget {
     required this.groupId,
     required this.draggable,
     required this.onAccept,
+    required this.onDragStart,
+    required this.onDragUpdate,
     required this.onDragEnd,
   });
 
@@ -149,91 +236,208 @@ class _PanelTabs extends StatelessWidget {
   final String? groupId;
   final bool draggable;
   final void Function(PanelTabDragData, int targetIndex)? onAccept;
+  final ValueChanged<PanelTabDragData>? onDragStart;
+  final void Function(PanelTabDragData, DragUpdateDetails)? onDragUpdate;
   final void Function(PanelTabDragData, DraggableDetails)? onDragEnd;
 
   @override
+  State<_PanelTabs> createState() => _PanelTabsState();
+}
+
+class _PanelTabsState extends State<_PanelTabs> {
+  static const _reorderDuration = Duration(milliseconds: 180);
+
+  final GlobalKey _tabStripKey = GlobalKey();
+  final ScrollController _scrollController = ScrollController();
+  WorkspacePanelId? _draggedPanel;
+  int? _previewInsertionIndex;
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return _tabStrip(
-      ListView(
-        scrollDirection: Axis.horizontal,
-        children: [
-          for (final (index, tab) in tabs.indexed) _buildTab(tab, index),
+    final tabList = ListView(
+      controller: _scrollController,
+      scrollDirection: Axis.horizontal,
+      children: [
+        for (var index = 0; index <= widget.tabs.length; index++) ...[
+          _buildAnimatedGap(index),
+          if (index < widget.tabs.length)
+            _buildAnimatedTab(widget.tabs[index], index),
         ],
-      ),
+      ],
     );
+    final strip = _tabStrip(tabList);
+    final accept = widget.onAccept;
+    if (!widget.draggable || accept == null) return strip;
+    return DragTarget<PanelTabDragData>(
+      onWillAcceptWithDetails: (_) => true,
+      onMove: (details) {
+        final insertionIndex = _insertionIndexAt(details.offset);
+        if (insertionIndex == null ||
+            (_draggedPanel == details.data.panel &&
+                _previewInsertionIndex == insertionIndex)) {
+          return;
+        }
+        setState(() {
+          _draggedPanel = details.data.panel;
+          _previewInsertionIndex = insertionIndex;
+        });
+      },
+      onLeave: (data) {
+        if (data == null ||
+            _draggedPanel != data.panel ||
+            _previewInsertionIndex == null) {
+          return;
+        }
+        setState(() => _previewInsertionIndex = null);
+      },
+      onAcceptWithDetails: (details) {
+        final insertionIndex =
+            _previewInsertionIndex ?? _insertionIndexAt(details.offset);
+        if (insertionIndex == null) return;
+        setState(() {
+          _draggedPanel = null;
+          _previewInsertionIndex = null;
+        });
+        accept(details.data, insertionIndex);
+      },
+      builder: (context, candidates, rejected) => strip,
+    );
+  }
+
+  int? _insertionIndexAt(Offset globalPosition) {
+    final renderObject = _tabStripKey.currentContext?.findRenderObject();
+    if (renderObject is! RenderBox) return null;
+    var x = renderObject.globalToLocal(globalPosition).dx;
+    if (_scrollController.hasClients) x += _scrollController.offset;
+    var tabLeft = 0.0;
+    for (var index = 0; index < widget.tabs.length; index++) {
+      final width = _tabWidth(widget.tabs[index]);
+      if (x < tabLeft + width / 2) return index;
+      tabLeft += width;
+    }
+    return widget.tabs.length;
   }
 
   Widget _tabStrip(Widget child) {
     return Container(
-      height: 30,
+      key: _tabStripKey,
+      height: talPanelTabStripHeight,
       color: TalColors.surface,
       alignment: Alignment.bottomLeft,
       child: child,
     );
   }
 
+  Widget _buildAnimatedGap(int index) {
+    final draggedPanel = _draggedPanel;
+    final width = draggedPanel == null ? 0.0 : _tabWidth(draggedPanel);
+    final expanded = _previewInsertionIndex == index;
+    return TweenAnimationBuilder<double>(
+      key: ValueKey<String>('panel-tab-gap-$index'),
+      tween: Tween<double>(begin: 0, end: expanded ? width : 0),
+      duration: _reorderDuration,
+      curve: Curves.easeOutCubic,
+      builder: (context, animatedWidth, child) =>
+          SizedBox(width: animatedWidth, height: 29),
+    );
+  }
+
+  Widget _buildAnimatedTab(WorkspacePanelId tab, int index) {
+    final width = _tabWidth(tab);
+    final hidden = _draggedPanel == tab;
+    return TweenAnimationBuilder<double>(
+      key: ValueKey<String>('panel-tab-slot-${tab.name}'),
+      tween: Tween<double>(begin: width, end: hidden ? 0 : width),
+      duration: _reorderDuration,
+      curve: Curves.easeOutCubic,
+      builder: (context, animatedWidth, child) => SizedBox(
+        width: animatedWidth,
+        height: 29,
+        child: ClipRect(
+          child: OverflowBox(
+            alignment: Alignment.centerLeft,
+            minWidth: width,
+            maxWidth: width,
+            child: child,
+          ),
+        ),
+      ),
+      child: _buildTab(tab, index),
+    );
+  }
+
+  double _tabWidth(WorkspacePanelId tab) {
+    return talPanelTabWidth(
+      tab,
+      textScaler: MediaQuery.textScalerOf(context),
+      textDirection: Directionality.of(context),
+    );
+  }
+
   Widget _buildTab(WorkspacePanelId tab, int index) {
     final tabWidget = InkWell(
-      onTap: () => onSelected(tab),
+      onTap: () => widget.onSelected(tab),
       child: _tabSurface(tab),
     );
-    final sourceGroupId = groupId;
-    if (!draggable || sourceGroupId == null || onDragEnd == null) {
+    final sourceGroupId = widget.groupId;
+    if (!widget.draggable ||
+        sourceGroupId == null ||
+        widget.onDragEnd == null) {
       return tabWidget;
     }
     final data = PanelTabDragData(sourceGroupId: sourceGroupId, panel: tab);
+    final sourceTab = Opacity(
+      key: ValueKey<String>('panel-tab-drag-source-${tab.name}'),
+      opacity: _draggedPanel == tab ? 0 : 1,
+      child: tabWidget,
+    );
     final draggableTab = MouseRegion(
       cursor: SystemMouseCursors.grab,
       child: Draggable<PanelTabDragData>(
         data: data,
         rootOverlay: true,
         dragAnchorStrategy: pointerDragAnchorStrategy,
-        onDragStarted: () => onSelected(tab),
-        onDragEnd: (details) => onDragEnd!(data, details),
-        feedback: Material(
-          color: Colors.transparent,
-          child: Opacity(opacity: 0.92, child: _tabSurface(tab)),
+        onDragStarted: () {
+          setState(() {
+            _draggedPanel = tab;
+            _previewInsertionIndex = index;
+          });
+          widget.onDragStart?.call(data);
+        },
+        onDragUpdate: (details) => widget.onDragUpdate?.call(data, details),
+        onDragEnd: (details) {
+          if (mounted) {
+            setState(() {
+              _draggedPanel = null;
+              _previewInsertionIndex = null;
+            });
+          }
+          widget.onDragEnd!(data, details);
+        },
+        feedback: SizedBox(
+          key: ValueKey<String>('panel-tab-drag-feedback-${tab.name}'),
+          width: 1,
+          height: 1,
         ),
-        childWhenDragging: Opacity(opacity: 0.35, child: tabWidget),
-        child: tabWidget,
+        childWhenDragging: const SizedBox.shrink(),
+        child: sourceTab,
       ),
     );
-    final accept = onAccept;
-    if (accept == null) return draggableTab;
-    return DragTarget<PanelTabDragData>(
-      onWillAcceptWithDetails: (_) => true,
-      onAcceptWithDetails: (details) => accept(details.data, index),
-      builder: (context, candidates, rejected) => DecoratedBox(
-        decoration: BoxDecoration(
-          color: candidates.isEmpty ? null : TalColors.surfaceAlt,
-          border: candidates.isEmpty
-              ? null
-              : Border.all(color: TalColors.accent),
-        ),
-        child: draggableTab,
-      ),
-    );
+    return draggableTab;
   }
 
   Widget _tabSurface(WorkspacePanelId tab) {
-    return Container(
-      key: ValueKey<String>('panel-tab-${tab.name}'),
-      height: 29,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(
-        color: tab == selected ? TalColors.surface : TalColors.surfaceAlt,
-        border: Border(
-          top: BorderSide(
-            color: tab == selected ? TalColors.accent : TalColors.border,
-            width: tab == selected ? 2 : 1,
-          ),
-          right: const BorderSide(color: TalColors.border),
-          bottom: BorderSide(
-            color: tab == selected ? TalColors.surface : TalColors.border,
-          ),
-        ),
-      ),
-      child: Center(child: Text(tab.title, style: talBody)),
+    return TalPanelTabSurface(
+      tab: tab,
+      selected: tab == widget.selected,
+      width: _tabWidth(tab),
+      surfaceKey: ValueKey<String>('panel-tab-${tab.name}'),
     );
   }
 }

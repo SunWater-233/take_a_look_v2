@@ -124,7 +124,7 @@ void main() {
     controller.dispose();
   });
 
-  test('plot window freezes while paused or follow-latest is disabled', () {
+  test('follow-latest freezes only the viewport while pause freezes data', () {
     final controller = TakeALookController();
     controller.loadDemoSymbols();
     controller.toggleSymbol(demoSymbols.first.key);
@@ -165,15 +165,16 @@ void main() {
       ],
     });
     expect(controller.plotWindowEndSeconds, 10);
-    expect(plotEvents, 1);
+    expect(controller.plotSamplesFor(controller.watches.single).last.dx, 20);
+    expect(plotEvents, 2);
 
     controller.toggleFollowLatest();
     expect(controller.plotWindowEndSeconds, 20);
-    expect(plotEvents, 2);
+    expect(plotEvents, 3);
     controller.togglePlotting();
     expect(controller.plottingPaused, isTrue);
     expect(controller.plotWindowEndSeconds, 20);
-    expect(plotEvents, 3);
+    expect(plotEvents, 4);
 
     controller.applyTelemetrySnapshot({
       'elapsedSeconds': 30,
@@ -189,11 +190,30 @@ void main() {
       ],
     });
     expect(controller.plotWindowEndSeconds, 20);
-    expect(plotEvents, 3);
+    expect(plotEvents, 4);
 
     controller.togglePlotting();
     expect(controller.plotWindowEndSeconds, 30);
-    expect(plotEvents, 4);
+    expect(plotEvents, 5);
+
+    controller.toggleFollowLatest();
+    controller.togglePlotting();
+    controller.togglePlotting();
+    controller.applyTelemetrySnapshot({
+      'elapsedSeconds': 40,
+      'watches': [
+        {
+          'key': key,
+          'value': 4,
+          'samples': [
+            [39, 3.5],
+            [40, 4],
+          ],
+        },
+      ],
+    });
+    controller.togglePlotting();
+    expect(controller.plotSamplesFor(controller.watches.single).last.dx, 40);
     controller.dispose();
   });
 

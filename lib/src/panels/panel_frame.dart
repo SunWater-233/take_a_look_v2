@@ -3,6 +3,7 @@ part of '../panels.dart';
 const double talPanelHeaderHeight = 34;
 const double talPanelTabStripHeight = 30;
 const double talPanelTabHeight = 29;
+const double _talPanelTabMouseDragSlop = 10;
 
 double talPanelTabWidth(
   WorkspacePanelId tab, {
@@ -399,7 +400,7 @@ class _PanelTabsState extends State<_PanelTabs> {
     );
     final draggableTab = MouseRegion(
       cursor: SystemMouseCursors.grab,
-      child: Draggable<PanelTabDragData>(
+      child: _TabDraggable<PanelTabDragData>(
         data: data,
         rootOverlay: true,
         dragAnchorStrategy: pointerDragAnchorStrategy,
@@ -439,5 +440,77 @@ class _PanelTabsState extends State<_PanelTabs> {
       width: _tabWidth(tab),
       surfaceKey: ValueKey<String>('panel-tab-${tab.name}'),
     );
+  }
+}
+
+class _TabDraggable<T extends Object> extends Draggable<T> {
+  const _TabDraggable({
+    required super.data,
+    required super.feedback,
+    required super.child,
+    super.childWhenDragging,
+    super.rootOverlay,
+    super.dragAnchorStrategy,
+    super.onDragStarted,
+    super.onDragUpdate,
+    super.onDragEnd,
+  });
+
+  @override
+  MultiDragGestureRecognizer createRecognizer(
+    GestureMultiDragStartCallback onStart,
+  ) {
+    return _TabMultiDragGestureRecognizer(
+      mouseDragSlop: _talPanelTabMouseDragSlop,
+      allowedButtonsFilter: allowedButtonsFilter,
+    )..onStart = onStart;
+  }
+}
+
+class _TabMultiDragGestureRecognizer extends MultiDragGestureRecognizer {
+  _TabMultiDragGestureRecognizer({
+    required this.mouseDragSlop,
+    super.allowedButtonsFilter,
+  }) : super(debugOwner: null);
+
+  final double mouseDragSlop;
+
+  @override
+  MultiDragPointerState createNewPointerState(PointerDownEvent event) {
+    return _TabMultiDragPointerState(
+      event.position,
+      event.kind,
+      gestureSettings,
+      mouseDragSlop,
+    );
+  }
+
+  @override
+  String get debugDescription => 'tab multidrag';
+}
+
+class _TabMultiDragPointerState extends MultiDragPointerState {
+  _TabMultiDragPointerState(
+    super.initialPosition,
+    super.kind,
+    super.gestureSettings,
+    this.mouseDragSlop,
+  );
+
+  final double mouseDragSlop;
+
+  @override
+  void checkForResolutionAfterMove() {
+    final delta = pendingDelta;
+    if (delta == null) return;
+    final platformSlop = computeHitSlop(kind, gestureSettings);
+    if (delta.distance > math.max(mouseDragSlop, platformSlop)) {
+      resolve(GestureDisposition.accepted);
+    }
+  }
+
+  @override
+  void accepted(GestureMultiDragStartCallback starter) {
+    starter(initialPosition);
   }
 }

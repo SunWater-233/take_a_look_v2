@@ -169,7 +169,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
           'plotInvertY',
           'plotWindowEndSeconds',
         }.any(data.containsKey);
-    final wasPlotFrozen = plottingPaused || !followLatest;
+    final wasPlotFrozen = plottingPaused;
     final previousConnectionStatus = connectionStatus;
     final previousDisplayRefreshMode = displayRefreshMode;
     final previousSampleRateHz = sampleRateHz;
@@ -330,7 +330,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
       _frozenPlotEndSeconds = plottingPaused || !followLatest
           ? (data['plotWindowEndSeconds'] as num?)?.toDouble() ?? elapsedSeconds
           : null;
-      if (plottingPaused || !followLatest) {
+      if (plottingPaused) {
         if (!wasPlotFrozen || _frozenPlotSamples.isEmpty) {
           _capturePlotSamples();
         }

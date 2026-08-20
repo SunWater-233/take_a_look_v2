@@ -49,6 +49,7 @@ class _SymbolPanelState extends State<_SymbolPanel> {
       _nameWidth + _addressWidth + _sizeWidth + _sectionWidth + _typeWidth;
 
   final search = TextEditingController();
+  final FocusNode _searchFocus = FocusNode(debugLabel: 'symbol-search');
   final Set<String> _expanded = <String>{};
   List<_SymbolTreeNode> _tree = const <_SymbolTreeNode>[];
   List<_VisibleSymbolNode> _visibleRows = const <_VisibleSymbolNode>[];
@@ -62,6 +63,7 @@ class _SymbolPanelState extends State<_SymbolPanel> {
   @override
   void dispose() {
     search.dispose();
+    _searchFocus.dispose();
     super.dispose();
   }
 
@@ -210,6 +212,12 @@ class _SymbolPanelState extends State<_SymbolPanel> {
     if (_tableLayout.resizeColumn(index, delta)) setState(() {});
   }
 
+  void _keepSearchFocusAfterWorkspaceReorder() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _searchFocus.requestFocus();
+    });
+  }
+
   Set<String> _symbolKeysForNode(_SymbolTreeNode node) {
     return node.symbolKeys;
   }
@@ -348,7 +356,10 @@ class _SymbolPanelState extends State<_SymbolPanel> {
               child: SizedBox(
                 height: 32,
                 child: TextField(
+                  key: const ValueKey('symbol-search-field'),
                   controller: search,
+                  focusNode: _searchFocus,
+                  onTap: _keepSearchFocusAfterWorkspaceReorder,
                   onChanged: (_) => setState(() {}),
                   style: talBody,
                   decoration: const InputDecoration(

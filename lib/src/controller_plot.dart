@@ -9,6 +9,8 @@ extension TakeALookControllerPlot on TakeALookController {
       _freezePlotIfNeeded();
     } else if (followLatest) {
       _clearFrozenPlot();
+    } else {
+      _frozenPlotSamples.clear();
     }
     _appendLog(plottingPaused ? '绘图已暂停，后台继续采样。' : '绘图已恢复。');
     _emitState([signals.plot, signals.plotControls, signals.logs]);
@@ -33,7 +35,7 @@ extension TakeALookControllerPlot on TakeALookController {
     if (_dispatchRemote(ControllerCommand.toggleFollowLatest)) return;
     _resetPlotRefreshSchedule();
     if (followLatest) {
-      _freezePlotIfNeeded();
+      _freezePlotViewportIfNeeded();
     } else if (!plottingPaused) {
       _clearFrozenPlot();
     }
@@ -65,7 +67,7 @@ extension TakeALookControllerPlot on TakeALookController {
     final span = (normalizedXMax - normalizedXMin).clamp(0.2, 120).toDouble();
     final latest = math.max(elapsedSeconds, span);
     final end = normalizedXMax.clamp(span, latest).toDouble();
-    if (followLatest) _freezePlotIfNeeded();
+    if (followLatest) _freezePlotViewportIfNeeded();
     followLatest = false;
     plotVisibleWindowSeconds = span;
     _frozenPlotEndSeconds = end;
@@ -92,7 +94,7 @@ extension TakeALookControllerPlot on TakeALookController {
         if (nextFollowLatest && !plottingPaused) {
           _clearFrozenPlot();
         } else {
-          _freezePlotIfNeeded();
+          _freezePlotViewportIfNeeded();
         }
         followLatest = nextFollowLatest;
       }
@@ -138,7 +140,7 @@ extension TakeALookControllerPlot on TakeALookController {
         _dispatchRemote(ControllerCommand.showAllPlotSamples)) {
       return;
     }
-    if (followLatest) _freezePlotIfNeeded();
+    if (followLatest) _freezePlotViewportIfNeeded();
     followLatest = false;
     final plottedSamples = _watches
         .where((watch) => watch.plotted)

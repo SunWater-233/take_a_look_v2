@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -11,6 +12,73 @@ import 'package:take_a_look_v2/src/window_sync.dart';
 import 'package:take_a_look_v2/src/workspace.dart';
 
 void main() {
+  testWidgets(
+    'small mouse jitter does not turn a neighboring tab click into a drag',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1600, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      final controller = TakeALookController();
+      final windowSync = MainWindowSync(controller);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildTalTheme(),
+          home: Scaffold(
+            body: DockingWorkspace(
+              controller: controller,
+              windowSync: windowSync,
+            ),
+          ),
+        ),
+      );
+
+      final headerGroup = find.byKey(const ValueKey('workspace-group-header'));
+      final samplingTab = find.descendant(
+        of: headerGroup,
+        matching: find.byKey(const ValueKey('panel-tab-sampling')),
+      );
+      final gesture = await tester.startGesture(
+        tester.getCenter(samplingTab),
+        kind: PointerDeviceKind.mouse,
+      );
+      await gesture.moveBy(const Offset(4, 1));
+      await tester.pump();
+
+      expect(
+        find.descendant(
+          of: headerGroup,
+          matching: find.byKey(
+            const ValueKey<String>('panel-tab-drag-source-sampling'),
+          ),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('panel-tab-drag-feedback-sampling')),
+        findsNothing,
+      );
+
+      await gesture.up();
+      await tester.tap(samplingTab);
+      await tester.pump();
+      expect(
+        tester
+            .widget<TalPanelFrame>(
+              find.descendant(
+                of: headerGroup,
+                matching: find.byType(TalPanelFrame),
+              ),
+            )
+            .panel,
+        WorkspacePanelId.sampling,
+      );
+
+      await windowSync.dispose();
+      controller.dispose();
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   testWidgets('dragging a tab animates neighboring tabs before reordering', (
     tester,
   ) async {

@@ -5,6 +5,8 @@ import 'package:take_a_look_v2/src/controller.dart';
 import 'package:take_a_look_v2/src/panel_types.dart';
 import 'package:take_a_look_v2/src/panels.dart';
 import 'package:take_a_look_v2/src/theme.dart';
+import 'package:take_a_look_v2/src/window_sync.dart';
+import 'package:take_a_look_v2/src/workspace.dart';
 
 void main() {
   testWidgets('symbol panel groups variables into an expandable source tree', (
@@ -170,6 +172,10 @@ void main() {
 
     await tester.enterText(find.byType(TextField), 'speed_rpm');
     await tester.pump();
+    final searchField = tester.widget<TextField>(
+      find.byKey(const ValueKey('symbol-search-field')),
+    );
+    expect(searchField.focusNode!.hasFocus, isTrue);
     expect(find.text('control'), findsOneWidget);
     expect(find.text('foc_speed.c'), findsOneWidget);
     expect(
@@ -180,6 +186,48 @@ void main() {
     );
     expect(find.text('iq_ref'), findsNothing);
 
+    controller.selectSymbols([demoSymbols.first.key]);
+    await tester.pump();
+    expect(searchField.focusNode!.hasFocus, isTrue);
+    expect(searchField.controller!.text, 'speed_rpm');
+
+    controller.dispose();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
+  testWidgets('symbol search keeps focus when its workspace comes to front', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1600, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final controller = TakeALookController()..loadDemoSymbols();
+    final windowSync = MainWindowSync(controller);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTalTheme(),
+        home: Scaffold(
+          body: DockingWorkspace(
+            controller: controller,
+            windowSync: windowSync,
+          ),
+        ),
+      ),
+    );
+
+    final fieldFinder = find.byKey(const ValueKey('symbol-search-field'));
+    await tester.tap(fieldFinder);
+    await tester.pump();
+    final field = tester.widget<TextField>(fieldFinder);
+    expect(field.focusNode!.hasFocus, isTrue);
+
+    await tester.enterText(fieldFinder, 'speed_rpm');
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(field.focusNode!.hasFocus, isTrue);
+    expect(field.controller!.text, 'speed_rpm');
+
+    await windowSync.dispose();
     controller.dispose();
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();

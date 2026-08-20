@@ -159,7 +159,7 @@ class TakeALookController extends ChangeNotifier {
       ? (_frozenPlotEndSeconds ?? elapsedSeconds)
       : elapsedSeconds;
   Iterable<Offset> plotSamplesFor(WatchItem watch) {
-    if (!plottingPaused && followLatest) return watch.samples;
+    if (!plottingPaused) return watch.samples;
     return _frozenPlotSamples[watch.symbol.key] ?? watch.samples;
   }
 
@@ -245,6 +245,10 @@ class TakeALookController extends ChangeNotifier {
     if (_frozenPlotSamples.isEmpty) _capturePlotSamples();
   }
 
+  void _freezePlotViewportIfNeeded() {
+    _frozenPlotEndSeconds ??= elapsedSeconds;
+  }
+
   void _capturePlotSamples() {
     _frozenPlotSamples
       ..clear()
@@ -298,9 +302,7 @@ class TakeALookController extends ChangeNotifier {
       _telemetryDisplayPending = false;
       signals.telemetry.emit();
     }
-    if (!plottingPaused &&
-        followLatest &&
-        _watches.any((watch) => watch.plotted)) {
+    if (!plottingPaused && _watches.any((watch) => watch.plotted)) {
       signals.plot.emit();
     }
   }

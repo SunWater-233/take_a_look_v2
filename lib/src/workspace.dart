@@ -986,6 +986,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     WorkspacePanelId.watch ||
     WorkspacePanelId.connection => const Rect.fromLTWH(0.04, 0.26, 0.36, 0.58),
     WorkspacePanelId.plot => const Rect.fromLTWH(0.22, 0.05, 0.72, 0.67),
+    WorkspacePanelId.analysis => const Rect.fromLTWH(0.12, 0.08, 0.76, 0.72),
     WorkspacePanelId.log => const Rect.fromLTWH(0.08, 0.68, 0.84, 0.26),
   };
 

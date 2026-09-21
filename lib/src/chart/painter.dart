@@ -21,7 +21,14 @@ class TelemetryPainter extends CustomPainter {
     if (plot.width <= 1 || plot.height <= 1) return;
 
     if (controller.plotShowGrid) {
-      _drawGrid(canvas, plot);
+      _drawGrid(
+        canvas,
+        plot,
+        xMin: viewport.xMin,
+        xMax: viewport.xMax,
+        yMin: viewport.yMin,
+        yMax: viewport.yMax,
+      );
     } else {
       _drawPlotOutline(canvas, plot);
     }
@@ -29,14 +36,7 @@ class TelemetryPainter extends CustomPainter {
 
     final plotted = controller.watches.where((item) => item.plotted).toList();
     if (plotted.isEmpty) {
-      _drawAxisLabels(
-        canvas,
-        plot,
-        viewport.xMin,
-        viewport.xMax,
-        viewport.yMin,
-        viewport.yMax,
-      );
+      _drawAxisLabels(canvas, plot, viewport);
       return;
     }
 
@@ -54,37 +54,103 @@ class TelemetryPainter extends CustomPainter {
       );
     }
     canvas.restore();
-    _drawAxisLabels(
-      canvas,
-      plot,
-      viewport.xMin,
-      viewport.xMax,
-      viewport.yMin,
-      viewport.yMax,
-    );
+    _drawAxisLabels(canvas, plot, viewport);
     if (controller.plotShowLegend) _drawLegend(canvas, plot, plotted);
   }
 
-  void _drawGrid(Canvas canvas, Rect plot) {
+  void _drawGrid(
+    Canvas canvas,
+    Rect plot, {
+    required double xMin,
+    required double xMax,
+    required double yMin,
+    required double yMax,
+  }) {
     final minor = Paint()..color = TalColors.gridMinor;
     final major = Paint()..color = TalColors.gridMajor;
-    for (var i = 0; i <= 50; i += 1) {
-      final x = plot.left + plot.width * i / 50;
-      canvas.drawLine(
-        Offset(x, plot.top),
-        Offset(x, plot.bottom),
-        i % 5 == 0 ? major : minor,
-      );
-    }
-    for (var i = 0; i <= 20; i += 1) {
-      final y = plot.top + plot.height * i / 20;
-      canvas.drawLine(
-        Offset(plot.left, y),
-        Offset(plot.right, y),
-        i % 2 == 0 ? major : minor,
-      );
-    }
+
+    _drawValueGridLines(
+      min: xMin,
+      max: xMax,
+      targetMajorCount: 10,
+      minorDivisions: 5,
+      paint: minor,
+      majorPaint: major,
+      position: (value) {
+        final fraction = (value - xMin) / (xMax - xMin);
+        final mapped = controller.plotInvertX ? 1 - fraction : fraction;
+        return plot.left + plot.width * mapped;
+      },
+      line: (position, paint) => canvas.drawLine(
+        Offset(position, plot.top),
+        Offset(position, plot.bottom),
+        paint,
+      ),
+    );
+    _drawValueGridLines(
+      min: yMin,
+      max: yMax,
+      targetMajorCount: 5,
+      minorDivisions: 2,
+      paint: minor,
+      majorPaint: major,
+      position: (value) {
+        final fraction = (value - yMin) / (yMax - yMin);
+        final mapped = controller.plotInvertY ? fraction : 1 - fraction;
+        return plot.top + plot.height * mapped;
+      },
+      line: (position, paint) => canvas.drawLine(
+        Offset(plot.left, position),
+        Offset(plot.right, position),
+        paint,
+      ),
+    );
     _drawPlotOutline(canvas, plot);
+  }
+
+  void _drawValueGridLines({
+    required double min,
+    required double max,
+    required int targetMajorCount,
+    required int minorDivisions,
+    required Paint paint,
+    required Paint majorPaint,
+    required double Function(double value) position,
+    required void Function(double position, Paint paint) line,
+  }) {
+    final majorStep = _niceStep(max - min, targetMajorCount);
+    final minorStep = majorStep / minorDivisions;
+    final first = (min / minorStep).ceil();
+    final last = (max / minorStep).floor();
+    for (var index = first; index <= last; index += 1) {
+      final value = index * minorStep;
+      final isMajor = index % minorDivisions == 0;
+      line(position(value), isMajor ? majorPaint : paint);
+    }
+  }
+
+  double _niceStep(double span, int targetMajorCount) {
+    final raw = span / targetMajorCount;
+    if (!raw.isFinite || raw <= 0) return 1;
+    final magnitude = math
+        .pow(10, (math.log(raw) / math.ln10).floor())
+        .toDouble();
+    final normalized = raw / magnitude;
+    final factor = normalized <= 1
+        ? 1
+        : normalized <= 2
+        ? 2
+        : normalized <= 5
+        ? 5
+        : 10;
+    return factor * magnitude;
+  }
+
+  List<double> _majorTicks(double min, double max, int targetMajorCount) {
+    final step = _niceStep(max - min, targetMajorCount);
+    final first = (min / step).ceil();
+    final last = (max / step).floor();
+    return [for (var index = first; index <= last; index += 1) index * step];
   }
 
   void _drawPlotOutline(Canvas canvas, Rect plot) {
@@ -112,35 +178,36 @@ class TelemetryPainter extends CustomPainter {
     );
   }
 
-  void _drawAxisLabels(
-    Canvas canvas,
-    Rect plot,
-    double xMin,
-    double xMax,
-    double yMin,
-    double yMax,
-  ) {
-    for (var i = 0; i <= 5; i += 1) {
-      final y = plot.bottom - plot.height * i / 5;
-      final fraction = controller.plotInvertY ? 1 - i / 5 : i / 5;
-      final value = yMin + (yMax - yMin) * fraction;
+  void _drawAxisLabels(Canvas canvas, Rect plot, TelemetryViewport viewport) {
+    final xMin = viewport.xMin;
+    final xMax = viewport.xMax;
+    final yMin = viewport.yMin;
+    final yMax = viewport.yMax;
+    for (final value in _majorTicks(yMin, yMax, 5)) {
+      final fraction = (value - yMin) / (yMax - yMin);
+      final mapped = controller.plotInvertY ? fraction : 1 - fraction;
+      final y = plot.top + plot.height * mapped;
       _text(
         canvas,
         value.toStringAsFixed(value.abs() >= 100 ? 0 : 1),
-        Offset(2, y - 7),
+        Offset(plot.left - 42, y - 7),
         talBody,
         width: 46,
         align: TextAlign.right,
       );
     }
-    for (var i = 0; i <= 10; i += 1) {
-      final x = plot.left + plot.width * i / 10;
-      final fraction = controller.plotInvertX ? 1 - i / 10 : i / 10;
-      final value = xMin + (xMax - xMin) * fraction;
+    for (final value in _majorTicks(xMin, xMax, 10)) {
+      final fraction = (value - xMin) / (xMax - xMin);
+      final mapped = controller.plotInvertX ? 1 - fraction : fraction;
+      final x = plot.left + plot.width * mapped;
+      final labelInset = math.min(30.0, plot.width / 2);
+      final labelCenter = x
+          .clamp(plot.left + labelInset, plot.right - labelInset)
+          .toDouble();
       _text(
         canvas,
         value.toStringAsFixed(value.abs() >= 100 ? 0 : 1),
-        Offset(x - 30, plot.bottom + 7),
+        Offset(labelCenter - 30, plot.bottom + 2),
         talBody,
         width: 60,
         align: TextAlign.center,
@@ -154,18 +221,6 @@ class TelemetryPainter extends CustomPainter {
       width: 90,
       align: TextAlign.center,
     );
-    canvas.save();
-    canvas.translate(12, plot.center.dy + 28);
-    canvas.rotate(-math.pi / 2);
-    _text(
-      canvas,
-      '变量值',
-      Offset.zero,
-      talBody,
-      width: 56,
-      align: TextAlign.center,
-    );
-    canvas.restore();
   }
 
   void _drawSeries(

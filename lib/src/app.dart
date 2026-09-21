@@ -55,6 +55,7 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
           backendCommand: client.command,
           symbolFilePicker: pickSymbolFile,
           csvExportPathPicker: pickCsvExportPath,
+          csvImportContentsPicker: pickCsvImportContents,
         );
         client.eventHandler = controller.applyBackendEvent;
         backendClient = client;
@@ -71,6 +72,7 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
       remoteController = TakeALookController(
         remoteCommand: (method, arguments) =>
             sendCommandToMain(remoteController, method, arguments),
+        csvImportContentsPicker: pickCsvImportContents,
       );
       controller = remoteController;
       windowManager.addListener(this);

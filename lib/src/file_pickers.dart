@@ -23,3 +23,14 @@ Future<String?> pickCsvExportPath() async {
   );
   return location?.path;
 }
+
+/// Opens a CSV file and returns its text so callers do not need to depend on
+/// dart:io (the picker itself also works on the web target).
+Future<String?> pickCsvImportContents() async {
+  final file = await openFile(
+    acceptedTypeGroups: const [
+      XTypeGroup(label: 'CSV 文件', extensions: ['csv']),
+    ],
+  );
+  return file?.readAsString();
+}

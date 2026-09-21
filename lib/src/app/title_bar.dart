@@ -32,6 +32,7 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
     WorkspacePanelId.sampling,
     WorkspacePanelId.runControl,
     WorkspacePanelId.plot,
+    WorkspacePanelId.analysis,
     WorkspacePanelId.connection,
     WorkspacePanelId.symbols,
     WorkspacePanelId.watch,

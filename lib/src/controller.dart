@@ -27,6 +27,7 @@ typedef RemoteCommand =
 typedef BackendCommand =
     Future<void> Function(ControllerCommand command, Object? arguments);
 typedef PathPicker = Future<String?> Function();
+typedef TextFilePicker = Future<String?> Function();
 
 class TakeALookController extends ChangeNotifier {
   static const double standardPlotRefreshRateHz = 60;
@@ -38,6 +39,7 @@ class TakeALookController extends ChangeNotifier {
     this.backendCommand,
     this.symbolFilePicker,
     this.csvExportPathPicker,
+    this.csvImportContentsPicker,
   }) {
     _logs.add(LogEntry('UI 已从 .ui 文件加载，pyOCD 内存读写后端已就绪。'));
     _logs.add(LogEntry('读取 .elf / .axf 后，可从符号层级中加入变量到实时调参列表。'));
@@ -50,6 +52,7 @@ class TakeALookController extends ChangeNotifier {
   final BackendCommand? backendCommand;
   final PathPicker? symbolFilePicker;
   final PathPicker? csvExportPathPicker;
+  final TextFilePicker? csvImportContentsPicker;
   final List<SymbolItem> _symbols = <SymbolItem>[];
   final List<WatchItem> _watches = <WatchItem>[];
   final List<LogEntry> _logs = <LogEntry>[];

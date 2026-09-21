@@ -20,6 +20,7 @@ part 'panels/symbol_panel.dart';
 part 'panels/watch_panel.dart';
 part 'panels/connection_panel.dart';
 part 'panels/plot_log_panels.dart';
+part 'panels/analysis_chart_panel.dart';
 part 'panels/shared_controls.dart';
 
 Widget buildWorkspacePanel(
@@ -46,6 +47,7 @@ Widget buildWorkspacePanelBody(
     WorkspacePanelId.watch => _WatchPanel(controller: controller),
     WorkspacePanelId.connection => _ConnectionPanel(controller: controller),
     WorkspacePanelId.plot => _PlotPanel(controller: controller),
+    WorkspacePanelId.analysis => _AnalysisChartPanel(controller: controller),
     WorkspacePanelId.log => _LogPanel(controller: controller),
   };
 }

@@ -73,6 +73,20 @@ Future<JsonObject> executeControllerCommand(
       controller.clearLogs();
     case ControllerCommand.resetTarget:
       controller.resetTarget(halt: arguments == true);
+    case ControllerCommand.setBreakpoints:
+      final values = Map<String, Object?>.from(arguments! as Map);
+      final path = values['path'] as String;
+      final requested = (values['lines'] as List).cast<int>().toSet();
+      controller.setBreakpoints(path, requested);
+    case ControllerCommand.debugControl:
+      switch (arguments) {
+        case 'halt':
+          controller.haltTarget();
+        case 'resume':
+          controller.resumeTarget();
+        case 'step':
+          controller.stepTarget();
+      }
     case ControllerCommand.exportCsv:
       await controller.exportCsv();
     case ControllerCommand.toggleSymbol:

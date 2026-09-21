@@ -9,6 +9,29 @@ Future<String?> pickSymbolFile() async {
   return file?.path;
 }
 
+Future<String?> pickSourceFile() async {
+  final file = await openFile(
+    acceptedTypeGroups: const [
+      XTypeGroup(
+        label: 'C/C++ 源码',
+        extensions: [
+          'c',
+          'cc',
+          'cpp',
+          'cxx',
+          'h',
+          'hh',
+          'hpp',
+          'hxx',
+          's',
+          'S',
+        ],
+      ),
+    ],
+  );
+  return file?.path;
+}
+
 Future<String?> pickCsvExportPath() async {
   final now = DateTime.now();
   String two(int value) => value.toString().padLeft(2, '0');

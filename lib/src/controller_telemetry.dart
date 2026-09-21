@@ -118,6 +118,9 @@ extension TakeALookControllerTelemetry on TakeALookController {
           );
           _emitState([signals.logs]);
         }
+      case BackendEventType.debug:
+        final payload = _asMap(params);
+        if (payload != null) applyDebugState(payload);
     }
   }
 

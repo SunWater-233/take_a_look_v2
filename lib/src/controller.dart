@@ -23,6 +23,7 @@ part 'controller_connection.dart';
 part 'controller_plot.dart';
 part 'controller_analysis.dart';
 part 'controller_watch.dart';
+part 'controller_debug.dart';
 
 typedef RemoteCommand =
     Future<void> Function(ControllerCommand command, Object? arguments);
@@ -163,6 +164,7 @@ class TakeALookController extends ChangeNotifier {
   Listenable get analysisChanges => signals.analysis;
   Listenable get clockChanges => signals.clock;
   Listenable get logChanges => signals.logs;
+  Listenable get debugChanges => signals.debug;
   Listenable get stateSyncChanges => signals.stateSync;
   Listenable get telemetrySyncChanges => signals.telemetrySync;
   double get plotWindowEndSeconds => plottingPaused || !followLatest

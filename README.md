@@ -11,6 +11,8 @@ process and is never exposed over the network.
 - Configurable memory sampling from 1 Hz to 10 kHz
 - J-Scope-compatible RTT-Normal and configured-variable RTT-Plus sampling
 - Target reset/run and reset/halt control
+- DWARF source browsing with C/C++ syntax highlighting, source-line breakpoints,
+  halt/resume/instruction-step controls, current-PC highlighting, and registers
 - In-memory raw sample cache, pause/resume, clear and UTF-8 CSV export
 - Versioned JSON-lines RPC with state, sample, log and performance events
 - One hardware backend owned by the main window; detached Flutter windows use the existing main-window channel
@@ -35,6 +37,17 @@ The app searches for Python in this order:
 `TAKE_A_LOOK_BACKEND_DIR` can override the backend source directory. These
 overrides are useful for development and diagnostics; normal development uses
 `backend/.venv` automatically.
+
+## Source debugging
+
+Load an ELF/AXF file built with DWARF debug information (`-Og -g3` is
+recommended for GCC/Clang), then open the **源码调试** tab beside the realtime
+plot. Click the gutter next to a line number to add or remove a breakpoint.
+Verified breakpoints are red; pending or rejected breakpoints are amber and
+show their status in a tooltip. When the target halts, the panel opens the
+current source file, highlights the program-counter line, and displays core
+registers along the bottom. If the ELF contains a build-machine source path
+that does not exist locally, use **定位本地源码** to select the matching file.
 
 ## Test
 

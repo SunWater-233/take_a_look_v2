@@ -21,18 +21,22 @@ class SamplingServiceMixin:
                 with self._lock:
                     connected = self._connection_status == "connected"
                     paused = self._sampling_paused
+                    if connected and now >= self._next_debug_poll_at:
+                        self._poll_debug_state_locked()
+                        self._next_debug_poll_at = now + 0.05
+                    target_halted = self._target_execution_state == "halted"
                     memory_period = 1.0 / self._sample_rate_hz
                     rtt_period = 1.0 / self._rtt_sample_rate_hz
                     elapsed = self._elapsed_locked(now)
                     has_watches = bool(self._watches)
                     rtt_enabled = self._rtt_enabled
                     rtt_protocol = self._rtt_protocol
-                    if connected and not paused and has_watches and now >= next_memory_at:
+                    if connected and not paused and not target_halted and has_watches and now >= next_memory_at:
                         values = self._read_memory_locked(rtt_enabled, rtt_protocol)
                         if values:
                             pending_frames.append((elapsed, values))
                         next_memory_at = now + memory_period
-                    if connected and not paused and rtt_enabled and now >= next_rtt_at:
+                    if connected and not paused and not target_halted and rtt_enabled and now >= next_rtt_at:
                         pending_frames.extend(self._read_rtt_locked(elapsed, now))
                         next_rtt_at = now + max(rtt_period, 0.002)
             except Exception as error:
@@ -139,4 +143,3 @@ class SamplingServiceMixin:
         if self._connection_started_at is None:
             return 0.0
         return max(0.0, (now if now is not None else time.monotonic()) - self._connection_started_at)
-

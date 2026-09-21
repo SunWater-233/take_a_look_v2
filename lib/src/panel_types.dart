@@ -11,6 +11,7 @@ enum WorkspacePanelId {
   connection,
   plot,
   analysis,
+  sourceDebug,
   log,
 }
 
@@ -26,6 +27,7 @@ extension WorkspacePanelInfo on WorkspacePanelId {
     WorkspacePanelId.connection => '连接设置',
     WorkspacePanelId.plot => '实时图表',
     WorkspacePanelId.analysis => '分析图表',
+    WorkspacePanelId.sourceDebug => '源码调试',
     WorkspacePanelId.log => '事件日志',
   };
 
@@ -38,6 +40,7 @@ extension WorkspacePanelInfo on WorkspacePanelId {
     WorkspacePanelId.connection => Icons.settings_input_component,
     WorkspacePanelId.plot => Icons.show_chart,
     WorkspacePanelId.analysis => Icons.analytics_outlined,
+    WorkspacePanelId.sourceDebug => Icons.code,
     WorkspacePanelId.log => Icons.terminal,
   };
 
@@ -50,6 +53,7 @@ extension WorkspacePanelInfo on WorkspacePanelId {
     WorkspacePanelId.connection => const Size(520, 430),
     WorkspacePanelId.plot => const Size(1050, 700),
     WorkspacePanelId.analysis => const Size(1050, 700),
+    WorkspacePanelId.sourceDebug => const Size(1100, 760),
     WorkspacePanelId.log => const Size(900, 340),
   };
 }

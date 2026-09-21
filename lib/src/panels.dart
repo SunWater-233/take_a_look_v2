@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -12,6 +13,7 @@ import 'chart/axis_settings.dart';
 import 'analysis.dart';
 import 'analysis_fft.dart';
 import 'controller.dart';
+import 'file_pickers.dart';
 import 'models.dart';
 import 'panel_types.dart';
 import 'theme.dart';
@@ -29,6 +31,7 @@ part 'panels/analysis_chart_panel.dart';
 part 'panels/analysis_chart_painters.dart';
 part 'panels/analysis_fft_panel.dart';
 part 'panels/analysis_chart_table.dart';
+part 'panels/source_debug_panel.dart';
 part 'panels/shared_controls.dart';
 
 Widget buildWorkspacePanel(
@@ -56,6 +59,7 @@ Widget buildWorkspacePanelBody(
     WorkspacePanelId.connection => _ConnectionPanel(controller: controller),
     WorkspacePanelId.plot => _PlotPanel(controller: controller),
     WorkspacePanelId.analysis => _AnalysisChartPanel(controller: controller),
+    WorkspacePanelId.sourceDebug => _SourceDebugPanel(controller: controller),
     WorkspacePanelId.log => _LogPanel(controller: controller),
   };
 }

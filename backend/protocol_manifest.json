@@ -14,6 +14,9 @@
     "setRtt",
     "clearSamples",
     "resetTarget",
+    "getDebugInfo",
+    "setBreakpoints",
+    "debugControl",
     "exportCsv",
     "shutdown"
   ],
@@ -24,6 +27,7 @@
     "sampleSchema",
     "log",
     "error",
-    "perf"
+    "perf",
+    "debug"
   ]
 }

@@ -282,7 +282,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         ),
         WorkspaceGroup(
           id: 'plot',
-          panels: const [WorkspacePanelId.plot],
+          panels: const [WorkspacePanelId.plot, WorkspacePanelId.sourceDebug],
           activePanel: WorkspacePanelId.plot,
           rect: const Rect.fromLTWH(0.22, 0, 0.78, 0.76),
           z: 3,

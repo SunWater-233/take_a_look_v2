@@ -11,6 +11,18 @@ class ControllerState {
   final AcquisitionState acquisition = AcquisitionState();
   final PlotState plot = PlotState();
   final AnalysisSession analysis = AnalysisSession();
+  final DebugState debug = DebugState();
+}
+
+class DebugState {
+  DebugExecutionState executionState = DebugExecutionState.unavailable;
+  final List<String> sourceFiles = <String>[];
+  final Map<String, Set<int>> requestedBreakpoints = <String, Set<int>>{};
+  final List<DebugBreakpoint> resolvedBreakpoints = <DebugBreakpoint>[];
+  final Map<String, int> registers = <String, int>{};
+  String? currentSource;
+  int? currentLine;
+  int? programCounter;
 }
 
 class ConnectionState {

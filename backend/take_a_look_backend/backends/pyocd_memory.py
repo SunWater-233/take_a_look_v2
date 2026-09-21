@@ -147,6 +147,31 @@ class PyOcdMemoryBackend:
         else:
             target.reset()
 
+    def halt(self) -> None:
+        self._require_target().halt()
+
+    def resume(self) -> None:
+        self._require_target().resume()
+
+    def step(self) -> None:
+        self._require_target().step()
+
+    def debug_state(self) -> str:
+        state = self._require_target().get_state()
+        return str(getattr(state, "name", state)).lower()
+
+    def set_breakpoint(self, address: int) -> bool:
+        return bool(self._require_target().set_breakpoint(address))
+
+    def remove_breakpoint(self, address: int) -> None:
+        self._require_target().remove_breakpoint(address)
+
+    def read_core_registers(self) -> dict[str, int]:
+        target = self._require_target()
+        names = ["r0", "r1", "r2", "r3", "r12", "sp", "lr", "pc", "xpsr"]
+        values = target.read_core_registers_raw(names)
+        return {name: int(value) for name, value in zip(names, values)}
+
     def _require_target(self) -> Any:
         if self.target is None:
             raise RuntimeError("pyOCD 后端尚未连接。")

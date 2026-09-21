@@ -28,6 +28,8 @@ enum ControllerCommand {
   clearSamples,
   clearLogs,
   resetTarget,
+  setBreakpoints,
+  debugControl,
   exportCsv,
   toggleSymbol,
   selectSymbols,
@@ -72,6 +74,9 @@ enum BackendMethod {
   setRtt,
   clearSamples,
   resetTarget,
+  getDebugInfo,
+  setBreakpoints,
+  debugControl,
   exportCsv,
   shutdown;
 
@@ -143,6 +148,13 @@ class BackendCommandMapper {
         return BackendCall(BackendMethod.resetTarget, {
           'halt': arguments == true,
         });
+      case ControllerCommand.setBreakpoints:
+        return BackendCall(
+          BackendMethod.setBreakpoints,
+          Map<String, Object?>.from(arguments! as Map),
+        );
+      case ControllerCommand.debugControl:
+        return BackendCall(BackendMethod.debugControl, {'action': arguments});
       case ControllerCommand.exportCsv:
         return BackendCall(BackendMethod.exportCsv, {'path': arguments});
       case ControllerCommand.setWatches:

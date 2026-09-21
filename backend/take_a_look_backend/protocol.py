@@ -27,6 +27,9 @@ class RpcMethod(StrEnum):
     SET_RTT = "setRtt"
     CLEAR_SAMPLES = "clearSamples"
     RESET_TARGET = "resetTarget"
+    GET_DEBUG_INFO = "getDebugInfo"
+    SET_BREAKPOINTS = "setBreakpoints"
+    DEBUG_CONTROL = "debugControl"
     EXPORT_CSV = "exportCsv"
     SHUTDOWN = "shutdown"
 
@@ -39,6 +42,7 @@ class EventName(StrEnum):
     LOG = "log"
     ERROR = "error"
     PERF = "perf"
+    DEBUG = "debug"
 
 
 @dataclass(frozen=True)

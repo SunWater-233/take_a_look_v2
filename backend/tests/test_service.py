@@ -11,6 +11,7 @@ from take_a_look_backend.backends.pyocd_memory import PyOcdConnectionConfig
 from take_a_look_backend.models import SymbolInfo
 from take_a_look_backend.protocol import EventName, ProtocolError, RpcMethod
 from take_a_look_backend.service import BackendService
+from take_a_look_backend.services.debug_info import DebugInfoIndex, SourceLocation
 
 
 class _FakeMemory:
@@ -21,6 +22,9 @@ class _FakeMemory:
         self.connected: PyOcdConnectionConfig | None = None
         self.values: dict[str, object] = {}
         self.reset_calls: list[bool] = []
+        self.execution_state = "running"
+        self.breakpoints: set[int] = set()
+        self.registers = {"pc": 0x08000100, "sp": 0x20001000, "lr": 0x08000081}
 
     def connect(self, config: PyOcdConnectionConfig) -> None:
         self.connected = config
@@ -44,6 +48,29 @@ class _FakeMemory:
 
     def reset(self, halt: bool = False) -> None:
         self.reset_calls.append(halt)
+
+    def halt(self) -> None:
+        self.execution_state = "halted"
+
+    def resume(self) -> None:
+        self.execution_state = "running"
+
+    def step(self) -> None:
+        self.execution_state = "halted"
+        self.registers["pc"] += 4
+
+    def debug_state(self) -> str:
+        return self.execution_state
+
+    def set_breakpoint(self, address: int) -> bool:
+        self.breakpoints.add(address)
+        return True
+
+    def remove_breakpoint(self, address: int) -> None:
+        self.breakpoints.discard(address)
+
+    def read_core_registers(self) -> dict[str, int]:
+        return dict(self.registers)
 
 
 class _FakeRtt:
@@ -69,6 +96,12 @@ class BackendServiceTests(unittest.TestCase):
             normal_rtt_backend=_FakeRtt(),  # type: ignore[arg-type]
             plus_rtt_backend=_FakeRtt(),  # type: ignore[arg-type]
             symbol_loader=lambda _path: list(self.symbols),
+            debug_info_loader=lambda _path: DebugInfoIndex(
+                [
+                    SourceLocation("C:/firmware/main.c", 10, 0x08000100),
+                    SourceLocation("C:/firmware/main.c", 12, 0x08000108),
+                ]
+            ),
         )
 
     def tearDown(self) -> None:
@@ -148,3 +181,33 @@ class BackendServiceTests(unittest.TestCase):
         self.assertTrue(paused["samplingPaused"])
         self.assertNotIn("symbols", paused)
         self.assertNotIn("watches", paused)
+
+    def test_source_breakpoints_and_run_control_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            symbol_path = Path(directory) / "firmware.elf"
+            symbol_path.touch()
+            loaded = self.service.handle(RpcMethod.LOAD_SYMBOLS, {"path": str(symbol_path)})
+            self.assertEqual(loaded["state"]["debug"]["sourceFiles"], ["C:/firmware/main.c"])  # type: ignore[index]
+
+            pending = self.service.handle(
+                RpcMethod.SET_BREAKPOINTS,
+                {"path": "C:/firmware/main.c", "lines": [11]},
+            )["debug"]
+            self.assertFalse(pending["breakpoints"][0]["verified"])  # type: ignore[index]
+
+            self.service.handle(RpcMethod.CONNECT, {})
+            self.assertEqual(self.memory.breakpoints, {0x08000108})
+            self.service.handle(RpcMethod.DEBUG_CONTROL, {"action": "halt"})
+            debug = self.service.handle(RpcMethod.GET_DEBUG_INFO, {})["debug"]
+            self.assertEqual(debug["executionState"], "halted")  # type: ignore[index]
+            self.assertEqual(debug["stoppedLocation"]["line"], 10)  # type: ignore[index]
+            self.assertEqual(debug["registers"]["sp"], 0x20001000)  # type: ignore[index]
+
+            self.service.handle(
+                RpcMethod.SET_BREAKPOINTS,
+                {"path": "C:/firmware/main.c", "lines": [10]},
+            )
+            self.service.handle(RpcMethod.DEBUG_CONTROL, {"action": "resume"})
+            self.assertEqual(self.memory.execution_state, "running")
+            self.assertEqual(self.memory.registers["pc"], 0x08000104)
+            self.assertEqual(self.memory.breakpoints, {0x08000100})

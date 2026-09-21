@@ -75,6 +75,28 @@ extension TakeALookControllerSnapshot on TakeALookController {
       ],
       'logs': [for (final entry in _logs) entry.toJson()],
       'analysisSession': analysisSession.toJson(includeData: includeSamples),
+      'debug': {
+        'executionState': debugState.executionState.name,
+        'sourceFiles': debugState.sourceFiles,
+        'breakpoints': [
+          for (final breakpoint in debugState.resolvedBreakpoints)
+            breakpoint.toJson(),
+        ],
+        'requestedBreakpoints': {
+          for (final entry in debugState.requestedBreakpoints.entries)
+            entry.key: entry.value.toList()..sort(),
+        },
+        'registers': debugState.registers,
+        'stoppedLocation': debugState.programCounter == null
+            ? null
+            : {
+                'address': debugState.programCounter,
+                if (debugState.currentSource != null)
+                  'path': debugState.currentSource,
+                if (debugState.currentLine != null)
+                  'line': debugState.currentLine,
+              },
+      },
     };
   }
 
@@ -152,6 +174,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
     final hasWatchState = data.containsKey('watches');
     final hasElapsedState = data.containsKey('elapsedSeconds');
     final hasAnalysisState = data.containsKey('analysisSession');
+    final hasDebugState = data.containsKey('debug');
     final hasPlotState =
         hasWatchState ||
         hasElapsedState ||
@@ -333,6 +356,12 @@ extension TakeALookControllerSnapshot on TakeALookController {
         Map<String, dynamic>.from(data['analysisSession']! as Map),
       );
     }
+    if (hasDebugState && data['debug'] is Map) {
+      applyDebugState(
+        Map<String, dynamic>.from(data['debug'] as Map),
+        emit: false,
+      );
+    }
     if (hasPlotState) {
       _frozenPlotEndSeconds = plottingPaused || !followLatest
           ? (data['plotWindowEndSeconds'] as num?)?.toDouble() ?? elapsedSeconds
@@ -355,6 +384,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
       if (hasPlotState) signals.plotControls,
       if (data.containsKey('logs')) signals.logs,
       if (hasAnalysisState) signals.analysis,
+      if (hasDebugState) signals.debug,
     ], sync: false);
   }
 }

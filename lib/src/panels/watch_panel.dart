@@ -446,7 +446,7 @@ class _WatchPanelState extends State<_WatchPanel> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  OutlinedButton(
+                  TalButton(
                     onPressed: controller.watches.isEmpty
                         ? null
                         : controller.clearWatches,
@@ -656,7 +656,7 @@ class _WatchRowState extends State<_WatchRow> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    IconButton(
+                    TalIconButton(
                       tooltip: '写入',
                       onPressed: watch.symbol.writable
                           ? () => widget.controller.writeWatch(
@@ -666,7 +666,7 @@ class _WatchRowState extends State<_WatchRow> {
                           : null,
                       icon: const Icon(Icons.save_outlined, size: 16),
                     ),
-                    IconButton(
+                    TalIconButton(
                       tooltip: '移除',
                       onPressed: () =>
                           widget.controller.removeWatch(watch.symbol.key),

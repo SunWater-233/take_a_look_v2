@@ -185,13 +185,10 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
           ],
           const Spacer(),
           if (_series.isNotEmpty) ...[
-            OutlinedButton.icon(
+            TalButton.icon(
               key: const ValueKey('analysis-fft-toggle'),
               style: _session.fftVisible
-                  ? OutlinedButton.styleFrom(
-                      backgroundColor: TalColors.selection,
-                      side: const BorderSide(color: TalColors.accent),
-                    )
+                  ? talSelectedOutlinedButtonStyle
                   : null,
               onPressed: _toggleFft,
               icon: const Icon(Icons.graphic_eq, size: 16),
@@ -202,7 +199,7 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
           _importButton(),
           if (_series.isNotEmpty) ...[
             const SizedBox(width: 8),
-            OutlinedButton(
+            TalButton(
               onPressed: () {
                 setState(_session.clearData);
                 _commitSession(includeData: true);
@@ -253,7 +250,7 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
   }
 
   Widget _importButton() {
-    return PopupMenuButton<_AnalysisImportSource>(
+    return TalPopupMenuButton<_AnalysisImportSource>(
       tooltip: '导入分析数据',
       onSelected: _handleImport,
       itemBuilder: (context) => const [
@@ -276,20 +273,13 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
           ),
         ),
       ],
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          border: Border.all(color: TalColors.border),
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.file_open_outlined, size: 16),
-            const SizedBox(width: 7),
-            Text(_series.isEmpty ? '导入数据' : '重新导入'),
-          ],
-        ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.file_open_outlined, size: 16),
+          const SizedBox(width: 7),
+          Text(_series.isEmpty ? '导入数据' : '重新导入'),
+        ],
       ),
     );
   }
@@ -457,27 +447,51 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
     if (_mouseMode == AnalysisMouseMode.rectangle) {
       return Container(
         height: 34,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        alignment: Alignment.centerLeft,
         color: TalColors.surfaceAlt,
-        child: const Text(
-          '左键拖动框选缩放 · 中键移动 · 右键拖动或滚轮缩放 · 右键单击打开菜单',
-          style: talMuted,
+        child: Row(
+          children: [
+            const Expanded(
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 12),
+                child: Text(
+                  '左键拖动框选缩放 · 中键移动 · 右键拖动或滚轮缩放 · 右键单击打开菜单',
+                  style: talMuted,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
+            if (_session.fftVisible) ...[
+              const VerticalDivider(width: 1, color: TalColors.borderSoft),
+              Expanded(child: _buildFftToolbar()),
+            ],
+          ],
         ),
       );
     }
     return Container(
       height: 34,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      alignment: Alignment.centerLeft,
       color: TalColors.surfaceAlt,
-      child: Text(
-        selection == null
-            ? _session.fftVisible
-                  ? '左键拖动选择区间 · 中键移动 · 右键拖动或滚轮缩放 · 右键单击打开菜单'
-                  : '左键拖动选时间段 · 中键移动 · 右键拖动或滚轮缩放 · 右键单击打开菜单'
-            : '已选择 ${_formatNumber(selection.$1)} s – ${_formatNumber(selection.$2)} s · 左键重新选择 · 中键移动 · 右键/滚轮缩放 · 右键单击打开菜单',
-        style: selection == null ? talMuted : talBody,
+      child: Row(
+        children: [
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Text(
+                selection == null
+                    ? _session.fftVisible
+                          ? '左键拖动选择区间 · 中键移动 · 右键拖动或滚轮缩放 · 右键单击打开菜单'
+                          : '左键拖动选时间段 · 中键移动 · 右键拖动或滚轮缩放 · 右键单击打开菜单'
+                    : '已选择 ${_formatNumber(selection.$1)} s – ${_formatNumber(selection.$2)} s · 左键重新选择 · 中键移动 · 右键/滚轮缩放 · 右键单击打开菜单',
+                style: selection == null ? talMuted : talBody,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
+          if (_session.fftVisible) ...[
+            const VerticalDivider(width: 1, color: TalColors.borderSoft),
+            Expanded(child: _buildFftToolbar()),
+          ],
+        ],
       ),
     );
   }

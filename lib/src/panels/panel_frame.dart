@@ -174,7 +174,7 @@ class _TalPanelFrameState extends State<TalPanelFrame> {
                         ),
                       ),
                       if (chrome != null && chrome.showActions)
-                        IconButton(
+                        TalIconButton(
                           tooltip: '弹出为独立窗口',
                           onPressed: chrome.onFloat,
                           icon: const Icon(Icons.open_in_new, size: 15),
@@ -182,13 +182,13 @@ class _TalPanelFrameState extends State<TalPanelFrame> {
                       if (chrome != null &&
                           chrome.showActions &&
                           tabs.length > 1)
-                        IconButton(
+                        TalIconButton(
                           tooltip: '从组合中拆分当前面板',
                           onPressed: chrome.onSeparate,
                           icon: const Icon(Icons.call_split, size: 15),
                         ),
                       if (chrome != null && chrome.showActions)
-                        IconButton(
+                        TalIconButton(
                           tooltip: '隐藏面板（可从“视图”恢复）',
                           onPressed: chrome.onClose,
                           icon: const Icon(Icons.close, size: 17),

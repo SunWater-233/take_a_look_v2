@@ -64,7 +64,7 @@ class _HeaderPanel extends StatelessWidget {
   }
 
   Widget _connectionButton() {
-    return OutlinedButton(
+    return TalButton(
       onPressed: controller.connectionStatus == ConnectionStatus.connecting
           ? null
           : controller.toggleConnection,
@@ -77,7 +77,7 @@ class _HeaderPanel extends StatelessWidget {
   }
 
   Widget _ratePicker() {
-    return _CompactDropdown<double>(
+    return TalDropdown<double>(
       value: controller.sampleRateHz,
       values: const [50, 100, 200, 500, 1000, 2000, 5000, 7000],
       label: (value) => value >= 1000
@@ -145,15 +145,15 @@ class _RunControlPanel extends StatelessWidget {
             spacing: 8,
             runSpacing: 8,
             children: [
-              OutlinedButton(
+              TalButton(
                 onPressed: controller.toggleConnection,
                 child: Text(controller.connectionLabel),
               ),
-              OutlinedButton(
+              TalButton(
                 onPressed: () => controller.resetTarget(halt: false),
                 child: const Text('复位运行'),
               ),
-              OutlinedButton(
+              TalButton(
                 onPressed: () => controller.resetTarget(halt: true),
                 child: const Text('复位暂停'),
               ),
@@ -204,18 +204,18 @@ class _SamplingPanel extends StatelessWidget {
                   const Text('采样率', style: talBody),
                   SizedBox(
                     width: 96,
-                    child: _CompactDropdown<double>(
+                    child: TalDropdown<double>(
                       value: controller.sampleRateHz,
                       values: const [50, 100, 200, 500, 1000, 2000, 5000, 7000],
                       label: _sampleRateText,
                       onChanged: controller.setSampleRate,
                     ),
                   ),
-                  OutlinedButton(
+                  TalButton(
                     onPressed: controller.toggleSampling,
                     child: Text(controller.samplingPaused ? '继续采样' : '采样暂停'),
                   ),
-                  OutlinedButton(
+                  TalButton(
                     onPressed: controller.clearSamples,
                     child: const Text('清空采样'),
                   ),
@@ -231,7 +231,7 @@ class _SamplingPanel extends StatelessWidget {
                     ),
                     SizedBox(
                       width: 112,
-                      child: _CompactDropdown<double>(
+                      child: TalDropdown<double>(
                         value: controller.rttSampleRateHz,
                         values: const [
                           50,

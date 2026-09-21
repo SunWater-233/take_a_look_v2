@@ -32,17 +32,17 @@ class _PlotPanel extends StatelessWidget {
                     style: talMuted,
                   ),
                 ),
-                OutlinedButton(
+                TalButton(
                   onPressed: controller.togglePlotting,
                   child: Text(controller.plottingPaused ? '继续绘图' : '暂停绘图'),
                 ),
                 const SizedBox(width: 8),
-                OutlinedButton(
+                TalButton(
                   onPressed: controller.toggleFollowLatest,
                   child: Text(controller.followLatest ? '停止跟随' : '跟随最新'),
                 ),
                 const SizedBox(width: 8),
-                OutlinedButton(
+                TalButton(
                   onPressed: controller.exportCsv,
                   child: const Text('导出原始CSV'),
                 ),
@@ -115,7 +115,7 @@ class _LogPanelState extends State<_LogPanel> {
               Positioned(
                 right: 4,
                 top: 3,
-                child: IconButton(
+                child: TalIconButton(
                   tooltip: '清空日志',
                   onPressed: widget.controller.clearLogs,
                   icon: const Icon(Icons.delete_sweep_outlined, size: 17),

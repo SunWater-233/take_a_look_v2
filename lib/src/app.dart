@@ -11,6 +11,7 @@ import 'controller.dart';
 import 'panel_types.dart';
 import 'panels.dart';
 import 'theme.dart';
+import 'ui_controls.dart';
 import 'window_sync.dart';
 import 'workspace.dart';
 
@@ -428,7 +429,8 @@ class _MainWorkbenchState extends State<MainWorkbench> {
                   : '$message\n\n$details',
             ),
             actions: [
-              TextButton(
+              TalButton(
+                variant: TalButtonVariant.text,
                 onPressed: () => Navigator.of(dialogContext).pop(),
                 child: const Text('确定'),
               ),

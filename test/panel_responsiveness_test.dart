@@ -314,6 +314,14 @@ void main() {
 
     final anchor = find.byKey(const ValueKey<String>('compact-dropdown-auto'));
     final anchorRect = tester.getRect(anchor);
+
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    await mouse.moveTo(anchorRect.center);
+    await tester.pump();
+    final hoveredAnchor = tester.widget<Container>(anchor);
+    expect((hoveredAnchor.decoration! as BoxDecoration).color, TalColors.hover);
+
     await tester.tap(anchor);
     await tester.pump();
     final animationFinder = find.byKey(
@@ -346,6 +354,26 @@ void main() {
       const Border(left: BorderSide(color: TalColors.accent, width: 3)),
     );
 
+    await mouse.moveTo(selectedRect.center);
+    await tester.pump();
+    final hoveredSelectedSurface = tester.widget<Container>(
+      find.byKey(const ValueKey<String>('dropdown-selected-auto')),
+    );
+    expect(
+      (hoveredSelectedSurface.decoration! as BoxDecoration).color,
+      TalColors.hover,
+    );
+
+    await mouse.moveTo(const Offset(800, 600));
+    await tester.pump();
+    final restoredSelectedSurface = tester.widget<Container>(
+      find.byKey(const ValueKey<String>('dropdown-selected-auto')),
+    );
+    expect(
+      (restoredSelectedSurface.decoration! as BoxDecoration).color,
+      TalColors.selection,
+    );
+
     await tester.tap(
       find.byKey(const ValueKey<String>('dropdown-item-stm32f407vg')),
     );
@@ -359,6 +387,7 @@ void main() {
     expect(animationFinder, findsNothing);
     expect(controller.targetName, 'stm32f407vg');
 
+    await mouse.removePointer();
     controller.dispose();
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(milliseconds: 50));

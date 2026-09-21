@@ -254,24 +254,32 @@ class _ResizableTableViewport extends StatelessWidget {
   }
 }
 
-class _CompactDropdown<T> extends StatefulWidget {
-  const _CompactDropdown({
+/// Shared anchored dropdown used by all compact value selectors.
+///
+/// This intentionally does not use Flutter's platform-dependent
+/// [DropdownButton]. Keeping the anchor, menu surface, hover state, and
+/// selection treatment in one widget makes every panel use the same control.
+class TalDropdown<T> extends StatefulWidget {
+  const TalDropdown({
     required this.value,
     required this.values,
     required this.label,
     required this.onChanged,
+    this.highlightOnHover = true,
+    super.key,
   });
 
   final T value;
   final List<T> values;
   final String Function(T value) label;
   final ValueChanged<T> onChanged;
+  final bool highlightOnHover;
 
   @override
-  State<_CompactDropdown<T>> createState() => _CompactDropdownState<T>();
+  State<TalDropdown<T>> createState() => _TalDropdownState<T>();
 }
 
-class _CompactDropdownState<T> extends State<_CompactDropdown<T>>
+class _TalDropdownState<T> extends State<TalDropdown<T>>
     with SingleTickerProviderStateMixin {
   final LayerLink _layerLink = LayerLink();
   OverlayEntry? _overlayEntry;
@@ -279,6 +287,7 @@ class _CompactDropdownState<T> extends State<_CompactDropdown<T>>
   late final Animation<double> _animation;
   bool expanded = false;
   bool closing = false;
+  bool hovered = false;
 
   @override
   void initState() {
@@ -296,7 +305,7 @@ class _CompactDropdownState<T> extends State<_CompactDropdown<T>>
   }
 
   @override
-  void didUpdateWidget(covariant _CompactDropdown<T> oldWidget) {
+  void didUpdateWidget(covariant TalDropdown<T> oldWidget) {
     super.didUpdateWidget(oldWidget);
     _overlayEntry?.markNeedsBuild();
   }
@@ -304,6 +313,10 @@ class _CompactDropdownState<T> extends State<_CompactDropdown<T>>
   @override
   void dispose() {
     _overlayEntry?.remove();
+    _overlayEntry = null;
+    expanded = false;
+    closing = false;
+    hovered = false;
     _animationController.dispose();
     super.dispose();
   }
@@ -311,60 +324,76 @@ class _CompactDropdownState<T> extends State<_CompactDropdown<T>>
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
-      builder: (context, constraints) => CompositedTransformTarget(
-        link: _layerLink,
-        child: Semantics(
-          button: true,
-          expanded: expanded,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(7),
-            onTap: expanded
-                ? () => unawaited(_close())
-                : () => _open(constraints.maxWidth),
-            child: Container(
-              key: ValueKey<String>(
-                'compact-dropdown-${widget.label(widget.value)}',
-              ),
-              height: 32,
-              decoration: BoxDecoration(
-                color: TalColors.input,
-                borderRadius: BorderRadius.circular(7),
-                border: Border.all(color: TalColors.border),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 9),
-                      child: Text(
-                        widget.label(widget.value),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: talBody,
-                      ),
-                    ),
+      builder: (context, constraints) {
+        final highlight = widget.highlightOnHover && hovered;
+        return CompositedTransformTarget(
+          link: _layerLink,
+          child: Semantics(
+            button: true,
+            expanded: expanded,
+            child: MouseRegion(
+              onEnter: (_) {
+                if (mounted) setState(() => hovered = true);
+              },
+              onExit: (_) {
+                if (mounted) setState(() => hovered = false);
+              },
+              child: InkWell(
+                borderRadius: talControlRadius,
+                onTap: expanded
+                    ? () => unawaited(_close())
+                    : () => _open(constraints.maxWidth),
+                child: Container(
+                  key: ValueKey<String>(
+                    'compact-dropdown-${widget.label(widget.value)}',
                   ),
-                  Container(
-                    width: 30,
-                    height: double.infinity,
-                    decoration: const BoxDecoration(
-                      border: Border(
-                        left: BorderSide(color: TalColors.borderSoft),
-                      ),
-                    ),
-                    child: const Icon(Icons.arrow_drop_down, size: 18),
+                  height: talControlHeight,
+                  decoration: BoxDecoration(
+                    color: highlight ? TalColors.hover : TalColors.input,
+                    borderRadius: talControlRadius,
+                    border: const Border.fromBorderSide(talControlBorder),
                   ),
-                ],
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 9),
+                          child: Text(
+                            widget.label(widget.value),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: talBody,
+                          ),
+                        ),
+                      ),
+                      Container(
+                        width: 30,
+                        height: double.infinity,
+                        decoration: BoxDecoration(
+                          color: highlight ? TalColors.hover : null,
+                          border: const Border(
+                            left: BorderSide(color: TalColors.borderSoft),
+                          ),
+                        ),
+                        child: Icon(
+                          Icons.arrow_drop_down,
+                          size: 18,
+                          color: TalColors.text,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
   void _open(double width) {
-    if (expanded || closing) return;
+    if (!mounted || expanded || closing) return;
     _overlayEntry = OverlayEntry(builder: (_) => _buildOverlay(width));
     Overlay.of(context).insert(_overlayEntry!);
     setState(() => expanded = true);
@@ -400,7 +429,7 @@ class _CompactDropdownState<T> extends State<_CompactDropdown<T>>
                   shadowColor: Colors.black,
                   clipBehavior: Clip.antiAlias,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(7),
+                    borderRadius: talControlRadius,
                     side: const BorderSide(color: TalColors.border),
                   ),
                   child: Column(
@@ -419,44 +448,62 @@ class _CompactDropdownState<T> extends State<_CompactDropdown<T>>
   }
 
   Widget _buildMenuItem(T item) {
-    return InkWell(
-      key: ValueKey<String>('dropdown-item-${widget.label(item)}'),
-      onTap: () => unawaited(_close(selectedValue: item)),
-      overlayColor: WidgetStateProperty.resolveWith((states) {
-        if (states.contains(WidgetState.hovered) ||
-            states.contains(WidgetState.focused)) {
-          return TalColors.hover;
-        }
-        return Colors.transparent;
-      }),
-      child: Container(
-        key: item == widget.value
-            ? ValueKey<String>('dropdown-selected-${widget.label(item)}')
-            : null,
-        height: 32,
-        width: double.infinity,
-        alignment: Alignment.centerLeft,
-        padding: EdgeInsets.only(left: item == widget.value ? 9 : 12, right: 8),
-        decoration: BoxDecoration(
-          color: item == widget.value ? TalColors.selection : TalColors.input,
-          border: item == widget.value
-              ? const Border(
-                  left: BorderSide(color: TalColors.accent, width: 3),
-                )
-              : null,
-        ),
-        child: Text(
-          widget.label(item),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: talBody,
-        ),
-      ),
+    var hovered = false;
+    return StatefulBuilder(
+      builder: (context, setItemState) {
+        final highlight = widget.highlightOnHover && hovered;
+        return MouseRegion(
+          onEnter: (_) => setItemState(() => hovered = true),
+          onExit: (_) => setItemState(() => hovered = false),
+          child: InkWell(
+            key: ValueKey<String>('dropdown-item-${widget.label(item)}'),
+            onTap: () => unawaited(_close(selectedValue: item)),
+            overlayColor: WidgetStateProperty.resolveWith((states) {
+              if (widget.highlightOnHover) return Colors.transparent;
+              if (states.contains(WidgetState.hovered) ||
+                  states.contains(WidgetState.focused)) {
+                return TalColors.hover;
+              }
+              return Colors.transparent;
+            }),
+            child: Container(
+              key: item == widget.value
+                  ? ValueKey<String>('dropdown-selected-${widget.label(item)}')
+                  : null,
+              height: talControlHeight,
+              width: double.infinity,
+              alignment: Alignment.centerLeft,
+              padding: EdgeInsets.only(
+                left: item == widget.value ? 9 : 12,
+                right: 8,
+              ),
+              decoration: BoxDecoration(
+                color: highlight
+                    ? TalColors.hover
+                    : item == widget.value
+                    ? TalColors.selection
+                    : TalColors.input,
+                border: item == widget.value
+                    ? const Border(
+                        left: BorderSide(color: TalColors.accent, width: 3),
+                      )
+                    : null,
+              ),
+              child: Text(
+                widget.label(item),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: talBody,
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 
   Future<void> _close({T? selectedValue}) async {
-    if (!expanded || closing) return;
+    if (!mounted || !expanded || closing) return;
     closing = true;
     await _animationController.reverse();
     _overlayEntry?.remove();

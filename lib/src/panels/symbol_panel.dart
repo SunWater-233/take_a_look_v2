@@ -350,7 +350,7 @@ class _SymbolPanelState extends State<_SymbolPanel> {
                   const SizedBox(width: 8),
                   SizedBox(
                     width: 76,
-                    child: OutlinedButton(
+                    child: TalButton(
                       onPressed: widget.controller.chooseSymbolFile,
                       child: const Text('选择文件'),
                     ),
@@ -358,7 +358,7 @@ class _SymbolPanelState extends State<_SymbolPanel> {
                   const SizedBox(width: 8),
                   SizedBox(
                     width: 56,
-                    child: OutlinedButton(
+                    child: TalButton(
                       onPressed: widget.controller.symbols.isEmpty
                           ? null
                           : widget.controller.refreshSymbols,
@@ -461,7 +461,7 @@ class _SymbolPanelState extends State<_SymbolPanel> {
                   const SizedBox(width: 8),
                   SizedBox(
                     width: 160,
-                    child: OutlinedButton(
+                    child: TalButton(
                       onPressed: widget.controller.selectedSymbols.isEmpty
                           ? null
                           : widget.controller.addSelectedToWatch,

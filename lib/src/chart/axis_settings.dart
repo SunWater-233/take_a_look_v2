@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../ui_controls.dart';
+
 class AxisSettings {
   const AxisSettings({
     required this.automatic,
@@ -207,11 +209,16 @@ class PlotAxisSettingsDialogState extends State<PlotAxisSettingsDialog> {
         ),
       ),
       actions: [
-        TextButton(
+        TalButton(
+          variant: TalButtonVariant.text,
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('取消'),
         ),
-        FilledButton(onPressed: _apply, child: const Text('应用')),
+        TalButton(
+          variant: TalButtonVariant.filled,
+          onPressed: _apply,
+          child: const Text('应用'),
+        ),
       ],
     );
   }

@@ -52,6 +52,61 @@ void main() {
     expect(find.byKey(const ValueKey('analysis-fft-panel')), findsOneWidget);
     expect(find.byKey(const ValueKey('analysis-fft-chart')), findsOneWidget);
     expect(find.textContaining('Fs 100'), findsOneWidget);
+    expect(find.text('Y轴'), findsOneWidget);
+    expect(find.text('信号'), findsNothing);
+    final fftPanelRect = tester.getRect(
+      find.byKey(const ValueKey('analysis-fft-panel')),
+    );
+    final fftSelectorRect = tester.getRect(
+      find.byKey(const ValueKey('analysis-fft-signal-select')),
+    );
+    final fftTimeSelectorRect = tester.getRect(
+      find.byKey(const ValueKey('analysis-fft-time-select')),
+    );
+    final timeChartRect = tester.getRect(
+      find.byKey(const ValueKey('analysis-chart-interaction')),
+    );
+    expect(fftSelectorRect.bottom, lessThanOrEqualTo(fftPanelRect.top));
+    expect(fftPanelRect.top, closeTo(timeChartRect.top, 1));
+    expect(fftSelectorRect.width, closeTo(192, 0.1));
+    expect(fftTimeSelectorRect.width, closeTo(132, 0.1));
+    expect(
+      find.byKey(const ValueKey('analysis-fft-Y轴-touch-dropdown')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('analysis-fft-时间-touch-dropdown')),
+      findsOneWidget,
+    );
+
+    final toolbarMouse = await tester.createGesture(
+      kind: PointerDeviceKind.mouse,
+    );
+    await toolbarMouse.addPointer(location: Offset.zero);
+    await toolbarMouse.moveTo(fftSelectorRect.center);
+    await tester.pump();
+    expect(
+      find.byKey(const ValueKey('analysis-fft-Y轴-mouse-dropdown')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('analysis-fft-时间-mouse-dropdown')),
+      findsOneWidget,
+    );
+
+    final toolbarTouch = await tester.startGesture(
+      fftSelectorRect.center,
+      kind: PointerDeviceKind.touch,
+    );
+    await toolbarTouch.up();
+    await tester.pump();
+    expect(
+      find.byKey(const ValueKey('analysis-fft-Y轴-touch-dropdown')),
+      findsOneWidget,
+    );
+    await toolbarMouse.removePointer();
+    await tester.tapAt(fftPanelRect.center);
+    await tester.pumpAndSettle();
 
     final fftInteraction = find.byKey(
       const ValueKey('analysis-fft-interaction'),

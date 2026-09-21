@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart' show timeDilation;
 
+import 'ui_controls.dart';
+
 const talFontFamily = 'JetBrains Mono';
 const talFontFamilyFallback = <String>['MiSans'];
 const talBrandFontFamily = 'Ibrand';
@@ -29,6 +31,11 @@ abstract final class TalColors {
   static const gridMajor = Color(0x33494446);
   static const gridMinor = Color(0x19494446);
 }
+
+/// Shared geometry for regular controls (buttons, fields, and selectors).
+const talControlHeight = 32.0;
+const talControlRadius = BorderRadius.all(Radius.circular(7));
+const talControlBorder = BorderSide(color: TalColors.border);
 
 const talContextMenuAnimationStyle = AnimationStyle(
   duration: Duration(milliseconds: 300),
@@ -90,7 +97,9 @@ final MenuStyle talContextSubmenuStyle = talContextMenuStyle.copyWith(
 
 final ButtonStyle talContextMenuButtonStyle = ButtonStyle(
   minimumSize: const WidgetStatePropertyAll(Size(184, 32)),
-  maximumSize: const WidgetStatePropertyAll(Size(double.infinity, 32)),
+  maximumSize: const WidgetStatePropertyAll(
+    Size(double.infinity, talControlHeight),
+  ),
   padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 11)),
   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
   visualDensity: VisualDensity.compact,
@@ -111,6 +120,16 @@ final ButtonStyle talContextMenuButtonStyle = ButtonStyle(
       fontWeight: FontWeight.w400,
     ),
   ),
+);
+
+/// Local visual state shared by buttons that behave like a selected toggle.
+///
+/// The base shape, typography, density, and disabled state still come from
+/// [outlinedButtonTheme]; this style only supplies the selected surface and
+/// accent border.
+final ButtonStyle talSelectedOutlinedButtonStyle = ButtonStyle(
+  backgroundColor: const WidgetStatePropertyAll(TalColors.selection),
+  side: const WidgetStatePropertyAll(BorderSide(color: TalColors.accent)),
 );
 
 Future<T?> showTalContextMenu<T>({
@@ -191,7 +210,8 @@ class TalSelectionContextMenu extends StatelessWidget {
                       SizedBox(
                         width: double.infinity,
                         height: itemHeight,
-                        child: TextButton(
+                        child: TalButton(
+                          variant: TalButtonVariant.text,
                           onPressed: item.onPressed,
                           style: talContextMenuButtonStyle.copyWith(
                             minimumSize: WidgetStatePropertyAll(
@@ -224,7 +244,7 @@ class TalSelectionContextMenu extends StatelessWidget {
 }
 
 ThemeData buildTalTheme() {
-  const radius = BorderRadius.all(Radius.circular(7));
+  const radius = talControlRadius;
   final base = ThemeData(
     brightness: Brightness.dark,
     useMaterial3: true,
@@ -291,11 +311,11 @@ ThemeData buildTalTheme() {
       contentPadding: EdgeInsets.symmetric(horizontal: 9, vertical: 9),
       border: OutlineInputBorder(
         borderRadius: radius,
-        borderSide: BorderSide(color: TalColors.border),
+        borderSide: talControlBorder,
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: radius,
-        borderSide: BorderSide(color: TalColors.border),
+        borderSide: talControlBorder,
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: radius,
@@ -304,8 +324,10 @@ ThemeData buildTalTheme() {
     ),
     filledButtonTheme: FilledButtonThemeData(
       style: ButtonStyle(
-        minimumSize: const WidgetStatePropertyAll(Size(0, 32)),
-        maximumSize: const WidgetStatePropertyAll(Size(double.infinity, 32)),
+        minimumSize: const WidgetStatePropertyAll(Size(0, talControlHeight)),
+        maximumSize: const WidgetStatePropertyAll(
+          Size(double.infinity, talControlHeight),
+        ),
         visualDensity: VisualDensity.standard,
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         padding: const WidgetStatePropertyAll(
@@ -333,10 +355,37 @@ ThemeData buildTalTheme() {
         ),
       ),
     ),
+    textButtonTheme: TextButtonThemeData(
+      style: ButtonStyle(
+        minimumSize: const WidgetStatePropertyAll(Size(0, talControlHeight)),
+        maximumSize: const WidgetStatePropertyAll(
+          Size(double.infinity, talControlHeight),
+        ),
+        visualDensity: VisualDensity.standard,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        padding: const WidgetStatePropertyAll(
+          EdgeInsets.symmetric(horizontal: 12),
+        ),
+        foregroundColor: const WidgetStatePropertyAll(TalColors.text),
+        backgroundColor: WidgetStateProperty.resolveWith((states) {
+          return states.contains(WidgetState.hovered)
+              ? TalColors.hover
+              : Colors.transparent;
+        }),
+        shape: const WidgetStatePropertyAll(
+          RoundedRectangleBorder(borderRadius: radius),
+        ),
+        textStyle: const WidgetStatePropertyAll(
+          TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+        ),
+      ),
+    ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: ButtonStyle(
-        minimumSize: const WidgetStatePropertyAll(Size(0, 32)),
-        maximumSize: const WidgetStatePropertyAll(Size(double.infinity, 32)),
+        minimumSize: const WidgetStatePropertyAll(Size(0, talControlHeight)),
+        maximumSize: const WidgetStatePropertyAll(
+          Size(double.infinity, talControlHeight),
+        ),
         visualDensity: VisualDensity.standard,
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         padding: const WidgetStatePropertyAll(

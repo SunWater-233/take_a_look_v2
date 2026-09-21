@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../demo_data.dart';
 import '../theme.dart';
+import '../ui_controls.dart';
 
 class WatchColorDialog extends StatefulWidget {
   const WatchColorDialog({required this.initialColor, super.key});
@@ -188,11 +189,13 @@ class WatchColorDialogState extends State<WatchColorDialog> {
         ),
       ),
       actions: [
-        TextButton(
+        TalButton(
+          variant: TalButtonVariant.text,
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('取消'),
         ),
-        FilledButton(
+        TalButton(
+          variant: TalButtonVariant.filled,
           key: const ValueKey('watch-color-confirm'),
           onPressed: () => Navigator.of(context).pop(_color),
           child: const Text('确定'),

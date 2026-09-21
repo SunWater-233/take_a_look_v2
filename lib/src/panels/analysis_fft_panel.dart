@@ -7,10 +7,17 @@ extension _AnalysisFftPanelBuilder on _AnalysisChartPanelState {
     return _AnalysisFftPanel(
       series: _series,
       signalIndex: signalIndex,
-      timeSeriesIndex: _session.fftTimeSeriesIndex,
       spectrum: spectrum,
       session: _session,
       onSessionChanged: _commitSession,
+    );
+  }
+
+  Widget _buildFftToolbar() {
+    return _AnalysisFftToolbar(
+      series: _series,
+      signalIndex: _validFftSignalIndex,
+      timeSeriesIndex: _session.fftTimeSeriesIndex,
       onSignalChanged: (index) {
         if (index == null || index == _session.fftSeriesIndex) return;
         _setFftSignalIndex(index);
@@ -66,22 +73,16 @@ class _AnalysisFftPanel extends StatefulWidget {
   const _AnalysisFftPanel({
     required this.series,
     required this.signalIndex,
-    required this.timeSeriesIndex,
     required this.spectrum,
     required this.session,
     required this.onSessionChanged,
-    required this.onSignalChanged,
-    required this.onTimeSeriesChanged,
   });
 
   final List<AnalysisSeries> series;
   final int? signalIndex;
-  final int? timeSeriesIndex;
   final AnalysisSpectrum spectrum;
   final AnalysisSession session;
   final VoidCallback onSessionChanged;
-  final ValueChanged<int?> onSignalChanged;
-  final ValueChanged<int?> onTimeSeriesChanged;
 
   @override
   State<_AnalysisFftPanel> createState() => _AnalysisFftPanelState();
@@ -119,83 +120,7 @@ class _AnalysisFftPanelState extends State<_AnalysisFftPanel> {
     return Container(
       key: const ValueKey('analysis-fft-panel'),
       color: TalColors.input,
-      child: Column(
-        children: [
-          Container(
-            height: 40,
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            decoration: const BoxDecoration(
-              color: TalColors.surfaceAlt,
-              border: Border(bottom: BorderSide(color: TalColors.borderSoft)),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.graphic_eq, size: 15, color: TalColors.accent),
-                const SizedBox(width: 5),
-                const Text('FFT', style: talStrong),
-                const SizedBox(width: 10),
-                const Text('信号', style: talMuted),
-                const SizedBox(width: 5),
-                Expanded(
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<int>(
-                      key: const ValueKey('analysis-fft-signal-select'),
-                      value: widget.signalIndex,
-                      isExpanded: true,
-                      isDense: true,
-                      dropdownColor: TalColors.surfaceAlt,
-                      items: [
-                        for (final (index, item) in widget.series.indexed)
-                          DropdownMenuItem<int>(
-                            value: index,
-                            child: Text(
-                              item.name,
-                              style: talBody,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                      ],
-                      onChanged: widget.onSignalChanged,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                const Text('时间', style: talMuted),
-                const SizedBox(width: 5),
-                SizedBox(
-                  width: 116,
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<int>(
-                      key: const ValueKey('analysis-fft-time-select'),
-                      value: widget.timeSeriesIndex ?? -1,
-                      isExpanded: true,
-                      isDense: true,
-                      dropdownColor: TalColors.surfaceAlt,
-                      items: [
-                        const DropdownMenuItem<int>(
-                          value: -1,
-                          child: Text('X 轴', style: talBody),
-                        ),
-                        for (final (index, item) in widget.series.indexed)
-                          DropdownMenuItem<int>(
-                            value: index,
-                            child: Text(
-                              item.name,
-                              style: talBody,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                      ],
-                      onChanged: widget.onTimeSeriesChanged,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Expanded(child: _buildInteractiveChart(signal)),
-        ],
-      ),
+      child: _buildInteractiveChart(signal),
     );
   }
 
@@ -797,6 +722,151 @@ class _AnalysisFftPanelState extends State<_AnalysisFftPanel> {
       case 'y':
         await _showAxisSettings(xAxis: false);
     }
+  }
+}
+
+class _AnalysisFftToolbar extends StatefulWidget {
+  const _AnalysisFftToolbar({
+    required this.series,
+    required this.signalIndex,
+    required this.timeSeriesIndex,
+    required this.onSignalChanged,
+    required this.onTimeSeriesChanged,
+  });
+
+  final List<AnalysisSeries> series;
+  final int? signalIndex;
+  final int? timeSeriesIndex;
+  final ValueChanged<int?> onSignalChanged;
+  final ValueChanged<int?> onTimeSeriesChanged;
+
+  @override
+  State<_AnalysisFftToolbar> createState() => _AnalysisFftToolbarState();
+}
+
+class _AnalysisFftToolbarState extends State<_AnalysisFftToolbar> {
+  bool _mouseMode = false;
+
+  void _setMouseMode(bool value) {
+    if (_mouseMode == value) return;
+    setState(() => _mouseMode = value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (event) {
+        if (event.kind == PointerDeviceKind.mouse) _setMouseMode(true);
+      },
+      onHover: (event) {
+        if (event.kind == PointerDeviceKind.mouse) _setMouseMode(true);
+      },
+      child: Listener(
+        behavior: HitTestBehavior.opaque,
+        onPointerDown: (event) {
+          if (event.kind != PointerDeviceKind.mouse) _setMouseMode(false);
+        },
+        child: SizedBox(
+          height: 34,
+          child: LayoutBuilder(
+            builder: (context, constraints) => Row(
+              children: [
+                if (constraints.maxWidth >= 430) ...[
+                  const SizedBox(width: 8),
+                  const Icon(
+                    Icons.graphic_eq,
+                    size: 15,
+                    color: TalColors.accent,
+                  ),
+                  const SizedBox(width: 5),
+                  const Text('FFT', style: talStrong),
+                ],
+                const Spacer(),
+                SizedBox(
+                  width: 192,
+                  child: _AnalysisFftSelector<int>(
+                    label: 'Y轴',
+                    key: const ValueKey('analysis-fft-signal-select'),
+                    mouseOptimized: _mouseMode,
+                    value: widget.signalIndex,
+                    values: [
+                      for (final (index, _) in widget.series.indexed) index,
+                    ],
+                    valueLabel: (index) => widget.series[index].name,
+                    onChanged: widget.onSignalChanged,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 132,
+                  child: _AnalysisFftSelector<int>(
+                    label: '时间',
+                    key: const ValueKey('analysis-fft-time-select'),
+                    mouseOptimized: _mouseMode,
+                    value: widget.timeSeriesIndex ?? -1,
+                    values: [
+                      -1,
+                      for (final (index, _) in widget.series.indexed) index,
+                    ],
+                    valueLabel: (index) =>
+                        index == -1 ? 'X 轴' : widget.series[index].name,
+                    onChanged: widget.onTimeSeriesChanged,
+                  ),
+                ),
+                const SizedBox(width: 10),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AnalysisFftSelector<T> extends StatelessWidget {
+  const _AnalysisFftSelector({
+    required this.label,
+    required this.mouseOptimized,
+    required this.value,
+    required this.values,
+    required this.valueLabel,
+    required this.onChanged,
+    super.key,
+  });
+
+  final String label;
+  final bool mouseOptimized;
+  final T? value;
+  final List<T> values;
+  final String Function(T value) valueLabel;
+  final ValueChanged<T?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: [
+        Text(label, style: talMuted, textAlign: TextAlign.right),
+        const SizedBox(width: 6),
+        Flexible(
+          // Keep mouse and touch interaction on the same dropdown
+          // implementation. The key identifies the current pointer modality
+          // without changing the visual control or its behavior.
+          child: value == null
+              ? const SizedBox.shrink()
+              : TalDropdown<T>(
+                  key: ValueKey(
+                    'analysis-fft-$label-'
+                    '${mouseOptimized ? 'mouse' : 'touch'}-dropdown',
+                  ),
+                  value: value as T,
+                  values: values,
+                  label: valueLabel,
+                  onChanged: (next) => onChanged(next),
+                ),
+        ),
+      ],
+    );
   }
 }
 

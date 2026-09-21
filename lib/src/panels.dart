@@ -15,6 +15,7 @@ import 'controller.dart';
 import 'models.dart';
 import 'panel_types.dart';
 import 'theme.dart';
+import 'ui_controls.dart';
 import 'panels/table_layout.dart';
 import 'panels/watch_color_dialog.dart';
 

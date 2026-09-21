@@ -15,7 +15,7 @@ class _ConnectionPanel extends StatelessWidget {
           children: [
             _LabeledField(
               label: '探针',
-              child: _CompactDropdown<String>(
+              child: TalDropdown<String>(
                 value: controller.probeType,
                 values: const ['自动发现任意探针', 'CMSIS-DAP', 'ST-Link', 'J-Link'],
                 label: (value) => value,
@@ -25,7 +25,7 @@ class _ConnectionPanel extends StatelessWidget {
             const SizedBox(height: 10),
             _LabeledField(
               label: '目标芯片',
-              child: _CompactDropdown<String>(
+              child: TalDropdown<String>(
                 value: controller.targetName,
                 values: const [
                   'auto',
@@ -40,7 +40,7 @@ class _ConnectionPanel extends StatelessWidget {
             const SizedBox(height: 10),
             _LabeledField(
               label: 'SWD 时钟',
-              child: _CompactDropdown<String>(
+              child: TalDropdown<String>(
                 value: controller.swdClock,
                 values: const [
                   '100 kHz',

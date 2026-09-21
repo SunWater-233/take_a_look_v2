@@ -98,6 +98,7 @@ class _AnalysisFftPanelState extends State<_AnalysisFftPanel> {
   Offset? _rectangleZoomStart;
   Rect? _rectangleZoom;
   bool _selectionDragging = false;
+  _AnalysisSelectionDragTarget? _selectionDragTarget;
   bool _middleDragging = false;
   bool _rightZoomDragging = false;
   bool _rightZoomMoved = false;
@@ -105,6 +106,9 @@ class _AnalysisFftPanelState extends State<_AnalysisFftPanel> {
   TalMenuAnimationLease? _menuAnimationLease;
 
   AnalysisSession get session => widget.session;
+  bool get _resizingSelectionBoundary =>
+      _selectionDragTarget == _AnalysisSelectionDragTarget.lowerBound ||
+      _selectionDragTarget == _AnalysisSelectionDragTarget.upperBound;
 
   @override
   void dispose() {
@@ -141,7 +145,9 @@ class _AnalysisFftPanelState extends State<_AnalysisFftPanel> {
             behavior: HitTestBehavior.opaque,
             onLongPressStart: _handleLongPress,
             child: MouseRegion(
-              cursor: _rightZoomDragging
+              cursor: _resizingSelectionBoundary
+                  ? SystemMouseCursors.resizeLeftRight
+                  : _rightZoomDragging
                   ? SystemMouseCursors.zoomIn
                   : _middleDragging
                   ? SystemMouseCursors.grabbing
@@ -253,6 +259,18 @@ class _AnalysisFftPanelState extends State<_AnalysisFftPanel> {
       onPressed: _showAll,
       child: const Text('View All'),
     ),
+    MenuItemButton(
+      key: const ValueKey('analysis-fft-select-all'),
+      style: talContextMenuButtonStyle,
+      onPressed: _selectAll,
+      child: const Text('Select All'),
+    ),
+    MenuItemButton(
+      key: const ValueKey('analysis-fft-clear-selection'),
+      style: talContextMenuButtonStyle,
+      onPressed: _clearSelection,
+      child: const Text('Clear Selection'),
+    ),
     SubmenuButton(
       key: const ValueKey('analysis-fft-x-axis'),
       style: talContextMenuButtonStyle,
@@ -325,6 +343,25 @@ class _AnalysisFftPanelState extends State<_AnalysisFftPanel> {
     widget.onSessionChanged();
   }
 
+  void _selectAll() {
+    final bounds = _dataBounds;
+    setState(() {
+      session.fftSelectionStart = bounds.$1;
+      session.fftSelectionEnd = bounds.$2;
+      _selectionDragTarget = null;
+    });
+    widget.onSessionChanged();
+  }
+
+  void _clearSelection() {
+    setState(() {
+      session.fftSelectionStart = null;
+      session.fftSelectionEnd = null;
+      _selectionDragTarget = null;
+    });
+    widget.onSessionChanged();
+  }
+
   void _resetAxis({required bool xAxis}) {
     setState(() {
       if (xAxis) {
@@ -374,6 +411,10 @@ class _AnalysisFftPanelState extends State<_AnalysisFftPanel> {
 
   void _handlePointerDown(PointerDownEvent event, Size size) {
     _lastPointerKind = event.kind;
+    if (_menuController.isOpen && event.buttons & kSecondaryMouseButton == 0) {
+      _menuController.close();
+      return;
+    }
     if (event.kind != PointerDeviceKind.mouse ||
         !_analysisPlotRect(size).contains(event.localPosition)) {
       return;
@@ -410,12 +451,7 @@ class _AnalysisFftPanelState extends State<_AnalysisFftPanel> {
       });
       return;
     }
-    _selectionDragging = true;
-    _dragStartX = _xForPosition(event.localPosition.dx, size);
-    setState(() {
-      session.fftSelectionStart = _dragStartX;
-      session.fftSelectionEnd = _dragStartX;
-    });
+    _startSelection(event.localPosition.dx, size);
   }
 
   void _handlePointerMove(PointerMoveEvent event, Size size) {
@@ -435,9 +471,7 @@ class _AnalysisFftPanelState extends State<_AnalysisFftPanel> {
       return;
     }
     if (_selectionDragging && event.buttons & kPrimaryMouseButton != 0) {
-      setState(() {
-        session.fftSelectionEnd = _xForPosition(event.localPosition.dx, size);
-      });
+      _updateSelection(event.localPosition.dx, size);
       return;
     }
     final previous = _lastPanPosition;
@@ -569,11 +603,15 @@ class _AnalysisFftPanelState extends State<_AnalysisFftPanel> {
       _rectangleZoomStart = null;
       if (wasSelecting) {
         _dragStartX = null;
+        _selectionDragTarget = null;
         final start = session.fftSelectionStart;
         final end = session.fftSelectionEnd;
         if (start != null && end != null && (start - end).abs() < 1e-9) {
           session.fftSelectionStart = null;
           session.fftSelectionEnd = null;
+        } else if (start != null && end != null) {
+          session.fftSelectionStart = math.min(start, end);
+          session.fftSelectionEnd = math.max(start, end);
         }
       } else if (rectangle != null) {
         _applyRectangleZoom(rectangle, size);
@@ -581,6 +619,74 @@ class _AnalysisFftPanelState extends State<_AnalysisFftPanel> {
     });
     widget.onSessionChanged();
     if (openMenu) _openDesktopMenu(event.localPosition);
+  }
+
+  void _startSelection(double position, Size size) {
+    final range = _selectedRange;
+    final target = _selectionTargetAt(position, size, range);
+    _selectionDragging = true;
+    if (range != null && target != null) {
+      setState(() {
+        _selectionDragTarget = target;
+        _dragStartX = null;
+        session.fftSelectionStart = range.$1;
+        session.fftSelectionEnd = range.$2;
+      });
+      return;
+    }
+    final value = _xForPosition(position, size);
+    setState(() {
+      _selectionDragTarget = _AnalysisSelectionDragTarget.newRange;
+      _dragStartX = value;
+      session.fftSelectionStart = value;
+      session.fftSelectionEnd = value;
+    });
+  }
+
+  void _updateSelection(double position, Size size) {
+    final value = _xForPosition(position, size);
+    setState(() {
+      switch (_selectionDragTarget) {
+        case _AnalysisSelectionDragTarget.newRange:
+          if (_dragStartX == null) return;
+          session.fftSelectionEnd = value;
+        case _AnalysisSelectionDragTarget.lowerBound:
+          final upper = session.fftSelectionEnd;
+          if (upper == null) return;
+          session.fftSelectionStart = math.min(value, upper);
+        case _AnalysisSelectionDragTarget.upperBound:
+          final lower = session.fftSelectionStart;
+          if (lower == null) return;
+          session.fftSelectionEnd = math.max(value, lower);
+        case null:
+          return;
+      }
+    });
+  }
+
+  (double, double)? get _selectedRange {
+    final start = session.fftSelectionStart;
+    final end = session.fftSelectionEnd;
+    if (start == null || end == null) return null;
+    return (math.min(start, end), math.max(start, end));
+  }
+
+  _AnalysisSelectionDragTarget? _selectionTargetAt(
+    double position,
+    Size size,
+    (double, double)? range,
+  ) {
+    if (range == null) return null;
+    final viewport = _interactionViewport(_analysisPlotRect(size));
+    final lowerDistance = (position - viewport.mapX(range.$1)).abs();
+    final upperDistance = (position - viewport.mapX(range.$2)).abs();
+    if (math.min(lowerDistance, upperDistance) >
+        _analysisSelectionHandleHitSlop) {
+      return null;
+    }
+    return lowerDistance <= upperDistance
+        ? _AnalysisSelectionDragTarget.lowerBound
+        : _AnalysisSelectionDragTarget.upperBound;
   }
 
   void _applyRectangleZoom(Rect rectangle, Size size) {
@@ -667,6 +773,7 @@ class _AnalysisFftPanelState extends State<_AnalysisFftPanel> {
     _rectangleZoomStart = null;
     _rectangleZoom = null;
     _selectionDragging = false;
+    _selectionDragTarget = null;
     _middleDragging = false;
     _rightZoomDragging = false;
     _rightZoomMoved = false;
@@ -709,6 +816,17 @@ class _AnalysisFftPanelState extends State<_AnalysisFftPanel> {
       touchOptimized: true,
       items: [
         _analysisPopupItem(value: 'all', label: '显示全部', touchOptimized: true),
+        _analysisPopupItem(
+          value: 'select-all',
+          label: '选择全部',
+          touchOptimized: true,
+        ),
+        _analysisPopupItem(
+          value: 'clear-selection',
+          label: '取消选择',
+          touchOptimized: true,
+        ),
+        const PopupMenuDivider(),
         _analysisPopupItem(value: 'x', label: 'X 轴详细设置…', touchOptimized: true),
         _analysisPopupItem(value: 'y', label: 'Y 轴详细设置…', touchOptimized: true),
       ],
@@ -717,6 +835,10 @@ class _AnalysisFftPanelState extends State<_AnalysisFftPanel> {
     switch (action) {
       case 'all':
         _showAll();
+      case 'select-all':
+        _selectAll();
+      case 'clear-selection':
+        _clearSelection();
       case 'x':
         await _showAxisSettings(xAxis: true);
       case 'y':

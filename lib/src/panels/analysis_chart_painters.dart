@@ -103,23 +103,26 @@ class _AnalysisSelectionPainter extends CustomPainter {
   final double? selectionEnd;
   final bool invertX;
 
+  static const _handleSize = 18.0;
+
   @override
   void paint(Canvas canvas, Size size) {
     final start = selectionStart;
     final end = selectionEnd;
     if (start == null || end == null) return;
     final plot = _analysisPlotRect(size);
-    final span = math.max(1e-9, xMax - xMin);
-    final startPosition =
-        plot.left + (math.min(start, end) - xMin) / span * plot.width;
-    final endPosition =
-        plot.left + (math.max(start, end) - xMin) / span * plot.width;
-    final left = invertX
-        ? plot.right - (endPosition - plot.left)
-        : startPosition;
-    final right = invertX
-        ? plot.right - (startPosition - plot.left)
-        : endPosition;
+    final viewport = CartesianPlotViewport(
+      plot: plot,
+      xMin: xMin,
+      xMax: xMax,
+      yMin: 0,
+      yMax: 1,
+      invertX: invertX,
+    );
+    final firstPosition = viewport.mapX(math.min(start, end));
+    final secondPosition = viewport.mapX(math.max(start, end));
+    final left = math.min(firstPosition, secondPosition);
+    final right = math.max(firstPosition, secondPosition);
     canvas.save();
     canvas.clipRect(plot);
     canvas.drawRect(
@@ -136,6 +139,54 @@ class _AnalysisSelectionPainter extends CustomPainter {
       border,
     );
     canvas.restore();
+
+    if (firstPosition >= plot.left && firstPosition <= plot.right) {
+      _drawHandle(canvas, Offset(firstPosition, plot.center.dy));
+    }
+    if (secondPosition >= plot.left && secondPosition <= plot.right) {
+      _drawHandle(canvas, Offset(secondPosition, plot.center.dy));
+    }
+  }
+
+  void _drawHandle(Canvas canvas, Offset center) {
+    final rect = Rect.fromCenter(
+      center: center,
+      width: _handleSize,
+      height: _handleSize,
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(rect, const Radius.circular(3)),
+      Paint()..color = TalColors.amber,
+    );
+    final arrow = Paint()
+      ..color = TalColors.background
+      ..strokeWidth = 1.6
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..style = PaintingStyle.stroke;
+    final left = center.dx - 5;
+    final right = center.dx + 5;
+    canvas.drawLine(Offset(left, center.dy), Offset(right, center.dy), arrow);
+    canvas.drawLine(
+      Offset(left, center.dy),
+      Offset(left + 3, center.dy - 3),
+      arrow,
+    );
+    canvas.drawLine(
+      Offset(left, center.dy),
+      Offset(left + 3, center.dy + 3),
+      arrow,
+    );
+    canvas.drawLine(
+      Offset(right, center.dy),
+      Offset(right - 3, center.dy - 3),
+      arrow,
+    );
+    canvas.drawLine(
+      Offset(right, center.dy),
+      Offset(right - 3, center.dy + 3),
+      arrow,
+    );
   }
 
   @override

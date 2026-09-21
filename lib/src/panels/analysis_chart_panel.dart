@@ -2,6 +2,10 @@ part of '../panels.dart';
 
 enum _AnalysisImportSource { csv, realtime }
 
+enum _AnalysisSelectionDragTarget { newRange, lowerBound, upperBound }
+
+const _analysisSelectionHandleHitSlop = 12.0;
+
 const _analysisStatsColumnLabels = <String>[
   '曲线',
   '样本数',
@@ -46,6 +50,7 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
   Offset? _rectangleZoomStart;
   bool _rightZoomMoved = false;
   bool _selectionDragging = false;
+  _AnalysisSelectionDragTarget? _selectionDragTarget;
   bool _middleDragging = false;
   bool _rightZoomDragging = false;
   TalMenuAnimationLease? _plotMenuAnimationLease;
@@ -78,6 +83,9 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
   bool get _mouseYEnabled => _session.mouseYEnabled;
   bool get _invertX => _session.invertX;
   bool get _invertY => _session.invertY;
+  bool get _resizingSelectionBoundary =>
+      _selectionDragTarget == _AnalysisSelectionDragTarget.lowerBound ||
+      _selectionDragTarget == _AnalysisSelectionDragTarget.upperBound;
 
   @override
   void initState() {
@@ -176,8 +184,6 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
       ),
       child: Row(
         children: [
-          Icon(Icons.analytics_outlined, size: 17, color: TalColors.accent),
-          const SizedBox(width: 8),
           Text('分析图表', style: talStrong),
           if (_sourceLabel.isNotEmpty) ...[
             const SizedBox(width: 10),
@@ -311,10 +317,7 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
             .toDouble();
         return Column(
           children: [
-            ValueListenableBuilder<int>(
-              valueListenable: _chartChanges,
-              builder: (context, _, _) => _buildInteractionHint(),
-            ),
+            _buildChartToolbar(),
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
@@ -370,7 +373,9 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
                 behavior: HitTestBehavior.opaque,
                 onLongPressStart: _handlePlotLongPress,
                 child: MouseRegion(
-                  cursor: _rightZoomDragging
+                  cursor: _resizingSelectionBoundary
+                      ? SystemMouseCursors.resizeLeftRight
+                      : _rightZoomDragging
                       ? SystemMouseCursors.zoomIn
                       : _middleDragging
                       ? SystemMouseCursors.grabbing
@@ -442,49 +447,29 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
     return _session.selectedRange;
   }
 
-  Widget _buildInteractionHint() {
-    final selection = _selectedRange;
-    if (_mouseMode == AnalysisMouseMode.rectangle) {
-      return Container(
-        height: 34,
-        color: TalColors.surfaceAlt,
-        child: Row(
-          children: [
-            const Expanded(
-              child: Padding(
-                padding: EdgeInsets.symmetric(horizontal: 12),
-                child: Text(
-                  '左键拖动框选缩放 · 中键移动 · 右键拖动或滚轮缩放 · 右键单击打开菜单',
-                  style: talMuted,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ),
-            if (_session.fftVisible) ...[
-              const VerticalDivider(width: 1, color: TalColors.borderSoft),
-              Expanded(child: _buildFftToolbar()),
-            ],
-          ],
-        ),
-      );
-    }
+  Widget _buildChartToolbar() {
     return Container(
       height: 34,
       color: TalColors.surfaceAlt,
       child: Row(
         children: [
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Text(
-                selection == null
-                    ? _session.fftVisible
-                          ? '左键拖动选择区间 · 中键移动 · 右键拖动或滚轮缩放 · 右键单击打开菜单'
-                          : '左键拖动选时间段 · 中键移动 · 右键拖动或滚轮缩放 · 右键单击打开菜单'
-                    : '已选择 ${_formatNumber(selection.$1)} s – ${_formatNumber(selection.$2)} s · 左键重新选择 · 中键移动 · 右键/滚轮缩放 · 右键单击打开菜单',
-                style: selection == null ? talMuted : talBody,
-                overflow: TextOverflow.ellipsis,
-              ),
+          const Expanded(
+            child: Row(
+              children: [
+                SizedBox(width: 8),
+                Icon(
+                  Icons.analytics_outlined,
+                  key: ValueKey('analysis-data-heading-icon'),
+                  size: 15,
+                  color: TalColors.accent,
+                ),
+                SizedBox(width: 5),
+                Text(
+                  '数据',
+                  key: ValueKey('analysis-data-heading'),
+                  style: talStrong,
+                ),
+              ],
             ),
           ),
           if (_session.fftVisible) ...[
@@ -502,6 +487,18 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
       style: talContextMenuButtonStyle,
       onPressed: _showAllAnalysisData,
       child: const Text('View All'),
+    ),
+    MenuItemButton(
+      key: const ValueKey('analysis-plot-select-all'),
+      style: talContextMenuButtonStyle,
+      onPressed: _selectAllAnalysisRange,
+      child: const Text('Select All'),
+    ),
+    MenuItemButton(
+      key: const ValueKey('analysis-plot-clear-selection'),
+      style: talContextMenuButtonStyle,
+      onPressed: _clearAnalysisSelection,
+      child: const Text('Clear Selection'),
     ),
     SubmenuButton(
       key: const ValueKey('analysis-plot-x-axis'),
@@ -572,6 +569,25 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
     _commitSession();
   }
 
+  void _selectAllAnalysisRange() {
+    final bounds = _dataBounds;
+    _selectionStart = bounds.$1;
+    _selectionEnd = bounds.$2;
+    _updateSelectionStats();
+    _notifyChartChanged();
+    _statsChanges.value += 1;
+    _commitSession();
+  }
+
+  void _clearAnalysisSelection() {
+    _selectionStart = null;
+    _selectionEnd = null;
+    _session.selectionStats = const [];
+    _notifyChartChanged();
+    _statsChanges.value += 1;
+    _commitSession();
+  }
+
   void _resetAnalysisAxis({required bool xAxis}) {
     if (xAxis) {
       _viewXMin = null;
@@ -637,6 +653,17 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
       touchOptimized: true,
       items: [
         _analysisPopupItem(value: 'all', label: '显示全部', touchOptimized: true),
+        _analysisPopupItem(
+          value: 'select-all',
+          label: '选择全部',
+          touchOptimized: true,
+        ),
+        _analysisPopupItem(
+          value: 'clear-selection',
+          label: '取消选择',
+          touchOptimized: true,
+        ),
+        const PopupMenuDivider(),
         _analysisPopupItem(value: 'x', label: 'X 轴详细设置…', touchOptimized: true),
         _analysisPopupItem(value: 'y', label: 'Y 轴详细设置…', touchOptimized: true),
       ],
@@ -645,6 +672,10 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
     switch (action) {
       case 'all':
         _showAllAnalysisData();
+      case 'select-all':
+        _selectAllAnalysisRange();
+      case 'clear-selection':
+        _clearAnalysisSelection();
       case 'x':
         await _showAnalysisAxisSettings(xAxis: true);
       case 'y':
@@ -1054,6 +1085,11 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
 
   void _handlePointerDown(PointerDownEvent event, Size size) {
     _lastPlotPointerKind = event.kind;
+    if (_plotMenuController.isOpen &&
+        event.buttons & kSecondaryMouseButton == 0) {
+      _plotMenuController.close();
+      return;
+    }
     if (event.kind != PointerDeviceKind.mouse ||
         !_analysisPlotRect(size).contains(event.localPosition)) {
       return;
@@ -1087,7 +1123,6 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
         _notifyChartChanged();
         return;
       }
-      _selectionDragging = true;
       _startSelection(event.localPosition.dx, size);
     }
   }
@@ -1256,6 +1291,18 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
 
   void _startSelection(double position, Size size) {
     if (_series.isEmpty || size.width <= 0) return;
+    final range = _selectedRange;
+    final target = _selectionTargetAt(position, size, range);
+    _selectionDragging = true;
+    if (range != null && target != null) {
+      _selectionDragTarget = target;
+      _dragStartX = null;
+      _selectionStart = range.$1;
+      _selectionEnd = range.$2;
+      _notifyChartChanged();
+      return;
+    }
+    _selectionDragTarget = _AnalysisSelectionDragTarget.newRange;
     _dragStartX = _xForPosition(position, size);
     _selectionStart = _dragStartX;
     _selectionEnd = _dragStartX;
@@ -1263,24 +1310,61 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
   }
 
   void _updateSelection(double position, Size size) {
-    final dragStart = _dragStartX;
-    if (dragStart == null || size.width <= 0) return;
-    _selectionEnd = _xForPosition(position, size);
+    if (size.width <= 0) return;
+    final value = _xForPosition(position, size);
+    switch (_selectionDragTarget) {
+      case _AnalysisSelectionDragTarget.newRange:
+        if (_dragStartX == null) return;
+        _selectionEnd = value;
+      case _AnalysisSelectionDragTarget.lowerBound:
+        final upper = _selectionEnd;
+        if (upper == null) return;
+        _selectionStart = math.min(value, upper);
+      case _AnalysisSelectionDragTarget.upperBound:
+        final lower = _selectionStart;
+        if (lower == null) return;
+        _selectionEnd = math.max(value, lower);
+      case null:
+        return;
+    }
     _notifyChartChanged();
   }
 
   void _finishSelection() {
     _dragStartX = null;
+    _selectionDragTarget = null;
     if (_selectionStart == null || _selectionEnd == null) return;
     if ((_selectionStart! - _selectionEnd!).abs() < 1e-9) {
       _selectionStart = null;
       _selectionEnd = null;
       _session.selectionStats = const [];
     } else {
+      final lower = math.min(_selectionStart!, _selectionEnd!);
+      final upper = math.max(_selectionStart!, _selectionEnd!);
+      _selectionStart = lower;
+      _selectionEnd = upper;
       _updateSelectionStats();
     }
     _notifyChartChanged();
     _statsChanges.value += 1;
+  }
+
+  _AnalysisSelectionDragTarget? _selectionTargetAt(
+    double position,
+    Size size,
+    (double, double)? range,
+  ) {
+    if (range == null) return null;
+    final viewport = _interactionViewport(_analysisPlotRect(size));
+    final lowerDistance = (position - viewport.mapX(range.$1)).abs();
+    final upperDistance = (position - viewport.mapX(range.$2)).abs();
+    if (math.min(lowerDistance, upperDistance) >
+        _analysisSelectionHandleHitSlop) {
+      return null;
+    }
+    return lowerDistance <= upperDistance
+        ? _AnalysisSelectionDragTarget.lowerBound
+        : _AnalysisSelectionDragTarget.upperBound;
   }
 
   void _notifyChartChanged() => _chartChanges.value += 1;
@@ -1362,6 +1446,7 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
     _rectangleZoom = null;
     _rectangleZoomStart = null;
     _selectionDragging = false;
+    _selectionDragTarget = null;
     _middleDragging = false;
     _rightZoomDragging = false;
   }

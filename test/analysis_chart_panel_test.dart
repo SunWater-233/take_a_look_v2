@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
@@ -39,6 +41,16 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('本地 CSV'));
     await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('analysis-data-heading-icon')), findsOne);
+    final dataHeading = tester.widget<Text>(
+      find.byKey(const ValueKey('analysis-data-heading')),
+    );
+    expect(dataHeading.data, '数据');
+    expect(dataHeading.style, talStrong);
+    expect(find.textContaining('左键拖动'), findsNothing);
+    expect(find.textContaining('中键移动'), findsNothing);
+    expect(find.textContaining('右键单击打开菜单'), findsNothing);
 
     expect(controller.analysisSession.fftTimeSeriesIndex, 0);
     expect(controller.analysisSession.fftSeriesIndex, 1);
@@ -151,6 +163,49 @@ void main() {
     expect(controller.analysisSession.fftSelectionStart, isNotNull);
     expect(controller.analysisSession.fftSelectionEnd, isNotNull);
 
+    final fftInteractionRect = tester.getRect(fftInteraction);
+    final selectedLower = math.min(
+      controller.analysisSession.fftSelectionStart!,
+      controller.analysisSession.fftSelectionEnd!,
+    );
+    final selectedUpper = math.max(
+      controller.analysisSession.fftSelectionStart!,
+      controller.analysisSession.fftSelectionEnd!,
+    );
+    final fftPlotWidth = fftInteractionRect.width - 68;
+    final lowerHandleX =
+        fftInteractionRect.left +
+        54 +
+        (selectedLower - (fftPainter.xMin as double)) /
+            ((fftPainter.xMax as double) - (fftPainter.xMin as double)) *
+            fftPlotWidth;
+    final resizeLower = await tester.startGesture(
+      Offset(lowerHandleX, fftInteractionRect.center.dy),
+      kind: PointerDeviceKind.mouse,
+      buttons: kPrimaryMouseButton,
+    );
+    await resizeLower.moveBy(const Offset(20, 0));
+    await resizeLower.up();
+    await tester.pump();
+    expect(
+      controller.analysisSession.fftSelectionStart!,
+      greaterThan(selectedLower),
+    );
+    expect(
+      controller.analysisSession.fftSelectionEnd!,
+      closeTo(selectedUpper, 1e-9),
+    );
+
+    final clearWithClick = await tester.startGesture(
+      fftInteractionRect.topRight + const Offset(-20, 20),
+      kind: PointerDeviceKind.mouse,
+      buttons: kPrimaryMouseButton,
+    );
+    await clearWithClick.up();
+    await tester.pump();
+    expect(controller.analysisSession.fftSelectionStart, isNull);
+    expect(controller.analysisSession.fftSelectionEnd, isNull);
+
     final rightClick = await tester.startGesture(
       fftCenter,
       kind: PointerDeviceKind.mouse,
@@ -162,6 +217,49 @@ void main() {
     expect(find.text('X Axis'), findsOneWidget);
     expect(find.text('Y Axis'), findsOneWidget);
     expect(find.text('Mouse Mode'), findsOneWidget);
+    expect(find.text('Select All'), findsOneWidget);
+    expect(find.text('Clear Selection'), findsOneWidget);
+
+    await tester.tap(find.text('Select All'));
+    await tester.pumpAndSettle();
+    expect(controller.analysisSession.fftSelectionStart, closeTo(0, 1e-9));
+    expect(controller.analysisSession.fftSelectionEnd, isNotNull);
+
+    final clearSelectionMenu = await tester.startGesture(
+      fftCenter,
+      kind: PointerDeviceKind.mouse,
+      buttons: kSecondaryMouseButton,
+    );
+    await clearSelectionMenu.up();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Clear Selection'));
+    await tester.pumpAndSettle();
+    expect(controller.analysisSession.fftSelectionStart, isNull);
+    expect(controller.analysisSession.fftSelectionEnd, isNull);
+
+    final reopenForDismiss = await tester.startGesture(
+      fftCenter,
+      kind: PointerDeviceKind.mouse,
+      buttons: kSecondaryMouseButton,
+    );
+    await reopenForDismiss.up();
+    await tester.pumpAndSettle();
+
+    final dismissClick = await tester.startGesture(
+      tester.getRect(fftInteraction).topRight + const Offset(-20, 20),
+      kind: PointerDeviceKind.mouse,
+    );
+    await dismissClick.up();
+    await tester.pumpAndSettle();
+    expect(find.text('View All'), findsNothing);
+
+    final reopenMenu = await tester.startGesture(
+      fftCenter,
+      kind: PointerDeviceKind.mouse,
+      buttons: kSecondaryMouseButton,
+    );
+    await reopenMenu.up();
+    await tester.pumpAndSettle();
     await tester.tap(find.text('View All'));
     await tester.pumpAndSettle();
     fftPainter = tester.widget<CustomPaint>(fftChart).painter!;
@@ -304,6 +402,115 @@ void main() {
   );
 
   testWidgets(
+    'analysis selection supports adjustable bounds, clear click, and menu actions',
+    (tester) async {
+      final controller = TakeALookController(
+        csvImportContentsPicker: () async =>
+            'time,signal\n0,0\n1,1\n2,2\n3,3\n4,4\n',
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildTalTheme(),
+          home: Scaffold(
+            body: SizedBox(
+              width: 1000,
+              height: 700,
+              child: buildWorkspacePanel(WorkspacePanelId.analysis, controller),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('导入数据').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('本地 CSV'));
+      await tester.pumpAndSettle();
+
+      final interaction = find.byKey(
+        const ValueKey('analysis-chart-interaction'),
+      );
+      final interactionRect = tester.getRect(interaction);
+      final plotLeft = interactionRect.left + 54;
+      final plotWidth = interactionRect.width - 68;
+      final selectionY = interactionRect.center.dy;
+      final initialLowerX = plotLeft + plotWidth * 0.25;
+      final initialUpperX = plotLeft + plotWidth * 0.75;
+      final createSelection = await tester.startGesture(
+        Offset(initialLowerX, selectionY),
+        kind: PointerDeviceKind.mouse,
+        buttons: kPrimaryMouseButton,
+      );
+      await createSelection.moveTo(Offset(initialUpperX, selectionY));
+      await createSelection.up();
+      await tester.pump();
+
+      final originalRange = controller.analysisSession.selectedRange!;
+      final resizeLower = await tester.startGesture(
+        Offset(initialLowerX, selectionY),
+        kind: PointerDeviceKind.mouse,
+        buttons: kPrimaryMouseButton,
+      );
+      await resizeLower.moveBy(const Offset(40, 0));
+      await resizeLower.up();
+      await tester.pump();
+
+      final resizedRange = controller.analysisSession.selectedRange!;
+      expect(resizedRange.$1, greaterThan(originalRange.$1));
+      expect(resizedRange.$2, closeTo(originalRange.$2, 1e-9));
+
+      final resizeUpper = await tester.startGesture(
+        Offset(initialUpperX, selectionY),
+        kind: PointerDeviceKind.mouse,
+        buttons: kPrimaryMouseButton,
+      );
+      await resizeUpper.moveBy(const Offset(-30, 0));
+      await resizeUpper.up();
+      await tester.pump();
+
+      final upperResizedRange = controller.analysisSession.selectedRange!;
+      expect(upperResizedRange.$1, closeTo(resizedRange.$1, 1e-9));
+      expect(upperResizedRange.$2, lessThan(resizedRange.$2));
+
+      final clearWithClick = await tester.startGesture(
+        Offset(plotLeft + plotWidth * 0.1, selectionY),
+        kind: PointerDeviceKind.mouse,
+        buttons: kPrimaryMouseButton,
+      );
+      await clearWithClick.up();
+      await tester.pump();
+      expect(controller.analysisSession.selectedRange, isNull);
+
+      final openMenu = await tester.startGesture(
+        interactionRect.center,
+        kind: PointerDeviceKind.mouse,
+        buttons: kSecondaryMouseButton,
+      );
+      await openMenu.up();
+      await tester.pumpAndSettle();
+      expect(find.text('Select All'), findsOneWidget);
+      expect(find.text('Clear Selection'), findsOneWidget);
+
+      await tester.tap(find.text('Select All'));
+      await tester.pumpAndSettle();
+      final allRange = controller.analysisSession.selectedRange!;
+      expect(allRange.$1, closeTo(0, 1e-9));
+      expect(allRange.$2, closeTo(4, 1e-9));
+
+      final reopenMenu = await tester.startGesture(
+        interactionRect.center,
+        kind: PointerDeviceKind.mouse,
+        buttons: kSecondaryMouseButton,
+      );
+      await reopenMenu.up();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Clear Selection'));
+      await tester.pumpAndSettle();
+      expect(controller.analysisSession.selectedRange, isNull);
+
+      controller.dispose();
+    },
+  );
+
+  testWidgets(
     'analysis chart supports wheel/right-button zoom and middle-button pan',
     (tester) async {
       final controller = TakeALookController(
@@ -435,6 +642,22 @@ void main() {
     expect(menuAnchor.animated, isTrue);
     expect(menuAnchor.style, same(talContextMenuStyle));
 
+    final dismissClick = await tester.startGesture(
+      tester.getRect(interaction).topRight + const Offset(-20, 20),
+      kind: PointerDeviceKind.mouse,
+    );
+    await dismissClick.up();
+    await tester.pumpAndSettle();
+    expect(find.text('View All'), findsNothing);
+
+    final reopenMenu = await tester.startGesture(
+      center,
+      kind: PointerDeviceKind.mouse,
+      buttons: kSecondaryMouseButton,
+    );
+    await reopenMenu.up();
+    await tester.pumpAndSettle();
+
     await tester.tap(find.text('View All'));
     await tester.pumpAndSettle();
     painter = tester.widget<CustomPaint>(chart).painter!;
@@ -476,6 +699,8 @@ void main() {
     await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
     await tester.pumpAndSettle();
     expect(find.text('显示全部'), findsOneWidget);
+    expect(find.text('选择全部'), findsOneWidget);
+    expect(find.text('取消选择'), findsOneWidget);
     expect(find.text('X 轴详细设置…'), findsOneWidget);
     expect(find.text('Y 轴详细设置…'), findsOneWidget);
     await touch.up();

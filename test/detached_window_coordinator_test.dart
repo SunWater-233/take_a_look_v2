@@ -90,6 +90,108 @@ void main() {
     expect(coordinator.windows[WorkspacePanelId.plot], reusedWindow);
   });
 
+  test('panels can move between detached windows', () async {
+    const desktopChannel = MethodChannel('mixin.one/desktop_multi_window');
+    const channelsChannel = MethodChannel(
+      'mixin.one/desktop_multi_window/channels',
+    );
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    final pendingWindowIds = <String>['source_window', 'target_window'];
+    final configurations = <String, List<DetachedPanelLaunch>>{};
+    final hiddenWindows = <String>[];
+
+    messenger.setMockMethodCallHandler(desktopChannel, (call) async {
+      if (call.method == 'createWindow') return pendingWindowIds.removeAt(0);
+      if (call.method == 'window_hide') {
+        final arguments = Map<String, dynamic>.from(call.arguments as Map);
+        hiddenWindows.add(arguments['windowId'] as String);
+      }
+      return null;
+    });
+    messenger.setMockMethodCallHandler(channelsChannel, (call) async {
+      if (call.method != 'invokeMethod') return null;
+      final envelope = Map<String, dynamic>.from(call.arguments as Map);
+      final channel = envelope['channel'] as String;
+      final method = envelope['method'] as String;
+      if (method == getDetachedWindowBoundsMethod) {
+        return channel.endsWith('source_window')
+            ? <String, double>{
+                'left': 20,
+                'top': 20,
+                'width': 520,
+                'height': 330,
+              }
+            : <String, double>{
+                'left': 700,
+                'top': 100,
+                'width': 900,
+                'height': 650,
+              };
+      }
+      if (method == configureDetachedPanelMethod) {
+        final launch = detachedPanelLaunchFromJson(envelope['arguments']);
+        if (launch != null) {
+          configurations.putIfAbsent(channel, () => []).add(launch);
+        }
+      }
+      return null;
+    });
+    addTearDown(() {
+      messenger.setMockMethodCallHandler(desktopChannel, null);
+      messenger.setMockMethodCallHandler(channelsChannel, null);
+    });
+
+    final controller = TakeALookController();
+    final windowSync = MainWindowSync(controller);
+    final coordinator = DetachedWindowCoordinator(windowSync);
+    addTearDown(() async {
+      await coordinator.dispose();
+      await windowSync.dispose();
+      controller.dispose();
+    });
+
+    final source = await coordinator.acquire(
+      activePanel: WorkspacePanelId.sampling,
+      panels: const <WorkspacePanelId>[WorkspacePanelId.sampling],
+      initialSize: WorkspacePanelId.sampling.preferredWindowSize,
+    );
+    final target = await coordinator.acquire(
+      activePanel: WorkspacePanelId.plot,
+      panels: const <WorkspacePanelId>[WorkspacePanelId.plot],
+      initialSize: WorkspacePanelId.plot.preferredWindowSize,
+    );
+
+    expect(
+      await coordinator.windowAt(
+        const Offset(800, 200),
+        excludingWindowId: source.windowId,
+      ),
+      target.windowId,
+    );
+    expect(
+      await coordinator.mergePanelIntoWindow(
+        sourceWindowId: source.windowId,
+        panel: WorkspacePanelId.sampling,
+        targetWindowId: target.windowId,
+      ),
+      isTrue,
+    );
+
+    expect(hiddenWindows, contains(source.windowId));
+    expect(coordinator.windows[WorkspacePanelId.sampling], target);
+    expect(coordinator.windows[WorkspacePanelId.plot], target);
+    final targetChannel = 'mixin.one/window_controller/${target.windowId}';
+    expect(configurations[targetChannel]!.last.groupPanels, [
+      WorkspacePanelId.plot,
+      WorkspacePanelId.sampling,
+    ]);
+    expect(
+      configurations[targetChannel]!.last.initialSize,
+      const Size(900, 650),
+    );
+  });
+
   test('drag preview owns a dedicated reusable window', () async {
     const desktopChannel = MethodChannel('mixin.one/desktop_multi_window');
     const channelsChannel = MethodChannel(

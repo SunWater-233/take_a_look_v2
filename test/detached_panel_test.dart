@@ -89,6 +89,11 @@ void main() {
     }
     expect(find.byIcon(Icons.open_in_new), findsNothing);
     expect(find.byIcon(Icons.call_split), findsNothing);
+    final initialFrame = tester.widget<TalPanelFrame>(
+      find.byType(TalPanelFrame),
+    );
+    expect(initialFrame.chrome!.tabsDraggable, isTrue);
+    expect(initialFrame.chrome!.draggable, isFalse);
 
     await tester.tap(find.text(WorkspacePanelId.runControl.title).last);
     await tester.pump();
@@ -113,10 +118,12 @@ void main() {
     }
 
     await pumpPanel(WorkspacePanelId.sampling);
-    expect(
-      tester.widget<TalPanelFrame>(find.byType(TalPanelFrame)).panel,
-      WorkspacePanelId.sampling,
+    final samplingFrame = tester.widget<TalPanelFrame>(
+      find.byType(TalPanelFrame),
     );
+    expect(samplingFrame.panel, WorkspacePanelId.sampling);
+    expect(samplingFrame.chrome!.draggable, isTrue);
+    expect(samplingFrame.chrome!.tabsDraggable, isFalse);
 
     await pumpPanel(WorkspacePanelId.plot);
     expect(

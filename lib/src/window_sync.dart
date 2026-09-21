@@ -18,6 +18,28 @@ const prepareTabDragPreviewMethod = 'prepareTabDragPreview';
 const showTabDragPreviewMethod = 'showTabDragPreview';
 const hideTabDragPreviewMethod = 'hideTabDragPreview';
 const tabDragPreviewSessionKey = 'previewSession';
+const detachedTabDragStartMethod = 'detachedTabDragStart';
+const detachedTabDragUpdateMethod = 'detachedTabDragUpdate';
+const detachedTabDragEndMethod = 'detachedTabDragEnd';
+const getDetachedWindowBoundsMethod = 'getDetachedWindowBounds';
+
+enum DetachedTabDragPhase { start, update, end }
+
+class DetachedTabDragEvent {
+  const DetachedTabDragEvent({
+    required this.phase,
+    required this.sourceWindowId,
+    required this.panel,
+    this.screenPosition,
+    this.previewSize,
+  });
+
+  final DetachedTabDragPhase phase;
+  final String sourceWindowId;
+  final WorkspacePanelId panel;
+  final Offset? screenPosition;
+  final Size? previewSize;
+}
 
 class MainWindowSync {
   MainWindowSync(this.controller);
@@ -34,9 +56,12 @@ class MainWindowSync {
   bool _started = false;
   final StreamController<String> _detachedWindowReleases =
       StreamController<String>.broadcast(sync: true);
+  final StreamController<DetachedTabDragEvent> _detachedTabDrags =
+      StreamController<DetachedTabDragEvent>.broadcast(sync: true);
 
   bool get isStarted => _started;
   Stream<String> get detachedWindowReleases => _detachedWindowReleases.stream;
+  Stream<DetachedTabDragEvent> get detachedTabDrags => _detachedTabDrags.stream;
 
   Future<void> start() async {
     if (_started) return;
@@ -64,6 +89,19 @@ class MainWindowSync {
       final arguments = call.arguments;
       if (arguments is Map && arguments['windowId'] is String) {
         reportDetachedWindowReleased(arguments['windowId'] as String);
+      }
+      return null;
+    }
+    final dragPhase = switch (call.method) {
+      detachedTabDragStartMethod => DetachedTabDragPhase.start,
+      detachedTabDragUpdateMethod => DetachedTabDragPhase.update,
+      detachedTabDragEndMethod => DetachedTabDragPhase.end,
+      _ => null,
+    };
+    if (dragPhase != null) {
+      final event = _parseDetachedTabDrag(call.arguments, dragPhase);
+      if (event != null && !_detachedTabDrags.isClosed) {
+        _detachedTabDrags.add(event);
       }
       return null;
     }
@@ -148,7 +186,39 @@ class MainWindowSync {
     _telemetryBroadcastTimer?.cancel();
     if (_started) await _mainChannel.setMethodCallHandler(null);
     await _detachedWindowReleases.close();
+    await _detachedTabDrags.close();
   }
+}
+
+DetachedTabDragEvent? _parseDetachedTabDrag(
+  Object? arguments,
+  DetachedTabDragPhase phase,
+) {
+  if (arguments is! Map ||
+      arguments['windowId'] is! String ||
+      arguments['panel'] is! String) {
+    return null;
+  }
+  final panelName = arguments['panel'] as String;
+  final panel = WorkspacePanelId.values
+      .where((candidate) => candidate.name == panelName)
+      .firstOrNull;
+  if (panel == null) return null;
+  final x = arguments['x'];
+  final y = arguments['y'];
+  final width = arguments['width'];
+  final height = arguments['height'];
+  return DetachedTabDragEvent(
+    phase: phase,
+    sourceWindowId: arguments['windowId'] as String,
+    panel: panel,
+    screenPosition: x is num && y is num
+        ? Offset(x.toDouble(), y.toDouble())
+        : null,
+    previewSize: width is num && height is num
+        ? Size(width.toDouble(), height.toDouble())
+        : null,
+  );
 }
 
 Future<void> initializeDetachedWindow(
@@ -159,6 +229,7 @@ Future<void> initializeDetachedWindow(
   Future<void> Function(Offset screenPosition, int session)?
   onShowTabDragPreview,
   Future<void> Function(int session)? onHideTabDragPreview,
+  Future<Rect> Function()? onGetWindowBounds,
 }) async {
   final currentWindow = await WindowController.fromCurrentEngine();
   await currentWindow.setWindowMethodHandler((call) async {
@@ -215,6 +286,16 @@ Future<void> initializeDetachedWindow(
       await onHideTabDragPreview?.call(
         arguments[tabDragPreviewSessionKey] as int,
       );
+    } else if (call.method == getDetachedWindowBoundsMethod) {
+      final bounds = await onGetWindowBounds?.call();
+      return bounds == null
+          ? null
+          : <String, double>{
+              'left': bounds.left,
+              'top': bounds.top,
+              'width': bounds.width,
+              'height': bounds.height,
+            };
     }
     return null;
   });
@@ -224,6 +305,32 @@ Future<void> initializeDetachedWindow(
   if (state != null) {
     controller.applySnapshot(Map<String, dynamic>.from(state));
   }
+}
+
+Future<void> sendDetachedTabDrag({
+  required DetachedTabDragPhase phase,
+  required String windowId,
+  required WorkspacePanelId panel,
+  Offset? screenPosition,
+  Size? previewSize,
+}) {
+  final method = switch (phase) {
+    DetachedTabDragPhase.start => detachedTabDragStartMethod,
+    DetachedTabDragPhase.update => detachedTabDragUpdateMethod,
+    DetachedTabDragPhase.end => detachedTabDragEndMethod,
+  };
+  return _mainChannel.invokeMethod<void>(method, {
+    'windowId': windowId,
+    'panel': panel.name,
+    if (screenPosition != null) ...{
+      'x': screenPosition.dx,
+      'y': screenPosition.dy,
+    },
+    if (previewSize != null) ...{
+      'width': previewSize.width,
+      'height': previewSize.height,
+    },
+  });
 }
 
 Future<void> releaseDetachedWindow() async {

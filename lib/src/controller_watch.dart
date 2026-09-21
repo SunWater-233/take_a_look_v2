@@ -124,6 +124,23 @@ extension TakeALookControllerWatches on TakeALookController {
     _emitState([signals.watches, signals.plot]);
   }
 
+  void reorderWatch(int oldIndex, int newIndex) {
+    if (oldIndex < 0 || oldIndex >= _watches.length) return;
+    if (newIndex < 0 || newIndex >= _watches.length) return;
+    if (oldIndex == newIndex) return;
+    if (_isDetachedRemote &&
+        _dispatchRemote(ControllerCommand.reorderWatch, {
+          'oldIndex': oldIndex,
+          'newIndex': newIndex,
+        })) {
+      return;
+    }
+    final watch = _watches.removeAt(oldIndex);
+    _watches.insert(newIndex, watch);
+    _syncWatchesBackend();
+    _emitState([signals.watches, signals.plot]);
+  }
+
   void clearWatches() {
     if (_isDetachedRemote && _dispatchRemote(ControllerCommand.clearWatches)) {
       return;

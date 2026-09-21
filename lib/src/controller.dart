@@ -57,6 +57,7 @@ class TakeALookController extends ChangeNotifier {
   final List<WatchItem> _watches = <WatchItem>[];
   final List<LogEntry> _logs = <LogEntry>[];
   final Set<String> _selectedSymbols = <String>{};
+  final Set<String> _expandedSymbolTreeNodes = <String>{};
   int _symbolRevision = 0;
   Timer? _ticker;
   Timer? _plotRefreshTimer;
@@ -142,6 +143,8 @@ class TakeALookController extends ChangeNotifier {
 
   List<SymbolItem> get symbols => List.unmodifiable(_symbols);
   int get symbolRevision => _symbolRevision;
+  bool isSymbolTreeNodeExpanded(String key) =>
+      _expandedSymbolTreeNodes.contains(key);
   List<WatchItem> get watches => List.unmodifiable(_watches);
   List<LogEntry> get logs => List.unmodifiable(_logs);
   Set<String> get selectedSymbols => Set.unmodifiable(_selectedSymbols);
@@ -164,6 +167,12 @@ class TakeALookController extends ChangeNotifier {
   Iterable<Offset> plotSamplesFor(WatchItem watch) {
     if (!plottingPaused) return watch.samples;
     return _frozenPlotSamples[watch.symbol.key] ?? watch.samples;
+  }
+
+  void toggleSymbolTreeNodeExpansion(String key) {
+    if (!_expandedSymbolTreeNodes.add(key)) {
+      _expandedSymbolTreeNodes.remove(key);
+    }
   }
 
   WatchItem? _watchByKey(String key) {

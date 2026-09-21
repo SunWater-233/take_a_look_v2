@@ -117,6 +117,7 @@ extension TakeALookControllerConnection on TakeALookController {
     _symbols
       ..clear()
       ..addAll(next);
+    _expandedSymbolTreeNodes.clear();
     _symbolRevision += 1;
   }
 

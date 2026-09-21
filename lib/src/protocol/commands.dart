@@ -35,6 +35,7 @@ enum ControllerCommand {
   addSelectedToWatch,
   removeWatch,
   removeWatches,
+  reorderWatch,
   clearWatches,
   toggleWatchPlot,
   setWatchColor,
@@ -168,6 +169,7 @@ class BackendCommandMapper {
       case ControllerCommand.addSelectedToWatch:
       case ControllerCommand.removeWatch:
       case ControllerCommand.removeWatches:
+      case ControllerCommand.reorderWatch:
       case ControllerCommand.clearWatches:
       case ControllerCommand.toggleWatchPlot:
       case ControllerCommand.setWatchColor:

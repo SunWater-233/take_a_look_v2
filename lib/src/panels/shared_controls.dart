@@ -171,6 +171,89 @@ class _RightDragResizeRegionState extends State<_RightDragResizeRegion> {
   }
 }
 
+/// Shared viewport for the resizable tables used by symbols, realtime tuning
+/// and analysis statistics.
+///
+/// It keeps horizontal overflow, header/body alignment and right-drag scaling
+/// in one place while leaving row construction and selection to each panel.
+class _ResizableTableViewport extends StatelessWidget {
+  const _ResizableTableViewport({
+    required this.layout,
+    required this.contentWidth,
+    required this.header,
+    required this.body,
+    required this.onLayoutChanged,
+    required this.minimumRowHeight,
+    required this.contentKey,
+    required this.resizeRegionKey,
+    this.horizontalController,
+    this.bodyDecoration,
+    this.canStartResizeAt,
+    this.columnScale = 0.85,
+    this.rowScale = 0.85,
+  });
+
+  final ResizableTableLayout layout;
+  final double contentWidth;
+  final Widget header;
+  final Widget body;
+  final VoidCallback onLayoutChanged;
+  final double minimumRowHeight;
+  final Key contentKey;
+  final Key resizeRegionKey;
+  final ScrollController? horizontalController;
+  final Decoration? bodyDecoration;
+  final bool Function(Offset position)? canStartResizeAt;
+  final double columnScale;
+  final double rowScale;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = math.max(contentWidth, constraints.maxWidth);
+        return SingleChildScrollView(
+          controller: horizontalController,
+          scrollDirection: Axis.horizontal,
+          child: SizedBox(
+            key: contentKey,
+            width: width,
+            height: constraints.maxHeight,
+            child: Column(
+              children: [
+                header,
+                Expanded(
+                  child: DecoratedBox(
+                    decoration:
+                        bodyDecoration ??
+                        const BoxDecoration(color: TalColors.input),
+                    child: _RightDragResizeRegion(
+                      key: resizeRegionKey,
+                      onResizeStart: layout.beginResize,
+                      onResize: (delta) {
+                        if (layout.resizeAll(
+                          delta,
+                          columnScale: columnScale,
+                          rowScale: rowScale,
+                          minimumRowHeight: minimumRowHeight,
+                        )) {
+                          onLayoutChanged();
+                        }
+                      },
+                      canStartAt: canStartResizeAt,
+                      child: body,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 class _CompactDropdown<T> extends StatefulWidget {
   const _CompactDropdown({
     required this.value,

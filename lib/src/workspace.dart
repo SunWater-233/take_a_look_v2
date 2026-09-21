@@ -43,6 +43,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   final Map<WorkspacePanelId, DetachedPanelPlacement> _detachedPlacements =
       <WorkspacePanelId, DetachedPanelPlacement>{};
   StreamSubscription<void>? windowSubscription;
+  StreamSubscription<DetachedTabDragEvent>? detachedTabDragSubscription;
   final WorkspaceSession _session = WorkspaceSession();
   Timer? _tabMergeTimer;
   String? _tabMergeCandidate;
@@ -51,6 +52,8 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   Offset _mainWindowOrigin = Offset.zero;
   Offset _tabDragPreviewAnchor = Offset.zero;
   Offset? _lastTabDragPreviewPosition;
+  String? _detachedDragSourceWindowId;
+  WorkspacePanelId? _detachedDraggedPanel;
 
   @visibleForTesting
   String? get debugTabMergeCandidate => _tabMergeCandidate;
@@ -63,6 +66,9 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     _applyDefaultLayout();
     windowSubscription = detachedWindows.changes.listen(
       (_) => _syncExternalWindows(),
+    );
+    detachedTabDragSubscription = widget.windowSync.detachedTabDrags.listen(
+      _handleDetachedTabDrag,
     );
     if (widget.windowSync.isStarted) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -79,6 +85,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   @override
   void dispose() {
     windowSubscription?.cancel();
+    detachedTabDragSubscription?.cancel();
     _tabMergeTimer?.cancel();
     unawaited(tabDragPreview.dispose());
     unawaited(detachedWindows.dispose());
@@ -131,40 +138,47 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
       height: math.max(1, rect.height),
       child: GestureDetector(
         behavior: HitTestBehavior.translucent,
-        onTapDown: (_) => _bringToFront(group),
+        onTapDown: (details) {
+          final y = details.localPosition.dy;
+          final isTabStrip =
+              group.panels.length > 1 &&
+              y >= talPanelHeaderHeight &&
+              y < talPanelHeaderHeight + talPanelTabStripHeight;
+          if (!isTabStrip) _bringToFront(group);
+        },
         child: Stack(
           children: [
             Positioned.fill(
-              child: buildWorkspacePanel(
-                group.activePanel,
-                widget.controller,
-                chrome: PanelChrome(
-                  tabs: List.unmodifiable(group.panels),
-                  activePanel: group.activePanel,
-                  highlighted: _session.mergeTarget == group.id,
-                  onSelect: (panel) => setState(() {
-                    group.activePanel = panel;
-                    _bringToFront(group, notify: false);
-                  }),
-                  onFloat: () =>
-                      _floatPanel(group, group.activePanel, workspaceSize),
-                  onClose: () => _hidePanel(group, group.activePanel),
-                  onSeparate: () => _separatePanel(group, group.activePanel),
-                  onDragStart: (_) => _startDrag(group),
-                  onDragUpdate: (details) =>
-                      _moveGroup(group, details.delta, workspaceSize),
-                  onDragEnd: (_) => _endDrag(group),
-                  draggable: _session.gridMode,
-                  groupId: group.id,
-                  tabsDraggable: true,
-                  onTabAccept: (data, targetIndex) =>
-                      _acceptTabDrop(group, data, targetIndex),
-                  onTabDragStart: (data) =>
-                      _startTabDrag(group, data, workspaceSize),
-                  onTabDragUpdate: (data, details) =>
-                      _updateTabDrag(data, details, workspaceSize),
-                  onTabDragEnd: (data, details) =>
-                      _finishTabDrag(group, data, details, workspaceSize),
+              child: ValueListenableBuilder<WorkspacePanelId>(
+                valueListenable: group.activePanelListenable,
+                builder: (context, activePanel, _) => buildWorkspacePanel(
+                  activePanel,
+                  widget.controller,
+                  chrome: PanelChrome(
+                    tabs: List.unmodifiable(group.panels),
+                    activePanel: activePanel,
+                    highlighted: _session.mergeTarget == group.id,
+                    onSelect: (panel) => group.activePanel = panel,
+                    onFloat: () =>
+                        _floatPanel(group, activePanel, workspaceSize),
+                    onClose: () => _hidePanel(group, activePanel),
+                    onSeparate: () => _separatePanel(group, activePanel),
+                    onDragStart: (_) => _startDrag(group),
+                    onDragUpdate: (details) =>
+                        _moveGroup(group, details.delta, workspaceSize),
+                    onDragEnd: (_) => _endDrag(group),
+                    draggable: _session.gridMode,
+                    groupId: group.id,
+                    tabsDraggable: true,
+                    onTabAccept: (data, targetIndex) =>
+                        _acceptTabDrop(group, data, targetIndex),
+                    onTabDragStart: (data) =>
+                        _startTabDrag(group, data, workspaceSize),
+                    onTabDragUpdate: (data, details) =>
+                        _updateTabDrag(data, details, workspaceSize),
+                    onTabDragEnd: (data, details) =>
+                        _finishTabDrag(group, data, details, workspaceSize),
+                  ),
                 ),
               ),
             ),
@@ -390,8 +404,15 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   Future<void> showPanel(WorkspacePanelId panel) async {
     if (await detachedWindows.showIfOpen(panel)) return;
     if (_session.groups.any((group) => group.panels.contains(panel))) return;
-    setState(() => _restorePanel(panel));
+    final window = await detachedWindows.acquire(
+      activePanel: panel,
+      panels: <WorkspacePanelId>[panel],
+      initialSize: panel.preferredWindowSize,
+    );
+    if (!mounted) return;
     widget.onPanelVisibilityChanged?.call();
+    await window.show();
+    if (widget.windowSync.isStarted) unawaited(detachedWindows.prewarm());
   }
 
   WorkspaceLayoutRepository get _layoutRepository => WorkspaceLayoutRepository(
@@ -904,9 +925,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
       final restoredPlacements = <DetachedPanelPlacement>{};
       for (final panel in closed) {
         final placement = _detachedPlacements.remove(panel);
-        if (placement == null) {
-          _restorePanel(panel);
-        } else if (restoredPlacements.add(placement)) {
+        if (placement != null && restoredPlacements.add(placement)) {
           _restoreDetachedGroup(placement);
         }
       }
@@ -914,19 +933,103 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     widget.onPanelVisibilityChanged?.call();
   }
 
-  void _restorePanel(WorkspacePanelId panel) {
-    if (_session.groups.any((group) => group.panels.contains(panel))) return;
-    _session.groups.add(
-      WorkspaceGroup(
-        id: _session.nextGroupId('restored'),
-        panels: [panel],
-        activePanel: panel,
-        rect: _session.gridMode
-            ? _snapRectToGrid(_defaultRect(panel))
-            : _defaultRect(panel),
-        z: _nextZ(),
-      ),
+  void _handleDetachedTabDrag(DetachedTabDragEvent event) {
+    switch (event.phase) {
+      case DetachedTabDragPhase.start:
+        _detachedDragSourceWindowId = event.sourceWindowId;
+        _detachedDraggedPanel = event.panel;
+        unawaited(_captureMainWindowOrigin());
+        unawaited(
+          tabDragPreview.prepare(
+            panel: event.panel,
+            size: event.previewSize ?? event.panel.preferredWindowSize,
+          ),
+        );
+      case DetachedTabDragPhase.update:
+        if (_detachedDragSourceWindowId != event.sourceWindowId ||
+            _detachedDraggedPanel != event.panel) {
+          return;
+        }
+        final position = event.screenPosition;
+        if (position == null) return;
+        unawaited(tabDragPreview.showAt(position - const Offset(56, 15)));
+        final target = _mainGroupAtScreenPosition(position);
+        final targetId = target?.id;
+        if (_session.mergeTarget != targetId && mounted) {
+          setState(() => _session.mergeTarget = targetId);
+        }
+      case DetachedTabDragPhase.end:
+        if (_detachedDragSourceWindowId != event.sourceWindowId ||
+            _detachedDraggedPanel != event.panel) {
+          return;
+        }
+        _detachedDragSourceWindowId = null;
+        _detachedDraggedPanel = null;
+        if (_session.mergeTarget != null && mounted) {
+          setState(() => _session.mergeTarget = null);
+        }
+        unawaited(_finishDetachedTabDrag(event));
+    }
+  }
+
+  Future<void> _finishDetachedTabDrag(DetachedTabDragEvent event) async {
+    await tabDragPreview.hide().timeout(
+      const Duration(milliseconds: 200),
+      onTimeout: () {},
     );
+    final screenPosition = event.screenPosition;
+    if (!mounted || screenPosition == null) return;
+    await _captureMainWindowOrigin();
+    if (!mounted) return;
+
+    final targetWindowId = await detachedWindows.windowAt(screenPosition);
+    if (targetWindowId == event.sourceWindowId) return;
+    if (targetWindowId != null) {
+      final merged = await detachedWindows.mergePanelIntoWindow(
+        sourceWindowId: event.sourceWindowId,
+        panel: event.panel,
+        targetWindowId: targetWindowId,
+      );
+      if (merged) widget.onPanelVisibilityChanged?.call();
+      return;
+    }
+
+    final targetGroup = _mainGroupAtScreenPosition(screenPosition);
+    if (targetGroup != null) {
+      final removed = await detachedWindows.removePanelFromWindow(
+        sourceWindowId: event.sourceWindowId,
+        panel: event.panel,
+      );
+      if (!mounted || !removed) return;
+      setState(() {
+        _detachedPlacements.remove(event.panel);
+        if (!targetGroup.panels.contains(event.panel)) {
+          targetGroup.panels.add(event.panel);
+        }
+        targetGroup.activePanel = event.panel;
+        targetGroup.z = _nextZ();
+      });
+      widget.onPanelVisibilityChanged?.call();
+    }
+  }
+
+  WorkspaceGroup? _mainGroupAtScreenPosition(Offset screenPosition) {
+    if (_session.workspaceSize.isEmpty) return null;
+    final renderObject = context.findRenderObject();
+    if (renderObject is! RenderBox) return null;
+    final mainWindowPosition = screenPosition - _mainWindowOrigin;
+    final localPosition = renderObject.globalToLocal(mainWindowPosition);
+    if (!(Offset.zero & _session.workspaceSize).contains(localPosition)) {
+      return null;
+    }
+    final normalized = Offset(
+      localPosition.dx / _session.workspaceSize.width,
+      localPosition.dy / _session.workspaceSize.height,
+    );
+    for (final group in _session.groupsByZ.reversed) {
+      if (group.rect.contains(normalized)) return group;
+    }
+    return null;
   }
 
   void _restoreDetachedGroup(DetachedPanelPlacement placement) {
@@ -977,18 +1080,6 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
       ),
     );
   }
-
-  Rect _defaultRect(WorkspacePanelId panel) => switch (panel) {
-    WorkspacePanelId.header ||
-    WorkspacePanelId.runControl ||
-    WorkspacePanelId.sampling => const Rect.fromLTWH(0.03, 0.05, 0.34, 0.27),
-    WorkspacePanelId.symbols ||
-    WorkspacePanelId.watch ||
-    WorkspacePanelId.connection => const Rect.fromLTWH(0.04, 0.26, 0.36, 0.58),
-    WorkspacePanelId.plot => const Rect.fromLTWH(0.22, 0.05, 0.72, 0.67),
-    WorkspacePanelId.analysis => const Rect.fromLTWH(0.12, 0.08, 0.76, 0.72),
-    WorkspacePanelId.log => const Rect.fromLTWH(0.08, 0.68, 0.84, 0.26),
-  };
 
   Rect _snapRectToGrid(Rect rect) {
     return _geometry.snapRectToGrid(rect, _session.workspaceSize);

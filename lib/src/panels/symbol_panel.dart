@@ -22,6 +22,17 @@ class _VisibleSymbolNode {
   final int depth;
 }
 
+class _SymbolTreeCache {
+  int revision = -1;
+  List<_SymbolTreeNode> tree = const <_SymbolTreeNode>[];
+  Set<String> selectedSymbols = const <String>{};
+  Map<String, bool> selectedNodes = const <String, bool>{};
+}
+
+final Expando<_SymbolTreeCache> _symbolTreeCaches = Expando<_SymbolTreeCache>(
+  'symbol-tree-cache',
+);
+
 class _SymbolPanel extends StatefulWidget {
   const _SymbolPanel({required this.controller});
 
@@ -50,7 +61,6 @@ class _SymbolPanelState extends State<_SymbolPanel> {
 
   final search = TextEditingController();
   final FocusNode _searchFocus = FocusNode(debugLabel: 'symbol-search');
-  final Set<String> _expanded = <String>{};
   List<_SymbolTreeNode> _tree = const <_SymbolTreeNode>[];
   List<_VisibleSymbolNode> _visibleRows = const <_VisibleSymbolNode>[];
   Map<String, bool> _selectedNodes = const <String, bool>{};
@@ -173,7 +183,7 @@ class _SymbolPanelState extends State<_SymbolPanel> {
     final result = <_VisibleSymbolNode>[];
     void visit(_SymbolTreeNode node, int depth) {
       result.add(_VisibleSymbolNode(node, depth));
-      if (expandAll || _expanded.contains(node.key)) {
+      if (expandAll || widget.controller.isSymbolTreeNodeExpanded(node.key)) {
         for (final child in node.children) {
           visit(child, depth + 1);
         }
@@ -188,24 +198,9 @@ class _SymbolPanelState extends State<_SymbolPanel> {
 
   void _toggleNode(_SymbolTreeNode node) {
     setState(() {
-      if (!_expanded.add(node.key)) _expanded.remove(node.key);
+      widget.controller.toggleSymbolTreeNodeExpansion(node.key);
       _rebuildVisibleRows();
     });
-  }
-
-  void _beginTableResize() {
-    _tableLayout.beginResize();
-  }
-
-  void _resizeTable(Offset delta) {
-    if (_tableLayout.resizeAll(
-      delta,
-      columnScale: 0.75,
-      rowScale: 0.75,
-      minimumRowHeight: 18,
-    )) {
-      setState(() {});
-    }
   }
 
   void _resizeColumn(int index, double delta) {
@@ -228,12 +223,21 @@ class _SymbolPanelState extends State<_SymbolPanel> {
         _treeQuery == query) {
       return;
     }
-    final symbolsChanged = _treeRevision != widget.controller.symbolRevision;
-    final symbols = widget.controller.symbols
-        .where((item) => item.matches(query))
-        .toList(growable: false);
-    _tree = _buildTree(symbols);
-    if (symbolsChanged) _expanded.clear();
+    if (query.isEmpty) {
+      final cache = _symbolTreeCaches[widget.controller] ??= _SymbolTreeCache();
+      if (cache.revision != widget.controller.symbolRevision) {
+        cache.tree = _buildTree(widget.controller.symbols);
+        cache.revision = widget.controller.symbolRevision;
+        cache.selectedSymbols = const <String>{};
+        cache.selectedNodes = const <String, bool>{};
+      }
+      _tree = cache.tree;
+    } else {
+      final symbols = widget.controller.symbols
+          .where((item) => item.matches(query))
+          .toList(growable: false);
+      _tree = _buildTree(symbols);
+    }
     _treeRevision = widget.controller.symbolRevision;
     _treeQuery = query;
     _rebuildVisibleRows();
@@ -247,6 +251,15 @@ class _SymbolPanelState extends State<_SymbolPanel> {
 
   void _ensureSelectionCache(Set<String> selected) {
     if (setEquals(_selectedSymbols, selected)) return;
+    final sharedCache = _treeQuery.isEmpty
+        ? _symbolTreeCaches[widget.controller]
+        : null;
+    if (sharedCache != null &&
+        setEquals(sharedCache.selectedSymbols, selected)) {
+      _selectedSymbols = sharedCache.selectedSymbols;
+      _selectedNodes = sharedCache.selectedNodes;
+      return;
+    }
     final selectedNodes = <String, bool>{};
 
     bool visit(_SymbolTreeNode node) {
@@ -264,6 +277,10 @@ class _SymbolPanelState extends State<_SymbolPanel> {
     }
     _selectedSymbols = Set<String>.of(selected);
     _selectedNodes = selectedNodes;
+    if (sharedCache != null) {
+      sharedCache.selectedSymbols = _selectedSymbols;
+      sharedCache.selectedNodes = _selectedNodes;
+    }
   }
 
   void _selectNode(_SymbolTreeNode node) {
@@ -379,67 +396,48 @@ class _SymbolPanelState extends State<_SymbolPanel> {
                       BorderSide(color: TalColors.border),
                     ),
                   ),
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      return SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: SizedBox(
-                          width: _tableWidth,
-                          key: const ValueKey('symbol-table-content'),
-                          height: constraints.maxHeight,
-                          child: Column(
-                            children: [
-                              _SymbolTableHeader(
-                                nameWidth: _nameWidth,
-                                addressWidth: _addressWidth,
-                                sizeWidth: _sizeWidth,
-                                sectionWidth: _sectionWidth,
-                                typeWidth: _typeWidth,
-                                onResizeColumn: _resizeColumn,
-                              ),
-                              Expanded(
-                                child: _RightDragResizeRegion(
-                                  key: const ValueKey(
-                                    'symbol-table-resize-region',
+                  child: _ResizableTableViewport(
+                    layout: _tableLayout,
+                    contentWidth: _tableWidth,
+                    contentKey: const ValueKey('symbol-table-content'),
+                    resizeRegionKey: const ValueKey(
+                      'symbol-table-resize-region',
+                    ),
+                    minimumRowHeight: 18,
+                    columnScale: 0.75,
+                    rowScale: 0.75,
+                    onLayoutChanged: () => setState(() {}),
+                    header: _SymbolTableHeader(
+                      nameWidth: _nameWidth,
+                      addressWidth: _addressWidth,
+                      sizeWidth: _sizeWidth,
+                      sectionWidth: _sectionWidth,
+                      typeWidth: _typeWidth,
+                      onResizeColumn: _resizeColumn,
+                    ),
+                    body: _tree.isEmpty
+                        ? const SizedBox.expand()
+                        : ListView.builder(
+                            itemCount: rows.length,
+                            itemBuilder: (context, index) => _SymbolTreeRow(
+                              entry: rows[index],
+                              nameWidth: _nameWidth,
+                              addressWidth: _addressWidth,
+                              sizeWidth: _sizeWidth,
+                              sectionWidth: _sectionWidth,
+                              typeWidth: _typeWidth,
+                              rowHeight: _rowHeight,
+                              selected:
+                                  _selectedNodes[rows[index].node.key] ?? false,
+                              expanded:
+                                  _treeQuery.trim().isNotEmpty ||
+                                  widget.controller.isSymbolTreeNodeExpanded(
+                                    rows[index].node.key,
                                   ),
-                                  onResizeStart: _beginTableResize,
-                                  onResize: _resizeTable,
-                                  child: _tree.isEmpty
-                                      ? const SizedBox.expand()
-                                      : ListView.builder(
-                                          itemCount: rows.length,
-                                          itemBuilder: (context, index) =>
-                                              _SymbolTreeRow(
-                                                entry: rows[index],
-                                                nameWidth: _nameWidth,
-                                                addressWidth: _addressWidth,
-                                                sizeWidth: _sizeWidth,
-                                                sectionWidth: _sectionWidth,
-                                                typeWidth: _typeWidth,
-                                                rowHeight: _rowHeight,
-                                                selected:
-                                                    _selectedNodes[rows[index]
-                                                        .node
-                                                        .key] ??
-                                                    false,
-                                                expanded:
-                                                    _treeQuery
-                                                        .trim()
-                                                        .isNotEmpty ||
-                                                    _expanded.contains(
-                                                      rows[index].node.key,
-                                                    ),
-                                                onToggleNode: _toggleNode,
-                                                onSelectNode: _selectNode,
-                                              ),
-                                        ),
-                                ),
-                              ),
-                            ],
+                              onToggleNode: _toggleNode,
+                              onSelectNode: _selectNode,
+                            ),
                           ),
-                        ),
-                      );
-                    },
                   ),
                 ),
               ),
@@ -597,7 +595,7 @@ class _SymbolTreeRow extends StatelessWidget {
       key: ValueKey('symbol-tree-row-${node.key}'),
       color: rowColor,
       child: InkWell(
-        onTap: () => onSelectNode(node),
+        onTap: () => node.expandable ? onToggleNode(node) : onSelectNode(node),
         child: SizedBox(
           height: rowHeight,
           child: Row(

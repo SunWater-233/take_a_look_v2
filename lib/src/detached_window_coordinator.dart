@@ -63,6 +63,105 @@ class DetachedWindowCoordinator {
     return true;
   }
 
+  Future<String?> windowAt(
+    Offset screenPosition, {
+    String? excludingWindowId,
+  }) async {
+    for (final entry in _pool.values) {
+      if ((excludingWindowId != null &&
+              entry.controller.windowId == excludingWindowId) ||
+          entry.panels.isEmpty ||
+          entry.reserved) {
+        continue;
+      }
+      final bounds = await _windowBounds(entry.controller);
+      if (bounds?.contains(screenPosition) == true) {
+        return entry.controller.windowId;
+      }
+    }
+    return null;
+  }
+
+  Future<bool> mergePanelIntoWindow({
+    required String sourceWindowId,
+    required WorkspacePanelId panel,
+    required String targetWindowId,
+  }) async {
+    final source = _pool[sourceWindowId];
+    final target = _pool[targetWindowId];
+    if (source == null ||
+        target == null ||
+        identical(source, target) ||
+        !source.panels.contains(panel)) {
+      return false;
+    }
+
+    final sourcePanels = List<WorkspacePanelId>.of(source.panels)
+      ..remove(panel);
+    final targetPanels = List<WorkspacePanelId>.of(target.panels);
+    if (!targetPanels.contains(panel)) targetPanels.add(panel);
+    final sourceBounds = await _windowBounds(source.controller);
+    final targetBounds = await _windowBounds(target.controller);
+
+    await _configure(
+      target.controller,
+      DetachedPanelLaunch(
+        panel: panel,
+        panels: targetPanels,
+        initialSize: targetBounds?.size ?? panel.preferredWindowSize,
+      ),
+    );
+    if (sourcePanels.isEmpty) {
+      await source.controller.hide();
+    } else {
+      await _configure(
+        source.controller,
+        DetachedPanelLaunch(
+          panel: sourcePanels.first,
+          panels: sourcePanels,
+          initialSize:
+              sourceBounds?.size ?? sourcePanels.first.preferredWindowSize,
+        ),
+      );
+    }
+
+    _assign(
+      source,
+      activePanel: sourcePanels.firstOrNull,
+      panels: sourcePanels,
+    );
+    _assign(target, activePanel: panel, panels: targetPanels);
+    await target.controller.show();
+    if (windowSync.isStarted) unawaited(prewarm());
+    return true;
+  }
+
+  Future<bool> removePanelFromWindow({
+    required String sourceWindowId,
+    required WorkspacePanelId panel,
+  }) async {
+    final source = _pool[sourceWindowId];
+    if (source == null || !source.panels.contains(panel)) return false;
+    final remaining = List<WorkspacePanelId>.of(source.panels)..remove(panel);
+    final bounds = await _windowBounds(source.controller);
+    if (remaining.isEmpty) {
+      await source.controller.hide();
+    } else {
+      await _configure(
+        source.controller,
+        DetachedPanelLaunch(
+          panel: remaining.first,
+          panels: remaining,
+          initialSize: bounds?.size ?? remaining.first.preferredWindowSize,
+        ),
+      );
+      await source.controller.show();
+    }
+    _assign(source, activePanel: remaining.firstOrNull, panels: remaining);
+    if (windowSync.isStarted) unawaited(prewarm());
+    return true;
+  }
+
   Future<WindowController> acquire({
     required WorkspacePanelId activePanel,
     required List<WorkspacePanelId> panels,
@@ -141,6 +240,53 @@ class DetachedWindowCoordinator {
     Error.throwWithStackTrace(lastError!, lastStackTrace!);
   }
 
+  Future<Rect?> _windowBounds(WindowController window) async {
+    try {
+      final data = await window.invokeMethod<Map<Object?, Object?>>(
+        getDetachedWindowBoundsMethod,
+      );
+      if (data == null ||
+          data['left'] is! num ||
+          data['top'] is! num ||
+          data['width'] is! num ||
+          data['height'] is! num) {
+        return null;
+      }
+      return Rect.fromLTWH(
+        (data['left'] as num).toDouble(),
+        (data['top'] as num).toDouble(),
+        (data['width'] as num).toDouble(),
+        (data['height'] as num).toDouble(),
+      );
+    } on Object {
+      return null;
+    }
+  }
+
+  void _assign(
+    _PooledDetachedWindow entry, {
+    required WorkspacePanelId? activePanel,
+    required List<WorkspacePanelId> panels,
+  }) {
+    final previousActive = entry.activePanel;
+    if (previousActive != null) windowSync.unregisterWindow(previousActive);
+    for (final previousPanel in entry.panels) {
+      if (identical(_assignedWindows[previousPanel], entry)) {
+        _assignedWindows.remove(previousPanel);
+      }
+    }
+    entry
+      ..activePanel = activePanel
+      ..panels = List<WorkspacePanelId>.of(panels)
+      ..reserved = false;
+    for (final assignedPanel in panels) {
+      _assignedWindows[assignedPanel] = entry;
+    }
+    if (activePanel != null) {
+      windowSync.registerWindow(activePanel, entry.controller);
+    }
+  }
+
   _PooledDetachedWindow? get _idleWindow {
     for (final entry in _pool.values) {
       if (entry.panels.isEmpty && !entry.reserved) return entry;
@@ -157,17 +303,7 @@ class DetachedWindowCoordinator {
   }
 
   void _clearAssignment(_PooledDetachedWindow entry) {
-    final activePanel = entry.activePanel;
-    for (final panel in entry.panels) {
-      if (identical(_assignedWindows[panel], entry)) {
-        _assignedWindows.remove(panel);
-      }
-    }
-    if (activePanel != null) windowSync.unregisterWindow(activePanel);
-    entry
-      ..activePanel = null
-      ..panels = <WorkspacePanelId>[]
-      ..reserved = false;
+    _assign(entry, activePanel: null, panels: const <WorkspacePanelId>[]);
   }
 
   Future<List<WorkspacePanelId>> reconcile() async {

@@ -32,6 +32,7 @@ class _WatchPanelState extends State<_WatchPanel> {
     rowHeight: 44,
   );
   final FocusNode _tableFocus = FocusNode(debugLabel: 'watch-table');
+  final ScrollController _horizontalScrollController = ScrollController();
   final Set<String> _selectedWatchKeys = <String>{};
   final Set<int> _selectedColumns = <int>{};
   final Set<int> _hiddenColumns = <int>{};
@@ -46,23 +47,9 @@ class _WatchPanelState extends State<_WatchPanel> {
 
   @override
   void dispose() {
+    _horizontalScrollController.dispose();
     _tableFocus.dispose();
     super.dispose();
-  }
-
-  void _beginTableResize() {
-    _tableLayout.beginResize();
-  }
-
-  void _resizeTable(Offset delta) {
-    if (_tableLayout.resizeAll(
-      delta,
-      columnScale: 0.85,
-      rowScale: 0.85,
-      minimumRowHeight: 40,
-    )) {
-      setState(() {});
-    }
   }
 
   void _resizeColumn(int index, double delta) {
@@ -366,91 +353,81 @@ class _WatchPanelState extends State<_WatchPanel> {
                     focusNode: _tableFocus,
                     child: LayoutBuilder(
                       builder: (context, constraints) {
-                        final width = math.max(
-                          _tableWidth,
-                          constraints.maxWidth,
-                        );
-                        return SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: SizedBox(
-                            key: const ValueKey('watch-table-content'),
-                            width: width,
-                            height: constraints.maxHeight,
-                            child: Column(
-                              children: [
-                                _WatchTableHeader(
-                                  columnWidths: _columnWidths,
-                                  hiddenColumns: _hiddenColumns,
-                                  selectedColumns: _selectedColumns,
-                                  onResizeColumn: _resizeColumn,
-                                  onSelectColumn: _selectColumn,
-                                  onContextMenu: _showHeaderContextMenu,
-                                ),
-                                Expanded(
-                                  child: DecoratedBox(
-                                    decoration: const BoxDecoration(
-                                      color: TalColors.input,
-                                      border: Border(
-                                        left: BorderSide(
-                                          color: TalColors.border,
-                                        ),
-                                        right: BorderSide(
-                                          color: TalColors.border,
-                                        ),
-                                        bottom: BorderSide(
-                                          color: TalColors.border,
-                                        ),
-                                      ),
-                                    ),
-                                    child: _RightDragResizeRegion(
-                                      key: const ValueKey(
-                                        'watch-table-resize-region',
-                                      ),
-                                      onResizeStart: _beginTableResize,
-                                      onResize: _resizeTable,
-                                      canStartAt: _canStartTableResize,
-                                      child: controller.watches.isEmpty
-                                          ? const SizedBox.expand()
-                                          : ListView.builder(
-                                              itemCount:
-                                                  controller.watches.length,
-                                              itemBuilder: (context, index) =>
-                                                  _WatchRow(
-                                                    controller: controller,
-                                                    watch: controller
-                                                        .watches[index],
-                                                    columnWidths: _columnWidths,
-                                                    hiddenColumns:
-                                                        _hiddenColumns,
-                                                    selectedColumns:
-                                                        _selectedColumns,
-                                                    rowHeight: _rowHeight,
-                                                    selected: _selectedWatchKeys
-                                                        .contains(
-                                                          controller
-                                                              .watches[index]
-                                                              .symbol
-                                                              .key,
-                                                        ),
-                                                    onSelect: _selectWatch,
-                                                    onNameContextMenu:
-                                                        _showNameContextMenu,
-                                                    onPlotContextMenu:
-                                                        _showPlotContextMenu,
-                                                    key: ValueKey<String>(
-                                                      controller
-                                                          .watches[index]
-                                                          .symbol
-                                                          .key,
-                                                    ),
-                                                  ),
-                                            ),
-                                    ),
-                                  ),
-                                ),
-                              ],
+                        return _ResizableTableViewport(
+                          layout: _tableLayout,
+                          contentWidth: _tableWidth,
+                          horizontalController: _horizontalScrollController,
+                          contentKey: const ValueKey('watch-table-content'),
+                          resizeRegionKey: const ValueKey(
+                            'watch-table-resize-region',
+                          ),
+                          minimumRowHeight: 40,
+                          canStartResizeAt: _canStartTableResize,
+                          onLayoutChanged: () => setState(() {}),
+                          bodyDecoration: const BoxDecoration(
+                            color: TalColors.input,
+                            border: Border(
+                              left: BorderSide(color: TalColors.border),
+                              right: BorderSide(color: TalColors.border),
+                              bottom: BorderSide(color: TalColors.border),
                             ),
                           ),
+                          header: _WatchTableHeader(
+                            columnWidths: _columnWidths,
+                            hiddenColumns: _hiddenColumns,
+                            selectedColumns: _selectedColumns,
+                            onResizeColumn: _resizeColumn,
+                            onSelectColumn: _selectColumn,
+                            onContextMenu: _showHeaderContextMenu,
+                          ),
+                          body: controller.watches.isEmpty
+                              ? const SizedBox.expand()
+                              : ReorderableListView.builder(
+                                  buildDefaultDragHandles: false,
+                                  proxyDecorator: (child, index, animation) {
+                                    final horizontalOffset =
+                                        _horizontalScrollController.hasClients
+                                        ? _horizontalScrollController.offset
+                                        : 0.0;
+                                    return ClipRect(
+                                      key: const ValueKey('watch-drag-proxy'),
+                                      clipper: _WatchDragProxyClipper(
+                                        left: horizontalOffset,
+                                        width: constraints.maxWidth,
+                                      ),
+                                      child: Material(
+                                        color: Colors.transparent,
+                                        child: child,
+                                      ),
+                                    );
+                                  },
+                                  itemCount: controller.watches.length,
+                                  onReorderItem: controller.reorderWatch,
+                                  itemBuilder: (context, index) {
+                                    final watch = controller.watches[index];
+                                    return ReorderableDelayedDragStartListener(
+                                      key: ValueKey<String>(
+                                        'watch-reorder-${watch.symbol.key}',
+                                      ),
+                                      index: index,
+                                      child: _WatchRow(
+                                        key: ValueKey<String>(watch.symbol.key),
+                                        controller: controller,
+                                        watch: watch,
+                                        columnWidths: _columnWidths,
+                                        hiddenColumns: _hiddenColumns,
+                                        selectedColumns: _selectedColumns,
+                                        rowHeight: _rowHeight,
+                                        selected: _selectedWatchKeys.contains(
+                                          watch.symbol.key,
+                                        ),
+                                        onSelect: _selectWatch,
+                                        onNameContextMenu: _showNameContextMenu,
+                                        onPlotContextMenu: _showPlotContextMenu,
+                                      ),
+                                    );
+                                  },
+                                ),
                         );
                       },
                     ),
@@ -462,7 +439,7 @@ class _WatchPanelState extends State<_WatchPanel> {
                 children: [
                   const Expanded(
                     child: Text(
-                      '从左侧符号层级中选择变量，然后加入实时调参。',
+                      '从左侧符号层级中选择变量并加入实时调参；长按变量行可拖拽排序。',
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: talMuted,
@@ -482,6 +459,25 @@ class _WatchPanelState extends State<_WatchPanel> {
         );
       },
     );
+  }
+}
+
+class _WatchDragProxyClipper extends CustomClipper<Rect> {
+  const _WatchDragProxyClipper({required this.left, required this.width});
+
+  final double left;
+  final double width;
+
+  @override
+  Rect getClip(Size size) {
+    final clipLeft = left.clamp(0.0, size.width);
+    final clipRight = (clipLeft + width).clamp(clipLeft, size.width);
+    return Rect.fromLTRB(clipLeft, 0, clipRight, size.height);
+  }
+
+  @override
+  bool shouldReclip(covariant _WatchDragProxyClipper oldClipper) {
+    return oldClipper.left != left || oldClipper.width != width;
   }
 }
 
@@ -783,12 +779,6 @@ class _WatchCell extends StatelessWidget {
         _ContextMenuRequest(
           globalPosition: details.globalPosition,
           touchOptimized: false,
-        ),
-      ),
-      onLongPressStart: (details) => callback(
-        _ContextMenuRequest(
-          globalPosition: details.globalPosition,
-          touchOptimized: true,
         ),
       ),
       child: cell,

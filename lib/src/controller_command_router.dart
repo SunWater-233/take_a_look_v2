@@ -87,6 +87,12 @@ Future<JsonObject> executeControllerCommand(
       controller.removeWatch(arguments as String);
     case ControllerCommand.removeWatches:
       controller.removeWatches((arguments as List).cast<String>());
+    case ControllerCommand.reorderWatch:
+      final values = Map<String, Object?>.from(arguments! as Map);
+      controller.reorderWatch(
+        values['oldIndex'] as int,
+        values['newIndex'] as int,
+      );
     case ControllerCommand.clearWatches:
       controller.clearWatches();
     case ControllerCommand.toggleWatchPlot:

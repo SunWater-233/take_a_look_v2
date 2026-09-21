@@ -76,7 +76,7 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('watch menus use larger touch targets on long press', (
+  testWidgets('watch header menu uses larger touch targets on long press', (
     tester,
   ) async {
     final controller = await pumpWatchTable(tester);
@@ -102,21 +102,6 @@ void main() {
           .first,
     );
     expect(headerItem.height, 48);
-    await tester.tapAt(const Offset(790, 510));
-    await tester.pumpAndSettle();
-
-    await longPress(find.text('iq_ref'));
-    expect(find.text('移除该变量'), findsOneWidget);
-    final rowItem = tester.widget<PopupMenuItem<String>>(
-      find
-          .ancestor(
-            of: find.text('移除该变量'),
-            matching: find.byType(PopupMenuItem<String>),
-          )
-          .first,
-    );
-    expect(rowItem.height, 48);
-
     controller.dispose();
     await tester.pumpWidget(const SizedBox.shrink());
   });

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
 import 'package:tal_drag_preview/tal_drag_preview.dart';
 import 'package:window_manager/window_manager.dart';
@@ -96,6 +97,10 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
               widget.secondaryWindowRole == SecondaryWindowRole.dragPreview
               ? _hideTabDragPreview
               : null,
+          onGetWindowBounds:
+              widget.secondaryWindowRole == SecondaryWindowRole.detachedPanel
+              ? _getDetachedWindowBounds
+              : null,
         ),
       );
     }
@@ -180,6 +185,12 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
     _tabDragPreviewVisible = false;
     await windowManager.setAlwaysOnTop(false);
     await windowManager.hide();
+  }
+
+  Future<Rect> _getDetachedWindowBounds() async {
+    final position = await windowManager.getPosition();
+    final size = await windowManager.getSize();
+    return position & size;
   }
 
   bool _isCurrentTabDragPreview(int session) =>
@@ -487,6 +498,11 @@ class DetachedPanelWindow extends StatefulWidget {
 
 class _DetachedPanelWindowState extends State<DetachedPanelWindow> {
   late WorkspacePanelId activePanel;
+  WorkspacePanelId? _draggedPanel;
+  Offset? _dragWindowOrigin;
+  Offset? _lastDragPosition;
+  String? _sourceWindowId;
+  Future<void> _dragCommands = Future<void>.value();
 
   List<WorkspacePanelId> get groupPanels =>
       widget.panels.isEmpty ? <WorkspacePanelId>[widget.panel] : widget.panels;
@@ -511,22 +527,25 @@ class _DetachedPanelWindowState extends State<DetachedPanelWindow> {
   @override
   Widget build(BuildContext context) {
     final panels = groupPanels;
-    final chrome = panels.length > 1
-        ? PanelChrome(
-            tabs: List.unmodifiable(panels),
-            activePanel: activePanel,
-            highlighted: false,
-            onSelect: (panel) => setState(() => activePanel = panel),
-            onFloat: () {},
-            onClose: () {},
-            onSeparate: () {},
-            onDragStart: (_) {},
-            onDragUpdate: (_) {},
-            onDragEnd: (_) {},
-            showActions: false,
-            draggable: false,
-          )
-        : null;
+    final chrome = PanelChrome(
+      tabs: List.unmodifiable(panels),
+      activePanel: activePanel,
+      highlighted: false,
+      onSelect: (panel) => setState(() => activePanel = panel),
+      onFloat: () {},
+      onClose: () {},
+      onSeparate: () {},
+      onDragStart: (_) => _startPanelDrag(activePanel),
+      onDragUpdate: _updatePanelDrag,
+      onDragEnd: (_) => _endPanelDrag(),
+      showActions: false,
+      draggable: panels.length == 1,
+      groupId: 'detached-window',
+      tabsDraggable: panels.length > 1,
+      onTabDragStart: (data) => _startPanelDrag(data.panel),
+      onTabDragUpdate: (_, details) => _updatePanelDrag(details),
+      onTabDragEnd: (_, _) => _endPanelDrag(),
+    );
     return Scaffold(
       body: Column(
         children: [
@@ -548,5 +567,81 @@ class _DetachedPanelWindowState extends State<DetachedPanelWindow> {
         ],
       ),
     );
+  }
+
+  void _startPanelDrag(WorkspacePanelId panel) {
+    _draggedPanel = panel;
+    _dragWindowOrigin = null;
+    _lastDragPosition = null;
+    _sourceWindowId = null;
+    final previewSize = context.size ?? panel.preferredWindowSize;
+    _dragCommands = () async {
+      final window = await WindowController.fromCurrentEngine();
+      final origin = await windowManager.getPosition();
+      if (_draggedPanel != panel) return;
+      _sourceWindowId = window.windowId;
+      _dragWindowOrigin = origin;
+      await sendDetachedTabDrag(
+        phase: DetachedTabDragPhase.start,
+        windowId: window.windowId,
+        panel: panel,
+        previewSize: previewSize,
+      );
+    }();
+  }
+
+  void _updatePanelDrag(DragUpdateDetails details) {
+    final panel = _draggedPanel;
+    if (panel == null) return;
+    _lastDragPosition = details.globalPosition;
+    _queueDragCommand(() async {
+      final windowId = _sourceWindowId;
+      final origin = _dragWindowOrigin;
+      final localPosition = _lastDragPosition;
+      if (windowId == null || origin == null || localPosition == null) return;
+      await sendDetachedTabDrag(
+        phase: DetachedTabDragPhase.update,
+        windowId: windowId,
+        panel: panel,
+        screenPosition: origin + localPosition,
+      );
+    });
+  }
+
+  void _endPanelDrag() {
+    final panel = _draggedPanel;
+    if (panel == null) return;
+    final localPosition = _lastDragPosition;
+    _queueDragCommand(() async {
+      final windowId = _sourceWindowId;
+      final origin = _dragWindowOrigin;
+      if (windowId == null) return;
+      await sendDetachedTabDrag(
+        phase: DetachedTabDragPhase.end,
+        windowId: windowId,
+        panel: panel,
+        screenPosition: origin != null && localPosition != null
+            ? origin + localPosition
+            : null,
+      );
+      if (_draggedPanel == panel) {
+        _draggedPanel = null;
+        _dragWindowOrigin = null;
+        _lastDragPosition = null;
+        _sourceWindowId = null;
+      }
+    });
+  }
+
+  void _queueDragCommand(Future<void> Function() command) {
+    final previous = _dragCommands;
+    _dragCommands = () async {
+      try {
+        await previous;
+        await command();
+      } on Object {
+        // Losing drag feedback must not break the detached panel itself.
+      }
+    }();
   }
 }

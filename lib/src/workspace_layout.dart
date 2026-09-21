@@ -9,16 +9,21 @@ class WorkspaceGroup {
   WorkspaceGroup({
     required this.id,
     required List<WorkspacePanelId> panels,
-    required this.activePanel,
+    required WorkspacePanelId activePanel,
     required this.rect,
     required this.z,
-  }) : panels = List.of(panels);
+  }) : panels = List.of(panels),
+       _activePanel = ValueNotifier<WorkspacePanelId>(activePanel);
 
   final String id;
   final List<WorkspacePanelId> panels;
-  WorkspacePanelId activePanel;
+  final ValueNotifier<WorkspacePanelId> _activePanel;
   Rect rect;
   int z;
+
+  WorkspacePanelId get activePanel => _activePanel.value;
+  set activePanel(WorkspacePanelId value) => _activePanel.value = value;
+  ValueNotifier<WorkspacePanelId> get activePanelListenable => _activePanel;
 
   Map<String, dynamic> toJson() => {
     'id': id,

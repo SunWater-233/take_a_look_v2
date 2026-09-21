@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'chart.dart';
+import 'chart/cartesian_renderer.dart';
 import 'controller.dart';
 import 'models.dart';
 import 'panel_types.dart';

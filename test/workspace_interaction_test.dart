@@ -699,6 +699,41 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(1600, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
+    const createChannel = MethodChannel('mixin.one/desktop_multi_window');
+    const windowChannel = MethodChannel(
+      'mixin.one/window_controller/newly_opened_panel_window',
+    );
+    const channelsChannel = MethodChannel(
+      'mixin.one/desktop_multi_window/channels',
+    );
+    Map<String, dynamic>? assignedPanel;
+    var windowWasShown = false;
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(createChannel, (call) async {
+      if (call.method == 'createWindow') return 'newly_opened_panel_window';
+      if (call.method == 'window_show') windowWasShown = true;
+      if (call.method == 'getAllWindows') return <Map<String, dynamic>>[];
+      return null;
+    });
+    messenger.setMockMethodCallHandler(windowChannel, (call) async => null);
+    messenger.setMockMethodCallHandler(channelsChannel, (call) async {
+      if (call.method == 'invokeMethod') {
+        final arguments = Map<String, dynamic>.from(call.arguments as Map);
+        if (arguments['method'] == configureDetachedPanelMethod) {
+          assignedPanel = Map<String, dynamic>.from(
+            arguments['arguments'] as Map,
+          );
+        }
+      }
+      return null;
+    });
+    addTearDown(() {
+      messenger.setMockMethodCallHandler(createChannel, null);
+      messenger.setMockMethodCallHandler(windowChannel, null);
+      messenger.setMockMethodCallHandler(channelsChannel, null);
+    });
+
     final controller = TakeALookController();
     final initialLogCount = controller.logs.length;
     final workspaceKey = GlobalKey<DockingWorkspaceState>();
@@ -776,10 +811,48 @@ void main() {
     await tester.pump();
     expect(find.byType(TalPanelFrame), findsNWidgets(3));
 
-    await workspaceKey.currentState!.showPanel(WorkspacePanelId.header);
+    await tester.runAsync(
+      () => workspaceKey.currentState!.showPanel(WorkspacePanelId.header),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(TalPanelFrame), findsNWidgets(3));
+    expect(windowWasShown, isTrue);
+    final launch = detachedPanelLaunchFromJson(assignedPanel);
+    expect(launch, isNotNull);
+    expect(launch!.groupPanels, [WorkspacePanelId.header]);
+    expect(launch.initialSize, WorkspacePanelId.header.preferredWindowSize);
+    expect(
+      workspaceKey.currentState!.isPanelVisible(WorkspacePanelId.header),
+      isTrue,
+    );
+    expect(controller.logs, hasLength(initialLogCount));
+
+    windowSync.reportDetachedWindowReleased('newly_opened_panel_window');
+    await tester.pumpAndSettle();
+    expect(find.byType(TalPanelFrame), findsNWidgets(3));
+    expect(
+      workspaceKey.currentState!.isPanelVisible(WorkspacePanelId.header),
+      isFalse,
+    );
+
+    workspaceKey.currentState!.resetLayout();
     await tester.pump();
     expect(find.byType(TalPanelFrame), findsNWidgets(4));
-    expect(controller.logs, hasLength(initialLogCount));
+
+    final resetHeaderGroup = find.byKey(
+      const ValueKey('workspace-group-header'),
+    );
+    final resetHeaderSplitButton = find.descendant(
+      of: resetHeaderGroup,
+      matching: find.byIcon(Icons.call_split),
+    );
+    final resetHeaderSplitControl = find.ancestor(
+      of: resetHeaderSplitButton,
+      matching: find.byType(IconButton),
+    );
+    tester.widget<IconButton>(resetHeaderSplitControl).onPressed!();
+    await tester.pump();
+    expect(find.byType(TalPanelFrame), findsNWidgets(5));
 
     controller.setUiScale(1.25);
     await tester.runAsync(workspaceKey.currentState!.saveLayout);
@@ -799,13 +872,14 @@ void main() {
     );
     tester.widget<IconButton>(restoredHideControl).onPressed!();
     await tester.pump();
-    expect(find.byType(TalPanelFrame), findsNWidgets(3));
+    expect(find.byType(TalPanelFrame), findsNWidgets(4));
 
     await tester.runAsync(workspaceKey.currentState!.restoreLayout);
     await tester.pump();
-    expect(find.byType(TalPanelFrame), findsNWidgets(4));
+    expect(find.byType(TalPanelFrame), findsNWidgets(5));
     expect(controller.uiScale, 1.25);
 
+    await windowSync.dispose();
     controller.dispose();
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(milliseconds: 50));

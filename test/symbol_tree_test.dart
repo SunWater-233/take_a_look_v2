@@ -38,20 +38,18 @@ void main() {
     expect(find.byType(Checkbox), findsNothing);
 
     await tester.tap(
-      find.byKey(const ValueKey('symbol-tree-toggle-source/control')),
+      find.byKey(const ValueKey('symbol-tree-row-source/control')),
     );
     await tester.pump();
     expect(find.text('foc_current.c'), findsOneWidget);
     expect(find.text('iq_ref'), findsNothing);
+    expect(controller.selectedSymbols, isEmpty);
 
-    await tester.tap(
-      find.byKey(
-        const ValueKey('symbol-tree-toggle-source/control/foc_current.c'),
-      ),
-    );
+    await tester.tap(find.text('foc_current.c'));
     await tester.pump();
     expect(find.text('iq_ref'), findsOneWidget);
     expect(find.text('.bss'), findsWidgets);
+    expect(controller.selectedSymbols, isEmpty);
 
     await tester.tap(
       find.byKey(
@@ -66,12 +64,10 @@ void main() {
       ),
     );
     await tester.pump();
-    await tester.tap(find.text('iq_ref'));
+    await tester.tap(find.text('id_ref'));
     await tester.pump();
-    expect(controller.selectedSymbols, contains(demoSymbols.first.key));
+    expect(controller.selectedSymbols, contains(demoSymbols[1].key));
 
-    await tester.tap(find.text('foc_current.c'));
-    await tester.pump();
     await tester.tap(find.text('iq_ref'));
     await tester.pump(const Duration(milliseconds: 50));
     await tester.tap(find.text('iq_ref'));
@@ -81,7 +77,8 @@ void main() {
 
     await tester.tap(find.text('control'));
     await tester.pump();
-    expect(controller.selectedSymbols, hasLength(4));
+    expect(find.text('foc_current.c'), findsNothing);
+    expect(controller.selectedSymbols, isEmpty);
 
     controller.dispose();
     await tester.pumpWidget(const SizedBox.shrink());
@@ -191,6 +188,52 @@ void main() {
     expect(searchField.focusNode!.hasFocus, isTrue);
     expect(searchField.controller!.text, 'speed_rpm');
 
+    controller.dispose();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
+  testWidgets('symbol tree expansion survives switching workspace tabs', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1600, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final controller = TakeALookController()..loadDemoSymbols();
+    final windowSync = MainWindowSync(controller);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTalTheme(),
+        home: Scaffold(
+          body: DockingWorkspace(
+            controller: controller,
+            windowSync: windowSync,
+          ),
+        ),
+      ),
+    );
+    final sideGroup = find.byKey(const ValueKey('workspace-group-symbols'));
+    Finder tab(WorkspacePanelId panel) => find.descendant(
+      of: sideGroup,
+      matching: find.byKey(ValueKey('panel-tab-${panel.name}')),
+    );
+
+    await tester.tap(find.text('control'));
+    await tester.pump();
+    await tester.tap(find.text('foc_current.c'));
+    await tester.pump();
+    expect(find.text('iq_ref'), findsOneWidget);
+
+    await tester.tap(tab(WorkspacePanelId.watch));
+    await tester.pump();
+    expect(find.text('iq_ref'), findsNothing);
+
+    await tester.tap(tab(WorkspacePanelId.symbols));
+    await tester.pump();
+    expect(find.text('foc_current.c'), findsOneWidget);
+    expect(find.text('iq_ref'), findsOneWidget);
+    expect(controller.selectedSymbols, isEmpty);
+
+    await windowSync.dispose();
     controller.dispose();
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();

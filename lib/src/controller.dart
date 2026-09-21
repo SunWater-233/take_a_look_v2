@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'backend_client.dart';
+import 'analysis.dart';
 import 'controller_command_router.dart';
 import 'controller_signals.dart';
 import 'controller_state.dart';
@@ -20,6 +21,7 @@ part 'controller_snapshot.dart';
 part 'controller_telemetry.dart';
 part 'controller_connection.dart';
 part 'controller_plot.dart';
+part 'controller_analysis.dart';
 part 'controller_watch.dart';
 
 typedef RemoteCommand =
@@ -140,6 +142,7 @@ class TakeALookController extends ChangeNotifier {
   set plotInvertX(bool value) => state.plot.invertX = value;
   bool get plotInvertY => state.plot.invertY;
   set plotInvertY(bool value) => state.plot.invertY = value;
+  AnalysisSession get analysisSession => state.analysis;
 
   List<SymbolItem> get symbols => List.unmodifiable(_symbols);
   int get symbolRevision => _symbolRevision;
@@ -157,6 +160,7 @@ class TakeALookController extends ChangeNotifier {
   Listenable get telemetryChanges => signals.telemetry;
   Listenable get plotChanges => signals.plot;
   Listenable get plotControlChanges => signals.plotControls;
+  Listenable get analysisChanges => signals.analysis;
   Listenable get clockChanges => signals.clock;
   Listenable get logChanges => signals.logs;
   Listenable get stateSyncChanges => signals.stateSync;

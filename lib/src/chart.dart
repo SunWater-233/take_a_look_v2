@@ -4,6 +4,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import 'chart/axis_settings.dart';
+import 'chart/cartesian_renderer.dart';
 import 'chart/desktop_axis_menu.dart';
 import 'chart/painter.dart';
 import 'chart/selection_painter.dart';
@@ -262,19 +263,15 @@ class _TelemetryChartState extends State<TelemetryChart> {
         (!controller.plotMouseXEnabled && !controller.plotMouseYEnabled)) {
       return;
     }
-    final plot = telemetryPlotRect(_size);
     final viewport = telemetryViewport(controller, _size);
+    final mapping = _mappingFor(viewport);
     final scale = event.scrollDelta.dy > 0 ? 1.15 : 1 / 1.15;
     var xMin = viewport.xMin;
     var xMax = viewport.xMax;
     var yMin = viewport.yMin;
     var yMax = viewport.yMax;
     if (controller.plotMouseXEnabled) {
-      var fraction = ((event.localPosition.dx - plot.left) / plot.width).clamp(
-        0.0,
-        1.0,
-      );
-      if (controller.plotInvertX) fraction = 1 - fraction;
+      final fraction = mapping.xFractionAt(event.localPosition.dx);
       final anchor = viewport.xMin + viewport.xSpan * fraction;
       final span = (viewport.xSpan * scale).clamp(0.2, 120).toDouble();
       xMin = anchor - span * fraction;
@@ -290,9 +287,7 @@ class _TelemetryChartState extends State<TelemetryChart> {
       }
     }
     if (controller.plotMouseYEnabled) {
-      var fraction = (1 - (event.localPosition.dy - plot.top) / plot.height)
-          .clamp(0.0, 1.0);
-      if (controller.plotInvertY) fraction = 1 - fraction;
+      final fraction = mapping.yFractionAt(event.localPosition.dy);
       final anchor = viewport.yMin + viewport.ySpan * fraction;
       final span = math.max(1e-9, viewport.ySpan * scale);
       yMin = anchor - span * fraction;
@@ -307,42 +302,34 @@ class _TelemetryChartState extends State<TelemetryChart> {
   }
 
   void _applyZoomSelection(Rect selection) {
-    final plot = telemetryPlotRect(_size);
     if (selection.width < 5 || selection.height < 5) return;
     final viewport = telemetryViewport(controller, _size);
-    var leftFraction = ((selection.left - plot.left) / plot.width).clamp(
-      0.0,
-      1.0,
-    );
-    var rightFraction = ((selection.right - plot.left) / plot.width).clamp(
-      0.0,
-      1.0,
-    );
-    var topFraction = (1 - (selection.top - plot.top) / plot.height).clamp(
-      0.0,
-      1.0,
-    );
-    var bottomFraction = (1 - (selection.bottom - plot.top) / plot.height)
-        .clamp(0.0, 1.0);
-    if (controller.plotInvertX) {
-      final oldLeft = leftFraction;
-      leftFraction = 1 - rightFraction;
-      rightFraction = 1 - oldLeft;
-    }
-    if (controller.plotInvertY) {
-      final oldTop = topFraction;
-      topFraction = 1 - bottomFraction;
-      bottomFraction = 1 - oldTop;
-    }
-    final xMin = viewport.xMin + viewport.xSpan * leftFraction;
-    final xMax = viewport.xMin + viewport.xSpan * rightFraction;
-    final yMin = viewport.yMin + viewport.ySpan * bottomFraction;
-    final yMax = viewport.yMin + viewport.ySpan * topFraction;
+    final mapping = _mappingFor(viewport);
+    final firstX = mapping.unmapX(selection.left);
+    final secondX = mapping.unmapX(selection.right);
+    final firstY = mapping.unmapY(selection.top);
+    final secondY = mapping.unmapY(selection.bottom);
+    final xMin = math.min(firstX, secondX);
+    final xMax = math.max(firstX, secondX);
+    final yMin = math.min(firstY, secondY);
+    final yMax = math.max(firstY, secondY);
     controller.setPlotViewport(
       xMin: controller.plotMouseXEnabled ? xMin : viewport.xMin,
       xMax: controller.plotMouseXEnabled ? xMax : viewport.xMax,
       yMin: controller.plotMouseYEnabled ? yMin : null,
       yMax: controller.plotMouseYEnabled ? yMax : null,
+    );
+  }
+
+  CartesianPlotViewport _mappingFor(TelemetryViewport viewport) {
+    return CartesianPlotViewport(
+      plot: viewport.plot,
+      xMin: viewport.xMin,
+      xMax: viewport.xMax,
+      yMin: viewport.yMin,
+      yMax: viewport.yMax,
+      invertX: controller.plotInvertX,
+      invertY: controller.plotInvertY,
     );
   }
 
@@ -512,6 +499,7 @@ class _TelemetryChartState extends State<TelemetryChart> {
             ? controller.plotMouseXEnabled
             : controller.plotMouseYEnabled,
         inverted: xAxis ? controller.plotInvertX : controller.plotInvertY,
+        minimumAllowed: xAxis ? 0 : null,
       ),
     );
     if (!mounted || result == null) return;

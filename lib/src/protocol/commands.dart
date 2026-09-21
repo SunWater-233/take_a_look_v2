@@ -43,6 +43,7 @@ enum ControllerCommand {
   setOnlyWatchesPlotted,
   setAllWatchesPlotted,
   invertWatchPlots,
+  updateAnalysisSession,
   setWatches,
   writeWatch;
 
@@ -177,6 +178,7 @@ class BackendCommandMapper {
       case ControllerCommand.setOnlyWatchesPlotted:
       case ControllerCommand.setAllWatchesPlotted:
       case ControllerCommand.invertWatchPlots:
+      case ControllerCommand.updateAnalysisSession:
         return null;
     }
   }

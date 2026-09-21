@@ -74,6 +74,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
           },
       ],
       'logs': [for (final entry in _logs) entry.toJson()],
+      'analysisSession': analysisSession.toJson(includeData: includeSamples),
     };
   }
 
@@ -150,6 +151,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
         data.containsKey('selectedSymbols') || data.containsKey('symbols');
     final hasWatchState = data.containsKey('watches');
     final hasElapsedState = data.containsKey('elapsedSeconds');
+    final hasAnalysisState = data.containsKey('analysisSession');
     final hasPlotState =
         hasWatchState ||
         hasElapsedState ||
@@ -326,6 +328,11 @@ extension TakeALookControllerSnapshot on TakeALookController {
           }),
         );
     }
+    if (hasAnalysisState) {
+      analysisSession.applyJson(
+        Map<String, dynamic>.from(data['analysisSession']! as Map),
+      );
+    }
     if (hasPlotState) {
       _frozenPlotEndSeconds = plottingPaused || !followLatest
           ? (data['plotWindowEndSeconds'] as num?)?.toDouble() ?? elapsedSeconds
@@ -347,6 +354,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
       if (hasPlotState) signals.plot,
       if (hasPlotState) signals.plotControls,
       if (data.containsKey('logs')) signals.logs,
+      if (hasAnalysisState) signals.analysis,
     ], sync: false);
   }
 }

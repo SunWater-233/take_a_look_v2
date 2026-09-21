@@ -26,6 +26,7 @@ class AxisSettingsDraft {
     required double maximum,
     required this.mouseEnabled,
     required this.inverted,
+    this.minimumAllowed,
     String Function(double value)? format,
   }) : minimumController = TextEditingController(
          text: (format ?? _defaultFormat)(minimum),
@@ -37,6 +38,7 @@ class AxisSettingsDraft {
   bool automatic;
   bool mouseEnabled;
   bool inverted;
+  final double? minimumAllowed;
   final TextEditingController minimumController;
   final TextEditingController maximumController;
   String? errorText;
@@ -49,8 +51,10 @@ class AxisSettingsDraft {
         !minimum.isFinite ||
         !maximum.isFinite ||
         maximum <= minimum ||
-        (xAxis && minimum < 0)) {
-      errorText = xAxis ? '请输入有效范围，且 X 轴最小值不能小于 0。' : '请输入有效范围，最大值必须大于最小值。';
+        (minimumAllowed != null && minimum < minimumAllowed!)) {
+      errorText = minimumAllowed == null
+          ? '请输入有效范围，最大值必须大于最小值。'
+          : '请输入有效范围，且最小值不能小于 ${_defaultFormat(minimumAllowed!)}。';
       return null;
     }
     errorText = null;
@@ -79,6 +83,7 @@ class PlotAxisSettingsDialog extends StatefulWidget {
     required this.maximum,
     required this.mouseEnabled,
     required this.inverted,
+    this.minimumAllowed,
     super.key,
   });
 
@@ -88,6 +93,7 @@ class PlotAxisSettingsDialog extends StatefulWidget {
   final double maximum;
   final bool mouseEnabled;
   final bool inverted;
+  final double? minimumAllowed;
 
   @override
   State<PlotAxisSettingsDialog> createState() => PlotAxisSettingsDialogState();
@@ -115,6 +121,7 @@ class PlotAxisSettingsDialogState extends State<PlotAxisSettingsDialog> {
       maximum: widget.maximum,
       mouseEnabled: widget.mouseEnabled,
       inverted: widget.inverted,
+      minimumAllowed: widget.minimumAllowed,
     );
   }
 

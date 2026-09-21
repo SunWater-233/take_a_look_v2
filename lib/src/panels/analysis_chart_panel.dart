@@ -19,71 +19,6 @@ Rect _analysisPlotRect(Size size) => Rect.fromLTRB(
   math.max(13, size.height - 32),
 );
 
-class _AnalysisPoint {
-  const _AnalysisPoint(this.x, this.y);
-
-  final double x;
-  final double y;
-}
-
-class _AnalysisSeries {
-  const _AnalysisSeries({
-    required this.name,
-    required this.color,
-    required this.points,
-  });
-
-  final String name;
-  final Color color;
-  final List<_AnalysisPoint> points;
-}
-
-class _AnalysisStats {
-  const _AnalysisStats({
-    required this.count,
-    required this.minimum,
-    required this.maximum,
-    required this.average,
-  });
-
-  final int count;
-  final double minimum;
-  final double maximum;
-  final double average;
-}
-
-final Expando<_AnalysisChartSession> _analysisChartSessions =
-    Expando<_AnalysisChartSession>('analysis-chart-session');
-
-/// State that belongs to an analysis session rather than one mounted panel.
-/// Workspace tab switches rebuild panel widgets, so keeping this data here
-/// lets the analysis resume exactly where the user left it.
-class _AnalysisChartSession {
-  final ResizableTableLayout statsTableLayout = ResizableTableLayout(
-    widths: const [180, 90, 110, 110, 110, 110, 92],
-    minimumWidths: const [100, 70, 80, 80, 80, 80, 72],
-    rowHeight: 32,
-  );
-
-  double statsHeight = 164;
-  double statsHorizontalOffset = 0;
-  List<_AnalysisSeries> series = const [];
-  List<bool> seriesVisibility = const [];
-  final Set<int> selectedColumns = <int>{};
-  final Set<int> hiddenColumns = <int>{};
-  int? selectedSeriesIndex;
-  int? selectedCellColumn;
-  String sourceLabel = '';
-  double? selectionStart;
-  double? selectionEnd;
-  double? viewXMin;
-  double? viewXMax;
-  double? viewYMin;
-  double? viewYMax;
-  (double, double, double, double)? dataBounds;
-  List<_AnalysisStats?> selectionStats = const [];
-}
-
 class _AnalysisChartPanel extends StatefulWidget {
   const _AnalysisChartPanel({required this.controller});
 
@@ -94,30 +29,37 @@ class _AnalysisChartPanel extends StatefulWidget {
 }
 
 class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
-  late final _AnalysisChartSession _session;
+  final MenuController _plotMenuController = MenuController();
+  late AnalysisSession _session;
+  late final ResizableTableLayout _statsTableLayout;
   late final ScrollController _statsHorizontalScrollController;
   final ValueNotifier<int> _chartChanges = ValueNotifier<int>(0);
   final ValueNotifier<int> _statsChanges = ValueNotifier<int>(0);
+  Object? _fftCacheKey;
+  AnalysisSpectrum? _fftCache;
   double? _dragStartX;
   Offset? _lastPanPosition;
   Offset? _lastRightZoomPosition;
+  Offset? _rightZoomStartPosition;
   Offset? _rightZoomAnchorFraction;
+  Rect? _rectangleZoom;
+  Offset? _rectangleZoomStart;
+  bool _rightZoomMoved = false;
   bool _selectionDragging = false;
   bool _middleDragging = false;
   bool _rightZoomDragging = false;
+  TalMenuAnimationLease? _plotMenuAnimationLease;
+  PointerDeviceKind _lastPlotPointerKind = PointerDeviceKind.mouse;
 
   TakeALookController get controller => widget.controller;
-  ResizableTableLayout get _statsTableLayout => _session.statsTableLayout;
   double get _statsHeight => _session.statsHeight;
   set _statsHeight(double value) => _session.statsHeight = value;
-  List<_AnalysisSeries> get _series => _session.series;
-  set _series(List<_AnalysisSeries> value) => _session.series = value;
+  List<AnalysisSeries> get _series => _session.series;
   List<bool> get _seriesVisibility => _session.seriesVisibility;
   set _seriesVisibility(List<bool> value) => _session.seriesVisibility = value;
   Set<int> get _selectedColumns => _session.selectedColumns;
   Set<int> get _hiddenColumns => _session.hiddenColumns;
   String get _sourceLabel => _session.sourceLabel;
-  set _sourceLabel(String value) => _session.sourceLabel = value;
   double? get _selectionStart => _session.selectionStart;
   set _selectionStart(double? value) => _session.selectionStart = value;
   double? get _selectionEnd => _session.selectionEnd;
@@ -130,14 +72,54 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
   set _viewYMin(double? value) => _session.viewYMin = value;
   double? get _viewYMax => _session.viewYMax;
   set _viewYMax(double? value) => _session.viewYMax = value;
+  AnalysisMouseMode get _mouseMode => _session.mouseMode;
+  set _mouseMode(AnalysisMouseMode value) => _session.mouseMode = value;
+  bool get _mouseXEnabled => _session.mouseXEnabled;
+  bool get _mouseYEnabled => _session.mouseYEnabled;
+  bool get _invertX => _session.invertX;
+  bool get _invertY => _session.invertY;
 
   @override
   void initState() {
     super.initState();
-    _session = _analysisChartSessions[controller] ??= _AnalysisChartSession();
+    _session = controller.analysisSession;
+    _statsTableLayout = ResizableTableLayout(
+      widths: _session.statsColumnWidths,
+      minimumWidths: const [100, 70, 80, 80, 80, 80, 72],
+      rowHeight: _session.statsRowHeight,
+    );
     _statsHorizontalScrollController = ScrollController(
       initialScrollOffset: _session.statsHorizontalOffset,
     )..addListener(_rememberStatsHorizontalOffset);
+    controller.analysisChanges.addListener(_handleAnalysisSessionChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant _AnalysisChartPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (identical(oldWidget.controller, widget.controller)) return;
+    oldWidget.controller.analysisChanges.removeListener(
+      _handleAnalysisSessionChanged,
+    );
+    _session = controller.analysisSession;
+    _restoreStatsLayout();
+    controller.analysisChanges.addListener(_handleAnalysisSessionChanged);
+  }
+
+  void _handleAnalysisSessionChanged() {
+    if (!mounted) return;
+    _restoreStatsLayout();
+    setState(() {
+      _chartChanges.value += 1;
+      _statsChanges.value += 1;
+    });
+  }
+
+  void _restoreStatsLayout() {
+    _statsTableLayout.restore(
+      widths: _session.statsColumnWidths,
+      rowHeight: _session.statsRowHeight,
+    );
   }
 
   void _rememberStatsHorizontalOffset() {
@@ -146,9 +128,23 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
     }
   }
 
+  void _rememberStatsLayout() {
+    _session.statsColumnWidths = List<double>.of(_statsTableLayout.widths);
+    _session.statsRowHeight = _statsTableLayout.rowHeight;
+  }
+
+  void _commitSession({bool includeData = false}) {
+    _rememberStatsHorizontalOffset();
+    _rememberStatsLayout();
+    controller.commitAnalysisSession(includeData: includeData);
+  }
+
   @override
   void dispose() {
+    _releasePlotMenuAnimation();
+    controller.analysisChanges.removeListener(_handleAnalysisSessionChanged);
     _rememberStatsHorizontalOffset();
+    _rememberStatsLayout();
     _statsHorizontalScrollController.removeListener(
       _rememberStatsHorizontalOffset,
     );
@@ -188,29 +184,72 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
             Text('· $_sourceLabel · ${_series.length} 条曲线', style: talMuted),
           ],
           const Spacer(),
+          if (_series.isNotEmpty) ...[
+            OutlinedButton.icon(
+              key: const ValueKey('analysis-fft-toggle'),
+              style: _session.fftVisible
+                  ? OutlinedButton.styleFrom(
+                      backgroundColor: TalColors.selection,
+                      side: const BorderSide(color: TalColors.accent),
+                    )
+                  : null,
+              onPressed: _toggleFft,
+              icon: const Icon(Icons.graphic_eq, size: 16),
+              label: const Text('FFT'),
+            ),
+            const SizedBox(width: 8),
+          ],
           _importButton(),
           if (_series.isNotEmpty) ...[
             const SizedBox(width: 8),
             OutlinedButton(
-              onPressed: () => setState(() {
-                _series = const [];
-                _seriesVisibility = const [];
-                _selectedColumns.clear();
-                _session.selectedSeriesIndex = null;
-                _session.selectedCellColumn = null;
-                _sourceLabel = '';
-                _selectionStart = null;
-                _selectionEnd = null;
-                _session.dataBounds = null;
-                _session.selectionStats = const [];
-                _resetViewport();
-              }),
+              onPressed: () {
+                setState(_session.clearData);
+                _commitSession(includeData: true);
+              },
               child: const Text('清除'),
             ),
           ],
         ],
       ),
     );
+  }
+
+  void _toggleFft() {
+    setState(() {
+      _session.fftVisible = !_session.fftVisible;
+      if (_session.fftVisible) {
+        final selected = _session.selectedSeriesIndex;
+        if (selected != null && selected >= 0 && selected < _series.length) {
+          _session.fftSeriesIndex = selected;
+        }
+      }
+    });
+    _commitSession();
+  }
+
+  void _setFftSignalIndex(int index) {
+    if (index == _session.fftSeriesIndex) return;
+    setState(() {
+      _session.fftSeriesIndex = index;
+      _session.fftSelectionStart = null;
+      _session.fftSelectionEnd = null;
+      _session.resetFftViewport();
+      _fftCacheKey = null;
+    });
+    _commitSession();
+  }
+
+  void _setFftTimeSeriesIndex(int? index) {
+    if (index == _session.fftTimeSeriesIndex) return;
+    setState(() {
+      _session.fftTimeSeriesIndex = index;
+      _session.fftSelectionStart = null;
+      _session.fftSelectionEnd = null;
+      _session.resetFftViewport();
+      _fftCacheKey = null;
+    });
+    _commitSession();
   }
 
   Widget _importButton() {
@@ -289,72 +328,16 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final size = constraints.biggest;
-                    return ValueListenableBuilder<int>(
-                      valueListenable: _chartChanges,
-                      builder: (context, _, _) {
-                        final bounds = _viewportBounds;
-                        final selection = _selectedRange;
-                        return MouseRegion(
-                          cursor: _rightZoomDragging
-                              ? SystemMouseCursors.zoomIn
-                              : _middleDragging
-                              ? SystemMouseCursors.grabbing
-                              : SystemMouseCursors.precise,
-                          child: Listener(
-                            key: const ValueKey('analysis-chart-interaction'),
-                            behavior: HitTestBehavior.opaque,
-                            onPointerDown: (event) =>
-                                _handlePointerDown(event, size),
-                            onPointerMove: (event) =>
-                                _handlePointerMove(event, size),
-                            onPointerUp: (_) => _finishPointerInteraction(),
-                            onPointerCancel: (_) => _finishPointerInteraction(),
-                            onPointerSignal: (event) =>
-                                _handlePointerSignal(event, size),
-                            child: Stack(
-                              fit: StackFit.expand,
-                              children: [
-                                RepaintBoundary(
-                                  child: CustomPaint(
-                                    key: const ValueKey(
-                                      'analysis-chart-series-layer',
-                                    ),
-                                    painter: _AnalysisChartPainter(
-                                      series: _series,
-                                      seriesVisibility: _seriesVisibility,
-                                      xMin: bounds.$1,
-                                      xMax: bounds.$2,
-                                      yMin: bounds.$3,
-                                      yMax: bounds.$4,
-                                    ),
-                                  ),
-                                ),
-                                IgnorePointer(
-                                  child: RepaintBoundary(
-                                    child: CustomPaint(
-                                      key: const ValueKey(
-                                        'analysis-chart-selection-layer',
-                                      ),
-                                      painter: _AnalysisSelectionPainter(
-                                        xMin: bounds.$1,
-                                        xMax: bounds.$2,
-                                        selectionStart: selection?.$1,
-                                        selectionEnd: selection?.$2,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
-                    );
-                  },
-                ),
+                child: _session.fftVisible
+                    ? Row(
+                        key: const ValueKey('analysis-fft-split-view'),
+                        children: [
+                          Expanded(child: _buildTimeDomainChart()),
+                          Container(width: 1, color: TalColors.panelBorder),
+                          Expanded(child: _buildFftPanel()),
+                        ],
+                      )
+                    : _buildTimeDomainChart(),
               ),
             ),
             ValueListenableBuilder<int>(
@@ -376,15 +359,113 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
     );
   }
 
+  Widget _buildTimeDomainChart() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final size = constraints.biggest;
+        return ValueListenableBuilder<int>(
+          valueListenable: _chartChanges,
+          builder: (context, _, _) {
+            final bounds = _viewportBounds;
+            final selection = _selectedRange;
+            return MenuAnchor(
+              key: const ValueKey('analysis-plot-menu-anchor'),
+              controller: _plotMenuController,
+              style: talContextMenuStyle,
+              consumeOutsideTap: true,
+              animated: true,
+              onAnimationStatusChanged: _handlePlotMenuAnimationStatus,
+              menuChildren: _buildPlotDesktopMenu(),
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onLongPressStart: _handlePlotLongPress,
+                child: MouseRegion(
+                  cursor: _rightZoomDragging
+                      ? SystemMouseCursors.zoomIn
+                      : _middleDragging
+                      ? SystemMouseCursors.grabbing
+                      : SystemMouseCursors.precise,
+                  child: Listener(
+                    key: const ValueKey('analysis-chart-interaction'),
+                    behavior: HitTestBehavior.opaque,
+                    onPointerDown: (event) => _handlePointerDown(event, size),
+                    onPointerMove: (event) => _handlePointerMove(event, size),
+                    onPointerUp: (event) =>
+                        _finishPointerInteraction(size, event),
+                    onPointerCancel: (_) =>
+                        _finishPointerInteraction(size, null),
+                    onPointerSignal: (event) =>
+                        _handlePointerSignal(event, size),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        RepaintBoundary(
+                          child: CustomPaint(
+                            key: const ValueKey('analysis-chart-series-layer'),
+                            painter: _AnalysisChartPainter(
+                              series: _series,
+                              seriesVisibility: _seriesVisibility,
+                              xMin: bounds.$1,
+                              xMax: bounds.$2,
+                              yMin: bounds.$3,
+                              yMax: bounds.$4,
+                              invertX: _invertX,
+                              invertY: _invertY,
+                            ),
+                          ),
+                        ),
+                        IgnorePointer(
+                          child: RepaintBoundary(
+                            child: CustomPaint(
+                              key: const ValueKey(
+                                'analysis-chart-selection-layer',
+                              ),
+                              painter: _AnalysisSelectionPainter(
+                                xMin: bounds.$1,
+                                xMax: bounds.$2,
+                                selectionStart: selection?.$1,
+                                selectionEnd: selection?.$2,
+                                invertX: _invertX,
+                              ),
+                            ),
+                          ),
+                        ),
+                        if (_rectangleZoom case final rect?)
+                          IgnorePointer(
+                            child: CustomPaint(
+                              painter: _AnalysisRectangleZoomPainter(rect),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   (double, double)? get _selectedRange {
-    final start = _selectionStart;
-    final end = _selectionEnd;
-    if (start == null || end == null) return null;
-    return (math.min(start, end), math.max(start, end));
+    return _session.selectedRange;
   }
 
   Widget _buildInteractionHint() {
     final selection = _selectedRange;
+    if (_mouseMode == AnalysisMouseMode.rectangle) {
+      return Container(
+        height: 34,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        alignment: Alignment.centerLeft,
+        color: TalColors.surfaceAlt,
+        child: const Text(
+          '左键拖动框选缩放 · 中键移动 · 右键拖动或滚轮缩放 · 右键单击打开菜单',
+          style: talMuted,
+        ),
+      );
+    }
     return Container(
       height: 34,
       padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -392,11 +473,174 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
       color: TalColors.surfaceAlt,
       child: Text(
         selection == null
-            ? '左键拖动选时间段 · 中键移动 · 右键拖动或滚轮缩放'
-            : '已选择 ${_formatNumber(selection.$1)} s – ${_formatNumber(selection.$2)} s · 左键重新选择 · 中键移动 · 右键/滚轮缩放',
+            ? _session.fftVisible
+                  ? '左键拖动选择区间 · 中键移动 · 右键拖动或滚轮缩放 · 右键单击打开菜单'
+                  : '左键拖动选时间段 · 中键移动 · 右键拖动或滚轮缩放 · 右键单击打开菜单'
+            : '已选择 ${_formatNumber(selection.$1)} s – ${_formatNumber(selection.$2)} s · 左键重新选择 · 中键移动 · 右键/滚轮缩放 · 右键单击打开菜单',
         style: selection == null ? talMuted : talBody,
       ),
     );
+  }
+
+  List<Widget> _buildPlotDesktopMenu() => [
+    MenuItemButton(
+      key: const ValueKey('analysis-plot-view-all'),
+      style: talContextMenuButtonStyle,
+      onPressed: _showAllAnalysisData,
+      child: const Text('View All'),
+    ),
+    SubmenuButton(
+      key: const ValueKey('analysis-plot-x-axis'),
+      style: talContextMenuButtonStyle,
+      menuStyle: talContextSubmenuStyle,
+      animated: true,
+      menuChildren: _buildAxisMenu(xAxis: true),
+      child: const Text('X Axis'),
+    ),
+    SubmenuButton(
+      key: const ValueKey('analysis-plot-y-axis'),
+      style: talContextMenuButtonStyle,
+      menuStyle: talContextSubmenuStyle,
+      animated: true,
+      menuChildren: _buildAxisMenu(xAxis: false),
+      child: const Text('Y Axis'),
+    ),
+    SubmenuButton(
+      key: const ValueKey('analysis-plot-mouse-mode'),
+      style: talContextMenuButtonStyle,
+      menuStyle: talContextSubmenuStyle,
+      animated: true,
+      menuChildren: [
+        RadioMenuButton<AnalysisMouseMode>(
+          style: talContextMenuButtonStyle,
+          value: AnalysisMouseMode.threeButton,
+          groupValue: _mouseMode,
+          onChanged: _setAnalysisMouseMode,
+          child: const Text('3 Button'),
+        ),
+        RadioMenuButton<AnalysisMouseMode>(
+          style: talContextMenuButtonStyle,
+          value: AnalysisMouseMode.rectangle,
+          groupValue: _mouseMode,
+          onChanged: _setAnalysisMouseMode,
+          child: const Text('1 Button'),
+        ),
+      ],
+      child: const Text('Mouse Mode'),
+    ),
+  ];
+
+  List<Widget> _buildAxisMenu({required bool xAxis}) => [
+    MenuItemButton(
+      style: talContextMenuButtonStyle,
+      onPressed: () => _resetAnalysisAxis(xAxis: xAxis),
+      child: const Text('Auto'),
+    ),
+    MenuItemButton(
+      style: talContextMenuButtonStyle,
+      onPressed: () => unawaited(_showAnalysisAxisSettings(xAxis: xAxis)),
+      child: const Text('Manual…'),
+    ),
+  ];
+
+  void _setAnalysisMouseMode(AnalysisMouseMode? mode) {
+    if (mode == null || mode == _mouseMode) return;
+    _mouseMode = mode;
+    _rectangleZoom = null;
+    _rectangleZoomStart = null;
+    _notifyChartChanged();
+    _commitSession();
+  }
+
+  void _showAllAnalysisData() {
+    _resetViewport();
+    _notifyChartChanged();
+    _commitSession();
+  }
+
+  void _resetAnalysisAxis({required bool xAxis}) {
+    if (xAxis) {
+      _viewXMin = null;
+      _viewXMax = null;
+    } else {
+      _viewYMin = null;
+      _viewYMax = null;
+    }
+    _notifyChartChanged();
+    _commitSession();
+  }
+
+  Future<void> _showAnalysisAxisSettings({required bool xAxis}) async {
+    final bounds = _viewportBounds;
+    final result = await showDialog<AxisSettings>(
+      context: context,
+      builder: (context) => PlotAxisSettingsDialog(
+        xAxis: xAxis,
+        automatic: xAxis ? _viewXMin == null : _viewYMin == null,
+        minimum: xAxis ? bounds.$1 : bounds.$3,
+        maximum: xAxis ? bounds.$2 : bounds.$4,
+        mouseEnabled: xAxis ? _mouseXEnabled : _mouseYEnabled,
+        inverted: xAxis ? _invertX : _invertY,
+      ),
+    );
+    if (!mounted || result == null) return;
+    if (xAxis) {
+      _session.mouseXEnabled = result.mouseEnabled;
+      _session.invertX = result.inverted;
+      _viewXMin = result.automatic ? null : result.minimum;
+      _viewXMax = result.automatic ? null : result.maximum;
+    } else {
+      _session.mouseYEnabled = result.mouseEnabled;
+      _session.invertY = result.inverted;
+      _viewYMin = result.automatic ? null : result.minimum;
+      _viewYMax = result.automatic ? null : result.maximum;
+    }
+    _notifyChartChanged();
+    _commitSession();
+  }
+
+  void _openPlotDesktopMenu(Offset position) {
+    if (!_plotMenuController.isOpen && _plotMenuAnimationLease == null) {
+      _plotMenuAnimationLease = beginTalMenuAnimation();
+    }
+    _plotMenuController.open(position: position);
+  }
+
+  void _handlePlotMenuAnimationStatus(AnimationStatus status) {
+    if (status == AnimationStatus.dismissed) _releasePlotMenuAnimation();
+  }
+
+  void _releasePlotMenuAnimation() {
+    _plotMenuAnimationLease?.release();
+    _plotMenuAnimationLease = null;
+  }
+
+  Future<void> _showPlotTouchMenu(Offset globalPosition) async {
+    if (_plotMenuController.isOpen) _plotMenuController.close();
+    final action = await showTalContextMenu<String>(
+      context: context,
+      position: _statsMenuPosition(globalPosition),
+      touchOptimized: true,
+      items: [
+        _analysisPopupItem(value: 'all', label: '显示全部', touchOptimized: true),
+        _analysisPopupItem(value: 'x', label: 'X 轴详细设置…', touchOptimized: true),
+        _analysisPopupItem(value: 'y', label: 'Y 轴详细设置…', touchOptimized: true),
+      ],
+    );
+    if (!mounted || action == null) return;
+    switch (action) {
+      case 'all':
+        _showAllAnalysisData();
+      case 'x':
+        await _showAnalysisAxisSettings(xAxis: true);
+      case 'y':
+        await _showAnalysisAxisSettings(xAxis: false);
+    }
+  }
+
+  void _handlePlotLongPress(LongPressStartDetails details) {
+    if (_lastPlotPointerKind == PointerDeviceKind.mouse) return;
+    unawaited(_showPlotTouchMenu(details.globalPosition));
   }
 
   Widget _buildStats(
@@ -421,6 +665,7 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
                 minimumHeight,
                 maximumHeight,
               ),
+              onVerticalDragEnd: (_) => _commitSession(),
               child: Container(
                 height: 8,
                 color: TalColors.surface,
@@ -447,7 +692,7 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
                         'analysis-stats-table-resize-region',
                       ),
                       minimumRowHeight: 24,
-                      onLayoutChanged: () => setState(() {}),
+                      onLayoutChanged: _onStatsLayoutChanged,
                       header: _buildStatsHeader(),
                       body: ListView(
                         children: [
@@ -480,6 +725,11 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
           .clamp(minimumHeight, maximumHeight)
           .toDouble();
     });
+  }
+
+  void _onStatsLayoutChanged() {
+    setState(() {});
+    _commitSession();
   }
 
   Widget _buildStatsHeader() {
@@ -516,7 +766,10 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
   }
 
   void _resizeStatsColumn(int index, double delta) {
-    if (_statsTableLayout.resizeColumn(index, delta)) setState(() {});
+    if (_statsTableLayout.resizeColumn(index, delta)) {
+      setState(() {});
+      _commitSession();
+    }
   }
 
   double get _statsTableWidth => _statsTableLayout.widths.indexed
@@ -535,6 +788,7 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
     _session.selectedSeriesIndex = null;
     _session.selectedCellColumn = null;
     _statsChanges.value += 1;
+    _commitSession();
   }
 
   RelativeRect _statsMenuPosition(Offset globalPosition) {
@@ -600,14 +854,16 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
       _hiddenColumns.add(column);
     }
     _statsChanges.value += 1;
+    _commitSession();
   }
 
   void _showAllStatsColumns() {
     _hiddenColumns.clear();
     _statsChanges.value += 1;
+    _commitSession();
   }
 
-  Widget _buildStatsRow(_AnalysisSeries series, int seriesIndex) {
+  Widget _buildStatsRow(AnalysisSeries series, int seriesIndex) {
     final stats = seriesIndex < _session.selectionStats.length
         ? _session.selectionStats[seriesIndex]
         : null;
@@ -704,6 +960,7 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
     _session.selectedSeriesIndex = seriesIndex;
     _session.selectedCellColumn = columnIndex;
     _statsChanges.value += 1;
+    _commitSession();
   }
 
   Future<void> _showStatsCellContextMenu(
@@ -760,6 +1017,7 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
     _seriesVisibility = visibility;
     _chartChanges.value += 1;
     _statsChanges.value += 1;
+    _commitSession();
   }
 
   void _setOnlySeriesVisible(int index) {
@@ -770,15 +1028,18 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
     );
     _chartChanges.value += 1;
     _statsChanges.value += 1;
+    _commitSession();
   }
 
   void _setAllSeriesVisible() {
     _seriesVisibility = List<bool>.filled(_series.length, true);
     _chartChanges.value += 1;
     _statsChanges.value += 1;
+    _commitSession();
   }
 
   void _handlePointerDown(PointerDownEvent event, Size size) {
+    _lastPlotPointerKind = event.kind;
     if (event.kind != PointerDeviceKind.mouse ||
         !_analysisPlotRect(size).contains(event.localPosition)) {
       return;
@@ -787,9 +1048,11 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
       final plot = _analysisPlotRect(size);
       _rightZoomDragging = true;
       _lastRightZoomPosition = event.localPosition;
+      _rightZoomStartPosition = event.localPosition;
+      _rightZoomMoved = false;
       _rightZoomAnchorFraction = Offset(
-        ((event.localPosition.dx - plot.left) / plot.width).clamp(0.0, 1.0),
-        ((plot.bottom - event.localPosition.dy) / plot.height).clamp(0.0, 1.0),
+        _xFractionForPosition(event.localPosition.dx, plot),
+        _yFractionForPosition(event.localPosition.dy, plot),
       );
       _notifyChartChanged();
       return;
@@ -801,6 +1064,15 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
       return;
     }
     if (event.buttons & kPrimaryMouseButton != 0) {
+      if (_mouseMode == AnalysisMouseMode.rectangle) {
+        _rectangleZoomStart = event.localPosition;
+        _rectangleZoom = Rect.fromPoints(
+          event.localPosition,
+          event.localPosition,
+        );
+        _notifyChartChanged();
+        return;
+      }
       _selectionDragging = true;
       _startSelection(event.localPosition.dx, size);
     }
@@ -808,7 +1080,17 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
 
   void _handlePointerMove(PointerMoveEvent event, Size size) {
     if (_rightZoomDragging && event.buttons & kSecondaryMouseButton != 0) {
+      final start = _rightZoomStartPosition;
+      if (start != null && (event.localPosition - start).distanceSquared > 9) {
+        _rightZoomMoved = true;
+      }
       _updateRightButtonZoom(event.localPosition);
+      return;
+    }
+    final rectangleStart = _rectangleZoomStart;
+    if (rectangleStart != null && event.buttons & kPrimaryMouseButton != 0) {
+      _rectangleZoom = Rect.fromPoints(rectangleStart, event.localPosition);
+      _notifyChartChanged();
       return;
     }
     if (_selectionDragging && event.buttons & kPrimaryMouseButton != 0) {
@@ -828,18 +1110,24 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
     final delta = event.localPosition - previous;
     final xSpan = bounds.$2 - bounds.$1;
     final ySpan = bounds.$4 - bounds.$3;
-    final xWindow = _clampWindow(
-      bounds.$1 - delta.dx / plot.width * xSpan,
-      bounds.$2 - delta.dx / plot.width * xSpan,
-      data.$1,
-      data.$2,
-    );
-    final yWindow = _clampWindow(
-      bounds.$3 + delta.dy / plot.height * ySpan,
-      bounds.$4 + delta.dy / plot.height * ySpan,
-      data.$3,
-      data.$4,
-    );
+    final xShift = (_invertX ? 1 : -1) * delta.dx / plot.width * xSpan;
+    final yShift = (_invertY ? -1 : 1) * delta.dy / plot.height * ySpan;
+    final xWindow = _mouseXEnabled
+        ? clampCartesianWindow(
+            bounds.$1 + xShift,
+            bounds.$2 + xShift,
+            data.$1,
+            data.$2,
+          )
+        : (bounds.$1, bounds.$2);
+    final yWindow = _mouseYEnabled
+        ? clampCartesianWindow(
+            bounds.$3 + yShift,
+            bounds.$4 + yShift,
+            data.$3,
+            data.$4,
+          )
+        : (bounds.$3, bounds.$4);
     _lastPanPosition = event.localPosition;
     _viewXMin = xWindow.$1;
     _viewXMax = xWindow.$2;
@@ -858,22 +1146,26 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
     final data = _dataBounds;
     final xScale = math.pow(1.02, -delta.dx).toDouble();
     final yScale = math.pow(1.02, delta.dy).toDouble();
-    final xWindow = _zoomWindow(
-      bounds.$1,
-      bounds.$2,
-      data.$1,
-      data.$2,
-      anchor.dx,
-      xScale,
-    );
-    final yWindow = _zoomWindow(
-      bounds.$3,
-      bounds.$4,
-      data.$3,
-      data.$4,
-      anchor.dy,
-      yScale,
-    );
+    final xWindow = _mouseXEnabled
+        ? zoomCartesianWindow(
+            minimum: bounds.$1,
+            maximum: bounds.$2,
+            dataMinimum: data.$1,
+            dataMaximum: data.$2,
+            anchorFraction: anchor.dx,
+            scale: xScale,
+          )
+        : (bounds.$1, bounds.$2);
+    final yWindow = _mouseYEnabled
+        ? zoomCartesianWindow(
+            minimum: bounds.$3,
+            maximum: bounds.$4,
+            dataMinimum: data.$3,
+            dataMaximum: data.$4,
+            anchorFraction: anchor.dy,
+            scale: yScale,
+          )
+        : (bounds.$3, bounds.$4);
     _lastRightZoomPosition = position;
     _viewXMin = xWindow.$1;
     _viewXMax = xWindow.$2;
@@ -889,48 +1181,63 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
     final bounds = _viewportBounds;
     final data = _dataBounds;
     final scale = event.scrollDelta.dy > 0 ? 1.15 : 1 / 1.15;
-    final xFraction = ((event.localPosition.dx - plot.left) / plot.width).clamp(
-      0.0,
-      1.0,
-    );
-    final yFraction = ((plot.bottom - event.localPosition.dy) / plot.height)
-        .clamp(0.0, 1.0);
-    final xWindow = _zoomWindow(
-      bounds.$1,
-      bounds.$2,
-      data.$1,
-      data.$2,
-      xFraction,
-      scale,
-    );
-    final yWindow = _zoomWindow(
-      bounds.$3,
-      bounds.$4,
-      data.$3,
-      data.$4,
-      yFraction,
-      scale,
-    );
+    final xFraction = _xFractionForPosition(event.localPosition.dx, plot);
+    final yFraction = _yFractionForPosition(event.localPosition.dy, plot);
+    final xWindow = _mouseXEnabled
+        ? zoomCartesianWindow(
+            minimum: bounds.$1,
+            maximum: bounds.$2,
+            dataMinimum: data.$1,
+            dataMaximum: data.$2,
+            anchorFraction: xFraction,
+            scale: scale,
+          )
+        : (bounds.$1, bounds.$2);
+    final yWindow = _mouseYEnabled
+        ? zoomCartesianWindow(
+            minimum: bounds.$3,
+            maximum: bounds.$4,
+            dataMinimum: data.$3,
+            dataMaximum: data.$4,
+            anchorFraction: yFraction,
+            scale: scale,
+          )
+        : (bounds.$3, bounds.$4);
     _viewXMin = xWindow.$1;
     _viewXMax = xWindow.$2;
     _viewYMin = yWindow.$1;
     _viewYMax = yWindow.$2;
     _notifyChartChanged();
+    _commitSession();
   }
 
-  void _finishPointerInteraction() {
+  void _finishPointerInteraction(Size size, PointerUpEvent? event) {
     final wasSelecting = _selectionDragging;
+    final rectangle = _rectangleZoom;
+    final openMenu =
+        event != null &&
+        _rightZoomDragging &&
+        !_rightZoomMoved &&
+        event.kind == PointerDeviceKind.mouse;
     _selectionDragging = false;
     _middleDragging = false;
     _rightZoomDragging = false;
     _lastPanPosition = null;
     _lastRightZoomPosition = null;
+    _rightZoomStartPosition = null;
     _rightZoomAnchorFraction = null;
+    _rightZoomMoved = false;
+    _rectangleZoom = null;
+    _rectangleZoomStart = null;
     if (wasSelecting) {
       _finishSelection();
+    } else if (rectangle != null) {
+      _applyRectangleZoom(rectangle, size);
     } else {
       _notifyChartChanged();
     }
+    _commitSession();
+    if (openMenu) _openPlotDesktopMenu(event.localPosition);
   }
 
   void _startSelection(double position, Size size) {
@@ -965,15 +1272,54 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
   void _notifyChartChanged() => _chartChanges.value += 1;
 
   double _xForPosition(double position, Size size) {
+    return _interactionViewport(_analysisPlotRect(size)).unmapX(position);
+  }
+
+  double _yForPosition(double position, Size size) {
+    return _interactionViewport(_analysisPlotRect(size)).unmapY(position);
+  }
+
+  double _xFractionForPosition(double position, Rect plot) {
+    return _interactionViewport(plot).xFractionAt(position);
+  }
+
+  double _yFractionForPosition(double position, Rect plot) {
+    return _interactionViewport(plot).yFractionAt(position);
+  }
+
+  CartesianPlotViewport _interactionViewport(Rect plot) {
     final bounds = _viewportBounds;
-    final xMin = bounds.$1;
-    final xMax = bounds.$2;
-    final plot = _analysisPlotRect(size);
-    final fraction = ((position - plot.left) / math.max(1, plot.width)).clamp(
-      0.0,
-      1.0,
+    return CartesianPlotViewport(
+      plot: plot,
+      xMin: bounds.$1,
+      xMax: bounds.$2,
+      yMin: bounds.$3,
+      yMax: bounds.$4,
+      invertX: _invertX,
+      invertY: _invertY,
     );
-    return xMin + (xMax - xMin) * fraction;
+  }
+
+  void _applyRectangleZoom(Rect rectangle, Size size) {
+    final plot = _analysisPlotRect(size);
+    final clipped = rectangle.intersect(plot);
+    if (clipped.width < 5 || clipped.height < 5) {
+      _notifyChartChanged();
+      return;
+    }
+    final left = _xForPosition(clipped.left, size);
+    final right = _xForPosition(clipped.right, size);
+    final top = _yForPosition(clipped.top, size);
+    final bottom = _yForPosition(clipped.bottom, size);
+    if (_mouseXEnabled) {
+      _viewXMin = math.min(left, right);
+      _viewXMax = math.max(left, right);
+    }
+    if (_mouseYEnabled) {
+      _viewYMin = math.min(top, bottom);
+      _viewYMax = math.max(top, bottom);
+    }
+    _notifyChartChanged();
   }
 
   (double, double, double, double) get _viewportBounds {
@@ -986,72 +1332,7 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
     );
   }
 
-  (double, double, double, double) get _dataBounds {
-    final cached = _session.dataBounds;
-    if (cached != null) return cached;
-    var xMin = double.infinity;
-    var xMax = -double.infinity;
-    var yMin = double.infinity;
-    var yMax = -double.infinity;
-    for (final series in _series) {
-      for (final point in series.points) {
-        xMin = math.min(xMin, point.x);
-        xMax = math.max(xMax, point.x);
-        yMin = math.min(yMin, point.y);
-        yMax = math.max(yMax, point.y);
-      }
-    }
-    if (xMax <= xMin) {
-      xMin -= 0.5;
-      xMax += 0.5;
-    }
-    if (yMax <= yMin) {
-      final padding = math.max(1, yMax.abs() * 0.1);
-      yMin -= padding;
-      yMax += padding;
-    } else {
-      final padding = (yMax - yMin) * 0.08;
-      yMin -= padding;
-      yMax += padding;
-    }
-    return _session.dataBounds = (xMin, xMax, yMin, yMax);
-  }
-
-  (double, double) _zoomWindow(
-    double minimum,
-    double maximum,
-    double dataMinimum,
-    double dataMaximum,
-    double anchorFraction,
-    double scale,
-  ) {
-    final dataSpan = dataMaximum - dataMinimum;
-    final span = ((maximum - minimum) * scale).clamp(
-      math.max(dataSpan * 0.0001, 1e-9),
-      dataSpan,
-    );
-    final anchor = minimum + (maximum - minimum) * anchorFraction;
-    final nextMinimum = anchor - span * anchorFraction;
-    return _clampWindow(
-      nextMinimum,
-      nextMinimum + span,
-      dataMinimum,
-      dataMaximum,
-    );
-  }
-
-  (double, double) _clampWindow(
-    double minimum,
-    double maximum,
-    double dataMinimum,
-    double dataMaximum,
-  ) {
-    final span = maximum - minimum;
-    if (span >= dataMaximum - dataMinimum) return (dataMinimum, dataMaximum);
-    if (minimum < dataMinimum) return (dataMinimum, dataMinimum + span);
-    if (maximum > dataMaximum) return (dataMaximum - span, dataMaximum);
-    return (minimum, maximum);
-  }
+  (double, double, double, double) get _dataBounds => _session.dataBounds;
 
   void _resetViewport() {
     _viewXMin = null;
@@ -1061,7 +1342,11 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
     _dragStartX = null;
     _lastPanPosition = null;
     _lastRightZoomPosition = null;
+    _rightZoomStartPosition = null;
     _rightZoomAnchorFraction = null;
+    _rightZoomMoved = false;
+    _rectangleZoom = null;
+    _rectangleZoomStart = null;
     _selectionDragging = false;
     _middleDragging = false;
     _rightZoomDragging = false;
@@ -1072,12 +1357,12 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
       final series = [
         for (final watch in controller.watches)
           if (watch.samples.isNotEmpty)
-            _AnalysisSeries(
+            AnalysisSeries(
               name: watch.symbol.name,
               color: watch.color,
               points: [
                 for (final point in watch.samples)
-                  _AnalysisPoint(point.dx, point.dy),
+                  AnalysisPoint(point.dx, point.dy),
               ],
             ),
       ];
@@ -1095,7 +1380,10 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
     }
     final contents = await picker();
     if (!mounted || contents == null || contents.trim().isEmpty) return;
-    final series = _parseCsv(contents);
+    final series = contents.length < 256 * 1024
+        ? parseAnalysisCsv(contents, colors: seriesColors)
+        : await parseAnalysisCsvInBackground(contents, colors: seriesColors);
+    if (!mounted) return;
     if (series.isEmpty) {
       controller.report('CSV 中没有找到可分析的数值列。');
       return;
@@ -1103,604 +1391,15 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
     _setImported(series, '本地 CSV');
   }
 
-  void _setImported(List<_AnalysisSeries> series, String source) {
-    final sortedSeries = [
-      for (final item in series)
-        _AnalysisSeries(
-          name: item.name,
-          color: item.color,
-          points: List<_AnalysisPoint>.of(item.points)
-            ..sort((left, right) => left.x.compareTo(right.x)),
-        ),
-    ];
-    setState(() {
-      _series = sortedSeries;
-      _seriesVisibility = List<bool>.filled(sortedSeries.length, true);
-      _selectedColumns.clear();
-      _session.selectedSeriesIndex = null;
-      _session.selectedCellColumn = null;
-      _sourceLabel = source;
-      _selectionStart = null;
-      _selectionEnd = null;
-      _session.dataBounds = null;
-      _session.selectionStats = const [];
-      _resetViewport();
-    });
-  }
-
-  static List<_AnalysisSeries> _parseCsv(String contents) {
-    final rows = [
-      for (final line
-          in contents
-              .replaceAll('\r\n', '\n')
-              .replaceAll('\r', '\n')
-              .split('\n'))
-        if (line.trim().isNotEmpty) _parseCsvLine(line),
-    ];
-    if (rows.isEmpty || rows.first.length < 2) return const [];
-    final first = rows.first;
-    final hasHeader = double.tryParse(first.first.trim()) == null;
-    final start = hasHeader ? 1 : 0;
-    final columnCount = rows
-        .skip(start)
-        .fold<int>(first.length, (count, row) => math.max(count, row.length));
-    if (columnCount < 2) return const [];
-    final names = [
-      for (var column = 1; column < columnCount; column += 1)
-        hasHeader && first.length > column && first[column].trim().isNotEmpty
-            ? first[column].trim()
-            : '通道 $column',
-    ];
-    final points = [
-      for (var i = 0; i < names.length; i += 1) <_AnalysisPoint>[],
-    ];
-    for (final row in rows.skip(start)) {
-      final x = double.tryParse(row.isEmpty ? '' : row.first.trim());
-      if (x == null || !x.isFinite) {
-        continue;
-      }
-      for (var column = 1; column < columnCount; column += 1) {
-        if (row.length <= column) continue;
-        final y = double.tryParse(row[column].trim());
-        if (y != null && y.isFinite) {
-          points[column - 1].add(_AnalysisPoint(x, y));
-        }
-      }
-    }
-    return [
-      for (var index = 0; index < points.length; index += 1)
-        if (points[index].isNotEmpty)
-          _AnalysisSeries(
-            name: names[index],
-            color: seriesColors[index % seriesColors.length],
-            points: points[index],
-          ),
-    ];
-  }
-
-  static List<String> _parseCsvLine(String line) {
-    final values = <String>[];
-    var buffer = StringBuffer();
-    var quoted = false;
-    for (var index = 0; index < line.length; index += 1) {
-      final char = line[index];
-      if (char == '"') {
-        if (quoted && index + 1 < line.length && line[index + 1] == '"') {
-          buffer.write('"');
-          index += 1;
-        } else {
-          quoted = !quoted;
-        }
-      } else if (char == ',' && !quoted) {
-        values.add(buffer.toString());
-        buffer = StringBuffer();
-      } else {
-        buffer.write(char);
-      }
-    }
-    values.add(buffer.toString());
-    return values;
+  void _setImported(List<AnalysisSeries> series, String source) {
+    setState(() => _session.replaceData(series, source));
+    _commitSession(includeData: true);
   }
 
   void _updateSelectionStats() {
-    final selection = _selectedRange;
-    _session.selectionStats = selection == null
-        ? const []
-        : [
-            for (final series in _series)
-              _statsForRange(series.points, selection.$1, selection.$2),
-          ];
-  }
-
-  static _AnalysisStats? _statsForRange(
-    List<_AnalysisPoint> points,
-    double start,
-    double end,
-  ) {
-    final first = _lowerBound(points, start);
-    final afterLast = _upperBound(points, end);
-    if (first >= afterLast) return null;
-    var minimum = double.infinity;
-    var maximum = -double.infinity;
-    var sum = 0.0;
-    for (var index = first; index < afterLast; index += 1) {
-      final value = points[index].y;
-      minimum = math.min(minimum, value);
-      maximum = math.max(maximum, value);
-      sum += value;
-    }
-    final count = afterLast - first;
-    return _AnalysisStats(
-      count: count,
-      minimum: minimum,
-      maximum: maximum,
-      average: sum / count,
-    );
-  }
-
-  static int _lowerBound(List<_AnalysisPoint> points, double value) {
-    var low = 0;
-    var high = points.length;
-    while (low < high) {
-      final middle = low + ((high - low) >> 1);
-      if (points[middle].x < value) {
-        low = middle + 1;
-      } else {
-        high = middle;
-      }
-    }
-    return low;
-  }
-
-  static int _upperBound(List<_AnalysisPoint> points, double value) {
-    var low = 0;
-    var high = points.length;
-    while (low < high) {
-      final middle = low + ((high - low) >> 1);
-      if (points[middle].x <= value) {
-        low = middle + 1;
-      } else {
-        high = middle;
-      }
-    }
-    return low;
+    _session.updateSelectionStats();
   }
 
   static String _formatNumber(double value) =>
       value.abs() >= 1000 ? value.toStringAsFixed(1) : value.toStringAsFixed(4);
-}
-
-class _AnalysisStatsHeaderCell extends StatefulWidget {
-  const _AnalysisStatsHeaderCell({
-    required this.label,
-    required this.width,
-    required this.columnIndex,
-    required this.onResize,
-    required this.selected,
-    required this.onSelect,
-    required this.hideLabel,
-    required this.canHide,
-    required this.onHide,
-    required this.onShowAll,
-    required this.onTouchContextMenu,
-    super.key,
-  });
-
-  final String label;
-  final double width;
-  final int columnIndex;
-  final _ColumnResizeCallback onResize;
-  final bool selected;
-  final ValueChanged<int> onSelect;
-  final String hideLabel;
-  final bool canHide;
-  final VoidCallback onHide;
-  final VoidCallback onShowAll;
-  final ValueChanged<_ContextMenuRequest> onTouchContextMenu;
-
-  @override
-  State<_AnalysisStatsHeaderCell> createState() =>
-      _AnalysisStatsHeaderCellState();
-}
-
-class _AnalysisStatsHeaderCellState extends State<_AnalysisStatsHeaderCell> {
-  final MenuController _menuController = MenuController();
-  TalMenuAnimationLease? _menuAnimationLease;
-
-  @override
-  void dispose() {
-    _releaseMenuAnimation();
-    super.dispose();
-  }
-
-  void _openDesktopMenu(Offset position) {
-    if (!_menuController.isOpen && _menuAnimationLease == null) {
-      _menuAnimationLease = beginTalMenuAnimation();
-    }
-    _menuController.open(position: position);
-  }
-
-  void _handleMenuAnimationStatus(AnimationStatus status) {
-    if (status == AnimationStatus.dismissed) _releaseMenuAnimation();
-  }
-
-  void _releaseMenuAnimation() {
-    _menuAnimationLease?.release();
-    _menuAnimationLease = null;
-  }
-
-  void _handleContextMenu(_ContextMenuRequest request) {
-    if (request.touchOptimized) {
-      if (_menuController.isOpen) _menuController.close();
-      widget.onTouchContextMenu(request);
-      return;
-    }
-    final box = context.findRenderObject()! as RenderBox;
-    _openDesktopMenu(box.globalToLocal(request.globalPosition));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return MenuAnchor(
-      key: const ValueKey('analysis-header-menu-anchor'),
-      controller: _menuController,
-      style: talContextMenuStyle,
-      consumeOutsideTap: true,
-      animated: true,
-      onAnimationStatusChanged: _handleMenuAnimationStatus,
-      menuChildren: [
-        MenuItemButton(
-          key: const ValueKey('analysis-header-menu-hide'),
-          style: talContextMenuButtonStyle,
-          onPressed: widget.canHide ? widget.onHide : null,
-          child: Text(widget.hideLabel),
-        ),
-        MenuItemButton(
-          key: const ValueKey('analysis-header-menu-show-all'),
-          style: talContextMenuButtonStyle,
-          onPressed: widget.onShowAll,
-          child: const Text('显示全列'),
-        ),
-      ],
-      child: _ResizableTableHeaderCell(
-        label: widget.label,
-        width: widget.width,
-        columnIndex: widget.columnIndex,
-        keyPrefix: 'analysis-stats',
-        onResize: widget.onResize,
-        selected: widget.selected,
-        onSelect: widget.onSelect,
-        onContextMenu: (_, request) => _handleContextMenu(request),
-      ),
-    );
-  }
-}
-
-class _AnalysisStatsCell extends StatefulWidget {
-  const _AnalysisStatsCell({
-    required this.width,
-    required this.selected,
-    required this.onTap,
-    required this.onMenuOpen,
-    required this.onCopy,
-    required this.onOnly,
-    required this.onAll,
-    required this.onTouchContextMenu,
-    required this.child,
-    super.key,
-  });
-
-  final double width;
-  final bool selected;
-  final VoidCallback onTap;
-  final VoidCallback onMenuOpen;
-  final VoidCallback onCopy;
-  final VoidCallback onOnly;
-  final VoidCallback onAll;
-  final ValueChanged<_ContextMenuRequest> onTouchContextMenu;
-  final Widget child;
-
-  @override
-  State<_AnalysisStatsCell> createState() => _AnalysisStatsCellState();
-}
-
-class _AnalysisStatsCellState extends State<_AnalysisStatsCell> {
-  final MenuController _menuController = MenuController();
-  TalMenuAnimationLease? _menuAnimationLease;
-
-  @override
-  void dispose() {
-    _releaseMenuAnimation();
-    super.dispose();
-  }
-
-  void _openDesktopMenu(Offset position) {
-    widget.onMenuOpen();
-    if (!_menuController.isOpen && _menuAnimationLease == null) {
-      _menuAnimationLease = beginTalMenuAnimation();
-    }
-    _menuController.open(position: position);
-  }
-
-  void _handleMenuAnimationStatus(AnimationStatus status) {
-    if (status == AnimationStatus.dismissed) _releaseMenuAnimation();
-  }
-
-  void _releaseMenuAnimation() {
-    _menuAnimationLease?.release();
-    _menuAnimationLease = null;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return MenuAnchor(
-      key: const ValueKey('analysis-cell-menu-anchor'),
-      controller: _menuController,
-      style: talContextMenuStyle,
-      consumeOutsideTap: true,
-      animated: true,
-      onAnimationStatusChanged: _handleMenuAnimationStatus,
-      menuChildren: [
-        MenuItemButton(
-          key: const ValueKey('analysis-cell-menu-copy'),
-          style: talContextMenuButtonStyle,
-          onPressed: widget.onCopy,
-          child: const Text('复制'),
-        ),
-        MenuItemButton(
-          key: const ValueKey('analysis-cell-menu-only'),
-          style: talContextMenuButtonStyle,
-          onPressed: widget.onOnly,
-          child: const Text('仅绘制该栏'),
-        ),
-        MenuItemButton(
-          key: const ValueKey('analysis-cell-menu-all'),
-          style: talContextMenuButtonStyle,
-          onPressed: widget.onAll,
-          child: const Text('全部绘制'),
-        ),
-      ],
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: widget.onTap,
-        onLongPress: () {
-          if (_menuController.isOpen) _menuController.close();
-          final box = context.findRenderObject()! as RenderBox;
-          widget.onTouchContextMenu(
-            _ContextMenuRequest(
-              globalPosition: box.localToGlobal(box.size.center(Offset.zero)),
-              touchOptimized: true,
-            ),
-          );
-        },
-        onSecondaryTapUp: (details) => _openDesktopMenu(details.localPosition),
-        child: Container(
-          width: widget.width,
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          alignment: Alignment.centerLeft,
-          decoration: BoxDecoration(
-            color: widget.selected ? TalColors.selection : Colors.transparent,
-            border: const Border(
-              right: BorderSide(color: TalColors.borderSoft),
-            ),
-          ),
-          child: widget.child,
-        ),
-      ),
-    );
-  }
-}
-
-PopupMenuEntry<String> _analysisPopupItem({
-  required String value,
-  required String label,
-  bool enabled = true,
-  required bool touchOptimized,
-}) {
-  return PopupMenuItem<String>(
-    value: value,
-    enabled: enabled,
-    height: touchOptimized ? 48 : 32,
-    child: Text(label),
-  );
-}
-
-class _AnalysisChartPainter extends CustomPainter {
-  const _AnalysisChartPainter({
-    required this.series,
-    required this.seriesVisibility,
-    required this.xMin,
-    required this.xMax,
-    required this.yMin,
-    required this.yMax,
-  });
-
-  final List<_AnalysisSeries> series;
-  final List<bool> seriesVisibility;
-  final double xMin;
-  final double xMax;
-  final double yMin;
-  final double yMax;
-
-  Iterable<_AnalysisSeries> get visibleSeries sync* {
-    for (final (index, item) in series.indexed) {
-      if (index >= seriesVisibility.length || seriesVisibility[index]) {
-        yield item;
-      }
-    }
-  }
-
-  int get visibleSeriesCount => visibleSeries.length;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final plot = _analysisPlotRect(size);
-    final viewport = CartesianPlotViewport(
-      plot: plot,
-      xMin: xMin,
-      xMax: xMax,
-      yMin: yMin,
-      yMax: yMax,
-    );
-    final renderer = CartesianChartRenderer(
-      canvas: canvas,
-      size: size,
-      viewport: viewport,
-    );
-    renderer.drawBackground();
-    if (plot.width <= 2 || plot.height <= 2) return;
-    renderer.drawGrid();
-    canvas.save();
-    canvas.clipRect(plot);
-    for (final item in visibleSeries) {
-      renderer.drawPolyline(
-        _downsampleAnalysisPoints(
-          item.points,
-          xMin: xMin,
-          xMax: xMax,
-          pixelWidth: plot.width,
-        ),
-        item.color,
-      );
-    }
-    canvas.restore();
-    renderer.drawAxisLabels(
-      yLabelOffset: 50,
-      xTickOffset: 5,
-      xAxisLabelOffset: 15,
-    );
-    renderer.drawLegend([
-      for (final item in visibleSeries)
-        CartesianLegendItem(label: item.name, color: item.color),
-    ], wrap: true);
-  }
-
-  @override
-  bool shouldRepaint(covariant _AnalysisChartPainter oldDelegate) =>
-      oldDelegate.series != series ||
-      oldDelegate.seriesVisibility != seriesVisibility ||
-      oldDelegate.xMin != xMin ||
-      oldDelegate.xMax != xMax ||
-      oldDelegate.yMin != yMin ||
-      oldDelegate.yMax != yMax;
-}
-
-class _AnalysisSelectionPainter extends CustomPainter {
-  const _AnalysisSelectionPainter({
-    required this.xMin,
-    required this.xMax,
-    required this.selectionStart,
-    required this.selectionEnd,
-  });
-
-  final double xMin;
-  final double xMax;
-  final double? selectionStart;
-  final double? selectionEnd;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final start = selectionStart;
-    final end = selectionEnd;
-    if (start == null || end == null) return;
-    final plot = _analysisPlotRect(size);
-    final span = math.max(1e-9, xMax - xMin);
-    final left = plot.left + (math.min(start, end) - xMin) / span * plot.width;
-    final right = plot.left + (math.max(start, end) - xMin) / span * plot.width;
-    canvas.save();
-    canvas.clipRect(plot);
-    canvas.drawRect(
-      Rect.fromLTRB(left, plot.top, right, plot.bottom),
-      Paint()..color = TalColors.accent.withAlpha(38),
-    );
-    final border = Paint()
-      ..color = TalColors.accent
-      ..strokeWidth = 1.2;
-    canvas.drawLine(Offset(left, plot.top), Offset(left, plot.bottom), border);
-    canvas.drawLine(
-      Offset(right, plot.top),
-      Offset(right, plot.bottom),
-      border,
-    );
-    canvas.restore();
-  }
-
-  @override
-  bool shouldRepaint(covariant _AnalysisSelectionPainter oldDelegate) =>
-      oldDelegate.xMin != xMin ||
-      oldDelegate.xMax != xMax ||
-      oldDelegate.selectionStart != selectionStart ||
-      oldDelegate.selectionEnd != selectionEnd;
-}
-
-List<Offset> _downsampleAnalysisPoints(
-  List<_AnalysisPoint> points, {
-  required double xMin,
-  required double xMax,
-  required double pixelWidth,
-}) {
-  if (points.isEmpty || xMax <= xMin) return const [];
-  final first = _AnalysisChartPanelState._lowerBound(points, xMin);
-  final afterLast = _AnalysisChartPanelState._upperBound(points, xMax);
-  if (first >= afterLast) return const [];
-  final bucketCount = math.max(1, pixelWidth.floor());
-  final visibleCount = afterLast - first;
-  if (visibleCount <= bucketCount * 2) {
-    return [
-      for (var index = first; index < afterLast; index += 1)
-        Offset(points[index].x, points[index].y),
-    ];
-  }
-
-  final result = <Offset>[];
-  var currentBucket = -1;
-  _AnalysisPoint? minimum;
-  _AnalysisPoint? maximum;
-  var minimumIndex = 0;
-  var maximumIndex = 0;
-
-  void append(_AnalysisPoint point) {
-    final offset = Offset(point.x, point.y);
-    if (result.isEmpty || result.last != offset) result.add(offset);
-  }
-
-  void flushBucket() {
-    final low = minimum;
-    final high = maximum;
-    if (low == null || high == null) return;
-    if (minimumIndex <= maximumIndex) {
-      append(low);
-      append(high);
-    } else {
-      append(high);
-      append(low);
-    }
-  }
-
-  for (var index = first; index < afterLast; index += 1) {
-    final point = points[index];
-    final bucket = (((point.x - xMin) / (xMax - xMin)) * bucketCount)
-        .floor()
-        .clamp(0, bucketCount - 1);
-    if (bucket != currentBucket) {
-      flushBucket();
-      currentBucket = bucket;
-      minimum = point;
-      maximum = point;
-      minimumIndex = index;
-      maximumIndex = index;
-    } else {
-      if (point.y < minimum!.y) {
-        minimum = point;
-        minimumIndex = index;
-      }
-      if (point.y > maximum!.y) {
-        maximum = point;
-        maximumIndex = index;
-      }
-    }
-  }
-  flushBucket();
-  append(points[afterLast - 1]);
-  return result;
 }

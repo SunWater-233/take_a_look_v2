@@ -8,6 +8,119 @@ import 'package:take_a_look_v2/src/panel_types.dart';
 import 'package:take_a_look_v2/src/theme.dart';
 
 void main() {
+  testWidgets('FFT button splits the chart and selects a CSV signal', (
+    tester,
+  ) async {
+    final controller = TakeALookController(
+      csvImportContentsPicker: () async =>
+          'index,elapsed_s,alpha,beta\n'
+          '0,0.00,0,1\n'
+          '1,0.01,1,0\n'
+          '2,0.02,0,-1\n'
+          '3,0.03,-1,0\n'
+          '4,0.04,0,1\n'
+          '5,0.05,1,0\n'
+          '6,0.06,0,-1\n'
+          '7,0.07,-1,0\n',
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTalTheme(),
+        home: Scaffold(
+          body: SizedBox(
+            width: 1000,
+            height: 700,
+            child: buildWorkspacePanel(WorkspacePanelId.analysis, controller),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('导入数据').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('本地 CSV'));
+    await tester.pumpAndSettle();
+
+    expect(controller.analysisSession.fftTimeSeriesIndex, 0);
+    expect(controller.analysisSession.fftSeriesIndex, 1);
+    await tester.tap(find.byKey(const ValueKey('analysis-fft-toggle')));
+    await tester.pump();
+
+    expect(
+      find.byKey(const ValueKey('analysis-fft-split-view')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('analysis-fft-panel')), findsOneWidget);
+    expect(find.byKey(const ValueKey('analysis-fft-chart')), findsOneWidget);
+    expect(find.textContaining('Fs 100'), findsOneWidget);
+
+    final fftInteraction = find.byKey(
+      const ValueKey('analysis-fft-interaction'),
+    );
+    final fftChart = find.byKey(const ValueKey('analysis-fft-chart'));
+    dynamic fftPainter = tester.widget<CustomPaint>(fftChart).painter!;
+    final initialSpan =
+        (fftPainter.xMax as double) - (fftPainter.xMin as double);
+    final fftCenter = tester.getCenter(fftInteraction);
+    tester.binding.handlePointerEvent(
+      PointerScrollEvent(
+        position: fftCenter,
+        scrollDelta: const Offset(0, -20),
+      ),
+    );
+    await tester.pump();
+    fftPainter = tester.widget<CustomPaint>(fftChart).painter!;
+    final zoomedSpan =
+        (fftPainter.xMax as double) - (fftPainter.xMin as double);
+    expect(zoomedSpan, lessThan(initialSpan));
+
+    final beforePanMinimum = fftPainter.xMin as double;
+    final pan = await tester.startGesture(
+      fftCenter,
+      kind: PointerDeviceKind.mouse,
+      buttons: kMiddleMouseButton,
+    );
+    await pan.moveBy(const Offset(-35, 0));
+    await pan.up();
+    await tester.pump();
+    fftPainter = tester.widget<CustomPaint>(fftChart).painter!;
+    expect(fftPainter.xMin as double, greaterThan(beforePanMinimum));
+
+    final selection = await tester.startGesture(
+      fftCenter - const Offset(45, 0),
+      kind: PointerDeviceKind.mouse,
+      buttons: kPrimaryMouseButton,
+    );
+    await selection.moveTo(fftCenter + const Offset(45, 0));
+    await selection.up();
+    await tester.pump();
+    expect(controller.analysisSession.fftSelectionStart, isNotNull);
+    expect(controller.analysisSession.fftSelectionEnd, isNotNull);
+
+    final rightClick = await tester.startGesture(
+      fftCenter,
+      kind: PointerDeviceKind.mouse,
+      buttons: kSecondaryMouseButton,
+    );
+    await rightClick.up();
+    await tester.pumpAndSettle();
+    expect(find.text('View All'), findsOneWidget);
+    expect(find.text('X Axis'), findsOneWidget);
+    expect(find.text('Y Axis'), findsOneWidget);
+    expect(find.text('Mouse Mode'), findsOneWidget);
+    await tester.tap(find.text('View All'));
+    await tester.pumpAndSettle();
+    fftPainter = tester.widget<CustomPaint>(fftChart).painter!;
+    expect(
+      (fftPainter.xMax as double) - (fftPainter.xMin as double),
+      closeTo(initialSpan, 1e-9),
+    );
+
+    await tester.tap(find.byKey(const ValueKey('analysis-fft-toggle')));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('analysis-fft-panel')), findsNothing);
+    controller.dispose();
+  });
+
   testWidgets(
     'analysis panel imports realtime samples and reports selection statistics',
     (tester) async {
@@ -187,6 +300,8 @@ void main() {
       await rightZoom.up();
       await tester.pump();
 
+      expect(find.text('View All'), findsNothing);
+
       painter = tester.widget<CustomPaint>(chart).painter!;
       final afterRightXSpan =
           (painter.xMax as double) - (painter.xMin as double);
@@ -211,6 +326,109 @@ void main() {
       controller.dispose();
     },
   );
+
+  testWidgets('analysis plot provides the realtime chart context menu', (
+    tester,
+  ) async {
+    final controller = TakeALookController(
+      csvImportContentsPicker: () async =>
+          'time,signal\n0,0\n1,1\n2,2\n3,3\n4,4\n',
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTalTheme(),
+        home: Scaffold(
+          body: SizedBox(
+            width: 1000,
+            height: 700,
+            child: buildWorkspacePanel(WorkspacePanelId.analysis, controller),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('导入数据').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('本地 CSV'));
+    await tester.pumpAndSettle();
+
+    final interaction = find.byKey(
+      const ValueKey('analysis-chart-interaction'),
+    );
+    final chart = find.byKey(const ValueKey('analysis-chart-series-layer'));
+    dynamic painter = tester.widget<CustomPaint>(chart).painter!;
+    final initialXSpan = (painter.xMax as double) - (painter.xMin as double);
+    final center = tester.getCenter(interaction);
+    tester.binding.handlePointerEvent(
+      PointerScrollEvent(position: center, scrollDelta: const Offset(0, -20)),
+    );
+    await tester.pump();
+
+    final rightClick = await tester.startGesture(
+      center,
+      kind: PointerDeviceKind.mouse,
+      buttons: kSecondaryMouseButton,
+    );
+    await rightClick.up();
+    await tester.pumpAndSettle();
+    expect(find.text('View All'), findsOneWidget);
+    expect(find.text('X Axis'), findsOneWidget);
+    expect(find.text('Y Axis'), findsOneWidget);
+    expect(find.text('Mouse Mode'), findsOneWidget);
+    final menuAnchor = tester.widget<MenuAnchor>(
+      find.byKey(const ValueKey('analysis-plot-menu-anchor')),
+    );
+    expect(menuAnchor.animated, isTrue);
+    expect(menuAnchor.style, same(talContextMenuStyle));
+
+    await tester.tap(find.text('View All'));
+    await tester.pumpAndSettle();
+    painter = tester.widget<CustomPaint>(chart).painter!;
+    expect(
+      (painter.xMax as double) - (painter.xMin as double),
+      closeTo(initialXSpan, 1e-9),
+    );
+
+    final modeMenu = await tester.startGesture(
+      center,
+      kind: PointerDeviceKind.mouse,
+      buttons: kSecondaryMouseButton,
+    );
+    await modeMenu.up();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Mouse Mode'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('1 Button'));
+    await tester.pumpAndSettle();
+
+    final rectangle = await tester.startGesture(
+      center - const Offset(100, 70),
+      kind: PointerDeviceKind.mouse,
+      buttons: kPrimaryMouseButton,
+    );
+    await rectangle.moveTo(center + const Offset(100, 70));
+    await rectangle.up();
+    await tester.pump();
+    painter = tester.widget<CustomPaint>(chart).painter!;
+    expect(
+      (painter.xMax as double) - (painter.xMin as double),
+      lessThan(initialXSpan),
+    );
+
+    final touch = await tester.startGesture(
+      center,
+      kind: PointerDeviceKind.touch,
+    );
+    await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
+    await tester.pumpAndSettle();
+    expect(find.text('显示全部'), findsOneWidget);
+    expect(find.text('X 轴详细设置…'), findsOneWidget);
+    expect(find.text('Y 轴详细设置…'), findsOneWidget);
+    await touch.up();
+    await tester.tap(find.text('显示全部'));
+    await tester.pumpAndSettle();
+
+    controller.dispose();
+  });
 
   testWidgets('analysis panel parses a local CSV through the injected picker', (
     tester,
@@ -365,7 +583,7 @@ void main() {
     );
     expect(tester.widget<PopupMenuItem<String>>(touchHideItem).height, 48);
     await headerTouch.up();
-    await tester.tapAt(const Offset(980, 20));
+    await tester.tap(find.text('显示全列'));
     await tester.pumpAndSettle();
 
     final touch = await tester.startGesture(

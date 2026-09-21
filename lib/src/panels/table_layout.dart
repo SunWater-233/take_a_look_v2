@@ -23,6 +23,17 @@ class ResizableTableLayout {
   double get rowHeight => _rowHeight;
   double get totalWidth => _widths.fold(0, (sum, width) => sum + width);
 
+  void restore({required List<double> widths, required double rowHeight}) {
+    if (widths.length != minimumWidths.length) return;
+    _widths = [
+      for (var index = 0; index < widths.length; index += 1)
+        math.max(minimumWidths[index], widths[index]),
+    ];
+    _rowHeight = rowHeight;
+    _resizeWidths = null;
+    _resizeRowHeight = null;
+  }
+
   void beginResize() {
     _resizeWidths = List<double>.of(_widths);
     _resizeRowHeight = _rowHeight;

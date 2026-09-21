@@ -54,6 +54,7 @@ class DesktopAxisMenuState extends State<DesktopAxisMenu> {
           ? controller.plotMouseXEnabled
           : controller.plotMouseYEnabled,
       inverted: widget.xAxis ? controller.plotInvertX : controller.plotInvertY,
+      minimumAllowed: widget.xAxis ? 0 : null,
       format: _compactNumber,
     );
   }

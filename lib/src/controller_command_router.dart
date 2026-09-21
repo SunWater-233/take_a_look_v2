@@ -119,6 +119,10 @@ Future<JsonObject> executeControllerCommand(
       controller.setAllWatchesPlotted(arguments as bool);
     case ControllerCommand.invertWatchPlots:
       controller.invertWatchPlots((arguments as List).cast<String>());
+    case ControllerCommand.updateAnalysisSession:
+      controller.applyAnalysisSession(
+        Map<String, dynamic>.from(arguments! as Map),
+      );
     case ControllerCommand.writeWatch:
       final values = Map<String, Object?>.from(arguments! as Map);
       controller.writeWatch(values['key'] as String, values['value'] as String);

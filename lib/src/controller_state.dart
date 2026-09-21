@@ -1,4 +1,5 @@
 import 'models.dart';
+import 'analysis.dart';
 
 /// Aggregate state owned by the application controller.
 ///
@@ -9,6 +10,7 @@ class ControllerState {
   final ConnectionState connection = ConnectionState();
   final AcquisitionState acquisition = AcquisitionState();
   final PlotState plot = PlotState();
+  final AnalysisSession analysis = AnalysisSession();
 }
 
 class ConnectionState {

@@ -228,6 +228,10 @@ class DetachedWindowCoordinator {
           configureDetachedPanelMethod,
           configuration.toJson(),
         );
+        if (configuration.panels.contains(WorkspacePanelId.analysis) ||
+            configuration.panel == WorkspacePanelId.analysis) {
+          await windowSync.syncAnalysisSessionTo(window);
+        }
         return;
       } on Object catch (error, stackTrace) {
         lastError = error;

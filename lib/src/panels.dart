@@ -8,6 +8,9 @@ import 'package:flutter/services.dart';
 
 import 'chart.dart';
 import 'chart/cartesian_renderer.dart';
+import 'chart/axis_settings.dart';
+import 'analysis.dart';
+import 'analysis_fft.dart';
 import 'controller.dart';
 import 'models.dart';
 import 'panel_types.dart';
@@ -22,6 +25,9 @@ part 'panels/watch_panel.dart';
 part 'panels/connection_panel.dart';
 part 'panels/plot_log_panels.dart';
 part 'panels/analysis_chart_panel.dart';
+part 'panels/analysis_chart_painters.dart';
+part 'panels/analysis_fft_panel.dart';
+part 'panels/analysis_chart_table.dart';
 part 'panels/shared_controls.dart';
 
 Widget buildWorkspacePanel(

@@ -83,6 +83,12 @@ class MainWindowSync {
     _telemetryCursors.remove(panel);
   }
 
+  Future<void> syncAnalysisSessionTo(WindowController window) {
+    return window.invokeMethod<void>('state', {
+      'analysisSession': controller.analysisSession.toJson(includeData: true),
+    });
+  }
+
   Future<dynamic> _handleCall(MethodCall call) async {
     if (call.method == 'snapshot') return controller.snapshot();
     if (call.method == releaseDetachedWindowMethod) {

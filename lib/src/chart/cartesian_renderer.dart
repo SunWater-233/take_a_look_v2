@@ -38,6 +38,61 @@ class CartesianPlotViewport {
     final mapped = invertY ? fraction : 1 - fraction;
     return plot.top + plot.height * mapped;
   }
+
+  double xFractionAt(double pixelX) {
+    final fraction = ((pixelX - plot.left) / math.max(1, plot.width)).clamp(
+      0.0,
+      1.0,
+    );
+    return invertX ? 1 - fraction : fraction;
+  }
+
+  double yFractionAt(double pixelY) {
+    final fraction = invertY
+        ? (pixelY - plot.top) / math.max(1, plot.height)
+        : (plot.bottom - pixelY) / math.max(1, plot.height);
+    return fraction.clamp(0.0, 1.0);
+  }
+
+  double unmapX(double pixelX) => xMin + xSpan * xFractionAt(pixelX);
+
+  double unmapY(double pixelY) => yMin + ySpan * yFractionAt(pixelY);
+}
+
+(double, double) clampCartesianWindow(
+  double minimum,
+  double maximum,
+  double dataMinimum,
+  double dataMaximum,
+) {
+  final span = maximum - minimum;
+  if (span >= dataMaximum - dataMinimum) return (dataMinimum, dataMaximum);
+  if (minimum < dataMinimum) return (dataMinimum, dataMinimum + span);
+  if (maximum > dataMaximum) return (dataMaximum - span, dataMaximum);
+  return (minimum, maximum);
+}
+
+(double, double) zoomCartesianWindow({
+  required double minimum,
+  required double maximum,
+  required double dataMinimum,
+  required double dataMaximum,
+  required double anchorFraction,
+  required double scale,
+}) {
+  final dataSpan = dataMaximum - dataMinimum;
+  final span = ((maximum - minimum) * scale).clamp(
+    math.max(dataSpan * 0.0001, 1e-9),
+    dataSpan,
+  );
+  final anchor = minimum + (maximum - minimum) * anchorFraction;
+  final nextMinimum = anchor - span * anchorFraction;
+  return clampCartesianWindow(
+    nextMinimum,
+    nextMinimum + span,
+    dataMinimum,
+    dataMaximum,
+  );
 }
 
 class CartesianLegendItem {

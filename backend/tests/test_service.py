@@ -188,10 +188,14 @@ class BackendServiceTests(unittest.TestCase):
             symbol_path.touch()
             loaded = self.service.handle(RpcMethod.LOAD_SYMBOLS, {"path": str(symbol_path)})
             self.assertEqual(loaded["state"]["debug"]["sourceFiles"], ["C:/firmware/main.c"])  # type: ignore[index]
+            self.assertEqual(
+                loaded["state"]["debug"]["executableLines"],  # type: ignore[index]
+                {"C:/firmware/main.c": [10, 12]},
+            )
 
             pending = self.service.handle(
                 RpcMethod.SET_BREAKPOINTS,
-                {"path": "C:/firmware/main.c", "lines": [11]},
+                {"path": "C:/firmware/main.c", "lines": [12]},
             )["debug"]
             self.assertFalse(pending["breakpoints"][0]["verified"])  # type: ignore[index]
 
@@ -211,3 +215,24 @@ class BackendServiceTests(unittest.TestCase):
             self.assertEqual(self.memory.execution_state, "running")
             self.assertEqual(self.memory.registers["pc"], 0x08000104)
             self.assertEqual(self.memory.breakpoints, {0x08000100})
+
+    def test_breakpoint_can_be_removed_through_canonical_path_after_alias_add(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            symbol_path = Path(directory) / "firmware.elf"
+            symbol_path.touch()
+            self.service.handle(RpcMethod.LOAD_SYMBOLS, {"path": str(symbol_path)})
+            self.service.handle(RpcMethod.CONNECT, {})
+
+            added = self.service.handle(
+                RpcMethod.SET_BREAKPOINTS,
+                {"path": "D:/checkout/main.c", "lines": [12]},
+            )["debug"]
+            self.assertEqual(added["breakpoints"][0]["path"], "C:/firmware/main.c")  # type: ignore[index]
+            self.assertEqual(self.memory.breakpoints, {0x08000108})
+
+            removed = self.service.handle(
+                RpcMethod.SET_BREAKPOINTS,
+                {"path": "C:/firmware/main.c", "lines": []},
+            )["debug"]
+            self.assertEqual(removed["breakpoints"], [])  # type: ignore[index]
+            self.assertEqual(self.memory.breakpoints, set())

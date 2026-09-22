@@ -42,12 +42,20 @@ overrides are useful for development and diagnostics; normal development uses
 
 Load an ELF/AXF file built with DWARF debug information (`-Og -g3` is
 recommended for GCC/Clang), then open the **源码调试** tab beside the realtime
-plot. Click the gutter next to a line number to add or remove a breakpoint.
+plot. Executable line numbers are highlighted in gray; click one to add or
+remove a breakpoint. Lines without generated instructions cannot accept a
+breakpoint.
 Verified breakpoints are red; pending or rejected breakpoints are amber and
 show their status in a tooltip. When the target halts, the panel opens the
 current source file, highlights the program-counter line, and displays core
-registers along the bottom. If the ELF contains a build-machine source path
-that does not exist locally, use **定位本地源码** to select the matching file.
+registers along the bottom. Source files open in closable tabs; overflowing
+tabs scroll horizontally and fade at the right edge to reveal that more files
+are available. Press `Ctrl+W` to close the active source tab, drag external
+text/source files into the panel to open them, or press `Ctrl+F` to search all
+known and open source files. Use the folder button in the source toolbar to set
+the project source root; build-machine paths recorded in the ELF are then
+matched to local files automatically. **定位本地源码** remains available as a
+per-file fallback.
 
 ## Test
 

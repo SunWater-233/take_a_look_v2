@@ -32,6 +32,10 @@ Future<String?> pickSourceFile() async {
   return file?.path;
 }
 
+Future<String?> pickSourceRootDirectory() {
+  return getDirectoryPath(confirmButtonText: '选择工程源码根目录');
+}
+
 Future<String?> pickCsvExportPath() async {
   final now = DateTime.now();
   String two(int value) => value.toString().padLeft(2, '0');

@@ -73,6 +73,12 @@ Future<JsonObject> executeControllerCommand(
       controller.clearLogs();
     case ControllerCommand.resetTarget:
       controller.resetTarget(halt: arguments == true);
+    case ControllerCommand.setSourceRoot:
+      if (arguments is String) {
+        controller.setSourceRoot(arguments);
+      } else {
+        await controller.chooseSourceRoot();
+      }
     case ControllerCommand.setBreakpoints:
       final values = Map<String, Object?>.from(arguments! as Map);
       final path = values['path'] as String;

@@ -56,6 +56,7 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
         controller = TakeALookController(
           backendCommand: client.command,
           symbolFilePicker: pickSymbolFile,
+          sourceRootPicker: pickSourceRootDirectory,
           csvExportPathPicker: pickCsvExportPath,
           csvImportContentsPicker: pickCsvImportContents,
         );

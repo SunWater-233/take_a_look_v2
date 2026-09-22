@@ -41,6 +41,7 @@ class TakeALookController extends ChangeNotifier {
     this.remoteCommand,
     this.backendCommand,
     this.symbolFilePicker,
+    this.sourceRootPicker,
     this.csvExportPathPicker,
     this.csvImportContentsPicker,
   }) {
@@ -54,6 +55,7 @@ class TakeALookController extends ChangeNotifier {
   final RemoteCommand? remoteCommand;
   final BackendCommand? backendCommand;
   final PathPicker? symbolFilePicker;
+  final PathPicker? sourceRootPicker;
   final PathPicker? csvExportPathPicker;
   final TextFilePicker? csvImportContentsPicker;
   final List<SymbolItem> _symbols = <SymbolItem>[];

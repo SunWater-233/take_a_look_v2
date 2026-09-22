@@ -13,17 +13,40 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   static const _lineHeight = 22.0;
   final ScrollController _verticalController = ScrollController();
   final ScrollController _horizontalController = ScrollController();
+  final ScrollController _tabController = ScrollController();
+  final List<String> _openPaths = <String>[];
+  final Map<String, GlobalKey> _tabKeys = <String, GlobalKey>{};
+  final Set<String> _externalPathKeys = <String>{};
+  final Map<String, String> _sourceTextCache = <String, String>{};
+  final FocusNode _panelFocusNode = FocusNode();
+  final FocusNode _searchFocusNode = FocusNode();
+  final TextEditingController _searchController = TextEditingController();
   String? _selectedPath;
   List<_HighlightedSourceLine> _lines = const [];
   String? _loadError;
   int _loadGeneration = 0;
+  int _searchGeneration = 0;
+  bool _canScrollTabsRight = false;
+  bool _draggingFiles = false;
+  bool _searchVisible = false;
+  bool _searching = false;
+  int _activeSearchIndex = -1;
+  int? _revealedSearchLine;
+  Timer? _searchDebounce;
+  List<_SourceSearchResult> _searchResults = const [];
   final Map<String, String> _sourceOverrides = <String, String>{};
+  final Map<String, String> _resolvedSourcePaths = <String, String>{};
+  Future<Map<String, List<String>>>? _sourceRootIndexFuture;
+  String _observedSourceRoot = '';
+  String? _observedCurrentSource;
+  int? _observedCurrentLine;
 
   TakeALookController get controller => widget.controller;
 
   @override
   void initState() {
     super.initState();
+    _tabController.addListener(_updateTabOverflow);
     controller.debugChanges.addListener(_handleDebugChange);
     controller.symbolChanges.addListener(_handleDebugChange);
     _handleDebugChange();
@@ -38,6 +61,20 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     controller.debugChanges.addListener(_handleDebugChange);
     controller.symbolChanges.addListener(_handleDebugChange);
     _selectedPath = null;
+    _openPaths.clear();
+    _tabKeys.clear();
+    _externalPathKeys.clear();
+    _sourceTextCache.clear();
+    _sourceRootIndexFuture = null;
+    _searchDebounce?.cancel();
+    _searchGeneration += 1;
+    _searchController.clear();
+    _searchResults = const [];
+    _searchVisible = false;
+    _searching = false;
+    _activeSearchIndex = -1;
+    _observedCurrentSource = null;
+    _observedCurrentLine = null;
     _handleDebugChange();
   }
 
@@ -47,6 +84,13 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     controller.symbolChanges.removeListener(_handleDebugChange);
     _verticalController.dispose();
     _horizontalController.dispose();
+    _panelFocusNode.dispose();
+    _searchFocusNode.dispose();
+    _searchController.dispose();
+    _searchDebounce?.cancel();
+    _tabController
+      ..removeListener(_updateTabOverflow)
+      ..dispose();
     super.dispose();
   }
 
@@ -63,15 +107,37 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
 
   void _handleDebugChange() {
     if (!mounted) return;
+    final sourceRootChanged =
+        _observedSourceRoot != controller.debugState.sourceRoot;
+    if (sourceRootChanged) {
+      _observedSourceRoot = controller.debugState.sourceRoot;
+      _resolvedSourcePaths.clear();
+      _sourceTextCache.clear();
+      _sourceRootIndexFuture = null;
+    }
     final currentSource = controller.debugState.currentSource;
+    final currentLine = controller.debugState.currentLine;
+    final locationChanged =
+        currentSource != _observedCurrentSource ||
+        currentLine != _observedCurrentLine;
+    _observedCurrentSource = currentSource;
+    _observedCurrentLine = currentLine;
     final files = _sourceFiles;
     String? nextPath = _selectedPath;
-    if (currentSource != null && currentSource.isNotEmpty) {
+    if (locationChanged && currentSource != null && currentSource.isNotEmpty) {
       nextPath = _matchingPath(currentSource, files) ?? currentSource;
-    } else if (nextPath == null || !files.contains(nextPath)) {
-      nextPath = files.firstOrNull;
+    } else if (nextPath == null ||
+        (!_externalPathKeys.contains(_pathKey(nextPath)) &&
+            _matchingPath(nextPath, files) == null)) {
+      nextPath = _openPaths.firstOrNull ?? files.firstOrNull;
     }
-    if (nextPath != _selectedPath) {
+    if (nextPath != null &&
+        !_openPaths.any(
+          (path) => controller.sourcePathsMatch(path, nextPath!),
+        )) {
+      _openPaths.add(nextPath);
+    }
+    if (nextPath != _selectedPath || sourceRootChanged) {
       unawaited(_loadSource(nextPath));
     } else {
       setState(() {});
@@ -79,25 +145,350 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     }
   }
 
-  Future<void> _loadSource(String? path) async {
+  Future<void> _loadSource(String? path, {int? revealLine}) async {
     final generation = ++_loadGeneration;
     setState(() {
       _selectedPath = path;
+      _revealedSearchLine = revealLine;
+      if (path != null &&
+          !_openPaths.any(
+            (openPath) => controller.sourcePathsMatch(openPath, path),
+          )) {
+        _openPaths.add(path);
+      }
       _lines = const [];
       _loadError = null;
     });
+    _ensureSelectedTabVisible();
     if (path == null) return;
     try {
-      final sourcePath = _sourceOverrides[_pathKey(path)] ?? path;
-      final source = await File(sourcePath).readAsString();
+      final source = await _readSourceText(path);
       final highlighted = _CppSyntaxHighlighter().highlight(source);
       if (!mounted || generation != _loadGeneration) return;
       setState(() => _lines = highlighted);
-      _scrollToCurrentLine(immediate: true);
+      if (revealLine != null) {
+        _scrollToLine(revealLine, immediate: true);
+      } else {
+        _scrollToCurrentLine(immediate: true);
+      }
     } on Object catch (error) {
       if (!mounted || generation != _loadGeneration) return;
       setState(() => _loadError = error.toString());
     }
+  }
+
+  Future<String> _readSourceText(String path) async {
+    final key = _pathKey(path);
+    final cached = _sourceTextCache[key];
+    if (cached != null) return cached;
+    final sourcePath = _sourceOverrides[key] ?? await _resolveSourcePath(path);
+    final source = await File(sourcePath).readAsString();
+    _sourceTextCache[key] = source;
+    return source;
+  }
+
+  void _openSource(String path) {
+    final existing = _openPaths
+        .where((openPath) => controller.sourcePathsMatch(openPath, path))
+        .firstOrNull;
+    unawaited(_loadSource(existing ?? path));
+    _restorePanelFocus();
+  }
+
+  void _restorePanelFocus() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _searchVisible) return;
+      _panelFocusNode.requestFocus();
+    });
+  }
+
+  void _closeSource(String path) {
+    var index = _openPaths.indexOf(path);
+    if (index < 0) {
+      index = _openPaths.indexWhere(
+        (openPath) => controller.sourcePathsMatch(openPath, path),
+      );
+    }
+    if (index < 0) return;
+    final openPath = _openPaths[index];
+    final wasSelected =
+        _selectedPath != null &&
+        controller.sourcePathsMatch(_selectedPath!, openPath);
+    setState(() {
+      _openPaths.removeAt(index);
+      _tabKeys.remove(_pathKey(openPath));
+      if (_matchingPath(openPath, _sourceFiles) == null) {
+        _externalPathKeys.remove(_pathKey(openPath));
+      }
+    });
+    if (_searchVisible && _searchController.text.isNotEmpty) {
+      _queueSearch(_searchController.text, immediate: true);
+    }
+    if (!wasSelected) {
+      _scheduleTabOverflowUpdate();
+      return;
+    }
+    final nextPath = _openPaths.isEmpty
+        ? null
+        : _openPaths[math.min(index, _openPaths.length - 1)];
+    unawaited(_loadSource(nextPath));
+  }
+
+  void _closeSelectedSource() {
+    final selectedPath = _selectedPath;
+    if (selectedPath != null) _closeSource(selectedPath);
+  }
+
+  KeyEventResult _handlePanelKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final keyboard = HardwareKeyboard.instance;
+    if ((!keyboard.isControlPressed && !keyboard.isMetaPressed) ||
+        keyboard.isAltPressed ||
+        keyboard.isShiftPressed) {
+      return KeyEventResult.ignored;
+    }
+    if (event.physicalKey == PhysicalKeyboardKey.keyW) {
+      _closeSelectedSource();
+      return KeyEventResult.handled;
+    }
+    if (event.physicalKey == PhysicalKeyboardKey.keyF) {
+      _showSearch();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  Future<void> _openDroppedFiles(Iterable<String> paths) async {
+    final accepted = <String>[];
+    for (final path in paths) {
+      if (path.isEmpty || !await File(path).exists()) continue;
+      final key = _pathKey(path);
+      _externalPathKeys.add(key);
+      _sourceTextCache.remove(key);
+      if (!_openPaths.any((item) => _pathKey(item) == key)) {
+        _openPaths.add(path);
+      }
+      accepted.add(path);
+    }
+    if (!mounted) return;
+    setState(() => _draggingFiles = false);
+    if (accepted.isNotEmpty) {
+      await _loadSource(accepted.first);
+      if (_searchVisible && _searchController.text.isNotEmpty) {
+        _queueSearch(_searchController.text, immediate: true);
+      }
+    }
+  }
+
+  GlobalKey _tabKeyFor(String path) =>
+      _tabKeys.putIfAbsent(_pathKey(path), GlobalKey.new);
+
+  void _ensureSelectedTabVisible() {
+    final selectedPath = _selectedPath;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || selectedPath == null) return;
+      final tabContext = _tabKeys[_pathKey(selectedPath)]?.currentContext;
+      if (tabContext != null) {
+        unawaited(
+          Scrollable.ensureVisible(
+            tabContext,
+            alignment: 0.5,
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+          ),
+        );
+      }
+      _updateTabOverflow();
+    });
+  }
+
+  void _scheduleTabOverflowUpdate() {
+    WidgetsBinding.instance.addPostFrameCallback((_) => _updateTabOverflow());
+  }
+
+  void _updateTabOverflow() {
+    if (!mounted || !_tabController.hasClients) return;
+    final canScrollRight = _tabController.position.extentAfter > 1;
+    if (canScrollRight == _canScrollTabsRight) return;
+    setState(() => _canScrollTabsRight = canScrollRight);
+  }
+
+  void _handleTabPointerSignal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent ||
+        !_tabController.hasClients ||
+        event.scrollDelta.dy == 0) {
+      return;
+    }
+    final position = _tabController.position;
+    final target = (_tabController.offset + event.scrollDelta.dy).clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    _tabController.jumpTo(target);
+  }
+
+  void _showSearch() {
+    final wasVisible = _searchVisible;
+    if (!wasVisible) setState(() => _searchVisible = true);
+    if (!wasVisible && _searchController.text.isNotEmpty) {
+      _queueSearch(_searchController.text, immediate: true);
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _searchFocusNode.requestFocus();
+      _searchController.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: _searchController.text.length,
+      );
+    });
+  }
+
+  void _closeSearch() {
+    _searchDebounce?.cancel();
+    _searchGeneration += 1;
+    setState(() {
+      _searchVisible = false;
+      _searching = false;
+      _searchResults = const [];
+      _activeSearchIndex = -1;
+      _revealedSearchLine = null;
+    });
+    _panelFocusNode.requestFocus();
+  }
+
+  void _queueSearch(String query, {bool immediate = false}) {
+    _searchDebounce?.cancel();
+    final generation = ++_searchGeneration;
+    if (query.isEmpty) {
+      setState(() {
+        _searching = false;
+        _searchResults = const [];
+        _activeSearchIndex = -1;
+        _revealedSearchLine = null;
+      });
+      return;
+    }
+    setState(() => _searching = true);
+    void run() => unawaited(_searchAcrossFiles(query, generation));
+    if (immediate) {
+      run();
+    } else {
+      _searchDebounce = Timer(const Duration(milliseconds: 180), run);
+    }
+  }
+
+  Future<void> _searchAcrossFiles(String query, int generation) async {
+    final pathsByKey = <String, String>{};
+    for (final path in [..._sourceFiles, ..._openPaths]) {
+      pathsByKey.putIfAbsent(_pathKey(path), () => path);
+    }
+    final lowerQuery = query.toLowerCase();
+    final results = <_SourceSearchResult>[];
+    for (final path in pathsByKey.values) {
+      if (generation != _searchGeneration) return;
+      try {
+        final source = await _readSourceText(path);
+        final lines = source
+            .replaceAll('\r\n', '\n')
+            .replaceAll('\r', '\n')
+            .split('\n');
+        for (var index = 0; index < lines.length; index += 1) {
+          final column = lines[index].toLowerCase().indexOf(lowerQuery);
+          if (column < 0) continue;
+          results.add(
+            _SourceSearchResult(
+              path: path,
+              line: index + 1,
+              column: column + 1,
+              preview: lines[index].trim(),
+            ),
+          );
+          if (results.length >= 1000) break;
+        }
+      } on Object {
+        // Missing build-machine paths and non-text dropped files are skipped.
+      }
+      if (results.length >= 1000) break;
+    }
+    if (!mounted || generation != _searchGeneration) return;
+    setState(() {
+      _searching = false;
+      _searchResults = results;
+      _activeSearchIndex = results.isEmpty ? -1 : 0;
+    });
+  }
+
+  void _moveSearchResult(int delta) {
+    if (_searchResults.isEmpty) return;
+    final next = (_activeSearchIndex + delta) % _searchResults.length;
+    _activateSearchResult(next < 0 ? next + _searchResults.length : next);
+  }
+
+  void _activateSearchResult(int index) {
+    if (index < 0 || index >= _searchResults.length) return;
+    final result = _searchResults[index];
+    setState(() => _activeSearchIndex = index);
+    unawaited(_loadSource(result.path, revealLine: result.line));
+  }
+
+  Future<String> _resolveSourcePath(String debugPath) async {
+    if (await File(debugPath).exists()) return debugPath;
+    final sourceRoot = controller.debugState.sourceRoot;
+    if (sourceRoot.isEmpty) return debugPath;
+
+    final cacheKey = _pathKey(debugPath);
+    final cached = _resolvedSourcePaths[cacheKey];
+    if (cached != null && await File(cached).exists()) return cached;
+
+    final normalized = debugPath.replaceAll('\\', '/');
+    final isAbsolute =
+        normalized.startsWith('/') ||
+        RegExp(r'^[A-Za-z]:/').hasMatch(normalized);
+    if (!isAbsolute) {
+      final direct = File(
+        '$sourceRoot${Platform.pathSeparator}${normalized.replaceAll('/', Platform.pathSeparator)}',
+      );
+      if (await direct.exists()) {
+        _resolvedSourcePaths[cacheKey] = direct.path;
+        return direct.path;
+      }
+    }
+
+    final targetName = _basename(debugPath).toLowerCase();
+    File? bestMatch;
+    var bestScore = -1;
+    final index = await (_sourceRootIndexFuture ??= _indexSourceRoot(
+      sourceRoot,
+    ));
+    for (final path in index[targetName] ?? const <String>[]) {
+      final score = _matchingPathSuffixLength(debugPath, path);
+      if (score > bestScore) {
+        bestMatch = File(path);
+        bestScore = score;
+      }
+    }
+    if (bestMatch != null) {
+      _resolvedSourcePaths[cacheKey] = bestMatch.path;
+      return bestMatch.path;
+    }
+    return debugPath;
+  }
+
+  Future<Map<String, List<String>>> _indexSourceRoot(String sourceRoot) async {
+    final index = <String, List<String>>{};
+    try {
+      await for (final entity in Directory(
+        sourceRoot,
+      ).list(recursive: true, followLinks: false)) {
+        if (entity is! File) continue;
+        index
+            .putIfAbsent(_basename(entity.path).toLowerCase(), () => <String>[])
+            .add(entity.path);
+      }
+    } on FileSystemException {
+      return const <String, List<String>>{};
+    }
+    return index;
   }
 
   Future<void> _locateSourceFile() async {
@@ -106,6 +497,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     final localPath = await pickSourceFile();
     if (localPath == null || localPath.isEmpty) return;
     _sourceOverrides[_pathKey(selectedPath)] = localPath;
+    _sourceTextCache.remove(_pathKey(selectedPath));
     await _loadSource(selectedPath);
   }
 
@@ -115,13 +507,17 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     if (currentPath == null ||
         currentLine == null ||
         _selectedPath == null ||
-        _pathKey(currentPath) != _pathKey(_selectedPath!)) {
+        !controller.sourcePathsMatch(currentPath, _selectedPath!)) {
       return;
     }
+    _scrollToLine(currentLine, immediate: immediate);
+  }
+
+  void _scrollToLine(int line, {bool immediate = false}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_verticalController.hasClients) return;
       final viewport = _verticalController.position.viewportDimension;
-      final target = ((currentLine - 1) * _lineHeight - viewport * 0.38).clamp(
+      final target = ((line - 1) * _lineHeight - viewport * 0.38).clamp(
         0.0,
         _verticalController.position.maxScrollExtent,
       );
@@ -141,14 +537,232 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _buildToolbar(),
-        const Divider(height: 1, color: TalColors.borderSoft),
-        Expanded(child: _buildBody()),
-        _buildRegisterStrip(),
-      ],
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.keyW, control: true):
+            _closeSelectedSource,
+        const SingleActivator(LogicalKeyboardKey.keyW, meta: true):
+            _closeSelectedSource,
+        const SingleActivator(LogicalKeyboardKey.keyF, control: true):
+            _showSearch,
+        const SingleActivator(LogicalKeyboardKey.keyF, meta: true): _showSearch,
+        const SingleActivator(LogicalKeyboardKey.escape): () {
+          if (_searchVisible) _closeSearch();
+        },
+      },
+      child: Focus(
+        focusNode: _panelFocusNode,
+        autofocus: true,
+        onKeyEvent: _handlePanelKeyEvent,
+        child: Listener(
+          onPointerDown: (_) => _panelFocusNode.requestFocus(),
+          child: DropTarget(
+            key: const ValueKey('source-file-drop-target'),
+            onDragEntered: (_) {
+              if (mounted) setState(() => _draggingFiles = true);
+            },
+            onDragExited: (_) {
+              if (mounted) setState(() => _draggingFiles = false);
+            },
+            onDragDone: (details) => unawaited(
+              _openDroppedFiles(details.files.map((file) => file.path)),
+            ),
+            child: Stack(
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _buildToolbar(),
+                    if (_searchVisible) _buildSearchArea(),
+                    const Divider(height: 1, color: TalColors.borderSoft),
+                    Expanded(child: _buildBody()),
+                    _buildRegisterStrip(),
+                  ],
+                ),
+                if (_draggingFiles)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: Container(
+                        key: const ValueKey('source-file-drop-overlay'),
+                        decoration: BoxDecoration(
+                          color: TalColors.accent.withValues(alpha: 0.08),
+                          border: Border.all(color: TalColors.accent, width: 2),
+                        ),
+                        child: const Center(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: TalColors.surfaceAlt,
+                              borderRadius: BorderRadius.all(
+                                Radius.circular(6),
+                              ),
+                            ),
+                            child: Padding(
+                              padding: EdgeInsets.symmetric(
+                                horizontal: 18,
+                                vertical: 10,
+                              ),
+                              child: Text(
+                                '释放以打开文件',
+                                style: TextStyle(color: TalColors.text),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSearchArea() {
+    final query = _searchController.text;
+    final status = _searching
+        ? '搜索中…'
+        : query.isEmpty
+        ? '输入文本'
+        : _searchResults.isEmpty
+        ? '无结果'
+        : '${_activeSearchIndex + 1} / ${_searchResults.length}';
+    final resultHeight = math.min(168.0, _searchResults.length * 30.0);
+    return Container(
+      key: const ValueKey('source-search-area'),
+      color: TalColors.surfaceAlt,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            height: 36,
+            child: Row(
+              children: [
+                const SizedBox(width: 10),
+                const Icon(Icons.search, size: 16, color: TalColors.muted),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: TextField(
+                    key: const ValueKey('source-search-field'),
+                    controller: _searchController,
+                    focusNode: _searchFocusNode,
+                    autofocus: true,
+                    maxLines: 1,
+                    onChanged: _queueSearch,
+                    onSubmitted: (_) {
+                      if (_activeSearchIndex >= 0) {
+                        _activateSearchResult(_activeSearchIndex);
+                      }
+                    },
+                    style: const TextStyle(
+                      color: TalColors.text,
+                      fontSize: 12,
+                      fontFamily: talFontFamily,
+                    ),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      hintText: '在所有源码文件中搜索',
+                      hintStyle: talMuted.copyWith(fontSize: 12),
+                      border: InputBorder.none,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 74,
+                  child: Text(
+                    status,
+                    textAlign: TextAlign.center,
+                    style: talMuted.copyWith(fontSize: 11),
+                  ),
+                ),
+                _DebugToolbarButton(
+                  key: const ValueKey('source-search-previous'),
+                  tooltip: '上一个结果',
+                  icon: Icons.keyboard_arrow_up,
+                  onPressed: _searchResults.isEmpty
+                      ? null
+                      : () => _moveSearchResult(-1),
+                ),
+                _DebugToolbarButton(
+                  key: const ValueKey('source-search-next'),
+                  tooltip: '下一个结果',
+                  icon: Icons.keyboard_arrow_down,
+                  onPressed: _searchResults.isEmpty
+                      ? null
+                      : () => _moveSearchResult(1),
+                ),
+                _DebugToolbarButton(
+                  key: const ValueKey('source-search-close'),
+                  tooltip: '关闭搜索',
+                  icon: Icons.close,
+                  onPressed: _closeSearch,
+                ),
+                const SizedBox(width: 4),
+              ],
+            ),
+          ),
+          if (_searchResults.isNotEmpty)
+            Container(
+              height: resultHeight,
+              decoration: const BoxDecoration(
+                color: TalColors.surface,
+                border: Border(top: BorderSide(color: TalColors.borderSoft)),
+              ),
+              child: ListView.builder(
+                key: const ValueKey('source-search-results'),
+                itemExtent: 30,
+                itemCount: _searchResults.length,
+                itemBuilder: (context, index) {
+                  final result = _searchResults[index];
+                  final selected = index == _activeSearchIndex;
+                  return InkWell(
+                    key: ValueKey('source-search-result-$index'),
+                    onTap: () => _activateSearchResult(index),
+                    child: ColoredBox(
+                      color: selected
+                          ? TalColors.selection.withValues(alpha: 0.55)
+                          : Colors.transparent,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        child: Row(
+                          children: [
+                            SizedBox(
+                              width: 220,
+                              child: Text(
+                                '${_basename(result.path)}:${result.line}:${result.column}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: TalColors.text,
+                                  fontSize: 11,
+                                  fontFamily: talFontFamily,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                result.preview,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: talMuted.copyWith(
+                                  fontSize: 11,
+                                  fontFamily: talFontFamily,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -187,59 +801,198 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
           const SizedBox(width: 8),
           _DebugStateBadge(state: state),
           const SizedBox(width: 12),
-          Expanded(child: _buildFileSelector()),
+          Expanded(child: _buildSourceTabs()),
+          _DebugToolbarButton(
+            key: const ValueKey('source-root-picker'),
+            tooltip: controller.debugState.sourceRoot.isEmpty
+                ? '设置工程源码根目录'
+                : '工程源码根目录：${controller.debugState.sourceRoot}',
+            icon: controller.debugState.sourceRoot.isEmpty
+                ? Icons.folder_open_outlined
+                : Icons.folder_special_outlined,
+            onPressed: controller.chooseSourceRoot,
+          ),
           const SizedBox(width: 8),
         ],
       ),
     );
   }
 
-  Widget _buildFileSelector() {
+  Widget _buildSourceTabs() {
     final files = _sourceFiles;
-    return PopupMenuButton<String>(
-      tooltip: '选择源码文件',
-      enabled: files.isNotEmpty,
-      onSelected: (path) => unawaited(_loadSource(path)),
-      itemBuilder: (context) => [
-        for (final path in files)
-          PopupMenuItem<String>(
-            value: path,
-            child: Tooltip(
-              message: path,
-              child: Text(
-                _basename(path),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
+    _scheduleTabOverflowUpdate();
+    return SizedBox(
+      height: 32,
+      child: Row(
+        children: [
+          Expanded(
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: Listener(
+                    key: const ValueKey('source-tabs-scroll-area'),
+                    onPointerSignal: _handleTabPointerSignal,
+                    child: SingleChildScrollView(
+                      controller: _tabController,
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          if (_openPaths.isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                              ),
+                              child: Center(
+                                child: Text(
+                                  files.isEmpty
+                                      ? 'ELF 中没有源码调试信息'
+                                      : '从右侧列表打开源码文件',
+                                  style: talMuted.copyWith(fontSize: 12),
+                                ),
+                              ),
+                            )
+                          else
+                            for (final path in _openPaths)
+                              _buildSourceTab(path),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  top: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: IgnorePointer(
+                    child: AnimatedOpacity(
+                      key: const ValueKey('source-tabs-right-fade'),
+                      opacity: _canScrollTabsRight ? 1 : 0,
+                      duration: const Duration(milliseconds: 120),
+                      child: Container(
+                        width: 54,
+                        decoration: const BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [Colors.transparent, TalColors.surface],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-      ],
-      child: Container(
-        height: 30,
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        decoration: BoxDecoration(
-          color: TalColors.input,
-          border: Border.all(color: TalColors.border),
-          borderRadius: talControlRadius,
-        ),
-        child: Row(
-          children: [
-            const Icon(
-              Icons.description_outlined,
-              size: 15,
-              color: TalColors.muted,
+          const SizedBox(width: 4),
+          PopupMenuButton<String>(
+            key: const ValueKey('source-file-menu'),
+            tooltip: '打开源码标签',
+            enabled: files.isNotEmpty,
+            onSelected: _openSource,
+            itemBuilder: (context) => [
+              for (final path in files)
+                PopupMenuItem<String>(
+                  key: ValueKey('source-file-option-$path'),
+                  value: path,
+                  child: Tooltip(
+                    message: path,
+                    child: Row(
+                      children: [
+                        Icon(
+                          _openPaths.any(
+                                (openPath) =>
+                                    controller.sourcePathsMatch(openPath, path),
+                              )
+                              ? Icons.check
+                              : Icons.description_outlined,
+                          size: 15,
+                          color: TalColors.muted,
+                        ),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Text(
+                            _basename(path),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+            child: const SizedBox(
+              width: 28,
+              height: 28,
+              child: Icon(Icons.add, size: 17, color: TalColors.muted),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                _selectedPath ?? (files.isEmpty ? 'ELF 中没有源码调试信息' : '选择源码文件'),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: talMuted.copyWith(fontSize: 12),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSourceTab(String path) {
+    final selected =
+        _selectedPath != null &&
+        controller.sourcePathsMatch(_selectedPath!, path);
+    return Tooltip(
+      message: path,
+      child: Material(
+        key: _tabKeyFor(path),
+        color: selected ? TalColors.surfaceAlt : Colors.transparent,
+        child: InkWell(
+          key: ValueKey('source-tab-$path'),
+          onTap: () => _openSource(path),
+          child: Container(
+            key: selected ? ValueKey('source-tab-active-$path') : null,
+            constraints: const BoxConstraints(minWidth: 92, maxWidth: 230),
+            height: 29,
+            padding: const EdgeInsets.only(left: 9, right: 3),
+            decoration: BoxDecoration(
+              border: Border(
+                right: const BorderSide(color: TalColors.borderSoft),
+                bottom: BorderSide(
+                  color: selected ? TalColors.accent : Colors.transparent,
+                  width: 2,
+                ),
               ),
             ),
-            const Icon(Icons.arrow_drop_down, size: 18, color: TalColors.muted),
-          ],
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.description_outlined,
+                  size: 14,
+                  color: selected ? TalColors.text : TalColors.muted,
+                ),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    _basename(path),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: selected ? TalColors.text : TalColors.muted,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 3),
+                IconButton(
+                  key: ValueKey('source-tab-close-$path'),
+                  tooltip: '关闭 ${_basename(path)}',
+                  onPressed: () => _closeSource(path),
+                  icon: const Icon(Icons.close, size: 13),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 22,
+                    height: 22,
+                  ),
+                  visualDensity: VisualDensity.compact,
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -303,69 +1056,93 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   Widget _buildSourceLine(int index) {
     final lineNumber = index + 1;
     final path = _selectedPath!;
-    final requested =
-        controller.debugState.requestedBreakpoints[path] ??
-        controller.debugState.requestedBreakpoints.entries
-            .where((entry) => _pathKey(entry.key) == _pathKey(path))
-            .map((entry) => entry.value)
-            .firstOrNull ??
-        const <int>{};
+    final requested = controller.debugState.requestedBreakpoints.entries
+        .where((entry) => controller.sourcePathsMatch(entry.key, path))
+        .expand((entry) => entry.value)
+        .toSet();
     final breakpoint = controller.debugState.resolvedBreakpoints
         .where(
           (item) =>
-              _pathKey(item.path) == _pathKey(path) &&
+              controller.sourcePathsMatch(item.path, path) &&
               item.requestedLine == lineNumber,
         )
         .firstOrNull;
     final hasBreakpoint = requested.contains(lineNumber);
+    final executableLines = controller.executableLinesFor(path);
+    final canSetBreakpoint = executableLines.contains(lineNumber);
     final isCurrent =
         controller.debugState.currentLine == lineNumber &&
         controller.debugState.currentSource != null &&
-        _pathKey(controller.debugState.currentSource!) == _pathKey(path);
+        controller.sourcePathsMatch(controller.debugState.currentSource!, path);
+    final isSearchResult = _revealedSearchLine == lineNumber;
     return ColoredBox(
-      color: isCurrent ? const Color(0x333B82F6) : Colors.transparent,
+      color: isCurrent
+          ? const Color(0x333B82F6)
+          : isSearchResult
+          ? TalColors.amber.withValues(alpha: 0.16)
+          : Colors.transparent,
       child: Row(
         children: [
           InkWell(
             key: ValueKey('breakpoint-$lineNumber'),
-            onTap: () => controller.toggleBreakpoint(path, lineNumber),
+            onTap: canSetBreakpoint
+                ? () => controller.toggleBreakpoint(path, lineNumber)
+                : null,
             child: SizedBox(
-              width: 30,
+              width: 76,
               height: _lineHeight,
-              child: Center(
-                child: isCurrent
-                    ? const Icon(
-                        Icons.arrow_right,
-                        size: 18,
-                        color: Color(0xFF65A7FF),
-                      )
-                    : hasBreakpoint
-                    ? Tooltip(
-                        message:
-                            breakpoint?.message ??
-                            (breakpoint?.verified == true ? '断点已设置' : '等待设置断点'),
-                        child: Icon(
-                          Icons.circle,
-                          size: 11,
-                          color: breakpoint?.verified == true
-                              ? const Color(0xFFE25858)
-                              : TalColors.amber,
-                        ),
-                      )
-                    : const SizedBox.shrink(),
-              ),
-            ),
-          ),
-          SizedBox(
-            width: 46,
-            child: Text(
-              '$lineNumber',
-              textAlign: TextAlign.right,
-              style: const TextStyle(
-                color: Color(0xFF777277),
-                fontSize: 12,
-                height: 1.45,
-                fontFamily: talFontFamily,
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 30,
+                    child: Center(
+                      child: isCurrent
+                          ? const Icon(
+                              Icons.arrow_right,
+                              size: 18,
+                              color: Color(0xFF65A7FF),
+                            )
+                          : hasBreakpoint
+                          ? Tooltip(
+                              message:
+                                  breakpoint?.message ??
+                                  (breakpoint?.verified == true
+                                      ? '断点已设置'
+                                      : '等待设置断点'),
+                              child: Icon(
+                                Icons.circle,
+                                size: 11,
+                                color: breakpoint?.verified == true
+                                    ? const Color(0xFFE25858)
+                                    : TalColors.amber,
+                              ),
+                            )
+                          : const SizedBox.shrink(),
+                    ),
+                  ),
+                  Container(
+                    key: ValueKey('executable-line-$lineNumber'),
+                    width: 46,
+                    height: _lineHeight,
+                    alignment: Alignment.centerRight,
+                    padding: const EdgeInsets.only(right: 4),
+                    color: canSetBreakpoint
+                        ? const Color(0xFF353236)
+                        : Colors.transparent,
+                    child: Text(
+                      '$lineNumber',
+                      textAlign: TextAlign.right,
+                      style: TextStyle(
+                        color: canSetBreakpoint
+                            ? const Color(0xFFC8C4C9)
+                            : const Color(0xFF625E63),
+                        fontSize: 12,
+                        height: 1.45,
+                        fontFamily: talFontFamily,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -553,6 +1330,20 @@ class _HighlightedSourceLine {
 
   final List<TextSpan> spans;
   final int textLength;
+}
+
+class _SourceSearchResult {
+  const _SourceSearchResult({
+    required this.path,
+    required this.line,
+    required this.column,
+    required this.preview,
+  });
+
+  final String path;
+  final int line;
+  final int column;
+  final String preview;
 }
 
 class _CppSyntaxHighlighter {
@@ -769,6 +1560,30 @@ String _pathKey(String path) => path.replaceAll('\\', '/').toLowerCase();
 String _basename(String path) {
   final normalized = path.replaceAll('\\', '/');
   return normalized.substring(normalized.lastIndexOf('/') + 1);
+}
+
+int _matchingPathSuffixLength(String left, String right) {
+  final leftParts = left
+      .replaceAll('\\', '/')
+      .split('/')
+      .where((part) => part.isNotEmpty)
+      .map((part) => part.toLowerCase())
+      .toList();
+  final rightParts = right
+      .replaceAll('\\', '/')
+      .split('/')
+      .where((part) => part.isNotEmpty)
+      .map((part) => part.toLowerCase())
+      .toList();
+  var score = 0;
+  while (score < leftParts.length && score < rightParts.length) {
+    if (leftParts[leftParts.length - 1 - score] !=
+        rightParts[rightParts.length - 1 - score]) {
+      break;
+    }
+    score += 1;
+  }
+  return score;
 }
 
 String? _matchingPath(String candidate, List<String> paths) {

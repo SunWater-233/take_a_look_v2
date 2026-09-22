@@ -17,12 +17,14 @@ class ControllerState {
 class DebugState {
   DebugExecutionState executionState = DebugExecutionState.unavailable;
   final List<String> sourceFiles = <String>[];
+  final Map<String, Set<int>> executableLines = <String, Set<int>>{};
   final Map<String, Set<int>> requestedBreakpoints = <String, Set<int>>{};
   final List<DebugBreakpoint> resolvedBreakpoints = <DebugBreakpoint>[];
   final Map<String, int> registers = <String, int>{};
   String? currentSource;
   int? currentLine;
   int? programCounter;
+  String sourceRoot = '';
 }
 
 class ConnectionState {

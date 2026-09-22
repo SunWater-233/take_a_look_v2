@@ -36,19 +36,30 @@ class DebugInfoIndex:
     def source_files(self) -> list[str]:
         return sorted(self._paths_by_key.values(), key=str.casefold)
 
+    @property
+    def executable_lines(self) -> dict[str, list[int]]:
+        """Return the exact source lines that have emitted instructions."""
+        return {
+            self._paths_by_key[key]: sorted(lines)
+            for key, lines in self._lines_by_path.items()
+        }
+
+    def canonical_source_path(self, path: str) -> str | None:
+        key = self._resolve_path_key(path)
+        return self._paths_by_key[key] if key is not None else None
+
     def resolve_breakpoint(self, path: str, requested_line: int) -> SourceLocation | None:
         key = self._resolve_path_key(path)
         if key is None:
             return None
         lines = self._lines_by_path[key]
-        candidates = sorted(line for line in lines if line >= requested_line)
-        if not candidates:
+        addresses = lines.get(requested_line)
+        if not addresses:
             return None
-        actual_line = candidates[0]
         return SourceLocation(
             path=self._paths_by_key[key],
-            line=actual_line,
-            address=min(lines[actual_line]),
+            line=requested_line,
+            address=min(addresses),
         )
 
     def resolve_address(self, address: int) -> SourceLocation | None:

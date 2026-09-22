@@ -3,17 +3,47 @@ part of 'controller.dart';
 extension TakeALookControllerDebug on TakeALookController {
   DebugState get debugState => state.debug;
 
+  Future<void> chooseSourceRoot() async {
+    if (_isDetachedRemote) {
+      _dispatchRemote(ControllerCommand.setSourceRoot);
+      return;
+    }
+    final picker = sourceRootPicker;
+    if (picker == null) return;
+    final path = await picker();
+    if (path == null || path.isEmpty) return;
+    setSourceRoot(path);
+  }
+
+  void setSourceRoot(String path) {
+    final normalized = path.trim();
+    if (_isDetachedRemote &&
+        _dispatchRemote(ControllerCommand.setSourceRoot, normalized)) {
+      return;
+    }
+    if (debugState.sourceRoot == normalized) return;
+    debugState.sourceRoot = normalized;
+    _emitState([signals.debug]);
+  }
+
   void toggleBreakpoint(String path, int line) {
     if (line <= 0) return;
-    final lines = <int>{
-      ...debugState.requestedBreakpoints[path] ?? const <int>{},
-    };
+    final executableLines = executableLinesFor(path);
+    if (!executableLines.contains(line)) return;
+    final matchingRequest = debugState.requestedBreakpoints.entries
+        .where((entry) => sourcePathsMatch(entry.key, path))
+        .firstOrNull;
+    final requestPath = matchingRequest?.key ?? path;
+    final lines = <int>{...matchingRequest?.value ?? const <int>{}};
     if (!lines.add(line)) lines.remove(line);
-    setBreakpoints(path, lines);
+    setBreakpoints(requestPath, lines);
   }
 
   void setBreakpoints(String path, Iterable<int> requestedLines) {
-    final lines = requestedLines.where((line) => line > 0).toSet();
+    final executableLines = executableLinesFor(path);
+    final lines = requestedLines
+        .where((line) => line > 0 && executableLines.contains(line))
+        .toSet();
     if (lines.isEmpty) {
       debugState.requestedBreakpoints.remove(path);
     } else {
@@ -33,6 +63,40 @@ extension TakeALookControllerDebug on TakeALookController {
 
   void stepTarget() => _dispatchCommand(ControllerCommand.debugControl, 'step');
 
+  Set<int> executableLinesFor(String path) {
+    final normalized = path.replaceAll('\\', '/').toLowerCase();
+    for (final entry in debugState.executableLines.entries) {
+      if (entry.key.replaceAll('\\', '/').toLowerCase() == normalized) {
+        return entry.value;
+      }
+    }
+    final basename = normalized.substring(normalized.lastIndexOf('/') + 1);
+    final basenameMatches = debugState.executableLines.entries
+        .where((entry) {
+          final key = entry.key.replaceAll('\\', '/').toLowerCase();
+          return key.substring(key.lastIndexOf('/') + 1) == basename;
+        })
+        .map((entry) => entry.value)
+        .toList();
+    return basenameMatches.length == 1 ? basenameMatches.single : const <int>{};
+  }
+
+  bool sourcePathsMatch(String left, String right) {
+    String normalize(String path) => path.replaceAll('\\', '/').toLowerCase();
+    String basename(String path) {
+      final normalized = normalize(path);
+      return normalized.substring(normalized.lastIndexOf('/') + 1);
+    }
+
+    if (normalize(left) == normalize(right)) return true;
+    final name = basename(left);
+    if (name != basename(right)) return false;
+    final matchingDebugPaths = debugState.executableLines.keys
+        .where((path) => basename(path) == name)
+        .length;
+    return matchingDebugPaths == 1;
+  }
+
   void applyDebugState(Map<String, dynamic> data, {bool emit = true}) {
     final execution = data['executionState'] as String?;
     debugState.executionState = DebugExecutionState.values.firstWhere(
@@ -43,6 +107,26 @@ extension TakeALookControllerDebug on TakeALookController {
       debugState.sourceFiles
         ..clear()
         ..addAll(rawFiles.whereType<String>());
+    }
+    if (data['executableLines'] case final Map rawLines) {
+      debugState.executableLines
+        ..clear()
+        ..addEntries(
+          rawLines.entries
+              .where((entry) => entry.key is String && entry.value is List)
+              .map(
+                (entry) => MapEntry(
+                  entry.key as String,
+                  (entry.value as List)
+                      .whereType<int>()
+                      .where((line) => line > 0)
+                      .toSet(),
+                ),
+              ),
+        );
+    }
+    if (data['sourceRoot'] case final String sourceRoot) {
+      debugState.sourceRoot = sourceRoot;
     }
     if (data['breakpoints'] case final List rawBreakpoints) {
       debugState.resolvedBreakpoints

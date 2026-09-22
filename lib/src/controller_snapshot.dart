@@ -78,6 +78,11 @@ extension TakeALookControllerSnapshot on TakeALookController {
       'debug': {
         'executionState': debugState.executionState.name,
         'sourceFiles': debugState.sourceFiles,
+        'sourceRoot': debugState.sourceRoot,
+        'executableLines': {
+          for (final entry in debugState.executableLines.entries)
+            entry.key: entry.value.toList()..sort(),
+        },
         'breakpoints': [
           for (final breakpoint in debugState.resolvedBreakpoints)
             breakpoint.toJson(),

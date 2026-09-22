@@ -261,6 +261,7 @@ class BackendService(SamplingServiceMixin):
         with self._lock:
             return {
                 "sourceFiles": self._debug_info.source_files,
+                "executableLines": self._debug_info.executable_lines,
                 "debug": self._debug_state_locked(),
             }
 
@@ -272,7 +273,23 @@ class BackendService(SamplingServiceMixin):
         ):
             raise ProtocolError("invalid_request", "lines must contain positive integers.")
         with self._lock:
-            self._requested_breakpoints[path] = set(raw_lines)
+            canonical_path = self._debug_info.canonical_source_path(path) or path
+            canonical_key = canonical_path.replace("\\", "/").rstrip("/").casefold()
+            # Source-root mappings and DWARF can name one file with different
+            # absolute paths. Keep one authoritative breakpoint set so a
+            # removal cannot reveal a stale alias on the next state event.
+            for existing_path in list(self._requested_breakpoints):
+                existing_canonical = (
+                    self._debug_info.canonical_source_path(existing_path)
+                    or existing_path
+                )
+                existing_key = (
+                    existing_canonical.replace("\\", "/").rstrip("/").casefold()
+                )
+                if existing_key == canonical_key:
+                    del self._requested_breakpoints[existing_path]
+            if raw_lines:
+                self._requested_breakpoints[canonical_path] = set(raw_lines)
             self._apply_all_breakpoints_locked()
             payload = self._debug_state_locked()
         self._emit(EventName.DEBUG, payload)
@@ -335,6 +352,7 @@ class BackendService(SamplingServiceMixin):
         return {
             "executionState": self._target_execution_state,
             "sourceFiles": self._debug_info.source_files,
+            "executableLines": self._debug_info.executable_lines,
             "breakpoints": list(self._resolved_breakpoints),
             "registers": dict(self._registers),
             "stoppedLocation": self._stopped_location,
@@ -402,12 +420,10 @@ class BackendService(SamplingServiceMixin):
                     "verified": False,
                 }
                 if location is None:
-                    item["message"] = "该行之后没有可执行指令，或源码不在当前 ELF 中。"
+                    item["message"] = "该行没有可执行指令，不能设置断点。"
                 else:
                     item["path"] = location.path
                     item["address"] = location.address
-                    if location.line != requested_line:
-                        item["message"] = f"第 {requested_line} 行不可执行，断点已移动到第 {location.line} 行。"
                     if self._connection_status != "connected":
                         item["message"] = "连接调试探针后设置断点。"
                     else:

@@ -58,6 +58,31 @@ void main() {
     target.dispose();
   });
 
+  test('source root and executable lines are synchronized in snapshots', () {
+    const sourcePath = 'C:/build/src/main.c';
+    final source = TakeALookController()..setSourceRoot('D:/firmware');
+    source.applyDebugState({
+      'sourceFiles': [sourcePath],
+      'executableLines': {
+        sourcePath: [10, 12],
+      },
+    });
+
+    source.toggleBreakpoint(sourcePath, 11);
+    expect(source.debugState.requestedBreakpoints[sourcePath], isNull);
+    source.toggleBreakpoint(sourcePath, 12);
+    expect(source.debugState.requestedBreakpoints[sourcePath], {12});
+    expect(source.executableLinesFor('D:/checkout/src/main.c'), {10, 12});
+
+    final target = TakeALookController()..applySnapshot(source.stateSnapshot());
+    expect(target.debugState.sourceRoot, 'D:/firmware');
+    expect(target.debugState.executableLines[sourcePath], {10, 12});
+    expect(target.debugState.requestedBreakpoints[sourcePath], {12});
+
+    source.dispose();
+    target.dispose();
+  });
+
   test('partial backend state only notifies the affected UI domain', () {
     final controller = TakeALookController();
     controller.connectionStatus = ConnectionStatus.connected;

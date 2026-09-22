@@ -32,6 +32,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   bool _searching = false;
   int _activeSearchIndex = -1;
   int? _revealedSearchLine;
+  _SourceTokenSelection? _sourceSelection;
   Timer? _searchDebounce;
   List<_SourceSearchResult> _searchResults = const [];
   final Map<String, String> _sourceOverrides = <String, String>{};
@@ -70,6 +71,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     _searchGeneration += 1;
     _searchController.clear();
     _searchResults = const [];
+    _sourceSelection = null;
     _searchVisible = false;
     _searching = false;
     _activeSearchIndex = -1;
@@ -472,6 +474,277 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
       return bestMatch.path;
     }
     return debugPath;
+  }
+
+  List<SymbolItem> _symbolsForToken(String token, String sourcePath) {
+    final candidates = controller.symbols
+        .where((symbol) => _symbolNameMatchesToken(symbol.name, token))
+        .where(
+          (symbol) =>
+              controller.sourcePathsMatch(symbol.source, sourcePath) ||
+              symbol.source == '未知来源',
+        )
+        .toList();
+    if (candidates.isNotEmpty) return candidates;
+
+    final globalCandidates = controller.symbols
+        .where((symbol) => _symbolNameMatchesToken(symbol.name, token))
+        .toList();
+    return globalCandidates;
+  }
+
+  _SourceTokenSelection? _tokenAtOffset(
+    String path,
+    int lineIndex,
+    _HighlightedSourceLine line,
+    Offset offset,
+  ) {
+    if (line.rawText.isEmpty || offset.dx < 0) return null;
+    final painter = TextPainter(
+      text: TextSpan(
+        children: line.spans,
+        style: const TextStyle(
+          color: TalColors.text,
+          fontSize: 13,
+          height: 1.45,
+          fontFamily: talFontFamily,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    final position = painter.getPositionForOffset(
+      Offset(offset.dx, _lineHeight / 2),
+    );
+    if (offset.dx > painter.width) return null;
+    var index = position.offset.clamp(0, line.rawText.length);
+    if (index == line.rawText.length && index > 0) index -= 1;
+    if (index >= line.rawText.length ||
+        !_isIdentifierPart(line.rawText[index])) {
+      return null;
+    }
+    var start = index;
+    var end = index + 1;
+    while (start > 0 && _isIdentifierPart(line.rawText[start - 1])) {
+      start -= 1;
+    }
+    while (end < line.rawText.length && _isIdentifierPart(line.rawText[end])) {
+      end += 1;
+    }
+    if (!_isIdentifierStart(line.rawText[start])) return null;
+    return _SourceTokenSelection(
+      path: path,
+      lineIndex: lineIndex,
+      start: start,
+      end: end,
+      token: line.rawText.substring(start, end),
+    );
+  }
+
+  void _selectSourceToken(String path, int lineIndex, Offset localPosition) {
+    final selection = _tokenAtOffset(
+      path,
+      lineIndex,
+      _lines[lineIndex],
+      localPosition,
+    );
+    if (selection == null) return;
+    setState(() => _sourceSelection = selection);
+  }
+
+  List<TextSpan> _spansForSourceLine(String path, int lineIndex) {
+    final line = _lines[lineIndex];
+    final selection = _sourceSelection;
+    if (selection == null ||
+        selection.lineIndex != lineIndex ||
+        !controller.sourcePathsMatch(selection.path, path)) {
+      return line.spans;
+    }
+    final result = <TextSpan>[];
+    var offset = 0;
+    for (final span in line.spans) {
+      final text = span.text ?? '';
+      final spanStart = offset;
+      final spanEnd = offset + text.length;
+      final selectedStart = math.max(spanStart, selection.start);
+      final selectedEnd = math.min(spanEnd, selection.end);
+      if (selectedStart >= selectedEnd) {
+        result.add(span);
+      } else {
+        if (spanStart < selectedStart) {
+          result.add(
+            TextSpan(
+              text: text.substring(0, selectedStart - spanStart),
+              style: span.style,
+            ),
+          );
+        }
+        result.add(
+          TextSpan(
+            text: text.substring(
+              selectedStart - spanStart,
+              selectedEnd - spanStart,
+            ),
+            style: span.style?.copyWith(backgroundColor: TalColors.selection),
+          ),
+        );
+        if (selectedEnd < spanEnd) {
+          result.add(
+            TextSpan(
+              text: text.substring(selectedEnd - spanStart),
+              style: span.style,
+            ),
+          );
+        }
+      }
+      offset = spanEnd;
+    }
+    return result;
+  }
+
+  Future<String?> _resolveIncludedSource(String sourcePath, String line) async {
+    final includeName = _includeNameFromLine(line);
+    if (includeName == null) return null;
+    final sourceFile = await _resolveSourcePath(sourcePath);
+    final candidates = <String>[];
+    if (await File(sourceFile).exists()) {
+      final parent = File(sourceFile).parent.path;
+      candidates.add(
+        '$parent${Platform.pathSeparator}${includeName.replaceAll('/', Platform.pathSeparator)}',
+      );
+    }
+    final root = controller.debugState.sourceRoot;
+    if (root.isNotEmpty) {
+      candidates.add(
+        '$root${Platform.pathSeparator}${includeName.replaceAll('/', Platform.pathSeparator)}',
+      );
+    }
+    for (final candidate in candidates) {
+      if (await File(candidate).exists()) return candidate;
+    }
+
+    final rootIndex = root.isEmpty
+        ? const <String, List<String>>{}
+        : await (_sourceRootIndexFuture ??= _indexSourceRoot(root));
+    final indexedMatches =
+        rootIndex[_basename(includeName).toLowerCase()] ?? const <String>[];
+    if (indexedMatches.isNotEmpty) {
+      final ranked =
+          indexedMatches
+              .map(
+                (path) => (path, _matchingPathSuffixLength(includeName, path)),
+              )
+              .toList()
+            ..sort((left, right) => right.$2.compareTo(left.$2));
+      if (ranked.length == 1 || ranked[0].$2 > ranked[1].$2) {
+        return ranked.first.$1;
+      }
+    }
+
+    final sourceCandidates = _sourceFiles
+        .where((path) => _pathKey(path).endsWith('/${_pathKey(includeName)}'))
+        .toList();
+    if (sourceCandidates.length == 1) return sourceCandidates.single;
+    final basenameMatches = _sourceFiles
+        .where(
+          (path) =>
+              _basename(path).toLowerCase() ==
+              _basename(includeName).toLowerCase(),
+        )
+        .toList();
+    return basenameMatches.length == 1 ? basenameMatches.single : null;
+  }
+
+  RelativeRect _contextMenuPosition(
+    BuildContext context,
+    Offset globalPosition,
+  ) {
+    final overlay =
+        Overlay.of(context).context.findRenderObject()! as RenderBox;
+    final local = overlay.globalToLocal(globalPosition);
+    return RelativeRect.fromLTRB(
+      local.dx,
+      local.dy,
+      overlay.size.width - local.dx,
+      overlay.size.height - local.dy,
+    );
+  }
+
+  Future<void> _showSourceContextMenu(
+    BuildContext context,
+    String sourcePath,
+    int lineIndex,
+    Offset globalPosition,
+    Offset localPosition,
+  ) async {
+    final line = _lines[lineIndex];
+    final selected = _sourceSelection;
+    final hit =
+        selected != null &&
+            selected.lineIndex == lineIndex &&
+            controller.sourcePathsMatch(selected.path, sourcePath)
+        ? selected
+        : _tokenAtOffset(sourcePath, lineIndex, line, localPosition);
+    final token = hit?.token;
+    final symbols = token == null
+        ? const <SymbolItem>[]
+        : _symbolsForToken(token, sourcePath);
+    final includeName = _includeNameFromLine(line.rawText);
+    final includePath = await _resolveIncludedSource(sourcePath, line.rawText);
+    if (!context.mounted) return;
+
+    final items = <PopupMenuEntry<String>>[];
+    for (final symbol in symbols) {
+      final symbolLabel = symbol.name == token ? token : symbol.name;
+      final suffix = symbols.length > 1 ? '  ${symbol.addressLabel}' : '';
+      final watched = controller.watches.any(
+        (watch) => watch.symbol.key == symbol.key,
+      );
+      items.add(
+        PopupMenuItem<String>(
+          key: ValueKey('source-menu-watch-${symbol.key}'),
+          value: 'watch:${symbol.key}',
+          enabled: !watched,
+          child: Text(
+            watched
+                ? '已在实时调试中  $symbolLabel$suffix'
+                : '加入实时调试  $symbolLabel$suffix',
+          ),
+        ),
+      );
+    }
+    if (includePath != null) {
+      items.add(
+        PopupMenuItem<String>(
+          key: ValueKey('source-menu-include-$includePath'),
+          value: 'include:$includePath',
+          child: Text('打开头文件  ${_basename(includePath)}'),
+        ),
+      );
+    } else if (includeName != null) {
+      items.add(
+        PopupMenuItem<String>(
+          enabled: false,
+          child: Text('无法定位头文件  ${_basename(includeName)}'),
+        ),
+      );
+    }
+    if (items.isEmpty) return;
+    final menuContext = context;
+    final action = await showTalContextMenu<String>(
+      context: menuContext,
+      position: _contextMenuPosition(menuContext, globalPosition),
+      items: items,
+    );
+    if (!context.mounted || action == null) return;
+    if (action.startsWith('watch:')) {
+      controller.activateSymbol(action.substring('watch:'.length));
+    } else if (action.startsWith('include:')) {
+      final includePath = action.substring('include:'.length);
+      if (_matchingPath(includePath, _sourceFiles) == null) {
+        _externalPathKeys.add(_pathKey(includePath));
+      }
+      _openSource(includePath);
+    }
   }
 
   Future<Map<String, List<String>>> _indexSourceRoot(String sourceRoot) async {
@@ -1148,16 +1421,35 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
           ),
           const SizedBox(width: 14),
           Expanded(
-            child: Text.rich(
-              TextSpan(children: _lines[index].spans),
-              maxLines: 1,
-              softWrap: false,
-              overflow: TextOverflow.visible,
-              style: const TextStyle(
-                color: TalColors.text,
-                fontSize: 13,
-                height: 1.45,
-                fontFamily: talFontFamily,
+            child: GestureDetector(
+              key: ValueKey('source-line-$lineNumber'),
+              behavior: HitTestBehavior.opaque,
+              onDoubleTapDown: (details) =>
+                  _selectSourceToken(path, index, details.localPosition),
+              onHorizontalDragStart: (details) =>
+                  _selectSourceToken(path, index, details.localPosition),
+              onHorizontalDragUpdate: (details) =>
+                  _selectSourceToken(path, index, details.localPosition),
+              onSecondaryTapUp: (details) => unawaited(
+                _showSourceContextMenu(
+                  context,
+                  path,
+                  index,
+                  details.globalPosition,
+                  details.localPosition,
+                ),
+              ),
+              child: Text.rich(
+                TextSpan(children: _spansForSourceLine(path, index)),
+                maxLines: 1,
+                softWrap: false,
+                overflow: TextOverflow.visible,
+                style: const TextStyle(
+                  color: TalColors.text,
+                  fontSize: 13,
+                  height: 1.45,
+                  fontFamily: talFontFamily,
+                ),
               ),
             ),
           ),
@@ -1326,10 +1618,27 @@ enum _SourceTokenKind {
 }
 
 class _HighlightedSourceLine {
-  const _HighlightedSourceLine(this.spans, this.textLength);
+  const _HighlightedSourceLine(this.spans, this.textLength, this.rawText);
 
   final List<TextSpan> spans;
   final int textLength;
+  final String rawText;
+}
+
+class _SourceTokenSelection {
+  const _SourceTokenSelection({
+    required this.path,
+    required this.lineIndex,
+    required this.start,
+    required this.end,
+    required this.token,
+  });
+
+  final String path;
+  final int lineIndex;
+  final int start;
+  final int end;
+  final String token;
 }
 
 class _SourceSearchResult {
@@ -1454,7 +1763,7 @@ class _CppSyntaxHighlighter {
       spans.add(
         TextSpan(text: line, style: _style(_SourceTokenKind.preprocessor)),
       );
-      return _HighlightedSourceLine(spans, line.length);
+      return _HighlightedSourceLine(spans, line.length, line);
     }
     while (index < line.length) {
       if (isInBlockComment()) {
@@ -1529,7 +1838,7 @@ class _CppSyntaxHighlighter {
       index += 1;
     }
     if (line.isEmpty) spans.add(const TextSpan(text: ''));
-    return _HighlightedSourceLine(spans, line.length);
+    return _HighlightedSourceLine(spans, line.length, line);
   }
 
   static void _add(List<TextSpan> spans, String text, _SourceTokenKind kind) {
@@ -1556,6 +1865,16 @@ class _CppSyntaxHighlighter {
 }
 
 String _pathKey(String path) => path.replaceAll('\\', '/').toLowerCase();
+
+bool _isIdentifierStart(String value) => RegExp(r'[A-Za-z_]').hasMatch(value);
+
+bool _isIdentifierPart(String value) => RegExp(r'[A-Za-z0-9_]').hasMatch(value);
+
+bool _symbolNameMatchesToken(String symbolName, String token) =>
+    symbolName == token || symbolName.endsWith('.$token');
+
+String? _includeNameFromLine(String line) =>
+    RegExp(r'^\s*#\s*include\s*[<"]([^>"]+)[>"]').firstMatch(line)?.group(1);
 
 String _basename(String path) {
   final normalized = path.replaceAll('\\', '/');

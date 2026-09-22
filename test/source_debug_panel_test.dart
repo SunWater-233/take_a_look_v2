@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:take_a_look_v2/src/controller.dart';
 import 'package:take_a_look_v2/src/panel_types.dart';
 import 'package:take_a_look_v2/src/panels.dart';
+import 'package:take_a_look_v2/src/theme.dart';
 
 void main() {
   testWidgets(
@@ -597,6 +598,127 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pump();
     expect(find.byKey(ValueKey('source-tab-$localPath')), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+  });
+
+  testWidgets('source context menu adds a variable and opens an include', (
+    tester,
+  ) async {
+    late final Directory root;
+    late final String sourcePath;
+    late final String headerPath;
+    await tester.runAsync(() async {
+      root = await Directory.systemTemp.createTemp('take_a_look_source_menu_');
+      sourcePath =
+          '${root.path}${Platform.pathSeparator}src${Platform.pathSeparator}main.c';
+      headerPath =
+          '${root.path}${Platform.pathSeparator}vendor${Platform.pathSeparator}include'
+          '${Platform.pathSeparator}included.h';
+      await File(sourcePath).parent.create(recursive: true);
+      await File(headerPath).parent.create(recursive: true);
+      await File(headerPath).writeAsString('#define READY 1\n');
+      await File(sourcePath).writeAsString('#include "included.h"\nmessage\n');
+    });
+    addTearDown(() => root.delete(recursive: true));
+
+    final controller = TakeALookController()..setSourceRoot(root.path);
+    controller.applySnapshot({
+      'symbols': [
+        {
+          'source': sourcePath,
+          'name': 'message',
+          'address': 0x20000010,
+          'type': 'int',
+          'size': 4,
+          'section': '.bss',
+          'key': 'message-key',
+        },
+      ],
+      'watches': <Object?>[],
+    });
+    controller.applyDebugState({
+      'sourceFiles': [sourcePath],
+      'executableLines': {
+        sourcePath: [1, 2],
+      },
+      'breakpoints': <Object?>[],
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTalTheme(),
+        home: Scaffold(
+          body: SizedBox(
+            width: 900,
+            height: 600,
+            child: buildWorkspacePanel(
+              WorkspacePanelId.sourceDebug,
+              controller,
+            ),
+          ),
+        ),
+      ),
+    );
+    for (
+      var attempt = 0;
+      attempt < 20 && find.byKey(ValueKey('source-line-2')).evaluate().isEmpty;
+      attempt += 1
+    ) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await tester.pump();
+    }
+
+    final variableLine = find.byKey(const ValueKey('source-line-2'));
+    final variableTopLeft = tester.getTopLeft(variableLine);
+    await tester.tapAt(variableTopLeft + const Offset(28, 11));
+    await tester.tapAt(variableTopLeft + const Offset(28, 11));
+    await tester.pump();
+    expect(controller.watches, isEmpty);
+    await tester.tapAt(
+      variableTopLeft + const Offset(28, 11),
+      buttons: kSecondaryMouseButton,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('加入实时调试  message'), findsOneWidget);
+    await tester.tap(find.text('加入实时调试  message'));
+    await tester.pumpAndSettle();
+    expect(controller.watches.single.symbol.key, 'message-key');
+
+    final includeLine = find.byKey(const ValueKey('source-line-1'));
+    final includeTopLeft = tester.getTopLeft(includeLine);
+    await tester.tapAt(
+      includeTopLeft + const Offset(20, 11),
+      buttons: kSecondaryMouseButton,
+    );
+    for (
+      var attempt = 0;
+      attempt < 20 && find.text('打开头文件  included.h').evaluate().isEmpty;
+      attempt += 1
+    ) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await tester.pump();
+    }
+    await tester.pumpAndSettle();
+    expect(find.text('打开头文件  included.h'), findsOneWidget);
+    await tester.tap(find.text('打开头文件  included.h'));
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(find.byKey(ValueKey('source-tab-$headerPath')), findsOneWidget);
+    expect(
+      find.byKey(ValueKey('source-tab-active-$headerPath')),
+      findsOneWidget,
+    );
+    controller.selectSymbols(const []);
+    await tester.pump();
+    expect(
+      find.byKey(ValueKey('source-tab-active-$headerPath')),
+      findsOneWidget,
+    );
 
     await tester.pumpWidget(const SizedBox.shrink());
     controller.dispose();

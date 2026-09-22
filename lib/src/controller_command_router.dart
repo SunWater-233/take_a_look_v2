@@ -115,6 +115,12 @@ Future<JsonObject> executeControllerCommand(
       );
     case ControllerCommand.clearWatches:
       controller.clearWatches();
+    case ControllerCommand.toggleWatchSampling:
+      final values = Map<String, Object?>.from(arguments! as Map);
+      controller.toggleWatchSampling(
+        values['key'] as String,
+        values['value'] as bool,
+      );
     case ControllerCommand.toggleWatchPlot:
       final values = Map<String, Object?>.from(arguments! as Map);
       controller.toggleWatchPlot(

@@ -9,6 +9,75 @@ import 'package:take_a_look_v2/src/window_sync.dart';
 import 'package:take_a_look_v2/src/workspace.dart';
 
 void main() {
+  testWidgets('double clicking an aggregate symbol adds its tree to watches', (
+    tester,
+  ) async {
+    final controller = TakeALookController();
+    controller.applySnapshot({
+      'symbols': [
+        {
+          'source': 'motor.c',
+          'name': 'motor',
+          'address': 0x20000000,
+          'type': 'struct MotorState',
+          'size': 8,
+          'section': '.bss',
+          'key': 'motor',
+        },
+        {
+          'source': 'motor.c',
+          'name': 'motor.speed',
+          'address': 0x20000000,
+          'type': 'float',
+          'size': 4,
+          'section': '.bss',
+          'key': 'motor.speed',
+        },
+        {
+          'source': 'motor.c',
+          'name': 'motor.current',
+          'address': 0x20000004,
+          'type': 'float',
+          'size': 4,
+          'section': '.bss',
+          'key': 'motor.current',
+        },
+      ],
+      'watches': <Object?>[],
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTalTheme(),
+        home: Scaffold(
+          body: SizedBox(
+            width: 850,
+            height: 600,
+            child: buildWorkspacePanel(WorkspacePanelId.symbols, controller),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('motor.c'));
+    await tester.pump();
+    expect(find.text('motor'), findsOneWidget);
+
+    await tester.tap(find.text('motor'));
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(find.text('motor'));
+    await tester.pump();
+
+    expect(controller.watches, hasLength(3));
+    expect(
+      controller.watches.map((watch) => watch.symbol.name),
+      containsAll(<String>['motor', 'motor.speed', 'motor.current']),
+    );
+
+    controller.dispose();
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('symbol panel groups variables into an expandable source tree', (
     tester,
   ) async {

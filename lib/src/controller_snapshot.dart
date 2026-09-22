@@ -61,6 +61,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
           {
             'key': watch.symbol.key,
             'color': watch.color.toARGB32(),
+            'sampling': watch.samplingEnabled,
             'plotted': watch.plotted,
             'value': watch.value,
             'sampleCursor': watch.totalSampleCount,
@@ -322,6 +323,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
             if (symbol == null) return null;
             final watch =
                 WatchItem(symbol: symbol, color: _colorFromValue(item['color']))
+                  ..samplingEnabled = item['sampling'] != false
                   ..plotted = item['plotted'] == true
                   ..value = _numericValue(item['value']);
             final samples = item['samples'] as List?;

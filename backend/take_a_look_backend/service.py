@@ -462,6 +462,9 @@ class BackendService(SamplingServiceMixin):
                     symbol=symbol,
                     color=_optional_string(raw, "color") or (old.color if old else "#5EEAD4"),
                     plot_enabled=bool(raw.get("plotted", old.plot_enabled if old else True)),
+                    sampling_enabled=bool(
+                        raw.get("sampling", old.sampling_enabled if old else True)
+                    ),
                     value=old.value if old else "",
                 )
             self._watches = new_watches
@@ -608,6 +611,7 @@ class BackendService(SamplingServiceMixin):
             "key": watch.symbol.key,
             "color": watch.color,
             "plotted": watch.plot_enabled,
+            "sampling": watch.sampling_enabled,
             "value": json_value(watch.value),
         }
 

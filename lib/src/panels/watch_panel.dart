@@ -7,12 +7,20 @@ const _watchColumnLabels = <String>[
   '当前值',
   '写入值',
   '操作',
-  '是否绘制',
+  '图标显示',
   '绘制颜色',
 ];
 
 typedef _WatchRowContextMenuCallback =
     void Function(String key, _ContextMenuRequest request);
+
+class _WatchTreeNode {
+  _WatchTreeNode(this.watch) : label = watch.symbol.name;
+
+  final WatchItem watch;
+  String label;
+  final List<_WatchTreeNode> children = <_WatchTreeNode>[];
+}
 
 class _WatchPanel extends StatefulWidget {
   const _WatchPanel({required this.controller});
@@ -24,16 +32,17 @@ class _WatchPanel extends StatefulWidget {
 }
 
 class _WatchPanelState extends State<_WatchPanel> {
-  static const _minimumColumnWidths = <double>[72, 88, 72, 72, 72, 108, 72, 72];
+  static const _minimumColumnWidths = <double>[96, 88, 72, 72, 72, 108, 72, 72];
 
   final ResizableTableLayout _tableLayout = ResizableTableLayout(
-    widths: const [180, 112, 96, 96, 96, 116, 84, 96],
+    widths: const [220, 112, 96, 96, 96, 116, 84, 96],
     minimumWidths: _minimumColumnWidths,
     rowHeight: 44,
   );
   final FocusNode _tableFocus = FocusNode(debugLabel: 'watch-table');
   final ScrollController _horizontalScrollController = ScrollController();
   final Set<String> _selectedWatchKeys = <String>{};
+  final Set<String> _expandedWatchKeys = <String>{};
   final Set<int> _selectedColumns = <int>{};
   final Set<int> _hiddenColumns = <int>{};
   String? _selectionAnchorKey;
@@ -61,7 +70,92 @@ class _WatchPanelState extends State<_WatchPanel> {
         .map((watch) => watch.symbol.key)
         .toSet();
     _selectedWatchKeys.removeWhere((key) => !available.contains(key));
+    _expandedWatchKeys.removeWhere((key) => !available.contains(key));
     if (!available.contains(_selectionAnchorKey)) _selectionAnchorKey = null;
+  }
+
+  List<_WatchTreeNode> _buildWatchTree() {
+    final watches = controller.watches;
+    final nodes = <String, _WatchTreeNode>{
+      for (final watch in watches) watch.symbol.key: _WatchTreeNode(watch),
+    };
+    final bySourceAndName = <String, _WatchTreeNode>{};
+    for (final watch in watches) {
+      bySourceAndName[_watchPathKey(watch.symbol)] = nodes[watch.symbol.key]!;
+    }
+
+    final roots = <_WatchTreeNode>[];
+    for (final watch in watches) {
+      final node = nodes[watch.symbol.key]!;
+      var parentName = _watchParentName(watch.symbol.name);
+      _WatchTreeNode? parent;
+      while (parentName != null) {
+        parent = bySourceAndName['${watch.symbol.source}\u0000$parentName'];
+        if (parent != null) break;
+        parentName = _watchParentName(parentName);
+      }
+      if (parent == null) {
+        roots.add(node);
+      } else {
+        node.label = _watchLeafLabel(watch.symbol.name);
+        parent.children.add(node);
+      }
+    }
+    return roots;
+  }
+
+  void _toggleWatchTreeNode(String key) {
+    setState(() {
+      if (!_expandedWatchKeys.add(key)) _expandedWatchKeys.remove(key);
+    });
+  }
+
+  void _reorderWatchRoot(
+    List<_WatchTreeNode> roots,
+    int oldIndex,
+    int newIndex,
+  ) {
+    if (oldIndex < 0 ||
+        oldIndex >= roots.length ||
+        newIndex < 0 ||
+        newIndex >= roots.length) {
+      return;
+    }
+    final watches = controller.watches;
+    final oldWatchIndex = watches.indexOf(roots[oldIndex].watch);
+    final newWatchIndex = watches.indexOf(roots[newIndex].watch);
+    controller.reorderWatch(oldWatchIndex, newWatchIndex);
+  }
+
+  Widget _buildWatchTreeBranch(_WatchTreeNode node, {required int depth}) {
+    final watch = node.watch;
+    final expanded = _expandedWatchKeys.contains(watch.symbol.key);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _WatchRow(
+          key: ValueKey<String>(watch.symbol.key),
+          controller: controller,
+          watch: watch,
+          label: node.label,
+          depth: depth,
+          expandable: node.children.isNotEmpty,
+          expanded: expanded,
+          onToggleExpanded: () => _toggleWatchTreeNode(watch.symbol.key),
+          columnWidths: _columnWidths,
+          hiddenColumns: _hiddenColumns,
+          selectedColumns: _selectedColumns,
+          rowHeight: _rowHeight,
+          selected: _selectedWatchKeys.contains(watch.symbol.key),
+          onSelect: _selectWatch,
+          onNameContextMenu: _showNameContextMenu,
+          onPlotContextMenu: _showPlotContextMenu,
+        ),
+        if (expanded)
+          for (final child in node.children)
+            _buildWatchTreeBranch(child, depth: depth + 1),
+      ],
+    );
   }
 
   void _selectWatch(String key) {
@@ -238,32 +332,32 @@ class _WatchPanelState extends State<_WatchPanel> {
         _watchPopupItem(
           value: 'only',
           icon: Icons.filter_alt_outlined,
-          label: count == 1 ? '仅绘制该栏' : '仅绘制所选变量（$count）',
+          label: count == 1 ? '仅显示该栏' : '仅显示所选变量（$count）',
           touchOptimized: request.touchOptimized,
         ),
         _watchPopupItem(
           value: 'all',
-          icon: Icons.check_box_outlined,
-          label: '全部绘制',
+          icon: Icons.visibility_outlined,
+          label: '全部显示',
           touchOptimized: request.touchOptimized,
         ),
         _watchPopupItem(
           value: 'none',
-          icon: Icons.check_box_outline_blank,
-          label: '全部不绘制',
+          icon: Icons.visibility_off_outlined,
+          label: '全部隐藏',
           touchOptimized: request.touchOptimized,
         ),
         _watchPopupItem(
           value: 'invert',
           icon: Icons.swap_vert,
-          label: '反转所选变量绘制状态',
+          label: '反转所选变量图表显示状态',
           touchOptimized: request.touchOptimized,
         ),
         const PopupMenuDivider(),
         _watchPopupItem(
           value: 'color',
           icon: Icons.palette_outlined,
-          label: count == 1 ? '设置绘制颜色' : '为所选变量设置绘制颜色（$count）',
+          label: count == 1 ? '设置曲线颜色' : '为所选变量设置曲线颜色（$count）',
           touchOptimized: request.touchOptimized,
         ),
       ],
@@ -313,13 +407,13 @@ class _WatchPanelState extends State<_WatchPanel> {
         _watchPopupItem(
           value: 'only',
           icon: Icons.filter_alt_outlined,
-          label: '仅绘制该栏',
+          label: '仅显示该栏',
           touchOptimized: request.touchOptimized,
         ),
         _watchPopupItem(
           value: 'all',
-          icon: Icons.check_box_outlined,
-          label: '全部绘制',
+          icon: Icons.visibility_outlined,
+          label: '全部显示',
           touchOptimized: request.touchOptimized,
         ),
       ],
@@ -335,6 +429,7 @@ class _WatchPanelState extends State<_WatchPanel> {
       animation: controller.watchChanges,
       builder: (context, _) {
         _normalizeSelection();
+        final treeRoots = _buildWatchTree();
         return Padding(
           padding: const EdgeInsets.all(10),
           child: Column(
@@ -380,7 +475,7 @@ class _WatchPanelState extends State<_WatchPanel> {
                             onSelectColumn: _selectColumn,
                             onContextMenu: _showHeaderContextMenu,
                           ),
-                          body: controller.watches.isEmpty
+                          body: treeRoots.isEmpty
                               ? const SizedBox.expand()
                               : ReorderableListView.builder(
                                   buildDefaultDragHandles: false,
@@ -401,29 +496,23 @@ class _WatchPanelState extends State<_WatchPanel> {
                                       ),
                                     );
                                   },
-                                  itemCount: controller.watches.length,
-                                  onReorderItem: controller.reorderWatch,
+                                  itemCount: treeRoots.length,
+                                  onReorderItem: (oldIndex, newIndex) =>
+                                      _reorderWatchRoot(
+                                        treeRoots,
+                                        oldIndex,
+                                        newIndex,
+                                      ),
                                   itemBuilder: (context, index) {
-                                    final watch = controller.watches[index];
+                                    final node = treeRoots[index];
                                     return ReorderableDelayedDragStartListener(
                                       key: ValueKey<String>(
-                                        'watch-reorder-${watch.symbol.key}',
+                                        'watch-reorder-${node.watch.symbol.key}',
                                       ),
                                       index: index,
-                                      child: _WatchRow(
-                                        key: ValueKey<String>(watch.symbol.key),
-                                        controller: controller,
-                                        watch: watch,
-                                        columnWidths: _columnWidths,
-                                        hiddenColumns: _hiddenColumns,
-                                        selectedColumns: _selectedColumns,
-                                        rowHeight: _rowHeight,
-                                        selected: _selectedWatchKeys.contains(
-                                          watch.symbol.key,
-                                        ),
-                                        onSelect: _selectWatch,
-                                        onNameContextMenu: _showNameContextMenu,
-                                        onPlotContextMenu: _showPlotContextMenu,
+                                      child: _buildWatchTreeBranch(
+                                        node,
+                                        depth: 0,
                                       ),
                                     );
                                   },
@@ -439,7 +528,7 @@ class _WatchPanelState extends State<_WatchPanel> {
                 children: [
                   const Expanded(
                     child: Text(
-                      '从左侧符号层级中选择变量并加入实时调参；长按变量行可拖拽排序。',
+                      '展开结构体或数组查看成员；铅笔用于写入，波形用于启停采样，眼睛控制图表显示。',
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: talMuted,
@@ -532,6 +621,11 @@ class _WatchRow extends StatefulWidget {
   const _WatchRow({
     required this.controller,
     required this.watch,
+    required this.label,
+    required this.depth,
+    required this.expandable,
+    required this.expanded,
+    required this.onToggleExpanded,
     required this.columnWidths,
     required this.hiddenColumns,
     required this.selectedColumns,
@@ -545,6 +639,11 @@ class _WatchRow extends StatefulWidget {
 
   final TakeALookController controller;
   final WatchItem watch;
+  final String label;
+  final int depth;
+  final bool expandable;
+  final bool expanded;
+  final VoidCallback onToggleExpanded;
   final List<double> columnWidths;
   final Set<int> hiddenColumns;
   final Set<int> selectedColumns;
@@ -605,11 +704,48 @@ class _WatchRowState extends State<_WatchRow> {
                 selected: widget.selectedColumns.contains(0),
                 onContextMenu: (request) =>
                     widget.onNameContextMenu(watch.symbol.key, request),
-                child: Text(
-                  watch.symbol.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: talBody,
+                padding: EdgeInsets.only(
+                  left: 6 + widget.depth * 18.0,
+                  right: 8,
+                ),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 22,
+                      child: widget.expandable
+                          ? TalIconButton(
+                              key: ValueKey(
+                                'watch-tree-toggle-${watch.symbol.key}',
+                              ),
+                              tooltip: widget.expanded ? '收起' : '展开',
+                              onPressed: widget.onToggleExpanded,
+                              icon: Icon(
+                                widget.expanded
+                                    ? Icons.keyboard_arrow_down
+                                    : Icons.keyboard_arrow_right,
+                                size: 18,
+                              ),
+                            )
+                          : const SizedBox.shrink(),
+                    ),
+                    const Icon(
+                      Icons.data_object,
+                      size: 15,
+                      color: TalColors.accent,
+                    ),
+                    const SizedBox(width: 5),
+                    Expanded(
+                      child: Tooltip(
+                        message: watch.symbol.name,
+                        child: Text(
+                          widget.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: talBody,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             if (!widget.hiddenColumns.contains(1))
@@ -630,8 +766,10 @@ class _WatchRowState extends State<_WatchRow> {
                 selected: widget.selectedColumns.contains(3),
                 child: AnimatedBuilder(
                   animation: widget.controller.telemetryChanges,
-                  builder: (context, _) =>
-                      Text(widget.watch.valueLabel, style: talMono),
+                  builder: (context, _) => Text(
+                    widget.expandable ? '展开查看' : widget.watch.valueLabel,
+                    style: talMono,
+                  ),
                 ),
               ),
             if (!widget.hiddenColumns.contains(4))
@@ -639,14 +777,16 @@ class _WatchRowState extends State<_WatchRow> {
                 width: widget.columnWidths[4],
                 selected: widget.selectedColumns.contains(4),
                 padding: const EdgeInsets.symmetric(horizontal: 5),
-                child: SizedBox(
-                  height: 30,
-                  child: TextField(
-                    controller: editor,
-                    enabled: watch.symbol.writable,
-                    style: talMono,
-                  ),
-                ),
+                child: widget.expandable
+                    ? const Center(child: Text('—', style: talMuted))
+                    : SizedBox(
+                        height: 30,
+                        child: TextField(
+                          controller: editor,
+                          enabled: watch.symbol.writable,
+                          style: talMono,
+                        ),
+                      ),
               ),
             if (!widget.hiddenColumns.contains(5))
               _WatchCell(
@@ -656,22 +796,42 @@ class _WatchRowState extends State<_WatchRow> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    TalIconButton(
-                      tooltip: '写入',
-                      onPressed: watch.symbol.writable
-                          ? () => widget.controller.writeWatch(
-                              watch.symbol.key,
-                              editor.text,
-                            )
-                          : null,
-                      icon: const Icon(Icons.save_outlined, size: 16),
-                    ),
-                    TalIconButton(
-                      tooltip: '移除',
-                      onPressed: () =>
-                          widget.controller.removeWatch(watch.symbol.key),
-                      icon: const Icon(Icons.close, size: 16),
-                    ),
+                    if (widget.expandable)
+                      TalIconButton(
+                        key: ValueKey('watch-remove-${watch.symbol.key}'),
+                        tooltip: '移除变量组',
+                        onPressed: () =>
+                            widget.controller.removeWatch(watch.symbol.key),
+                        icon: const Icon(Icons.close, size: 16),
+                      )
+                    else ...[
+                      TalIconButton(
+                        key: ValueKey('watch-edit-${watch.symbol.key}'),
+                        tooltip: '写入当前输入值',
+                        onPressed: watch.symbol.writable
+                            ? () => widget.controller.writeWatch(
+                                watch.symbol.key,
+                                editor.text,
+                              )
+                            : null,
+                        icon: const Icon(Icons.edit_outlined, size: 16),
+                      ),
+                      TalIconButton(
+                        key: ValueKey('watch-sampling-${watch.symbol.key}'),
+                        tooltip: watch.samplingEnabled ? '停止采样' : '开始采样',
+                        onPressed: () => widget.controller.toggleWatchSampling(
+                          watch.symbol.key,
+                          !watch.samplingEnabled,
+                        ),
+                        icon: Icon(
+                          Icons.monitor_heart_outlined,
+                          size: 16,
+                          color: watch.samplingEnabled
+                              ? TalColors.accent
+                              : TalColors.muted,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -683,11 +843,19 @@ class _WatchRowState extends State<_WatchRow> {
                 onContextMenu: (request) =>
                     widget.onPlotContextMenu(watch.symbol.key, request),
                 child: Center(
-                  child: Checkbox(
-                    value: watch.plotted,
-                    onChanged: (value) => widget.controller.toggleWatchPlot(
+                  child: TalIconButton(
+                    key: ValueKey('watch-visibility-${watch.symbol.key}'),
+                    tooltip: watch.plotted ? '在图表中隐藏' : '在图表中显示',
+                    onPressed: () => widget.controller.toggleWatchPlot(
                       watch.symbol.key,
-                      value ?? false,
+                      !watch.plotted,
+                    ),
+                    icon: Icon(
+                      watch.plotted
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
+                      size: 17,
+                      color: watch.plotted ? TalColors.accent : TalColors.muted,
                     ),
                   ),
                 ),
@@ -725,6 +893,43 @@ class _WatchRowState extends State<_WatchRow> {
       ),
     );
   }
+}
+
+String _watchPathKey(SymbolItem symbol) =>
+    '${symbol.source}\u0000${symbol.name}';
+
+String? _watchParentName(String name) {
+  final parts = _watchNameParts(name);
+  if (parts.length <= 1) return null;
+  return _joinWatchName(parts.take(parts.length - 1));
+}
+
+String _watchLeafLabel(String name) {
+  final parts = _watchNameParts(name);
+  return parts.isEmpty ? name : parts.last;
+}
+
+List<String> _watchNameParts(String name) {
+  final parts = <String>[];
+  final tokenPattern = RegExp(r'[^\[\]]+|\[[^\]]*\]');
+  for (final chunk in name.split('.')) {
+    parts.addAll(
+      tokenPattern
+          .allMatches(chunk)
+          .map((match) => match.group(0)!)
+          .where((part) => part.isNotEmpty),
+    );
+  }
+  return parts;
+}
+
+String _joinWatchName(Iterable<String> parts) {
+  final buffer = StringBuffer();
+  for (final part in parts) {
+    if (buffer.isNotEmpty && !part.startsWith('[')) buffer.write('.');
+    buffer.write(part);
+  }
+  return buffer.toString();
 }
 
 PopupMenuEntry<String> _watchPopupItem({

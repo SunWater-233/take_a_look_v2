@@ -86,16 +86,36 @@ extension TakeALookControllerWatches on TakeALookController {
       return;
     }
     final existing = _watches.map((item) => item.symbol.key).toSet();
-    final selected = _symbols
+    final selectedRoots = _symbols
         .where((item) => _selectedSymbols.contains(item.key))
+        .toList();
+    final aggregateRootKeys = <String>{};
+    final selectedKeys = <String>{};
+    for (final root in selectedRoots) {
+      selectedKeys.add(root.key);
+      for (final candidate in _symbols) {
+        if (!_isDescendantSymbol(candidate, root)) continue;
+        aggregateRootKeys.add(root.key);
+        selectedKeys.add(candidate.key);
+      }
+    }
+    final selected = _symbols
+        .where((item) => selectedKeys.contains(item.key))
         .where((item) => !existing.contains(item.key))
         .toList();
     for (final symbol in selected) {
+      final isAggregateMember = selectedRoots.any(
+        (root) =>
+            aggregateRootKeys.contains(root.key) &&
+            (symbol.key == root.key || _isDescendantSymbol(symbol, root)),
+      );
       _watches.add(
         WatchItem(
-          symbol: symbol,
-          color: seriesColors[_watches.length % seriesColors.length],
-        ),
+            symbol: symbol,
+            color: seriesColors[_watches.length % seriesColors.length],
+          )
+          ..samplingEnabled = !isAggregateMember
+          ..plotted = !isAggregateMember,
       );
     }
     _selectedSymbols.clear();
@@ -149,6 +169,21 @@ extension TakeALookControllerWatches on TakeALookController {
     _syncWatchesBackend();
     _appendLog('已清空实时调参列表。');
     _emitState([signals.watches, signals.plot, signals.logs]);
+  }
+
+  void toggleWatchSampling(String key, bool value) {
+    if (_isDetachedRemote &&
+        _dispatchRemote(ControllerCommand.toggleWatchSampling, {
+          'key': key,
+          'value': value,
+        })) {
+      return;
+    }
+    final watch = _watchByKey(key);
+    if (watch == null || watch.samplingEnabled == value) return;
+    watch.samplingEnabled = value;
+    _syncWatchesBackend();
+    _emitState([signals.watches, signals.plot]);
   }
 
   void toggleWatchPlot(String key, bool value) {
@@ -256,4 +291,12 @@ extension TakeALookControllerWatches on TakeALookController {
     }
     _emitState([signals.telemetry, signals.plot, signals.logs]);
   }
+}
+
+bool _isDescendantSymbol(SymbolItem candidate, SymbolItem root) {
+  if (candidate.source != root.source || candidate.key == root.key) {
+    return false;
+  }
+  return candidate.name.startsWith('${root.name}.') ||
+      candidate.name.startsWith('${root.name}[');
 }

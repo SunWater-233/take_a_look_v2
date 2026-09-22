@@ -111,7 +111,21 @@ class SamplingServiceMixin:
                 {"elapsed": elapsed, "values": {key: json_value(value) for key, value in values.items()}}
                 for elapsed, values in frames
             ]
-            self._samples.extend((frame["elapsed"], frame["values"]) for frame in normalized)
+            sampled_keys = {
+                key for key, watch in self._watches.items() if watch.sampling_enabled
+            }
+            self._samples.extend(
+                (
+                    frame["elapsed"],
+                    {
+                        key: value
+                        for key, value in frame["values"].items()
+                        if key in sampled_keys
+                    },
+                )
+                for frame in normalized
+                if any(key in sampled_keys for key in frame["values"])
+            )
             self._sample_count_since_perf += len(normalized)
         self._emit(EventName.SAMPLES, {"frames": normalized})
 

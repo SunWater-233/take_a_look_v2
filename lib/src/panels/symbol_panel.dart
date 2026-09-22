@@ -292,6 +292,16 @@ class _SymbolPanelState extends State<_SymbolPanel> {
     _lastTappedNodeKey = isDoubleTap ? null : node.key;
     _lastTapAt = isDoubleTap ? null : now;
 
+    if (node.expandable) {
+      final symbol = node.symbol;
+      if (isDoubleTap && symbol != null) {
+        widget.controller.activateSymbol(symbol.key);
+      } else {
+        _toggleNode(node);
+      }
+      return;
+    }
+
     final keys = _symbolKeysForNode(node);
     if (HardwareKeyboard.instance.isControlPressed) {
       final next = widget.controller.selectedSymbols.toSet();
@@ -595,7 +605,7 @@ class _SymbolTreeRow extends StatelessWidget {
       key: ValueKey('symbol-tree-row-${node.key}'),
       color: rowColor,
       child: InkWell(
-        onTap: () => node.expandable ? onToggleNode(node) : onSelectNode(node),
+        onTap: () => onSelectNode(node),
         child: SizedBox(
           height: rowHeight,
           child: Row(

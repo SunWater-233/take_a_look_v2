@@ -142,8 +142,8 @@ void main() {
     await tester.tap(find.text('speed_rpm'));
     await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await rightClick(tester, find.text('iq_ref'));
-    expect(find.text('仅绘制所选变量（2）'), findsOneWidget);
-    await tester.tap(find.text('仅绘制所选变量（2）'));
+    expect(find.text('仅显示所选变量（2）'), findsOneWidget);
+    await tester.tap(find.text('仅显示所选变量（2）'));
     await tester.pumpAndSettle();
     expect(controller.watches.map((watch) => watch.plotted), <bool>[
       true,
@@ -156,17 +156,17 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await rightClick(tester, find.text('id_ref'));
     expect(find.text('移除所选变量（3）'), findsOneWidget);
-    await tester.tap(find.text('全部不绘制'));
+    await tester.tap(find.text('全部隐藏'));
     await tester.pumpAndSettle();
     expect(controller.watches.every((watch) => !watch.plotted), isTrue);
 
     await rightClick(tester, find.text('id_ref'));
-    await tester.tap(find.text('反转所选变量绘制状态'));
+    await tester.tap(find.text('反转所选变量图表显示状态'));
     await tester.pumpAndSettle();
     expect(controller.watches.every((watch) => watch.plotted), isTrue);
 
     await rightClick(tester, find.text('id_ref'));
-    await tester.tap(find.text('为所选变量设置绘制颜色（3）'));
+    await tester.tap(find.text('为所选变量设置曲线颜色（3）'));
     await tester.pumpAndSettle();
     await tester.tap(
       find.byKey(ValueKey('watch-color-preset-${TalColors.blue.toARGB32()}')),
@@ -179,9 +179,14 @@ void main() {
     );
 
     await tester.tap(find.text('id_ref'));
-    await rightClick(tester, find.byType(Checkbox).at(1));
-    expect(find.text('仅绘制该栏'), findsOneWidget);
-    await tester.tap(find.text('仅绘制该栏'));
+    await rightClick(
+      tester,
+      find.byKey(
+        ValueKey('watch-visibility-${controller.watches[1].symbol.key}'),
+      ),
+    );
+    expect(find.text('仅显示该栏'), findsOneWidget);
+    await tester.tap(find.text('仅显示该栏'));
     await tester.pumpAndSettle();
     expect(controller.watches.map((watch) => watch.plotted), <bool>[
       false,
@@ -189,8 +194,13 @@ void main() {
       false,
     ]);
 
-    await rightClick(tester, find.byType(Checkbox).at(1));
-    await tester.tap(find.text('全部绘制'));
+    await rightClick(
+      tester,
+      find.byKey(
+        ValueKey('watch-visibility-${controller.watches[1].symbol.key}'),
+      ),
+    );
+    await tester.tap(find.text('全部显示'));
     await tester.pumpAndSettle();
     expect(controller.watches.every((watch) => watch.plotted), isTrue);
 
@@ -205,4 +215,89 @@ void main() {
     controller.dispose();
     await tester.pumpWidget(const SizedBox.shrink());
   });
+
+  testWidgets(
+    'aggregate watches expand as a tree with sampling and visibility actions',
+    (tester) async {
+      final controller = TakeALookController();
+      controller.applySnapshot({
+        'symbols': [
+          {
+            'source': 'motor.c',
+            'name': 'motor',
+            'address': 0x20000000,
+            'type': 'struct MotorState',
+            'size': 8,
+            'section': '.bss',
+            'key': 'motor',
+          },
+          {
+            'source': 'motor.c',
+            'name': 'motor.speed',
+            'address': 0x20000000,
+            'type': 'float',
+            'size': 4,
+            'section': '.bss',
+            'key': 'motor.speed',
+          },
+          {
+            'source': 'motor.c',
+            'name': 'motor.current',
+            'address': 0x20000004,
+            'type': 'float',
+            'size': 4,
+            'section': '.bss',
+            'key': 'motor.current',
+          },
+        ],
+        'watches': <Object?>[],
+      });
+      controller.selectSymbols(const ['motor']);
+      controller.addSelectedToWatch();
+
+      expect(controller.watches, hasLength(3));
+      expect(
+        controller.watches.every((watch) => !watch.samplingEnabled),
+        isTrue,
+      );
+      expect(controller.watches.every((watch) => !watch.plotted), isTrue);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildTalTheme(),
+          home: Scaffold(
+            body: SizedBox(
+              width: 900,
+              height: 520,
+              child: buildWorkspacePanel(WorkspacePanelId.watch, controller),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('图标显示'), findsOneWidget);
+      expect(find.text('speed'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('watch-tree-toggle-motor')));
+      await tester.pump();
+      expect(find.text('speed'), findsOneWidget);
+      expect(find.text('current'), findsOneWidget);
+
+      await tester.tap(
+        find.byKey(const ValueKey('watch-sampling-motor.speed')),
+      );
+      await tester.tap(
+        find.byKey(const ValueKey('watch-visibility-motor.speed')),
+      );
+      await tester.pump();
+      final speed = controller.watches.firstWhere(
+        (watch) => watch.symbol.key == 'motor.speed',
+      );
+      expect(speed.samplingEnabled, isTrue);
+      expect(speed.plotted, isTrue);
+      expect(find.byType(Checkbox), findsNothing);
+
+      controller.dispose();
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
 }

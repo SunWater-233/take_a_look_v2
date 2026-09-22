@@ -113,6 +113,7 @@ class WatchItem {
   Color color;
   final List<Offset> samples = <Offset>[];
   int totalSampleCount = 0;
+  bool samplingEnabled = true;
   bool plotted = true;
   double value = 0;
 

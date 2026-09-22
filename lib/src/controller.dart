@@ -219,6 +219,7 @@ class TakeALookController extends ChangeNotifier {
               'key': watch.symbol.key,
               'color':
                   '#${watch.color.toARGB32().toRadixString(16).padLeft(8, '0')}',
+              'sampling': watch.samplingEnabled,
               'plotted': watch.plotted,
             },
         ],

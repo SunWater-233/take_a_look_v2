@@ -40,7 +40,9 @@ class TelemetryStore {
         final watch = watchesByKey[entry.key];
         if (watch == null) continue;
         watch.value = numericValue(entry.value, fallback: watch.value);
-        append(watch, Offset(elapsed, watch.value));
+        if (watch.samplingEnabled) {
+          append(watch, Offset(elapsed, watch.value));
+        }
       }
     }
     return elapsedSeconds;
@@ -61,7 +63,9 @@ class TelemetryStore {
         final watch = schemaWatches[variable];
         if (watch == null || !batch.hasValue(frame, variable)) continue;
         watch.value = batch.valueAt(frame, variable);
-        append(watch, Offset(elapsed, watch.value));
+        if (watch.samplingEnabled) {
+          append(watch, Offset(elapsed, watch.value));
+        }
       }
     }
     return elapsedSeconds;

@@ -199,6 +199,19 @@ class _WatchPanelState extends State<_WatchPanel> {
     });
   }
 
+  KeyEventResult _handleWatchShortcut(KeyEvent event) {
+    final focusContext = FocusManager.instance.primaryFocus?.context;
+    if (focusContext?.findAncestorWidgetOfExactType<EditableText>() != null) {
+      return KeyEventResult.ignored;
+    }
+    if (!WorkspaceShortcut.selectAllWatches.matches(event)) {
+      return KeyEventResult.ignored;
+    }
+    _selectAllWatches();
+    _tableFocus.requestFocus();
+    return KeyEventResult.handled;
+  }
+
   List<String> _contextWatchKeys(String clickedKey) {
     if (!_selectedWatchKeys.contains(clickedKey)) {
       setState(() {
@@ -435,91 +448,82 @@ class _WatchPanelState extends State<_WatchPanel> {
           child: Column(
             children: [
               Expanded(
-                child: CallbackShortcuts(
-                  bindings: <ShortcutActivator, VoidCallback>{
-                    const SingleActivator(
-                      LogicalKeyboardKey.keyA,
-                      control: true,
-                    ): _selectAllWatches,
-                    const SingleActivator(LogicalKeyboardKey.keyA, meta: true):
-                        _selectAllWatches,
-                  },
-                  child: Focus(
-                    focusNode: _tableFocus,
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        return _ResizableTableViewport(
-                          layout: _tableLayout,
-                          contentWidth: _tableWidth,
-                          horizontalController: _horizontalScrollController,
-                          contentKey: const ValueKey('watch-table-content'),
-                          resizeRegionKey: const ValueKey(
-                            'watch-table-resize-region',
+                child: PanelKeyboardListener(
+                  focusNode: _tableFocus,
+                  onKeyEvent: _handleWatchShortcut,
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      return _ResizableTableViewport(
+                        layout: _tableLayout,
+                        contentWidth: _tableWidth,
+                        horizontalController: _horizontalScrollController,
+                        contentKey: const ValueKey('watch-table-content'),
+                        resizeRegionKey: const ValueKey(
+                          'watch-table-resize-region',
+                        ),
+                        minimumRowHeight: 40,
+                        canStartResizeAt: _canStartTableResize,
+                        onLayoutChanged: () => setState(() {}),
+                        bodyDecoration: const BoxDecoration(
+                          color: TalColors.input,
+                          border: Border(
+                            left: BorderSide(color: TalColors.border),
+                            right: BorderSide(color: TalColors.border),
+                            bottom: BorderSide(color: TalColors.border),
                           ),
-                          minimumRowHeight: 40,
-                          canStartResizeAt: _canStartTableResize,
-                          onLayoutChanged: () => setState(() {}),
-                          bodyDecoration: const BoxDecoration(
-                            color: TalColors.input,
-                            border: Border(
-                              left: BorderSide(color: TalColors.border),
-                              right: BorderSide(color: TalColors.border),
-                              bottom: BorderSide(color: TalColors.border),
-                            ),
-                          ),
-                          header: _WatchTableHeader(
-                            columnWidths: _columnWidths,
-                            hiddenColumns: _hiddenColumns,
-                            selectedColumns: _selectedColumns,
-                            onResizeColumn: _resizeColumn,
-                            onSelectColumn: _selectColumn,
-                            onContextMenu: _showHeaderContextMenu,
-                          ),
-                          body: treeRoots.isEmpty
-                              ? const SizedBox.expand()
-                              : ReorderableListView.builder(
-                                  buildDefaultDragHandles: false,
-                                  proxyDecorator: (child, index, animation) {
-                                    final horizontalOffset =
-                                        _horizontalScrollController.hasClients
-                                        ? _horizontalScrollController.offset
-                                        : 0.0;
-                                    return ClipRect(
-                                      key: const ValueKey('watch-drag-proxy'),
-                                      clipper: _WatchDragProxyClipper(
-                                        left: horizontalOffset,
-                                        width: constraints.maxWidth,
-                                      ),
-                                      child: Material(
-                                        color: Colors.transparent,
-                                        child: child,
-                                      ),
-                                    );
-                                  },
-                                  itemCount: treeRoots.length,
-                                  onReorderItem: (oldIndex, newIndex) =>
-                                      _reorderWatchRoot(
-                                        treeRoots,
-                                        oldIndex,
-                                        newIndex,
-                                      ),
-                                  itemBuilder: (context, index) {
-                                    final node = treeRoots[index];
-                                    return ReorderableDelayedDragStartListener(
-                                      key: ValueKey<String>(
-                                        'watch-reorder-${node.watch.symbol.key}',
-                                      ),
-                                      index: index,
-                                      child: _buildWatchTreeBranch(
-                                        node,
-                                        depth: 0,
-                                      ),
-                                    );
-                                  },
-                                ),
-                        );
-                      },
-                    ),
+                        ),
+                        header: _WatchTableHeader(
+                          columnWidths: _columnWidths,
+                          hiddenColumns: _hiddenColumns,
+                          selectedColumns: _selectedColumns,
+                          onResizeColumn: _resizeColumn,
+                          onSelectColumn: _selectColumn,
+                          onContextMenu: _showHeaderContextMenu,
+                        ),
+                        body: treeRoots.isEmpty
+                            ? const SizedBox.expand()
+                            : ReorderableListView.builder(
+                                buildDefaultDragHandles: false,
+                                proxyDecorator: (child, index, animation) {
+                                  final horizontalOffset =
+                                      _horizontalScrollController.hasClients
+                                      ? _horizontalScrollController.offset
+                                      : 0.0;
+                                  return ClipRect(
+                                    key: const ValueKey('watch-drag-proxy'),
+                                    clipper: _WatchDragProxyClipper(
+                                      left: horizontalOffset,
+                                      width: constraints.maxWidth,
+                                    ),
+                                    child: Material(
+                                      color: Colors.transparent,
+                                      child: child,
+                                    ),
+                                  );
+                                },
+                                itemCount: treeRoots.length,
+                                onReorderItem: (oldIndex, newIndex) =>
+                                    _reorderWatchRoot(
+                                      treeRoots,
+                                      oldIndex,
+                                      newIndex,
+                                    ),
+                                itemBuilder: (context, index) {
+                                  final node = treeRoots[index];
+                                  return ReorderableDelayedDragStartListener(
+                                    key: ValueKey<String>(
+                                      'watch-reorder-${node.watch.symbol.key}',
+                                    ),
+                                    index: index,
+                                    child: _buildWatchTreeBranch(
+                                      node,
+                                      depth: 0,
+                                    ),
+                                  );
+                                },
+                              ),
+                      );
+                    },
                   ),
                 ),
               ),

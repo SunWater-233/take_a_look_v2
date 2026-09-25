@@ -25,7 +25,7 @@ Future<void> main(List<String> args) async {
           ? 'Take A Look - Take A Look 调参上位机'
           : launch?.role == SecondaryWindowRole.dragPreview
           ? 'Take A Look - 拖动预览'
-          : launch!.groupPanels.length > 1
+          : launch!.groupPanels.length > 1 
           ? 'Take A Look - ${panel.title} 组合'
           : 'Take A Look - ${panel.title}',
       titleBarStyle: TitleBarStyle.hidden,

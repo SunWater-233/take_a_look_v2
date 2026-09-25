@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../controller.dart';
+import '../keyboard_shortcuts.dart';
 import '../panel_types.dart';
 import '../theme.dart';
 import '../workspace.dart';
@@ -180,10 +181,7 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
           _menuItem(label: '缩小界面', onPressed: () => _stepUiScale(-1)),
           _menuItem(
             label: '重置界面缩放',
-            shortcut: const SingleActivator(
-              LogicalKeyboardKey.digit0,
-              control: true,
-            ),
+            shortcut: WorkspaceShortcut.resetUiScale.menuActivator,
             onPressed: () => _setUiScale(1),
           ),
           const _MenuDivider(),
@@ -218,11 +216,7 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
       ),
       _menuItem(
         label: '保存布局',
-        shortcut: const SingleActivator(
-          LogicalKeyboardKey.keyS,
-          control: true,
-          shift: true,
-        ),
+        shortcut: WorkspaceShortcut.saveLayout.menuActivator,
         reserveLeading: true,
         onPressed: () => _handleViewAction('save'),
       ),

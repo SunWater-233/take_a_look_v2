@@ -255,6 +255,59 @@ void main() {
     expect(invokedMethods, contains(hideTabDragPreviewMethod));
   });
 
+  test(
+    'ordinary clicks do not send commands to an idle preview window',
+    () async {
+      const desktopChannel = MethodChannel('mixin.one/desktop_multi_window');
+      const channelsChannel = MethodChannel(
+        'mixin.one/desktop_multi_window/channels',
+      );
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      final calls = <String>[];
+      messenger.setMockMethodCallHandler(desktopChannel, (call) async {
+        if (call.method == 'createWindow') return 'idle_preview_window';
+        calls.add(call.method);
+        return null;
+      });
+      messenger.setMockMethodCallHandler(channelsChannel, (call) async {
+        if (call.method == 'invokeMethod') {
+          calls.add((call.arguments as Map)['method'] as String);
+        }
+        return null;
+      });
+      addTearDown(() {
+        messenger.setMockMethodCallHandler(desktopChannel, null);
+        messenger.setMockMethodCallHandler(channelsChannel, null);
+      });
+      final coordinator = TabDragPreviewCoordinator();
+      addTearDown(coordinator.dispose);
+      await coordinator.prewarm();
+      calls.clear();
+      for (var index = 0; index < 20; index += 1) {
+        await coordinator.hide();
+      }
+      await Future<void>.delayed(Duration.zero);
+      expect(calls, isEmpty);
+
+      await coordinator.prepare(
+        panel: WorkspacePanelId.sourceDebug,
+        size: const Size(800, 600),
+      );
+      await coordinator.showAt(const Offset(100, 100));
+      await coordinator.hide();
+      await Future<void>.delayed(Duration.zero);
+      expect(calls, contains(hideTabDragPreviewMethod));
+      expect(calls, contains('window_hide'));
+      calls.clear();
+      for (var index = 0; index < 20; index += 1) {
+        await coordinator.hide();
+      }
+      await Future<void>.delayed(Duration.zero);
+      expect(calls, isEmpty);
+    },
+  );
+
   test('drag preview hide bypasses an in-flight pointer move', () async {
     const desktopChannel = MethodChannel('mixin.one/desktop_multi_window');
     const channelsChannel = MethodChannel(

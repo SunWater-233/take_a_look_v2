@@ -77,6 +77,9 @@ class TabDragPreviewCoordinator {
   }
 
   Future<void> hide() {
+    // Workspace pointer-up events also arrive for ordinary clicks. An idle
+    // prewarmed window must not receive native window-management commands.
+    if (!_active) return Future<void>.value();
     final session = _session;
     _active = false;
     _pendingMove = null;

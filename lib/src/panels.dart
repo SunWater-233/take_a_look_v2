@@ -15,8 +15,10 @@ import 'analysis.dart';
 import 'analysis_fft.dart';
 import 'controller.dart';
 import 'file_pickers.dart';
+import 'keyboard_shortcuts.dart';
 import 'models.dart';
 import 'panel_types.dart';
+import 'source_search.dart';
 import 'theme.dart';
 import 'ui_controls.dart';
 import 'panels/table_layout.dart';
@@ -40,10 +42,13 @@ Widget buildWorkspacePanel(
   TakeALookController controller, {
   PanelChrome? chrome,
 }) {
-  return TalPanelFrame(
+  return PanelKeyboardScope(
     panel: panel,
-    chrome: chrome,
-    child: buildWorkspacePanelBody(panel, controller),
+    child: TalPanelFrame(
+      panel: panel,
+      chrome: chrome,
+      child: buildWorkspacePanelBody(panel, controller),
+    ),
   );
 }
 

@@ -51,11 +51,41 @@ current source file, highlights the program-counter line, and displays core
 registers along the bottom. Source files open in closable tabs; overflowing
 tabs scroll horizontally and fade at the right edge to reveal that more files
 are available. Press `Ctrl+W` to close the active source tab, drag external
-text/source files into the panel to open them, or press `Ctrl+F` to search all
-known and open source files. Use the folder button in the source toolbar to set
-the project source root; build-machine paths recorded in the ELF are then
+text/source files into the panel to open them, or press `Ctrl+F` to search file
+names, paths, and the contents of known and open source files. Filename search
+also includes files under the configured project source root and supports fuzzy
+abbreviations (for example, `mtrctrl` finds `motor_controller.c`, and `src mtr`
+matches its source path). `.c` and `.h` files have the highest priority; build
+outputs such as `.o`, `.obj`, and `.elf` appear last. Filename results appear
+first while content results load. File paths and prepared text are cached across
+queries, and binary build outputs are only matched by name. Content search uses
+literal text. Use `Up`/`Down` to select a result and `Enter` to open it and close
+search; `Esc` closes search without opening the selection.
+Use the folder button in the source toolbar to set the project source root;
+build-machine paths recorded in the ELF are then
 matched to local files automatically. **定位本地源码** remains available as a
 per-file fallback.
+
+## Keyboard shortcuts
+
+Panel commands follow the active panel. When the source debugger is visible,
+`Ctrl+F` and `Ctrl+W` work throughout the window, including after using the symbol
+list or a file picker; clicking a source file tab first is unnecessary. Window
+commands also work when no panel control has keyboard focus. On macOS, Command
+can be used in place of Ctrl.
+
+| Shortcut | Action | Scope |
+| --- | --- | --- |
+| `Ctrl+0` | Reset UI scale | Main and detached windows |
+| `Ctrl+Shift+S` | Save workspace layout | Main window |
+| `Ctrl+F` | Open file/content search | Window with a visible source debugger |
+| `Ctrl+W` | Close the active source file tab | Window with a visible source debugger |
+| `Up` / `Down` | Select a search result | Source search |
+| `Enter` / `Esc` | Open the selection and close search / cancel search | Source search |
+| `Ctrl+A` | Select all watched variables | Active watch panel |
+
+Focused text inputs retain their editing shortcuts, and modal dialogs take
+priority over commands in the workspace behind them.
 
 ## Test
 

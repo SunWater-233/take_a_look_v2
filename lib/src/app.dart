@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
@@ -8,6 +9,7 @@ import 'package:window_manager/window_manager.dart';
 import 'app/title_bar.dart';
 import 'backend_client.dart';
 import 'controller.dart';
+import 'keyboard_shortcuts.dart';
 import 'panel_types.dart';
 import 'panels.dart';
 import 'theme.dart';
@@ -174,6 +176,20 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
 
   Future<void> _showTabDragPreview(Offset screenPosition, int session) async {
     if (detachedPanel == null || !_isCurrentTabDragPreview(session)) return;
+    if (Platform.isWindows) {
+      // window_manager's Windows setPosition/show implementations activate the
+      // target, including show(inactive: true). Use one non-activating operation.
+      await TalDragPreview.showInactiveAt(
+        screenPosition,
+        devicePixelRatio: View.of(context).devicePixelRatio,
+      );
+      if (!_isCurrentTabDragPreview(session)) {
+        await windowManager.hide();
+        return;
+      }
+      _tabDragPreviewVisible = true;
+      return;
+    }
     await windowManager.setPosition(screenPosition);
     if (!_isCurrentTabDragPreview(session) || _tabDragPreviewVisible) return;
     _tabDragPreviewVisible = true;
@@ -182,10 +198,10 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
 
   Future<void> _hideTabDragPreview(int session) async {
     if (session < _tabDragPreviewSession) return;
+    if (!_tabDragPreviewActive && !_tabDragPreviewVisible) return;
     _tabDragPreviewSession = session;
     _tabDragPreviewActive = false;
     _tabDragPreviewVisible = false;
-    await windowManager.setAlwaysOnTop(false);
     await windowManager.hide();
   }
 
@@ -214,7 +230,7 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
     try {
       if (detachedWindowAssigned) {
         await releaseDetachedWindow();
-        detachedWindowAssigned = false;
+        if (mounted) setState(() => detachedWindowAssigned = false);
       }
       await windowManager.hide();
     } finally {
@@ -253,10 +269,13 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
               controller: controller,
               panel: detachedPanel!,
             )
-          : DetachedPanelWindow(
-              controller: controller,
-              panel: detachedPanel!,
-              panels: detachedPanels,
+          : ExcludeFocus(
+              excluding: !detachedWindowAssigned,
+              child: DetachedPanelWindow(
+                controller: controller,
+                panel: detachedPanel!,
+                panels: detachedPanels,
+              ),
             ),
     );
   }
@@ -276,30 +295,32 @@ class TabContentDragPreviewWindow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SizedBox(
-            height: talPanelTabStripHeight,
-            child: Align(
-              alignment: Alignment.bottomLeft,
-              child: TalPanelTabSurface(tab: panel, selected: true),
-            ),
-          ),
-          Expanded(
-            child: Container(
-              key: const ValueKey<String>('tab-content-drag-preview-body'),
-              decoration: BoxDecoration(
-                color: TalColors.surface,
-                border: Border.all(color: TalColors.panelBorder),
+    return ExcludeFocus(
+      child: Material(
+        color: Colors.transparent,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SizedBox(
+              height: talPanelTabStripHeight,
+              child: Align(
+                alignment: Alignment.bottomLeft,
+                child: TalPanelTabSurface(tab: panel, selected: true),
               ),
-              clipBehavior: Clip.hardEdge,
-              child: buildWorkspacePanelBody(panel, controller),
             ),
-          ),
-        ],
+            Expanded(
+              child: Container(
+                key: const ValueKey<String>('tab-content-drag-preview-body'),
+                decoration: BoxDecoration(
+                  color: TalColors.surface,
+                  border: Border.all(color: TalColors.panelBorder),
+                ),
+                clipBehavior: Clip.hardEdge,
+                child: buildWorkspacePanelBody(panel, controller),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -357,11 +378,13 @@ class MainWorkbench extends StatefulWidget {
   const MainWorkbench({
     required this.controller,
     required this.windowSync,
+    this.layoutFile,
     super.key,
   });
 
   final TakeALookController controller;
   final MainWindowSync windowSync;
+  final File? layoutFile;
 
   @override
   State<MainWorkbench> createState() => _MainWorkbenchState();
@@ -444,26 +467,46 @@ class _MainWorkbenchState extends State<MainWorkbench> {
     }
   }
 
+  KeyEventResult _handleWorkbenchShortcut(KeyEvent event) {
+    if (WorkspaceShortcut.resetUiScale.matches(event)) {
+      widget.controller.setUiScale(1);
+      setState(() {});
+      return KeyEventResult.handled;
+    }
+    if (WorkspaceShortcut.saveLayout.matches(event)) {
+      final workspace = workspaceKey.currentState;
+      if (workspace != null) {
+        unawaited(workspace.saveLayout());
+        return KeyEventResult.handled;
+      }
+    }
+    return KeyEventResult.ignored;
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Column(
-        children: [
-          TalWindowTitleBar(
-            controller: widget.controller,
-            workspaceKey: workspaceKey,
-          ),
-          Expanded(
-            child: DockingWorkspace(
-              key: workspaceKey,
+    return WorkspaceKeyboardShortcuts(
+      onKeyEvent: _handleWorkbenchShortcut,
+      child: Scaffold(
+        body: Column(
+          children: [
+            TalWindowTitleBar(
               controller: widget.controller,
-              windowSync: widget.windowSync,
-              onPanelVisibilityChanged: () {
-                if (mounted) setState(() {});
-              },
+              workspaceKey: workspaceKey,
             ),
-          ),
-        ],
+            Expanded(
+              child: DockingWorkspace(
+                key: workspaceKey,
+                controller: widget.controller,
+                windowSync: widget.windowSync,
+                layoutFile: widget.layoutFile,
+                onPanelVisibilityChanged: () {
+                  if (mounted) setState(() {});
+                },
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -549,25 +592,34 @@ class _DetachedPanelWindowState extends State<DetachedPanelWindow> {
       onTabDragUpdate: (_, details) => _updatePanelDrag(details),
       onTabDragEnd: (_, _) => _endPanelDrag(),
     );
-    return Scaffold(
-      body: Column(
-        children: [
-          TalWindowTitleBar(
-            subtitle: panels.length > 1
-                ? '${activePanel.title} 组合'
-                : activePanel.title,
-          ),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.all(4),
-              child: buildWorkspacePanel(
-                activePanel,
-                widget.controller,
-                chrome: chrome,
+    return WorkspaceKeyboardShortcuts(
+      onKeyEvent: (event) {
+        if (WorkspaceShortcut.resetUiScale.matches(event)) {
+          widget.controller.setUiScale(1);
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: Scaffold(
+        body: Column(
+          children: [
+            TalWindowTitleBar(
+              subtitle: panels.length > 1
+                  ? '${activePanel.title} 组合'
+                  : activePanel.title,
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: buildWorkspacePanel(
+                  activePanel,
+                  widget.controller,
+                  chrome: chrome,
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

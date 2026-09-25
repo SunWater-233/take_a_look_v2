@@ -513,8 +513,430 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('source-search-result-0')));
     await tester.pump();
+    expect(find.byKey(const ValueKey('source-search-field')), findsNothing);
     expect(
       find.byKey(ValueKey('source-tab-active-$pubspecPath')),
+      findsOneWidget,
+    );
+
+    await _searchSources(tester, 'README.MD');
+    expect(find.text('1 / 1'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('source-search-result-0')),
+        matching: find.text('README.md'),
+      ),
+      findsOneWidget,
+    );
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    expect(find.byKey(const ValueKey('source-search-field')), findsNothing);
+    expect(
+      find.byKey(ValueKey('source-tab-active-$readmePath')),
+      findsOneWidget,
+    );
+
+    await _searchSources(tester, 'no_such_source_file_or_text');
+    expect(find.text('无结果'), findsOneWidget);
+    expect(find.byKey(const ValueKey('source-search-results')), findsNothing);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    expect(find.byKey(const ValueKey('source-search-field')), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+  });
+
+  testWidgets('Ctrl+F finds project files and ranks build artifacts last', (
+    tester,
+  ) async {
+    late final Directory root;
+    late final String sourcePath;
+    late final String headerPath;
+    late final String notesPath;
+    late final String objectPath;
+    await tester.runAsync(() async {
+      root = await Directory.systemTemp.createTemp('take_a_look_file_search_');
+      Future<String> writeFile(String path, List<int> bytes) async {
+        final file = File(
+          '${root.path}${Platform.pathSeparator}'
+          '${path.replaceAll('/', Platform.pathSeparator)}',
+        );
+        await file.parent.create(recursive: true);
+        await file.writeAsBytes(bytes);
+        return file.path;
+      }
+
+      sourcePath = await writeFile('src/motor.c', 'int ready = 1;\n'.codeUnits);
+      headerPath = await writeFile(
+        'include/motor.h',
+        'void run(void);\n'.codeUnits,
+      );
+      notesPath = await writeFile(
+        'src/notes.c',
+        '// motor control\n'.codeUnits,
+      );
+      objectPath = await writeFile('build/motor.o', [0xff, 0xfe, 0, 1]);
+      await writeFile('build/motor.OBJ', [0xff, 0xfe, 0, 2]);
+      await writeFile('build/motor.elf', [0x7f, 0x45, 0x4c, 0x46, 0xff]);
+      await writeFile('docs/motor.txt', 'Overview\n'.codeUnits);
+    });
+    addTearDown(() => root.delete(recursive: true));
+
+    const debugPath = 'Z:/build/firmware/src/motor.c';
+    final controller = TakeALookController()..setSourceRoot(root.path);
+    controller.applyDebugState({
+      'sourceFiles': [debugPath, notesPath, objectPath],
+      'executableLines': {
+        debugPath: [1],
+      },
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: buildWorkspacePanel(WorkspacePanelId.sourceDebug, controller),
+        ),
+      ),
+    );
+    await _searchSources(tester, 'MoToR');
+
+    // The local source and its build-machine alias yield one filename match.
+    // Root-only headers are included, followed by content, then build outputs.
+    expect(find.text('1 / 7'), findsOneWidget);
+    final labels = [
+      'motor.c',
+      'motor.h',
+      'notes.c:1:4',
+      'motor.txt',
+      'motor.elf',
+      'motor.o',
+      'motor.OBJ',
+    ];
+    final resultScrollable = find.descendant(
+      of: find.byKey(const ValueKey('source-search-results')),
+      matching: find.byType(Scrollable),
+    );
+    for (var index = 0; index < labels.length; index += 1) {
+      final row = find.byKey(ValueKey('source-search-result-$index'));
+      await tester.scrollUntilVisible(row, 30, scrollable: resultScrollable);
+      expect(
+        find.descendant(of: row, matching: find.text(labels[index])),
+        findsOneWidget,
+      );
+    }
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('source-search-result-0')),
+      -30,
+      scrollable: resultScrollable,
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('source-search-result-0')),
+        matching: find.text(sourcePath),
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('source-search-result-0')));
+    await tester.pump();
+    expect(
+      find.byKey(const ValueKey('source-tab-active-$debugPath')),
+      findsOneWidget,
+    );
+
+    // Filename search does not need to decode binary object files as text.
+    await _searchSources(tester, 'MOTOR.O');
+    expect(find.text('1 / 2'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('source-search-result-0')),
+        matching: find.text('motor.o'),
+      ),
+      findsOneWidget,
+    );
+
+    await _searchSources(tester, r'INCLUDE\MOTOR.H');
+    expect(find.text('1 / 1'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('source-search-result-0')));
+    await tester.pump();
+    expect(
+      find.byKey(ValueKey('source-tab-active-$headerPath')),
+      findsOneWidget,
+    );
+    controller.selectSymbols(const []);
+    await tester.pump();
+    expect(
+      find.byKey(ValueKey('source-tab-active-$headerPath')),
+      findsOneWidget,
+    );
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+  });
+
+  testWidgets(
+    'fuzzy filename results appear before contents and cancel on new input',
+    (tester) async {
+      const sourcePath = 'Z:/unavailable/firmware/motor_controller.c';
+      final controller = TakeALookController();
+      controller.applyDebugState({
+        'sourceFiles': [
+          sourcePath,
+          'Z:/unavailable/firmware/motor_controller.txt',
+        ],
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: buildWorkspacePanel(WorkspacePanelId.sourceDebug, controller),
+          ),
+        ),
+      );
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pump();
+      final field = find.byKey(const ValueKey('source-search-field'));
+      await tester.enterText(field, 'mtrctrl');
+      await tester.pump(const Duration(milliseconds: 110));
+      expect(find.text('搜索中…'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('source-search-result-0')),
+          matching: find.text('motor_controller.c'),
+        ),
+        findsOneWidget,
+      );
+      await _searchSources(tester, 'zzzzzz');
+      expect(find.text('无结果'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('source-search-result-0')),
+        findsNothing,
+      );
+
+      await _searchSources(tester, 'mtrctrl');
+      expect(find.text('1 / 2'), findsOneWidget);
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('source-tab-active-$sourcePath')),
+        findsOneWidget,
+      );
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+    },
+  );
+
+  testWidgets('search keyboard selects, scrolls, confirms and cancels results', (
+    tester,
+  ) async {
+    final sourcePaths = List.generate(
+      10,
+      (index) =>
+          'Z:/unavailable/firmware/keyboard_${index.toString().padLeft(2, '0')}.c',
+    );
+    final controller = TakeALookController();
+    controller.applyDebugState({'sourceFiles': sourcePaths});
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: buildWorkspacePanel(WorkspacePanelId.sourceDebug, controller),
+        ),
+      ),
+    );
+    final field = find.byKey(const ValueKey('source-search-field'));
+    await _searchSources(tester, 'keyboard');
+    expect(find.text('1 / 10'), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pumpAndSettle();
+    expect(find.text('10 / 10'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('source-search-result-9')).hitTestable(),
+      findsOneWidget,
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(find.text('1 / 10'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('source-search-result-0')).hitTestable(),
+      findsOneWidget,
+    );
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+    expect(find.text('3 / 10'), findsOneWidget);
+    for (var index = 0; index < 6; index += 1) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pump();
+    }
+    await tester.pumpAndSettle();
+    expect(find.text('9 / 10'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('source-search-result-8')).hitTestable(),
+      findsOneWidget,
+    );
+    expect(tester.widget<TextField>(field).controller!.text, 'keyboard');
+    expect(tester.widget<TextField>(field).focusNode!.hasFocus, isTrue);
+    expect(
+      find.byKey(ValueKey('source-tab-active-${sourcePaths.first}')),
+      findsOneWidget,
+    );
+    expect(find.byKey(ValueKey('source-tab-${sourcePaths[8]}')), findsNothing);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(field, findsNothing);
+    expect(find.byKey(const ValueKey('source-search-results')), findsNothing);
+    expect(
+      find.byKey(ValueKey('source-tab-active-${sourcePaths[8]}')),
+      findsOneWidget,
+    );
+
+    await _searchSources(tester, 'keyboard_02');
+    await tester.sendKeyEvent(LogicalKeyboardKey.numpadEnter);
+    await tester.pump();
+    expect(field, findsNothing);
+    expect(
+      find.byKey(ValueKey('source-tab-active-${sourcePaths[2]}')),
+      findsOneWidget,
+    );
+
+    await _searchSources(tester, 'keyboard');
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    expect(field, findsNothing);
+    expect(
+      find.byKey(ValueKey('source-tab-active-${sourcePaths[2]}')),
+      findsOneWidget,
+    );
+    expect(find.byKey(ValueKey('source-tab-${sourcePaths[1]}')), findsNothing);
+
+    await _searchSources(tester, 'zzzzzz');
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(field, findsOneWidget);
+    expect(find.text('无结果'), findsOneWidget);
+
+    // Escape also cancels a query whose debounce has not fired yet.
+    await tester.enterText(field, 'keyboard_03');
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(field, findsNothing);
+    expect(find.byKey(ValueKey('source-tab-${sourcePaths[3]}')), findsNothing);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyW);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+    expect(find.byKey(ValueKey('source-tab-${sourcePaths[2]}')), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+  });
+
+  testWidgets('source matches keep priority when search reaches its limit', (
+    tester,
+  ) async {
+    late final Directory root;
+    late final String sourcePath;
+    late final String artifactPath;
+    await tester.runAsync(() async {
+      root = await Directory.systemTemp.createTemp('take_a_look_search_limit_');
+      final source = File('${root.path}/src/needle.c');
+      final artifact = File('${root.path}/build/needle.map');
+      await source.parent.create(recursive: true);
+      await artifact.parent.create(recursive: true);
+      final text = List.filled(1001, '// needle').join('\n');
+      await source.writeAsString(text);
+      await artifact.writeAsString(text);
+      sourcePath = source.path;
+      artifactPath = artifact.path;
+    });
+    addTearDown(() => root.delete(recursive: true));
+
+    final controller = TakeALookController()..setSourceRoot(root.path);
+    controller.applyDebugState({
+      'sourceFiles': [artifactPath, sourcePath],
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: buildWorkspacePanel(WorkspacePanelId.sourceDebug, controller),
+        ),
+      ),
+    );
+    await _searchSources(tester, 'needle');
+    expect(find.text('1 / 1000'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('source-search-result-0')),
+        matching: find.text('needle.c'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('source-search-result-1')),
+        matching: find.text('needle.c:1:4'),
+      ),
+      findsOneWidget,
+    );
+    final results = find.byKey(const ValueKey('source-search-results'));
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('source-search-result-999')),
+      30000,
+      scrollable: find.descendant(
+        of: results,
+        matching: find.byType(Scrollable),
+      ),
+    );
+    expect(
+      find.descendant(of: results, matching: find.text('needle.c:999:4')),
+      findsOneWidget,
+    );
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+  });
+
+  testWidgets('changing the source root refreshes the active filename search', (
+    tester,
+  ) async {
+    late final Directory root;
+    await tester.runAsync(() async {
+      root = await Directory.systemTemp.createTemp('take_a_look_search_roots_');
+      await Directory('${root.path}/first').create();
+      final newFile = File('${root.path}/second/new_header.h');
+      await newFile.parent.create();
+      await newFile.writeAsString('#define READY 1\n');
+    });
+    addTearDown(() => root.delete(recursive: true));
+    final controller = TakeALookController()
+      ..setSourceRoot('${root.path}/first');
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: buildWorkspacePanel(WorkspacePanelId.sourceDebug, controller),
+        ),
+      ),
+    );
+    await _searchSources(tester, 'new_header.h');
+    expect(find.text('无结果'), findsOneWidget);
+
+    controller.setSourceRoot('${root.path}/second');
+    await _waitForSourceSearch(tester);
+    expect(find.text('1 / 1'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('source-search-result-0')),
+        matching: find.text('new_header.h'),
+      ),
       findsOneWidget,
     );
 
@@ -723,4 +1145,32 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     controller.dispose();
   });
+}
+
+Future<void> _searchSources(WidgetTester tester, String query) async {
+  final field = find.byKey(const ValueKey('source-search-field'));
+  if (field.evaluate().isEmpty) {
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+  }
+  await tester.enterText(field, query);
+  await tester.pump(const Duration(milliseconds: 200));
+  await _waitForSourceSearch(tester);
+}
+
+Future<void> _waitForSourceSearch(WidgetTester tester) async {
+  await tester.pump(const Duration(milliseconds: 10));
+  for (
+    var attempt = 0;
+    attempt < 100 && find.text('搜索中…').evaluate().isNotEmpty;
+    attempt += 1
+  ) {
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 20)),
+    );
+    await tester.pump(const Duration(milliseconds: 10));
+  }
+  expect(find.text('搜索中…'), findsNothing);
 }

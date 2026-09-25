@@ -229,7 +229,8 @@ Win32Window::MessageHandler(HWND hwnd,
     }
 
     case WM_ACTIVATE:
-      if (child_content_ != nullptr) {
+      if (LOWORD(wparam) != WA_INACTIVE && child_content_ != nullptr &&
+          IsWindowVisible(hwnd)) {
         SetFocus(child_content_);
       }
       return 0;
@@ -267,7 +268,10 @@ void Win32Window::SetChildContent(HWND content) {
   MoveWindow(content, frame.left, frame.top, frame.right - frame.left,
              frame.bottom - frame.top, true);
 
-  SetFocus(child_content_);
+  if (IsWindowVisible(window_handle_) &&
+      GetForegroundWindow() == window_handle_) {
+    SetFocus(child_content_);
+  }
 }
 
 RECT Win32Window::GetClientArea() {

@@ -187,6 +187,50 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('source drag previews cannot acquire keyboard focus', (
+    tester,
+  ) async {
+    final controller = TakeALookController();
+    final editorFocus = FocusNode();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTalTheme(),
+        home: Scaffold(
+          body: Column(
+            children: [
+              TextField(focusNode: editorFocus, autofocus: true),
+              Expanded(
+                child: TabContentDragPreviewWindow(
+                  controller: controller,
+                  panel: WorkspacePanelId.sourceDebug,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    final previewFocus = tester
+        .widgetList<Focus>(
+          find.descendant(
+            of: find.byType(TabContentDragPreviewWindow),
+            matching: find.byType(Focus),
+          ),
+        )
+        .firstWhere(
+          (widget) => widget.focusNode != null && widget.onKeyEvent != null,
+        )
+        .focusNode!;
+    expect(previewFocus.canRequestFocus, isFalse);
+    previewFocus.requestFocus();
+    await tester.pump();
+    expect(editorFocus.hasFocus, isTrue);
+    await tester.pumpWidget(const SizedBox.shrink());
+    editorFocus.dispose();
+    controller.dispose();
+  });
+
   testWidgets('every workspace panel can render in an isolated window shell', (
     tester,
   ) async {

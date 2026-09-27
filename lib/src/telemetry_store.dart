@@ -1,18 +1,17 @@
 import 'dart:math' as math;
 import 'dart:ui';
 
-import 'backend_client.dart';
+import 'backend_transport.dart';
 import 'models.dart';
+import 'sample_buffer.dart';
 
 /// Owns mutation and retention rules for high-frequency watch samples.
 class TelemetryStore {
-  static const int retainedSamplesPerWatch = 1800;
+  static const int retainedSamplesPerWatch = SampleBuffer.defaultCapacity;
 
   void append(WatchItem watch, Offset point) {
     watch.samples.add(point);
     watch.totalSampleCount += 1;
-    final overflow = watch.samples.length - retainedSamplesPerWatch;
-    if (overflow > 0) watch.samples.removeRange(0, overflow);
   }
 
   void clear(Iterable<WatchItem> watches) {
@@ -41,7 +40,8 @@ class TelemetryStore {
         if (watch == null) continue;
         watch.value = numericValue(entry.value, fallback: watch.value);
         if (watch.samplingEnabled) {
-          append(watch, Offset(elapsed, watch.value));
+          watch.samples.addXY(elapsed, watch.value);
+          watch.totalSampleCount++;
         }
       }
     }
@@ -56,17 +56,24 @@ class TelemetryStore {
     final watchesByKey = {for (final watch in watches) watch.symbol.key: watch};
     final schemaWatches = [for (final key in batch.keys) watchesByKey[key]];
     var elapsedSeconds = currentElapsed;
-    for (var frame = 0; frame < batch.frameCount; frame += 1) {
-      final elapsed = batch.elapsedSeconds[frame];
+    for (final elapsed in batch.elapsedSeconds) {
       elapsedSeconds = math.max(elapsedSeconds, elapsed);
-      for (var variable = 0; variable < batch.variableCount; variable += 1) {
-        final watch = schemaWatches[variable];
-        if (watch == null || !batch.hasValue(frame, variable)) continue;
-        watch.value = batch.valueAt(frame, variable);
+    }
+    for (var variable = 0; variable < batch.variableCount; variable++) {
+      final watch = schemaWatches[variable];
+      if (watch == null) continue;
+      var recorded = 0;
+      var latest = watch.value;
+      for (var frame = 0; frame < batch.frameCount; frame++) {
+        if (!batch.hasValue(frame, variable)) continue;
+        latest = batch.valueAt(frame, variable);
         if (watch.samplingEnabled) {
-          append(watch, Offset(elapsed, watch.value));
+          watch.samples.addXY(batch.elapsedSeconds[frame], latest);
+          recorded++;
         }
       }
+      watch.value = latest;
+      watch.totalSampleCount += recorded;
     }
     return elapsedSeconds;
   }

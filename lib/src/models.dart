@@ -1,5 +1,7 @@
 import 'dart:ui';
 
+import 'sample_buffer.dart';
+
 enum ConnectionStatus { disconnected, connecting, connected }
 
 enum DebugExecutionState { unavailable, running, halted, unknown }
@@ -111,7 +113,7 @@ class WatchItem {
 
   final SymbolItem symbol;
   Color color;
-  final List<Offset> samples = <Offset>[];
+  final SampleBuffer samples = SampleBuffer();
   int totalSampleCount = 0;
   bool samplingEnabled = true;
   bool plotted = true;

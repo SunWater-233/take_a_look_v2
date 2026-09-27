@@ -4,6 +4,50 @@ import 'package:take_a_look_v2/src/protocol/events.dart';
 import 'package:take_a_look_v2/src/models.dart';
 
 void main() {
+  testWidgets(
+    'sample bursts keep data immediately but coalesce all display notifications',
+    (tester) async {
+      final controller = TakeALookController(backendCommand: (_, _) async {});
+      controller.loadDemoSymbols();
+      controller.toggleSymbol(demoSymbols.first.key);
+      controller.addSelectedToWatch();
+      controller.applySnapshot({
+        'connectionStatus': 'connected',
+        'displayRefreshMode': 'standard',
+      });
+      final key = controller.watches.single.symbol.key;
+      var general = 0;
+      var telemetry = 0;
+      var sync = 0;
+      controller.addListener(() => general++);
+      controller.telemetryChanges.addListener(() => telemetry++);
+      controller.telemetrySyncChanges.addListener(() => sync++);
+      for (var i = 0; i < 100; i++) {
+        controller.applyBackendSamples({
+          'frames': [
+            {
+              'elapsed': i / 10000,
+              'values': {key: i.toDouble()},
+            },
+          ],
+        });
+      }
+      expect(controller.watches.single.totalSampleCount, 100);
+      expect(controller.watches.single.value, 99);
+      expect(general, lessThanOrEqualTo(1));
+      await tester.pump(const Duration(milliseconds: 17));
+      expect(general, greaterThan(0));
+      expect(general, lessThanOrEqualTo(2));
+      expect(telemetry, general);
+      expect(sync, general);
+      await tester.pump(const Duration(milliseconds: 17));
+      final settled = general;
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(general, settled);
+      controller.dispose();
+    },
+  );
+
   test('controller emits only the state domains affected by a command', () {
     final controller = TakeALookController();
     var connectionEvents = 0;

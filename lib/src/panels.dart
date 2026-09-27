@@ -13,6 +13,7 @@ import 'chart/cartesian_renderer.dart';
 import 'chart/axis_settings.dart';
 import 'analysis.dart';
 import 'analysis_fft.dart';
+import 'analysis_worker.dart';
 import 'controller.dart';
 import 'file_pickers.dart';
 import 'keyboard_shortcuts.dart';

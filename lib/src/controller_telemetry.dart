@@ -26,7 +26,7 @@ extension TakeALookControllerTelemetry on TakeALookController {
             }),
           );
         watch.totalSampleCount =
-            (item['sampleCursor'] as int?) ?? watch.samples.length;
+            (item['sampleCursor'] as int?) ?? samples.length;
       }
     }
     _emitTelemetry(sync: false);

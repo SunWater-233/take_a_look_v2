@@ -70,6 +70,7 @@ class TakeALookController extends ChangeNotifier {
   final Stopwatch _samplingElapsedStopwatch = Stopwatch();
   double _samplingElapsedBaseSeconds = 0;
   bool _telemetryDisplayPending = false;
+  bool _telemetrySyncPending = false;
   bool _disposed = false;
   double _phase = 0;
   double? _frozenPlotEndSeconds;
@@ -302,9 +303,8 @@ class TakeALookController extends ChangeNotifier {
 
   void _emitTelemetry({bool sync = true}) {
     _telemetryDisplayPending = true;
+    _telemetrySyncPending = _telemetrySyncPending || sync;
     _schedulePlotRefresh();
-    if (sync) signals.telemetrySync.emit();
-    notifyListeners();
   }
 
   Duration get _plotRefreshInterval => Duration(
@@ -319,21 +319,27 @@ class TakeALookController extends ChangeNotifier {
   }
 
   void _emitDisplayFrame() {
-    if (_telemetryDisplayPending) {
+    if (_disposed) return;
+    final telemetryChanged = _telemetryDisplayPending;
+    if (telemetryChanged) {
       _telemetryDisplayPending = false;
       signals.telemetry.emit();
     }
     if (!plottingPaused && _watches.any((watch) => watch.plotted)) {
       signals.plot.emit();
     }
+    if (_telemetrySyncPending) {
+      _telemetrySyncPending = false;
+      signals.telemetrySync.emit();
+    }
+    if (telemetryChanged) notifyListeners();
   }
 
   void _resetPlotRefreshSchedule() {
     _plotRefreshTimer?.cancel();
     _plotRefreshTimer = null;
     if (_telemetryDisplayPending && !_disposed) {
-      _telemetryDisplayPending = false;
-      signals.telemetry.emit();
+      _emitDisplayFrame();
     }
     _startPlotRefreshClock();
   }

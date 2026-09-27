@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../controller.dart';
+import '../sample_buffer.dart';
 
 Rect telemetryPlotRect(Size size) => Rect.fromLTRB(
   52,
@@ -48,7 +49,16 @@ TelemetryViewport telemetryViewport(TakeALookController controller, Size size) {
     yMin = double.infinity;
     yMax = -double.infinity;
     for (final watch in plotted) {
-      for (final point in controller.plotSamplesFor(watch)) {
+      final samples = controller.plotSamplesFor(watch);
+      if (samples is SampleBuffer) {
+        final bounds = samples.valueBounds(xMin, xMax);
+        if (bounds != null) {
+          yMin = math.min(yMin, bounds.$1);
+          yMax = math.max(yMax, bounds.$2);
+        }
+        continue;
+      }
+      for (final point in samples) {
         if (point.dx < xMin || point.dx > xMax) continue;
         yMin = math.min(yMin, point.dy);
         yMax = math.max(yMax, point.dy);

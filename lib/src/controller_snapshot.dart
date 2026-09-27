@@ -343,7 +343,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
             }
             watch.totalSampleCount = samples == null
                 ? previousWatches[watch.symbol.key]?.totalSampleCount ?? 0
-                : (item['sampleCursor'] as int?) ?? watch.samples.length;
+                : (item['sampleCursor'] as int?) ?? samples.length;
             return watch;
           }).whereType<WatchItem>(),
         );

@@ -1,6 +1,7 @@
 import 'dart:math' as math;
+import 'dart:typed_data';
 
-import 'analysis.dart';
+import 'analysis_data.dart';
 
 class AnalysisSpectrum {
   const AnalysisSpectrum({
@@ -63,28 +64,34 @@ AnalysisSpectrum analysisSpectrumForSeries(
     return const AnalysisSpectrum.error('所选范围至少需要 4 个有效样本');
   }
 
-  final times = <double>[];
-  final values = <double>[];
+  final timeStorage = Float64List(afterLast - first);
+  final valueStorage = Float64List(afterLast - first);
+  var validCount = 0;
   for (var index = first; index < afterLast; index += 1) {
-    final point = signalPoints[index];
+    final x = analysisXAt(signalPoints, index);
+    final value = analysisYAt(signalPoints, index);
     final time = timePoints == null
-        ? point.x
-        : _interpolateSeriesValue(timePoints, point.x);
-    if (time == null || !time.isFinite || !point.y.isFinite) continue;
-    if (times.isNotEmpty && time <= times.last) {
+        ? x
+        : _interpolateSeriesValue(timePoints, x);
+    if (time == null || !time.isFinite || !value.isFinite) continue;
+    if (validCount > 0 && time <= timeStorage[validCount - 1]) {
       return const AnalysisSpectrum.error('时间基准必须严格递增');
     }
-    times.add(time);
-    values.add(point.y);
+    timeStorage[validCount] = time;
+    valueStorage[validCount] = value;
+    validCount++;
   }
-  if (values.length < 4) {
+  if (validCount < 4) {
     return const AnalysisSpectrum.error('时间基准与信号没有足够的重合样本');
   }
+  final times = Float64List.sublistView(timeStorage, 0, validCount);
+  final values = Float64List.sublistView(valueStorage, 0, validCount);
 
-  final deltas = <double>[
-    for (var index = 1; index < times.length; index += 1)
-      times[index] - times[index - 1],
-  ]..sort();
+  final deltas = Float64List(times.length - 1);
+  for (var index = 1; index < times.length; index++) {
+    deltas[index - 1] = times[index] - times[index - 1];
+  }
+  deltas.sort();
   final medianDelta = deltas[deltas.length ~/ 2];
   if (!medianDelta.isFinite || medianDelta <= 0) {
     return const AnalysisSpectrum.error('无法从时间基准计算采样率');
@@ -112,8 +119,8 @@ AnalysisSpectrum analysisSpectrumForSeries(
     fftSize <<= 1;
   }
 
-  final real = List<double>.filled(fftSize, 0);
-  final imaginary = List<double>.filled(fftSize, 0);
+  final real = Float64List(fftSize);
+  final imaginary = Float64List(fftSize);
   final mean = removeDc
       ? uniformValues.reduce((left, right) => left + right) / sampleCount
       : 0.0;
@@ -128,10 +135,10 @@ AnalysisSpectrum analysisSpectrumForSeries(
   }
   _fftInPlace(real, imaginary);
 
-  final points = <AnalysisPoint>[];
   var peakFrequency = 0.0;
   var peakAmplitude = 0.0;
   final lastBin = fftSize ~/ 2;
+  final amplitudes = Float64List(lastBin + 1);
   for (var bin = 0; bin <= lastBin; bin += 1) {
     final magnitude = math.sqrt(
       real[bin] * real[bin] + imaginary[bin] * imaginary[bin],
@@ -139,14 +146,14 @@ AnalysisSpectrum analysisSpectrumForSeries(
     final edgeBin = bin == 0 || bin == lastBin;
     final amplitude = magnitude / windowSum * (edgeBin ? 1 : 2);
     final frequency = bin * sampleRate / fftSize;
-    points.add(AnalysisPoint(frequency, amplitude));
+    amplitudes[bin] = amplitude;
     if (bin > 0 && amplitude > peakAmplitude) {
       peakAmplitude = amplitude;
       peakFrequency = frequency;
     }
   }
   return AnalysisSpectrum(
-    points: List<AnalysisPoint>.unmodifiable(points),
+    points: UniformAnalysisPoints(amplitudes, step: sampleRate / fftSize),
     sampleRate: sampleRate,
     sampleCount: sampleCount,
     fftSize: fftSize,
@@ -157,20 +164,26 @@ AnalysisSpectrum analysisSpectrumForSeries(
 }
 
 double? _interpolateSeriesValue(List<AnalysisPoint> points, double x) {
-  if (points.isEmpty || x < points.first.x || x > points.last.x) return null;
+  if (points.isEmpty ||
+      x < analysisXAt(points, 0) ||
+      x > analysisXAt(points, points.length - 1)) {
+    return null;
+  }
   final after = lowerBoundAnalysisPoints(points, x);
-  if (after < points.length && points[after].x == x) return points[after].y;
+  if (after < points.length && analysisXAt(points, after) == x) {
+    return analysisYAt(points, after);
+  }
   if (after == 0 || after >= points.length) return null;
-  final left = points[after - 1];
-  final right = points[after];
-  final span = right.x - left.x;
+  final leftX = analysisXAt(points, after - 1);
+  final leftY = analysisYAt(points, after - 1);
+  final span = analysisXAt(points, after) - leftX;
   if (span <= 0) return null;
-  final fraction = (x - left.x) / span;
-  return left.y + (right.y - left.y) * fraction;
+  final fraction = (x - leftX) / span;
+  return leftY + (analysisYAt(points, after) - leftY) * fraction;
 }
 
-List<double> _resampleUniform(List<double> times, List<double> values) {
-  final result = List<double>.filled(values.length, 0);
+Float64List _resampleUniform(Float64List times, Float64List values) {
+  final result = Float64List(values.length);
   final start = times.first;
   final step = (times.last - start) / (values.length - 1);
   var source = 1;
@@ -198,7 +211,7 @@ double _windowWeight(AnalysisWindowFunction window, int index, int length) {
   };
 }
 
-void _fftInPlace(List<double> real, List<double> imaginary) {
+void _fftInPlace(Float64List real, Float64List imaginary) {
   final length = real.length;
   var target = 0;
   for (var index = 1; index < length; index += 1) {

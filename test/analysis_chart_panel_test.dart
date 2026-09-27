@@ -4,12 +4,66 @@ import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:take_a_look_v2/src/analysis.dart';
 import 'package:take_a_look_v2/src/controller.dart';
 import 'package:take_a_look_v2/src/panels.dart';
 import 'package:take_a_look_v2/src/panel_types.dart';
 import 'package:take_a_look_v2/src/theme.dart';
 
 void main() {
+  testWidgets(
+    'FFT ignores replaced data and can close during background work',
+    (tester) async {
+      final controller = TakeALookController(backendCommand: (_, _) async {});
+      void replace(int count, double frequency) {
+        controller.analysisSession.replaceData([
+          AnalysisSeries(
+            name: 'signal',
+            color: Colors.blue,
+            points: [
+              for (var i = 0; i < count; i++)
+                AnalysisPoint(
+                  i / 1024,
+                  math.sin(2 * math.pi * frequency * i / 1024),
+                ),
+            ],
+          ),
+        ], 'fixture');
+        controller.analysisSession.fftVisible = true;
+      }
+
+      replace(65536, 32);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildTalTheme(),
+          home: Scaffold(
+            body: buildWorkspacePanel(WorkspacePanelId.analysis, controller),
+          ),
+        ),
+      );
+      expect(
+        find.byKey(const ValueKey('analysis-fft-loading')),
+        findsOneWidget,
+      );
+      replace(1024, 128);
+      controller.commitAnalysisSession(includeData: true);
+      await _waitForFft(tester);
+      final dynamic painter = tester
+          .widget<CustomPaint>(find.byKey(const ValueKey('analysis-fft-chart')))
+          .painter!;
+      expect(painter.spectrum.peakFrequency, closeTo(128, 1e-8));
+      controller.analysisSession.fftRemoveDc = false;
+      controller.commitAnalysisSession();
+      await tester.pump();
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      expect(tester.takeException(), isNull);
+      controller.dispose();
+    },
+  );
+
   testWidgets('FFT button splits the chart and selects a CSV signal', (
     tester,
   ) async {
@@ -56,6 +110,7 @@ void main() {
     expect(controller.analysisSession.fftSeriesIndex, 1);
     await tester.tap(find.byKey(const ValueKey('analysis-fft-toggle')));
     await tester.pump();
+    await _waitForFft(tester);
 
     expect(
       find.byKey(const ValueKey('analysis-fft-split-view')),
@@ -990,4 +1045,17 @@ void main() {
     activePanel.dispose();
     controller.dispose();
   });
+}
+
+Future<void> _waitForFft(WidgetTester tester) async {
+  for (var attempt = 0; attempt < 200; attempt++) {
+    await tester.pump();
+    if (find.byKey(const ValueKey('analysis-fft-loading')).evaluate().isEmpty) {
+      return;
+    }
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 10)),
+    );
+  }
+  fail('The FFT worker did not finish');
 }

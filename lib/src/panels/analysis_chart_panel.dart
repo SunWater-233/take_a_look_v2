@@ -40,7 +40,10 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
   final ValueNotifier<int> _chartChanges = ValueNotifier<int>(0);
   final ValueNotifier<int> _statsChanges = ValueNotifier<int>(0);
   Object? _fftCacheKey;
+  Object? _fftRequestedKey;
   AnalysisSpectrum? _fftCache;
+  final FftAnalysisWorker _fftWorker = FftAnalysisWorker();
+  late List<AnalysisSeries> _fftSourceSeries;
   double? _dragStartX;
   Offset? _lastPanPosition;
   Offset? _lastRightZoomPosition;
@@ -91,6 +94,7 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
   void initState() {
     super.initState();
     _session = controller.analysisSession;
+    _fftSourceSeries = _series;
     _statsTableLayout = ResizableTableLayout(
       widths: _session.statsColumnWidths,
       minimumWidths: const [100, 70, 80, 80, 80, 80, 72],
@@ -109,17 +113,34 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
     oldWidget.controller.analysisChanges.removeListener(
       _handleAnalysisSessionChanged,
     );
+    _invalidateFftData();
     _session = controller.analysisSession;
+    _fftSourceSeries = _series;
     _restoreStatsLayout();
     controller.analysisChanges.addListener(_handleAnalysisSessionChanged);
   }
 
   void _handleAnalysisSessionChanged() {
     if (!mounted) return;
+    if (!identical(_fftSourceSeries, _series)) {
+      _invalidateFftData();
+      _fftSourceSeries = _series;
+    } else if (!_session.fftVisible) {
+      _fftWorker.cancel();
+      _fftRequestedKey = null;
+    }
     _restoreStatsLayout();
     setState(() {
       _chartChanges.value += 1;
       _statsChanges.value += 1;
+    });
+  }
+
+  void _acceptFftResult(Object key, AnalysisSpectrum spectrum) {
+    if (!mounted || !_session.fftVisible || _fftRequestedKey != key) return;
+    setState(() {
+      _fftCacheKey = key;
+      _fftCache = spectrum;
     });
   }
 
@@ -149,6 +170,7 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
 
   @override
   void dispose() {
+    _fftWorker.dispose();
     _releasePlotMenuAnimation();
     controller.analysisChanges.removeListener(_handleAnalysisSessionChanged);
     _rememberStatsHorizontalOffset();
@@ -239,6 +261,7 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
       _session.fftSelectionEnd = null;
       _session.resetFftViewport();
       _fftCacheKey = null;
+      _fftRequestedKey = null;
     });
     _commitSession();
   }
@@ -251,6 +274,7 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
       _session.fftSelectionEnd = null;
       _session.resetFftViewport();
       _fftCacheKey = null;
+      _fftRequestedKey = null;
     });
     _commitSession();
   }

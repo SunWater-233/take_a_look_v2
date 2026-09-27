@@ -8,6 +8,7 @@ extension _AnalysisFftPanelBuilder on _AnalysisChartPanelState {
       series: _series,
       signalIndex: signalIndex,
       spectrum: spectrum,
+      loading: _fftRequestedKey != null && _fftRequestedKey != _fftCacheKey,
       session: _session,
       onSessionChanged: _commitSession,
     );
@@ -56,16 +57,39 @@ extension _AnalysisFftPanelBuilder on _AnalysisChartPanelState {
       _session.fftRemoveDc,
     );
     if (_fftCacheKey == cacheKey && _fftCache != null) return _fftCache!;
-    final spectrum = analysisSpectrumForSeries(
-      signal.points,
-      timePoints: timePoints,
-      selectionStart: range?.$1,
-      selectionEnd: range?.$2,
-      window: _session.fftWindow,
-      removeDc: _session.fftRemoveDc,
-    );
-    _fftCacheKey = cacheKey;
-    return _fftCache = spectrum;
+    if (_fftRequestedKey != cacheKey) {
+      _fftRequestedKey = cacheKey;
+      _fftCache = null;
+      unawaited(
+        _fftWorker
+            .analyze(
+              signal.points,
+              timePoints: timePoints,
+              selectionStart: range?.$1,
+              selectionEnd: range?.$2,
+              window: _session.fftWindow,
+              removeDc: _session.fftRemoveDc,
+            )
+            .then(
+              (spectrum) {
+                if (spectrum != null) _acceptFftResult(cacheKey, spectrum);
+              },
+              onError: (Object error, StackTrace stack) {
+                _acceptFftResult(
+                  cacheKey,
+                  AnalysisSpectrum.error('频谱计算失败：$error'),
+                );
+              },
+            ),
+      );
+    }
+    return const AnalysisSpectrum.error('正在计算频谱…');
+  }
+
+  void _invalidateFftData() {
+    _fftWorker.clearData();
+    _fftCacheKey = _fftRequestedKey = null;
+    _fftCache = null;
   }
 }
 
@@ -74,6 +98,7 @@ class _AnalysisFftPanel extends StatefulWidget {
     required this.series,
     required this.signalIndex,
     required this.spectrum,
+    required this.loading,
     required this.session,
     required this.onSessionChanged,
   });
@@ -81,6 +106,7 @@ class _AnalysisFftPanel extends StatefulWidget {
   final List<AnalysisSeries> series;
   final int? signalIndex;
   final AnalysisSpectrum spectrum;
+  final bool loading;
   final AnalysisSession session;
   final VoidCallback onSessionChanged;
 
@@ -201,6 +227,9 @@ class _AnalysisFftPanelState extends State<_AnalysisFftPanel> {
                           padding: const EdgeInsets.all(24),
                           child: Text(
                             error,
+                            key: widget.loading
+                                ? const ValueKey('analysis-fft-loading')
+                                : null,
                             style: talMuted,
                             textAlign: TextAlign.center,
                           ),
@@ -718,10 +747,9 @@ class _AnalysisFftPanelState extends State<_AnalysisFftPanel> {
   (double, double, double, double) get _dataBounds {
     final points = widget.spectrum.points;
     final xMaximum = points.isEmpty ? 1.0 : math.max(1e-9, points.last.x);
-    var yMaximum = 0.0;
-    for (final point in points) {
-      yMaximum = math.max(yMaximum, point.y);
-    }
+    final yMaximum = points.isEmpty
+        ? 0.0
+        : math.max(widget.spectrum.peakAmplitude, points.first.y);
     return (0.0, xMaximum, 0.0, yMaximum <= 0 ? 1.0 : yMaximum * 1.12);
   }
 

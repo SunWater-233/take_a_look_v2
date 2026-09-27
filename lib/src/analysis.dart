@@ -3,27 +3,11 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import 'analysis_data.dart';
+
+export 'analysis_data.dart';
+
 enum AnalysisMouseMode { threeButton, rectangle }
-
-enum AnalysisWindowFunction { rectangular, hann, hamming }
-
-@immutable
-class AnalysisPoint {
-  const AnalysisPoint(this.x, this.y);
-
-  final double x;
-  final double y;
-
-  List<double> toJson() => [x, y];
-
-  static AnalysisPoint fromJson(Object? value) {
-    final point = value! as List;
-    return AnalysisPoint(
-      (point[0] as num).toDouble(),
-      (point[1] as num).toDouble(),
-    );
-  }
-}
 
 @immutable
 class AnalysisSeries {
@@ -522,7 +506,7 @@ AnalysisStats? analysisStatsForRange(
   var maximum = -double.infinity;
   var sum = 0.0;
   for (var index = first; index < afterLast; index += 1) {
-    final value = points[index].y;
+    final value = analysisYAt(points, index);
     minimum = math.min(minimum, value);
     maximum = math.max(maximum, value);
     sum += value;
@@ -534,34 +518,6 @@ AnalysisStats? analysisStatsForRange(
     maximum: maximum,
     average: sum / count,
   );
-}
-
-int lowerBoundAnalysisPoints(List<AnalysisPoint> points, double value) {
-  var low = 0;
-  var high = points.length;
-  while (low < high) {
-    final middle = low + ((high - low) >> 1);
-    if (points[middle].x < value) {
-      low = middle + 1;
-    } else {
-      high = middle;
-    }
-  }
-  return low;
-}
-
-int upperBoundAnalysisPoints(List<AnalysisPoint> points, double value) {
-  var low = 0;
-  var high = points.length;
-  while (low < high) {
-    final middle = low + ((high - low) >> 1);
-    if (points[middle].x <= value) {
-      low = middle + 1;
-    } else {
-      high = middle;
-    }
-  }
-  return low;
 }
 
 List<Offset> downsampleAnalysisPoints(
@@ -579,59 +535,62 @@ List<Offset> downsampleAnalysisPoints(
   if (visibleCount <= bucketCount * 2) {
     return [
       for (var index = first; index < afterLast; index += 1)
-        Offset(points[index].x, points[index].y),
+        Offset(analysisXAt(points, index), analysisYAt(points, index)),
     ];
   }
 
   final result = <Offset>[];
   var currentBucket = -1;
-  AnalysisPoint? minimum;
-  AnalysisPoint? maximum;
+  var minimum = double.infinity;
+  var maximum = double.negativeInfinity;
   var minimumIndex = 0;
   var maximumIndex = 0;
 
-  void append(AnalysisPoint point) {
-    final offset = Offset(point.x, point.y);
+  void append(int index) {
+    final offset = Offset(
+      analysisXAt(points, index),
+      analysisYAt(points, index),
+    );
     if (result.isEmpty || result.last != offset) result.add(offset);
   }
 
   void flushBucket() {
-    final low = minimum;
-    final high = maximum;
-    if (low == null || high == null) return;
+    if (currentBucket < 0) return;
     if (minimumIndex <= maximumIndex) {
-      append(low);
-      append(high);
+      append(minimumIndex);
+      append(maximumIndex);
     } else {
-      append(high);
-      append(low);
+      append(maximumIndex);
+      append(minimumIndex);
     }
   }
 
   for (var index = first; index < afterLast; index += 1) {
-    final point = points[index];
-    final bucket = (((point.x - xMin) / (xMax - xMin)) * bucketCount)
-        .floor()
-        .clamp(0, bucketCount - 1);
+    final x = analysisXAt(points, index);
+    final y = analysisYAt(points, index);
+    final bucket = (((x - xMin) / (xMax - xMin)) * bucketCount).floor().clamp(
+      0,
+      bucketCount - 1,
+    );
     if (bucket != currentBucket) {
       flushBucket();
       currentBucket = bucket;
-      minimum = point;
-      maximum = point;
+      minimum = y;
+      maximum = y;
       minimumIndex = index;
       maximumIndex = index;
     } else {
-      if (point.y < minimum!.y) {
-        minimum = point;
+      if (y < minimum) {
+        minimum = y;
         minimumIndex = index;
       }
-      if (point.y > maximum!.y) {
-        maximum = point;
+      if (y > maximum) {
+        maximum = y;
         maximumIndex = index;
       }
     }
   }
   flushBucket();
-  append(points[afterLast - 1]);
+  append(afterLast - 1);
   return result;
 }

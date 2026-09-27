@@ -89,6 +89,20 @@ priority over commands in the workspace behind them.
 
 ## Test
 
+Realtime samples are stored in bounded numeric ring buffers (1,800 points per
+watch); writing new samples does not shift the retained history. Sampling updates
+values immediately, while display notifications and detached-window telemetry
+notifications are coalesced at the selected display refresh rate. Paused plots
+keep their own frozen snapshot.
+
+FFT calculation runs in a resident analysis isolate, independently of acquisition.
+Immutable signal/time datasets are uploaded once as numeric buffers; subsequent
+selection and window changes reuse them. At most one job runs and one latest job
+waits, and superseded results are discarded. Full frequency bins are returned as
+transferable numeric data, so zooming and spectrum selection retain their detail.
+Closing the analysis panel disposes its worker. The numeric analysis modules do
+not depend on a specific probe backend.
+
 ```powershell
 .\backend\.venv\Scripts\python -m pytest -q backend
 flutter analyze
@@ -98,6 +112,25 @@ flutter test
 The Python suite is hardware-independent. It uses fake targets and channels to
 test protocol handling, connection orchestration, memory codecs, coalesced
 reads, RTT framing, sampling, writes, reset and CSV export.
+
+The repeatable Windows release benchmark uses a separate, hidden application in
+`build/data_benchmark/` and does not overwrite the desktop application's release
+executable:
+
+```powershell
+.\tool\run_data_benchmarks.ps1 -Runs 2 -ResultSet refactor
+.\tool\run_data_benchmarks.ps1 -Runs 2 -Suite worker -ResultSet refactor -SkipBuild
+.\tool\run_data_benchmarks.ps1 -Runs 2 -Suite live -ResultSet refactor -SkipBuild
+```
+
+`all` measures the data algorithms, `worker` measures the production FFT worker,
+and `live` exercises the real plot/watch/analysis widgets with synthetic 32-channel
+10 kHz samples and changing FFT selections. The live suite records Flutter engine
+frame timings in a hidden window; it does not measure physical screen presentation
+or real debug-probe throughput.
+
+The recorded baseline and refactor comparison are in
+[the performance report](docs/performance/2026-09-27/refactor/REPORT.md).
 
 ## Package
 

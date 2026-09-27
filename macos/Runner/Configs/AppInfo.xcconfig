@@ -7,6 +7,9 @@
 // The application's name. By default this is also the title of the Flutter window.
 PRODUCT_NAME = take_a_look_v2
 
+// GPU selection uses Metal before Flutter creates its rendering surfaces.
+OTHER_LDFLAGS = $(inherited) -framework Metal
+
 // The application's bundle identifier
 PRODUCT_BUNDLE_IDENTIFIER = com.example.takeALookV2
 

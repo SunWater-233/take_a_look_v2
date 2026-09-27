@@ -38,6 +38,29 @@ The app searches for Python in this order:
 overrides are useful for development and diagnostics; normal development uses
 `backend/.venv` automatically.
 
+## GPU selection
+
+Windows, Linux and macOS desktop windows prefer a high-performance GPU when one
+is available. The policy also applies to detached and prewarmed windows. GPU
+selection affects rendering; sampling and FFT still run on the CPU.
+
+- Windows tries Flutter's high-performance preference, then the low-power
+  preference, then system defaults if engine initialization fails.
+- Linux uses `switcheroo-control` to discover discrete GPUs and their driver
+  settings. A separate, hidden OpenGL probe validates each candidate, with a
+  five-second timeout. Missing discovery support or failed probes leave the
+  system-default path available. Working explicit PRIME settings are respected.
+- macOS prefers a usable non-low-power Metal device before creating Flutter
+  surfaces. The current Flutter engine needs a guarded compatibility adapter;
+  an incompatible engine or failed Metal resource creation keeps its original
+  renderer. Apple silicon and other single-GPU systems keep their available GPU.
+
+Set `TAKE_A_LOOK_GPU=system` before launch to bypass the application's GPU
+preference. This is a diagnostic escape hatch and does not change OS settings.
+GPU changes take effect after restarting the application. See
+[GPU selection and verification](docs/gpu-selection.md) for implementation
+constraints and native validation commands.
+
 ## Source debugging
 
 Load an ELF/AXF file built with DWARF debug information (`-Og -g3` is

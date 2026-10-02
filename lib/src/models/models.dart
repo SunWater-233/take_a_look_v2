@@ -1,6 +1,6 @@
 import 'dart:ui';
 
-import 'sample_buffer.dart';
+import '../telemetry/sample_buffer.dart';
 
 enum ConnectionStatus { disconnected, connecting, connected }
 

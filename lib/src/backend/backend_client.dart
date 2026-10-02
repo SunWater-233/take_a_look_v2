@@ -4,11 +4,11 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'backend_transport.dart';
-import 'protocol/commands.dart';
-import 'protocol/events.dart';
+import '../protocol/commands.dart';
+import '../protocol/events.dart';
 
 export 'backend_transport.dart';
-export 'file_pickers.dart';
+export '../app/file_pickers.dart';
 
 typedef BackendEventHandler =
     void Function(BackendEventType event, Object? params);

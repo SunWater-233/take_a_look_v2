@@ -1,4 +1,4 @@
-part of '../panels.dart';
+part of 'panels.dart';
 
 class _SourceDebugPanel extends StatefulWidget {
   const _SourceDebugPanel({required this.controller});
@@ -1154,7 +1154,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
         mainAxisSize: MainAxisSize.min,
         children: [
           SizedBox(
-            height: 36,
+            height: TalUiTheme.of(context).targetExtent(36),
             child: Row(
               children: [
                 const SizedBox(width: 10),
@@ -1298,7 +1298,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     final state = controller.debugState.executionState;
     final connected = controller.connectionStatus == ConnectionStatus.connected;
     return SizedBox(
-      height: 42,
+      height: TalUiTheme.of(context).targetExtent(42),
       child: Row(
         children: [
           const SizedBox(width: 8),
@@ -1350,7 +1350,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     final files = _sourceFiles;
     _scheduleTabOverflowUpdate();
     return SizedBox(
-      height: 32,
+      height: TalUiTheme.of(context).targetExtent(32),
       child: Row(
         children: [
           Expanded(
@@ -1448,10 +1448,10 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
                   ),
                 ),
             ],
-            child: const SizedBox(
-              width: 28,
-              height: 28,
-              child: Icon(Icons.add, size: 17, color: TalColors.muted),
+            child: SizedBox(
+              width: TalUiTheme.of(context).targetExtent(28),
+              height: TalUiTheme.of(context).targetExtent(28),
+              child: const Icon(Icons.add, size: 17, color: TalColors.muted),
             ),
           ),
         ],
@@ -1474,7 +1474,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
           child: Container(
             key: selected ? ValueKey('source-tab-active-$path') : null,
             constraints: const BoxConstraints(minWidth: 92, maxWidth: 230),
-            height: 29,
+            height: TalUiTheme.of(context).panelTabHeight,
             padding: const EdgeInsets.only(left: 9, right: 3),
             decoration: BoxDecoration(
               border: Border(
@@ -1506,17 +1506,19 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
                   ),
                 ),
                 const SizedBox(width: 3),
-                IconButton(
+                TalIconButton(
                   key: ValueKey('source-tab-close-$path'),
                   tooltip: '关闭 ${_basename(path)}',
                   onPressed: () => _closeSource(path),
                   icon: const Icon(Icons.close, size: 13),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints.tightFor(
-                    width: 22,
-                    height: 22,
+                  style: ButtonStyle(
+                    minimumSize: WidgetStatePropertyAll(
+                      Size.square(TalUiTheme.of(context).compactIconButtonSize),
+                    ),
+                    maximumSize: WidgetStatePropertyAll(
+                      Size.square(TalUiTheme.of(context).compactIconButtonSize),
+                    ),
                   ),
-                  visualDensity: VisualDensity.compact,
                 ),
               ],
             ),
@@ -1767,13 +1769,10 @@ class _DebugToolbarButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: IconButton(
-        onPressed: onPressed,
-        icon: Icon(icon, size: 18),
-        visualDensity: VisualDensity.compact,
-      ),
+    return TalIconButton(
+      tooltip: tooltip,
+      onPressed: onPressed,
+      icon: Icon(icon, size: 18),
     );
   }
 }

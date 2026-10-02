@@ -5,12 +5,12 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
-import 'controller.dart';
+import '../controller/controller.dart';
 import 'detached_window_coordinator.dart';
 import 'panel_types.dart';
-import 'panels.dart';
+import '../panels/panels.dart';
 import 'tab_drag_preview_coordinator.dart';
-import 'theme.dart';
+import '../theme/theme.dart';
 import 'window_sync.dart';
 import 'workspace_geometry.dart';
 import 'workspace_layout.dart';
@@ -142,8 +142,10 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
           final y = details.localPosition.dy;
           final isTabStrip =
               group.panels.length > 1 &&
-              y >= talPanelHeaderHeight &&
-              y < talPanelHeaderHeight + talPanelTabStripHeight;
+              y >= TalUiTheme.of(context).panelHeaderHeight &&
+              y <
+                  TalUiTheme.of(context).panelHeaderHeight +
+                      TalUiTheme.of(context).panelTabStripHeight;
           if (!isTabStrip) _bringToFront(group);
         },
         child: Stack(
@@ -809,8 +811,8 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     final previewSize = Size(
       sourceSize.width,
       math.max(
-        talPanelTabStripHeight + 1,
-        sourceSize.height - talPanelHeaderHeight,
+        TalUiTheme.of(context).panelTabStripHeight + 1,
+        sourceSize.height - TalUiTheme.of(context).panelHeaderHeight,
       ),
     );
     final tabWidth = talPanelTabWidth(
@@ -820,7 +822,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     );
     _tabDragPreviewAnchor = Offset(
       math.min(tabWidth / 2, previewSize.width / 2),
-      talPanelTabStripHeight / 2,
+      TalUiTheme.of(context).panelTabStripHeight / 2,
     );
     _lastTabDragPreviewPosition = null;
     unawaited(_captureMainWindowOrigin());

@@ -1,4 +1,4 @@
-part of '../panels.dart';
+part of 'panels.dart';
 
 class _AnalysisStatsHeaderCell extends StatefulWidget {
   const _AnalysisStatsHeaderCell({
@@ -74,20 +74,18 @@ class _AnalysisStatsHeaderCellState extends State<_AnalysisStatsHeaderCell> {
     return MenuAnchor(
       key: const ValueKey('analysis-header-menu-anchor'),
       controller: _menuController,
-      style: talContextMenuStyle,
+      style: Theme.of(context).menuTheme.style,
       consumeOutsideTap: true,
       animated: true,
       onAnimationStatusChanged: _handleMenuAnimationStatus,
       menuChildren: [
         MenuItemButton(
           key: const ValueKey('analysis-header-menu-hide'),
-          style: talContextMenuButtonStyle,
           onPressed: widget.canHide ? widget.onHide : null,
           child: Text(widget.hideLabel),
         ),
         MenuItemButton(
           key: const ValueKey('analysis-header-menu-show-all'),
-          style: talContextMenuButtonStyle,
           onPressed: widget.onShowAll,
           child: const Text('显示全列'),
         ),
@@ -166,26 +164,23 @@ class _AnalysisStatsCellState extends State<_AnalysisStatsCell> {
     return MenuAnchor(
       key: const ValueKey('analysis-cell-menu-anchor'),
       controller: _menuController,
-      style: talContextMenuStyle,
+      style: Theme.of(context).menuTheme.style,
       consumeOutsideTap: true,
       animated: true,
       onAnimationStatusChanged: _handleMenuAnimationStatus,
       menuChildren: [
         MenuItemButton(
           key: const ValueKey('analysis-cell-menu-copy'),
-          style: talContextMenuButtonStyle,
           onPressed: widget.onCopy,
           child: const Text('复制'),
         ),
         MenuItemButton(
           key: const ValueKey('analysis-cell-menu-only'),
-          style: talContextMenuButtonStyle,
           onPressed: widget.onOnly,
           child: const Text('仅绘制该栏'),
         ),
         MenuItemButton(
           key: const ValueKey('analysis-cell-menu-all'),
-          style: talContextMenuButtonStyle,
           onPressed: widget.onAll,
           child: const Text('全部绘制'),
         ),
@@ -230,7 +225,7 @@ PopupMenuEntry<String> _analysisPopupItem({
   return PopupMenuItem<String>(
     value: value,
     enabled: enabled,
-    height: touchOptimized ? 48 : 32,
+    height: TalUiTheme.forTouch(touchOptimized).menuItemHeight,
     child: Text(label),
   );
 }

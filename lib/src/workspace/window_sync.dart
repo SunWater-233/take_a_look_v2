@@ -3,9 +3,9 @@ import 'dart:async';
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/services.dart';
 
-import 'controller.dart';
+import '../controller/controller.dart';
 import 'panel_types.dart';
-import 'protocol/commands.dart';
+import '../protocol/commands.dart';
 
 const _mainChannel = WindowMethodChannel(
   'take_a_look/main_state',

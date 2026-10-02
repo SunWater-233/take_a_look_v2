@@ -1,8 +1,5 @@
-part of '../panels.dart';
+part of 'panels.dart';
 
-const double talPanelHeaderHeight = 34;
-const double talPanelTabStripHeight = 30;
-const double talPanelTabHeight = 29;
 const double _talPanelTabMouseDragSlop = 10;
 
 double talPanelTabWidth(
@@ -51,7 +48,7 @@ class TalPanelTabSurface extends StatelessWidget {
             textScaler: MediaQuery.textScalerOf(context),
             textDirection: Directionality.of(context),
           ),
-      height: talPanelTabHeight,
+      height: TalUiTheme.of(context).panelTabHeight,
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
         color: selected ? TalColors.surface : TalColors.surfaceAlt,
@@ -143,7 +140,7 @@ class _TalPanelFrameState extends State<TalPanelFrame> {
                     ? SystemMouseCursors.grab
                     : MouseCursor.defer,
                 child: Container(
-                  height: talPanelHeaderHeight,
+                  height: TalUiTheme.of(context).panelHeaderHeight,
                   padding: const EdgeInsets.only(left: 7, right: 4),
                   decoration: const BoxDecoration(
                     color: TalColors.surfaceAlt,
@@ -155,8 +152,12 @@ class _TalPanelFrameState extends State<TalPanelFrame> {
                         onTap: () => setState(() => collapsed = !collapsed),
                         borderRadius: BorderRadius.circular(4),
                         child: SizedBox(
-                          width: 26,
-                          height: 28,
+                          width: TalUiTheme.of(context).touchOptimized
+                              ? 48
+                              : 26,
+                          height: TalUiTheme.of(context).touchOptimized
+                              ? 48
+                              : 28,
                           child: Icon(
                             collapsed
                                 ? Icons.keyboard_arrow_right
@@ -328,7 +329,7 @@ class _PanelTabsState extends State<_PanelTabs> {
   Widget _tabStrip(Widget child) {
     return Container(
       key: _tabStripKey,
-      height: talPanelTabStripHeight,
+      height: TalUiTheme.of(context).panelTabStripHeight,
       color: TalColors.surface,
       alignment: Alignment.bottomLeft,
       child: child,

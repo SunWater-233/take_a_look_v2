@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:take_a_look_v2/src/controller.dart';
-import 'package:take_a_look_v2/src/theme.dart';
-import 'package:take_a_look_v2/src/window_sync.dart';
-import 'package:take_a_look_v2/src/workspace.dart';
+import 'package:take_a_look_v2/src/controller/controller.dart';
+import 'package:take_a_look_v2/src/theme/theme.dart';
+import 'package:take_a_look_v2/src/workspace/window_sync.dart';
+import 'package:take_a_look_v2/src/workspace/workspace.dart';
 
 void main() {
   testWidgets('resizing a shared boundary keeps connected panels aligned', (

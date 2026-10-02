@@ -1,4 +1,4 @@
-part of '../panels.dart';
+part of 'panels.dart';
 
 class _HeaderPanel extends StatelessWidget {
   const _HeaderPanel({required this.controller});
@@ -38,10 +38,7 @@ class _HeaderPanel extends StatelessWidget {
                   Expanded(
                     child: Row(
                       children: [
-                        SizedBox(
-                          width: narrow ? 68 : 78,
-                          child: _connectionButton(),
-                        ),
+                        _connectionButton(),
                         SizedBox(width: narrow ? 4 : 8),
                         const Text('采样率', style: talBody),
                         SizedBox(width: narrow ? 3 : 7),

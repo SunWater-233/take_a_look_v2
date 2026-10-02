@@ -5,10 +5,10 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:take_a_look_v2/src/controller.dart';
-import 'package:take_a_look_v2/src/panel_types.dart';
-import 'package:take_a_look_v2/src/panels.dart';
-import 'package:take_a_look_v2/src/theme.dart';
+import 'package:take_a_look_v2/src/controller/controller.dart';
+import 'package:take_a_look_v2/src/workspace/panel_types.dart';
+import 'package:take_a_look_v2/src/panels/panels.dart';
+import 'package:take_a_look_v2/src/theme/theme.dart';
 
 void main() {
   testWidgets(
@@ -314,7 +314,7 @@ void main() {
       1,
     );
 
-    final closeButton = tester.widget<IconButton>(
+    final closeButton = tester.widget<TalIconButton>(
       find.byKey(ValueKey('source-tab-close-${sourcePaths.first}')),
     );
     closeButton.onPressed!();
@@ -976,7 +976,7 @@ void main() {
     );
     await tester.pump();
 
-    final debugCloseButton = tester.widget<IconButton>(
+    final debugCloseButton = tester.widget<TalIconButton>(
       find.byKey(const ValueKey('source-tab-close-$debugPath')),
     );
     debugCloseButton.onPressed!();

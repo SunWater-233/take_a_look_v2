@@ -2,11 +2,11 @@ import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:take_a_look_v2/src/backend_transport.dart';
+import 'package:take_a_look_v2/src/backend/backend_transport.dart';
 import 'package:take_a_look_v2/src/chart/downsampling.dart';
-import 'package:take_a_look_v2/src/models.dart';
-import 'package:take_a_look_v2/src/sample_buffer.dart';
-import 'package:take_a_look_v2/src/telemetry_store.dart';
+import 'package:take_a_look_v2/src/models/models.dart';
+import 'package:take_a_look_v2/src/telemetry/sample_buffer.dart';
+import 'package:take_a_look_v2/src/telemetry/telemetry_store.dart';
 
 void main() {
   test('bounded history wraps in order and snapshots survive later writes', () {

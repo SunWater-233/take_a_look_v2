@@ -1,4 +1,4 @@
-part of '../panels.dart';
+part of 'panels.dart';
 
 class _PlotPanel extends StatelessWidget {
   const _PlotPanel({required this.controller});

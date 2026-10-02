@@ -2,7 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import '../theme.dart';
+import '../theme/theme.dart';
 
 /// Axis bounds and coordinate mapping shared by realtime and analysis charts.
 class CartesianPlotViewport {

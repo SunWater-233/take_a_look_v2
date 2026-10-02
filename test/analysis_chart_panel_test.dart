@@ -4,11 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:take_a_look_v2/src/analysis.dart';
-import 'package:take_a_look_v2/src/controller.dart';
-import 'package:take_a_look_v2/src/panels.dart';
-import 'package:take_a_look_v2/src/panel_types.dart';
-import 'package:take_a_look_v2/src/theme.dart';
+import 'package:take_a_look_v2/src/analysis/analysis.dart';
+import 'package:take_a_look_v2/src/controller/controller.dart';
+import 'package:take_a_look_v2/src/panels/panels.dart';
+import 'package:take_a_look_v2/src/workspace/panel_types.dart';
+import 'package:take_a_look_v2/src/theme/theme.dart';
 
 void main() {
   testWidgets(
@@ -138,11 +138,11 @@ void main() {
     expect(fftSelectorRect.width, closeTo(192, 0.1));
     expect(fftTimeSelectorRect.width, closeTo(132, 0.1));
     expect(
-      find.byKey(const ValueKey('analysis-fft-Y轴-touch-dropdown')),
+      find.byKey(const ValueKey('analysis-fft-Y轴-dropdown')),
       findsOneWidget,
     );
     expect(
-      find.byKey(const ValueKey('analysis-fft-时间-touch-dropdown')),
+      find.byKey(const ValueKey('analysis-fft-时间-dropdown')),
       findsOneWidget,
     );
 
@@ -153,11 +153,11 @@ void main() {
     await toolbarMouse.moveTo(fftSelectorRect.center);
     await tester.pump();
     expect(
-      find.byKey(const ValueKey('analysis-fft-Y轴-mouse-dropdown')),
+      find.byKey(const ValueKey('analysis-fft-Y轴-dropdown')),
       findsOneWidget,
     );
     expect(
-      find.byKey(const ValueKey('analysis-fft-时间-mouse-dropdown')),
+      find.byKey(const ValueKey('analysis-fft-时间-dropdown')),
       findsOneWidget,
     );
 
@@ -168,7 +168,7 @@ void main() {
     await toolbarTouch.up();
     await tester.pump();
     expect(
-      find.byKey(const ValueKey('analysis-fft-Y轴-touch-dropdown')),
+      find.byKey(const ValueKey('analysis-fft-Y轴-dropdown')),
       findsOneWidget,
     );
     await toolbarMouse.removePointer();
@@ -695,7 +695,16 @@ void main() {
       find.byKey(const ValueKey('analysis-plot-menu-anchor')),
     );
     expect(menuAnchor.animated, isTrue);
-    expect(menuAnchor.style, same(talContextMenuStyle));
+    expect(
+      menuAnchor.style,
+      same(
+        Theme.of(
+          tester.element(
+            find.byKey(const ValueKey('analysis-plot-menu-anchor')),
+          ),
+        ).menuTheme.style,
+      ),
+    );
 
     final dismissClick = await tester.startGesture(
       tester.getRect(interaction).topRight + const Offset(-20, 20),
@@ -852,7 +861,8 @@ void main() {
       const ValueKey('analysis-cell-menu-copy'),
     );
     final desktopButton = tester.widget<MenuItemButton>(desktopCopyItem);
-    expect(desktopButton.style, same(talContextMenuButtonStyle));
+    expect(desktopButton.style, isNull);
+    expect(tester.getSize(desktopCopyItem).height, 32);
     expect(
       find.descendant(of: desktopCopyItem, matching: find.byType(Icon)),
       findsNothing,
@@ -861,7 +871,10 @@ void main() {
       find.descendant(of: firstNameCell, matching: find.byType(MenuAnchor)),
     );
     expect(cellMenuAnchor.animated, isTrue);
-    expect(cellMenuAnchor.style, same(talContextMenuStyle));
+    expect(
+      cellMenuAnchor.style,
+      same(Theme.of(tester.element(firstNameCell)).menuTheme.style),
+    );
     await tester.tap(find.text('复制'));
     await tester.pumpAndSettle();
     expect(copiedText, 'alpha');
@@ -887,7 +900,13 @@ void main() {
     final desktopHideItem = tester.widget<MenuItemButton>(
       find.byKey(const ValueKey('analysis-header-menu-hide')),
     );
-    expect(desktopHideItem.style, same(talContextMenuButtonStyle));
+    expect(desktopHideItem.style, isNull);
+    expect(
+      tester
+          .getSize(find.byKey(const ValueKey('analysis-header-menu-hide')))
+          .height,
+      32,
+    );
     final headerMenuAnchor = tester.widget<MenuAnchor>(
       find.descendant(
         of: find.byKey(const ValueKey('analysis-stats-header-2')),
@@ -895,7 +914,14 @@ void main() {
       ),
     );
     expect(headerMenuAnchor.animated, isTrue);
-    expect(headerMenuAnchor.style, same(talContextMenuStyle));
+    expect(
+      headerMenuAnchor.style,
+      same(
+        Theme.of(
+          tester.element(find.byKey(const ValueKey('analysis-stats-header-2'))),
+        ).menuTheme.style,
+      ),
+    );
     await tester.tap(find.text('隐藏该列'));
     await tester.pumpAndSettle();
     expect(find.text('最小值'), findsNothing);

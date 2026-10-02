@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../controller.dart';
+import '../controller/controller.dart';
 import 'cartesian_renderer.dart';
 import 'downsampling.dart';
 import 'viewport.dart';

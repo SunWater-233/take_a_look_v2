@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'models.dart';
-import 'theme.dart';
+import '../theme/theme.dart';
 
 const seriesColors = <Color>[
   TalColors.accent,

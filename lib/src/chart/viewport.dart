@@ -2,8 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import '../controller.dart';
-import '../sample_buffer.dart';
+import '../controller/controller.dart';
+import '../telemetry/sample_buffer.dart';
 
 Rect telemetryPlotRect(Size size) => Rect.fromLTRB(
   52,

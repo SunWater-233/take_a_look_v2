@@ -2,11 +2,11 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:take_a_look_v2/src/analysis.dart';
-import 'package:take_a_look_v2/src/analysis_fft.dart';
+import 'package:take_a_look_v2/src/analysis/analysis.dart';
+import 'package:take_a_look_v2/src/analysis/analysis_fft.dart';
 import 'package:take_a_look_v2/src/chart/axis_settings.dart';
 import 'package:take_a_look_v2/src/chart/cartesian_renderer.dart';
-import 'package:take_a_look_v2/src/controller.dart';
+import 'package:take_a_look_v2/src/controller/controller.dart';
 
 void main() {
   test('FFT finds the amplitude and frequency of a selected CSV signal', () {

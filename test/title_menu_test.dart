@@ -2,12 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:take_a_look_v2/src/app.dart';
-import 'package:take_a_look_v2/src/controller.dart';
+import 'package:take_a_look_v2/src/app/app.dart';
+import 'package:take_a_look_v2/src/controller/controller.dart';
 import 'package:take_a_look_v2/src/protocol/events.dart';
-import 'package:take_a_look_v2/src/panel_types.dart';
-import 'package:take_a_look_v2/src/theme.dart';
-import 'package:take_a_look_v2/src/window_sync.dart';
+import 'package:take_a_look_v2/src/workspace/panel_types.dart';
+import 'package:take_a_look_v2/src/theme/theme.dart';
+import 'package:take_a_look_v2/src/workspace/window_sync.dart';
 
 void main() {
   late TakeALookController controller;
@@ -242,37 +242,51 @@ void main() {
     );
   });
 
-  testWidgets('backend errors are presented in a modal dialog', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(1200, 800));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    final windowSync = MainWindowSync(controller);
-    addTearDown(windowSync.dispose);
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: buildTalTheme(),
-        home: MainWorkbench(controller: controller, windowSync: windowSync),
-      ),
-    );
+  for (final mode in TalInputMode.values) {
+    testWidgets('backend errors follow the $mode feedback policy', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(1200, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final windowSync = MainWindowSync(controller);
+      addTearDown(windowSync.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildTalTheme(inputMode: mode),
+          home: MainWorkbench(controller: controller, windowSync: windowSync),
+        ),
+      );
 
-    controller.applyBackendEvent(BackendEventType.error, {
-      'code': 'connect_failed',
-      'message': '连接失败。',
-      'details': '未找到探针',
+      final barriersBeforeError = find.byType(ModalBarrier).evaluate().length;
+      controller.applyBackendEvent(BackendEventType.error, {
+        'code': 'connect_failed',
+        'message': '连接失败。',
+        'details': '未找到探针',
+      });
+      await tester.pumpAndSettle();
+
+      final touch = mode == TalInputMode.touch;
+      expect(find.byType(AlertDialog), touch ? findsOneWidget : findsNothing);
+      expect(find.text('pyOCD 连接失败'), findsOneWidget);
+      if (!touch) {
+        expect(find.byType(ModalBarrier), findsNWidgets(barriersBeforeError));
+        await tester.tap(find.text('查看详情'));
+        await tester.pumpAndSettle();
+      }
+      expect(
+        find.descendant(
+          of: touch
+              ? find.byType(AlertDialog)
+              : find.byKey(const ValueKey('tal-error-popup')),
+          matching: find.textContaining('未找到探针'),
+        ),
+        findsOneWidget,
+      );
+
+      await tester.tap(touch ? find.text('确定') : find.byTooltip('关闭提示'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.byKey(const ValueKey('tal-error-popup')), findsNothing);
     });
-    await tester.pumpAndSettle();
-
-    expect(find.byType(AlertDialog), findsOneWidget);
-    expect(find.text('pyOCD 连接失败'), findsOneWidget);
-    expect(
-      find.descendant(
-        of: find.byType(AlertDialog),
-        matching: find.textContaining('未找到探针'),
-      ),
-      findsOneWidget,
-    );
-
-    await tester.tap(find.text('确定'));
-    await tester.pumpAndSettle();
-    expect(find.byType(AlertDialog), findsNothing);
-  });
+  }
 }

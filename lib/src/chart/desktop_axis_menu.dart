@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../controller.dart';
-import '../theme.dart';
+import '../controller/controller.dart';
+import '../theme/theme.dart';
 import 'axis_settings.dart';
 import 'viewport.dart';
 

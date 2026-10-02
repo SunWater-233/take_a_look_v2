@@ -6,18 +6,17 @@ import 'package:flutter/material.dart';
 import 'package:tal_drag_preview/tal_drag_preview.dart';
 import 'package:window_manager/window_manager.dart';
 
-import 'app/title_bar.dart';
-import 'backend_client.dart';
-import 'controller.dart';
-import 'keyboard_shortcuts.dart';
-import 'panel_types.dart';
-import 'panels.dart';
-import 'theme.dart';
-import 'ui_controls.dart';
-import 'window_sync.dart';
-import 'workspace.dart';
+import 'title_bar.dart';
+import '../backend/backend_client.dart';
+import '../controller/controller.dart';
+import '../workspace/keyboard_shortcuts.dart';
+import '../workspace/panel_types.dart';
+import '../panels/panels.dart';
+import '../theme/theme.dart';
+import '../workspace/window_sync.dart';
+import '../workspace/workspace.dart';
 
-export 'app/title_bar.dart';
+export 'title_bar.dart';
 
 class TakeALookApp extends StatefulWidget {
   const TakeALookApp({
@@ -250,33 +249,36 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'Take A Look',
-      theme: buildTalTheme(),
-      builder: (context, child) {
-        return ValueListenableBuilder<double>(
-          valueListenable: controller.uiScaleListenable,
-          child: child ?? const SizedBox.shrink(),
-          builder: (context, scale, child) =>
-              TalUiScaleViewport(scale: scale, child: child!),
-        );
-      },
-      home: widget.detachedPanel == null
-          ? MainWorkbench(controller: controller, windowSync: windowSync!)
-          : widget.secondaryWindowRole == SecondaryWindowRole.dragPreview
-          ? TabContentDragPreviewWindow(
-              controller: controller,
-              panel: detachedPanel!,
-            )
-          : ExcludeFocus(
-              excluding: !detachedWindowAssigned,
-              child: DetachedPanelWindow(
+    return TalInteractionRegion(
+      builder: (context, inputMode) => MaterialApp(
+        debugShowCheckedModeBanner: false,
+        title: 'Take A Look',
+        theme: buildTalTheme(inputMode: inputMode),
+        themeAnimationDuration: Duration.zero,
+        builder: (context, child) {
+          return ValueListenableBuilder<double>(
+            valueListenable: controller.uiScaleListenable,
+            child: child ?? const SizedBox.shrink(),
+            builder: (context, scale, child) =>
+                TalUiScaleViewport(scale: scale, child: child!),
+          );
+        },
+        home: widget.detachedPanel == null
+            ? MainWorkbench(controller: controller, windowSync: windowSync!)
+            : widget.secondaryWindowRole == SecondaryWindowRole.dragPreview
+            ? TabContentDragPreviewWindow(
                 controller: controller,
                 panel: detachedPanel!,
-                panels: detachedPanels,
+              )
+            : ExcludeFocus(
+                excluding: !detachedWindowAssigned,
+                child: DetachedPanelWindow(
+                  controller: controller,
+                  panel: detachedPanel!,
+                  panels: detachedPanels,
+                ),
               ),
-            ),
+      ),
     );
   }
 }
@@ -302,7 +304,7 @@ class TabContentDragPreviewWindow extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             SizedBox(
-              height: talPanelTabStripHeight,
+              height: TalUiTheme.of(context).panelTabStripHeight,
               child: Align(
                 alignment: Alignment.bottomLeft,
                 child: TalPanelTabSurface(tab: panel, selected: true),
@@ -392,10 +394,11 @@ class MainWorkbench extends StatefulWidget {
 
 class _MainWorkbenchState extends State<MainWorkbench> {
   final workspaceKey = GlobalKey<DockingWorkspaceState>();
+  final _feedback = TalFeedbackController();
   Map<String, dynamic>? _lastObservedBackendError;
   Map<String, dynamic>? _pendingBackendError;
-  bool _errorDialogScheduled = false;
-  bool _errorDialogShowing = false;
+  bool _feedbackScheduled = false;
+  bool _feedbackShowing = false;
 
   @override
   void initState() {
@@ -417,6 +420,7 @@ class _MainWorkbenchState extends State<MainWorkbench> {
   @override
   void dispose() {
     widget.controller.connectionChanges.removeListener(_handleBackendError);
+    _feedback.dispose();
     super.dispose();
   }
 
@@ -425,45 +429,32 @@ class _MainWorkbenchState extends State<MainWorkbench> {
     if (error == null || identical(error, _lastObservedBackendError)) return;
     _lastObservedBackendError = error;
     _pendingBackendError = Map<String, dynamic>.from(error);
-    if (_errorDialogShowing || _errorDialogScheduled) return;
-    _errorDialogScheduled = true;
+    if (_feedbackShowing || _feedbackScheduled) return;
+    _feedbackScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _errorDialogScheduled = false;
+      _feedbackScheduled = false;
       if (mounted) unawaited(_showPendingBackendErrors());
     });
   }
 
   Future<void> _showPendingBackendErrors() async {
-    if (_errorDialogShowing) return;
-    _errorDialogShowing = true;
+    if (_feedbackShowing) return;
+    _feedbackShowing = true;
     try {
       while (mounted && _pendingBackendError != null) {
         final error = _pendingBackendError!;
         _pendingBackendError = null;
         final message = error['message'] as String? ?? '后端操作失败。';
         final details = error['details'];
-        await showDialog<void>(
+        await _feedback.showError(
           context: context,
-          barrierDismissible: false,
-          builder: (dialogContext) => AlertDialog(
-            title: Text(_backendErrorTitle(error)),
-            content: SelectableText(
-              details == null || details.toString().isEmpty
-                  ? message
-                  : '$message\n\n$details',
-            ),
-            actions: [
-              TalButton(
-                variant: TalButtonVariant.text,
-                onPressed: () => Navigator.of(dialogContext).pop(),
-                child: const Text('确定'),
-              ),
-            ],
-          ),
+          title: _backendErrorTitle(error),
+          message: message,
+          details: details?.toString(),
         );
       }
     } finally {
-      _errorDialogShowing = false;
+      _feedbackShowing = false;
     }
   }
 

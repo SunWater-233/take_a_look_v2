@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../ui_controls.dart';
+import '../theme/theme.dart';
 
 class AxisSettings {
   const AxisSettings({
@@ -137,7 +137,7 @@ class PlotAxisSettingsDialogState extends State<PlotAxisSettingsDialog> {
   Widget build(BuildContext context) {
     final axis = widget.xAxis ? 'X' : 'Y';
     final unit = widget.xAxis ? '（秒）' : '';
-    return AlertDialog(
+    return TalDialog(
       title: Text('$axis 轴详细设置'),
       content: SizedBox(
         width: 360,

@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:take_a_look_v2/src/source_search.dart';
+import 'package:take_a_look_v2/src/panels/source_search.dart';
 
 void main() {
   List<String> search(List<String> paths, String query, {int limit = 1000}) =>

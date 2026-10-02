@@ -1,4 +1,4 @@
-part of '../panels.dart';
+part of 'panels.dart';
 
 class _AnalysisChartPainter extends CustomPainter {
   const _AnalysisChartPainter({

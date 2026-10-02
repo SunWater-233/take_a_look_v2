@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:take_a_look_v2/src/chart.dart';
+import 'package:take_a_look_v2/src/chart/chart.dart';
 
 void main() {
   test(

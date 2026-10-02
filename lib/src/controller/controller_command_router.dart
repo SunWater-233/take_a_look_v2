@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'controller.dart';
-import 'protocol/commands.dart';
+import '../protocol/commands.dart';
 
 /// Executes commands arriving from detached windows.
 ///

@@ -9,18 +9,18 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:take_a_look_v2/src/analysis.dart';
-import 'package:take_a_look_v2/src/analysis_fft.dart';
-import 'package:take_a_look_v2/src/analysis_worker.dart';
-import 'package:take_a_look_v2/src/backend_transport.dart';
+import 'package:take_a_look_v2/src/analysis/analysis.dart';
+import 'package:take_a_look_v2/src/analysis/analysis_fft.dart';
+import 'package:take_a_look_v2/src/analysis/analysis_worker.dart';
+import 'package:take_a_look_v2/src/backend/backend_transport.dart';
 import 'package:take_a_look_v2/src/chart/downsampling.dart';
 import 'package:take_a_look_v2/src/chart/painter.dart';
-import 'package:take_a_look_v2/src/controller.dart';
-import 'package:take_a_look_v2/src/models.dart';
-import 'package:take_a_look_v2/src/panel_types.dart';
-import 'package:take_a_look_v2/src/panels.dart';
-import 'package:take_a_look_v2/src/telemetry_store.dart';
-import 'package:take_a_look_v2/src/theme.dart';
+import 'package:take_a_look_v2/src/controller/controller.dart';
+import 'package:take_a_look_v2/src/models/models.dart';
+import 'package:take_a_look_v2/src/workspace/panel_types.dart';
+import 'package:take_a_look_v2/src/panels/panels.dart';
+import 'package:take_a_look_v2/src/telemetry/telemetry_store.dart';
+import 'package:take_a_look_v2/src/theme/theme.dart';
 
 double _checksum = 0;
 final _results = <Map<String, Object?>>[];

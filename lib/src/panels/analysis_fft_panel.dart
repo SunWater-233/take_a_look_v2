@@ -1,4 +1,4 @@
-part of '../panels.dart';
+part of 'panels.dart';
 
 extension _AnalysisFftPanelBuilder on _AnalysisChartPanelState {
   Widget _buildFftPanel() {
@@ -162,7 +162,7 @@ class _AnalysisFftPanelState extends State<_AnalysisFftPanel> {
         return MenuAnchor(
           key: const ValueKey('analysis-fft-menu-anchor'),
           controller: _menuController,
-          style: talContextMenuStyle,
+          style: Theme.of(context).menuTheme.style,
           consumeOutsideTap: true,
           animated: true,
           onAnimationStatusChanged: _handleMenuAnimationStatus,
@@ -284,53 +284,51 @@ class _AnalysisFftPanelState extends State<_AnalysisFftPanel> {
   List<Widget> _buildDesktopMenu() => [
     MenuItemButton(
       key: const ValueKey('analysis-fft-view-all'),
-      style: talContextMenuButtonStyle,
       onPressed: _showAll,
       child: const Text('View All'),
     ),
     MenuItemButton(
       key: const ValueKey('analysis-fft-select-all'),
-      style: talContextMenuButtonStyle,
       onPressed: _selectAll,
       child: const Text('Select All'),
     ),
     MenuItemButton(
       key: const ValueKey('analysis-fft-clear-selection'),
-      style: talContextMenuButtonStyle,
       onPressed: _clearSelection,
       child: const Text('Clear Selection'),
     ),
     SubmenuButton(
       key: const ValueKey('analysis-fft-x-axis'),
-      style: talContextMenuButtonStyle,
-      menuStyle: talContextSubmenuStyle,
+      menuStyle: Theme.of(
+        context,
+      ).menuTheme.style?.copyWith(alignment: AlignmentDirectional.topEnd),
       animated: true,
       menuChildren: _buildAxisMenu(xAxis: true),
       child: const Text('X Axis'),
     ),
     SubmenuButton(
       key: const ValueKey('analysis-fft-y-axis'),
-      style: talContextMenuButtonStyle,
-      menuStyle: talContextSubmenuStyle,
+      menuStyle: Theme.of(
+        context,
+      ).menuTheme.style?.copyWith(alignment: AlignmentDirectional.topEnd),
       animated: true,
       menuChildren: _buildAxisMenu(xAxis: false),
       child: const Text('Y Axis'),
     ),
     SubmenuButton(
       key: const ValueKey('analysis-fft-mouse-mode'),
-      style: talContextMenuButtonStyle,
-      menuStyle: talContextSubmenuStyle,
+      menuStyle: Theme.of(
+        context,
+      ).menuTheme.style?.copyWith(alignment: AlignmentDirectional.topEnd),
       animated: true,
       menuChildren: [
         RadioMenuButton<AnalysisMouseMode>(
-          style: talContextMenuButtonStyle,
           value: AnalysisMouseMode.threeButton,
           groupValue: session.fftMouseMode,
           onChanged: _setMouseMode,
           child: const Text('3 Button'),
         ),
         RadioMenuButton<AnalysisMouseMode>(
-          style: talContextMenuButtonStyle,
           value: AnalysisMouseMode.rectangle,
           groupValue: session.fftMouseMode,
           onChanged: _setMouseMode,
@@ -343,12 +341,10 @@ class _AnalysisFftPanelState extends State<_AnalysisFftPanel> {
 
   List<Widget> _buildAxisMenu({required bool xAxis}) => [
     MenuItemButton(
-      style: talContextMenuButtonStyle,
       onPressed: () => _resetAxis(xAxis: xAxis),
       child: const Text('Auto'),
     ),
     MenuItemButton(
-      style: talContextMenuButtonStyle,
       onPressed: () => unawaited(_showAxisSettings(xAxis: xAxis)),
       child: const Text('Manual…'),
     ),
@@ -406,7 +402,7 @@ class _AnalysisFftPanelState extends State<_AnalysisFftPanel> {
 
   Future<void> _showAxisSettings({required bool xAxis}) async {
     final bounds = _viewportBounds;
-    final result = await showDialog<AxisSettings>(
+    final result = await showTalDialog<AxisSettings>(
       context: context,
       builder: (context) => PlotAxisSettingsDialog(
         xAxis: xAxis,
@@ -875,7 +871,7 @@ class _AnalysisFftPanelState extends State<_AnalysisFftPanel> {
   }
 }
 
-class _AnalysisFftToolbar extends StatefulWidget {
+class _AnalysisFftToolbar extends StatelessWidget {
   const _AnalysisFftToolbar({
     required this.series,
     required this.signalIndex,
@@ -891,82 +887,44 @@ class _AnalysisFftToolbar extends StatefulWidget {
   final ValueChanged<int?> onTimeSeriesChanged;
 
   @override
-  State<_AnalysisFftToolbar> createState() => _AnalysisFftToolbarState();
-}
-
-class _AnalysisFftToolbarState extends State<_AnalysisFftToolbar> {
-  bool _mouseMode = false;
-
-  void _setMouseMode(bool value) {
-    if (_mouseMode == value) return;
-    setState(() => _mouseMode = value);
-  }
-
-  @override
   Widget build(BuildContext context) {
-    return MouseRegion(
-      onEnter: (event) {
-        if (event.kind == PointerDeviceKind.mouse) _setMouseMode(true);
-      },
-      onHover: (event) {
-        if (event.kind == PointerDeviceKind.mouse) _setMouseMode(true);
-      },
-      child: Listener(
-        behavior: HitTestBehavior.opaque,
-        onPointerDown: (event) {
-          if (event.kind != PointerDeviceKind.mouse) _setMouseMode(false);
-        },
-        child: SizedBox(
-          height: 34,
-          child: LayoutBuilder(
-            builder: (context, constraints) => Row(
-              children: [
-                if (constraints.maxWidth >= 430) ...[
-                  const SizedBox(width: 8),
-                  const Icon(
-                    Icons.graphic_eq,
-                    size: 15,
-                    color: TalColors.accent,
-                  ),
-                  const SizedBox(width: 5),
-                  const Text('FFT', style: talStrong),
-                ],
-                const Spacer(),
-                SizedBox(
-                  width: 192,
-                  child: _AnalysisFftSelector<int>(
-                    label: 'Y轴',
-                    key: const ValueKey('analysis-fft-signal-select'),
-                    mouseOptimized: _mouseMode,
-                    value: widget.signalIndex,
-                    values: [
-                      for (final (index, _) in widget.series.indexed) index,
-                    ],
-                    valueLabel: (index) => widget.series[index].name,
-                    onChanged: widget.onSignalChanged,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                SizedBox(
-                  width: 132,
-                  child: _AnalysisFftSelector<int>(
-                    label: '时间',
-                    key: const ValueKey('analysis-fft-time-select'),
-                    mouseOptimized: _mouseMode,
-                    value: widget.timeSeriesIndex ?? -1,
-                    values: [
-                      -1,
-                      for (final (index, _) in widget.series.indexed) index,
-                    ],
-                    valueLabel: (index) =>
-                        index == -1 ? 'X 轴' : widget.series[index].name,
-                    onChanged: widget.onTimeSeriesChanged,
-                  ),
-                ),
-                const SizedBox(width: 10),
-              ],
+    return SizedBox(
+      height: TalUiTheme.of(context).targetExtent(34),
+      child: LayoutBuilder(
+        builder: (context, constraints) => Row(
+          children: [
+            if (constraints.maxWidth >= 430) ...[
+              const SizedBox(width: 8),
+              const Icon(Icons.graphic_eq, size: 15, color: TalColors.accent),
+              const SizedBox(width: 5),
+              const Text('FFT', style: talStrong),
+            ],
+            const Spacer(),
+            SizedBox(
+              width: 192,
+              child: _AnalysisFftSelector<int>(
+                label: 'Y轴',
+                key: const ValueKey('analysis-fft-signal-select'),
+                value: signalIndex,
+                values: [for (final (index, _) in series.indexed) index],
+                valueLabel: (index) => series[index].name,
+                onChanged: onSignalChanged,
+              ),
             ),
-          ),
+            const SizedBox(width: 12),
+            SizedBox(
+              width: 132,
+              child: _AnalysisFftSelector<int>(
+                label: '时间',
+                key: const ValueKey('analysis-fft-time-select'),
+                value: timeSeriesIndex ?? -1,
+                values: [-1, for (final (index, _) in series.indexed) index],
+                valueLabel: (index) => index == -1 ? 'X 轴' : series[index].name,
+                onChanged: onTimeSeriesChanged,
+              ),
+            ),
+            const SizedBox(width: 10),
+          ],
         ),
       ),
     );
@@ -976,7 +934,6 @@ class _AnalysisFftToolbarState extends State<_AnalysisFftToolbar> {
 class _AnalysisFftSelector<T> extends StatelessWidget {
   const _AnalysisFftSelector({
     required this.label,
-    required this.mouseOptimized,
     required this.value,
     required this.values,
     required this.valueLabel,
@@ -985,7 +942,6 @@ class _AnalysisFftSelector<T> extends StatelessWidget {
   });
 
   final String label;
-  final bool mouseOptimized;
   final T? value;
   final List<T> values;
   final String Function(T value) valueLabel;
@@ -999,16 +955,10 @@ class _AnalysisFftSelector<T> extends StatelessWidget {
         Text(label, style: talMuted, textAlign: TextAlign.right),
         const SizedBox(width: 6),
         Flexible(
-          // Keep mouse and touch interaction on the same dropdown
-          // implementation. The key identifies the current pointer modality
-          // without changing the visual control or its behavior.
           child: value == null
               ? const SizedBox.shrink()
               : TalDropdown<T>(
-                  key: ValueKey(
-                    'analysis-fft-$label-'
-                    '${mouseOptimized ? 'mouse' : 'touch'}-dropdown',
-                  ),
+                  key: ValueKey('analysis-fft-$label-dropdown'),
                   value: value as T,
                   values: values,
                   label: valueLabel,

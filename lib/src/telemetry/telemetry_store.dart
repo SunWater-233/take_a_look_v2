@@ -1,8 +1,8 @@
 import 'dart:math' as math;
 import 'dart:ui';
 
-import 'backend_transport.dart';
-import 'models.dart';
+import '../backend/backend_transport.dart';
+import '../models/models.dart';
 import 'sample_buffer.dart';
 
 /// Owns mutation and retention rules for high-frequency watch samples.

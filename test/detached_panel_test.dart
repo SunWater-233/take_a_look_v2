@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:take_a_look_v2/src/app.dart';
-import 'package:take_a_look_v2/src/controller.dart';
-import 'package:take_a_look_v2/src/panel_types.dart';
-import 'package:take_a_look_v2/src/panels.dart';
-import 'package:take_a_look_v2/src/theme.dart';
+import 'package:take_a_look_v2/src/app/app.dart';
+import 'package:take_a_look_v2/src/controller/controller.dart';
+import 'package:take_a_look_v2/src/workspace/panel_types.dart';
+import 'package:take_a_look_v2/src/panels/panels.dart';
+import 'package:take_a_look_v2/src/theme/theme.dart';
 
 void main() {
   test('detached panel arguments preserve the source workspace size', () {

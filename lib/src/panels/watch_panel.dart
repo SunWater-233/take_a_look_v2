@@ -1,4 +1,4 @@
-part of '../panels.dart';
+part of 'panels.dart';
 
 const _watchColumnLabels = <String>[
   '变量',
@@ -48,8 +48,17 @@ class _WatchPanelState extends State<_WatchPanel> {
   String? _selectionAnchorKey;
 
   TakeALookController get controller => widget.controller;
-  List<double> get _columnWidths => _tableLayout.widths;
-  double get _rowHeight => _tableLayout.rowHeight;
+  List<double> get _columnWidths {
+    final ui = TalUiTheme.of(context);
+    if (!ui.touchOptimized) return _tableLayout.widths;
+    return [
+      for (final (index, width) in _tableLayout.widths.indexed)
+        index == 5 ? math.max(width, ui.iconButtonSize * 3 + 10) : width,
+    ];
+  }
+
+  double get _rowHeight =>
+      math.max(_tableLayout.rowHeight, TalUiTheme.of(context).controlHeight);
   double get _tableWidth => _columnWidths.indexed
       .where((entry) => !_hiddenColumns.contains(entry.$1))
       .fold(0, (sum, entry) => sum + entry.$2);
@@ -398,7 +407,7 @@ class _WatchPanelState extends State<_WatchPanel> {
         final initial = controller.watches
             .firstWhere((watch) => keys.contains(watch.symbol.key))
             .color;
-        final color = await showDialog<Color>(
+        final color = await showTalDialog<Color>(
           context: context,
           builder: (context) => WatchColorDialog(initialColor: initial),
         );
@@ -594,7 +603,7 @@ class _WatchTableHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 36,
+      height: TalUiTheme.of(context).targetExtent(36),
       decoration: const BoxDecoration(
         color: TalColors.surfaceAlt,
         border: Border.symmetric(
@@ -677,7 +686,7 @@ class _WatchRowState extends State<_WatchRow> {
   }
 
   Future<void> _chooseColor() async {
-    final color = await showDialog<Color>(
+    final color = await showTalDialog<Color>(
       context: context,
       builder: (context) => WatchColorDialog(initialColor: widget.watch.color),
     );
@@ -695,7 +704,10 @@ class _WatchRowState extends State<_WatchRow> {
         }
       },
       child: Container(
-        height: widget.rowHeight,
+        height: math.max(
+          widget.rowHeight,
+          TalUiTheme.of(context).controlHeight,
+        ),
         decoration: BoxDecoration(
           color: widget.selected ? TalColors.selection : TalColors.input,
           border: const Border(bottom: BorderSide(color: TalColors.borderSoft)),
@@ -715,7 +727,7 @@ class _WatchRowState extends State<_WatchRow> {
                 child: Row(
                   children: [
                     SizedBox(
-                      width: 22,
+                      width: TalUiTheme.of(context).targetExtent(22),
                       child: widget.expandable
                           ? TalIconButton(
                               key: ValueKey(
@@ -784,7 +796,7 @@ class _WatchRowState extends State<_WatchRow> {
                 child: widget.expandable
                     ? const Center(child: Text('—', style: talMuted))
                     : SizedBox(
-                        height: 30,
+                        height: TalUiTheme.of(context).targetExtent(30),
                         child: TextField(
                           controller: editor,
                           enabled: watch.symbol.writable,
@@ -946,7 +958,7 @@ PopupMenuEntry<String> _watchPopupItem({
   return PopupMenuItem<String>(
     value: value,
     enabled: enabled,
-    height: touchOptimized ? 48 : 32,
+    height: TalUiTheme.forTouch(touchOptimized).menuItemHeight,
     child: Row(
       children: [Icon(icon, size: 17), const SizedBox(width: 9), Text(label)],
     ),

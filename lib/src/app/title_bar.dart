@@ -4,11 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
-import '../controller.dart';
-import '../keyboard_shortcuts.dart';
-import '../panel_types.dart';
-import '../theme.dart';
-import '../workspace.dart';
+import '../controller/controller.dart';
+import '../workspace/keyboard_shortcuts.dart';
+import '../workspace/panel_types.dart';
+import '../theme/theme.dart';
+import '../workspace/workspace.dart';
 
 class TalWindowTitleBar extends StatefulWidget {
   const TalWindowTitleBar({
@@ -72,7 +72,7 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
   Widget build(BuildContext context) {
     final detached = widget.subtitle != null;
     return Container(
-      height: 46,
+      height: TalUiTheme.of(context).titleBarHeight,
       color: TalColors.input,
       child: Row(
         children: [
@@ -172,8 +172,9 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
     final workspace = widget.workspaceKey?.currentState;
     return [
       SubmenuButton(
-        style: _menuButtonStyle,
-        menuStyle: _submenuStyle,
+        menuStyle: Theme.of(
+          context,
+        ).menuTheme.style?.copyWith(alignment: AlignmentDirectional.topEnd),
         animated: true,
         leadingIcon: const SizedBox(width: 16),
         menuChildren: [
@@ -202,8 +203,9 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
         onPressed: _toggleGridMode,
       ),
       SubmenuButton(
-        style: _menuButtonStyle,
-        menuStyle: _submenuStyle,
+        menuStyle: Theme.of(
+          context,
+        ).menuTheme.style?.copyWith(alignment: AlignmentDirectional.topEnd),
         animated: true,
         leadingIcon: const SizedBox(width: 16),
         menuChildren: [
@@ -245,8 +247,9 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
     final state = widget.controller;
     return [
       SubmenuButton(
-        style: _menuButtonStyle,
-        menuStyle: _submenuStyle,
+        menuStyle: Theme.of(
+          context,
+        ).menuTheme.style?.copyWith(alignment: AlignmentDirectional.topEnd),
         animated: true,
         menuChildren: [
           _menuItem(
@@ -277,8 +280,9 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
         child: const Text('刷新率设置'),
       ),
       SubmenuButton(
-        style: _menuButtonStyle,
-        menuStyle: _submenuStyle,
+        menuStyle: Theme.of(
+          context,
+        ).menuTheme.style?.copyWith(alignment: AlignmentDirectional.topEnd),
         animated: true,
         menuChildren: [
           CheckboxMenuButton(
@@ -286,13 +290,13 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
             onChanged: state == null
                 ? null
                 : (value) => state.toggleRtt(value ?? false),
-            style: _menuButtonStyle,
             closeOnActivate: false,
             child: const Text('RTT采样'),
           ),
           SubmenuButton(
-            style: _menuButtonStyle,
-            menuStyle: _submenuStyle,
+            menuStyle: Theme.of(
+              context,
+            ).menuTheme.style?.copyWith(alignment: AlignmentDirectional.topEnd),
             animated: true,
             leadingIcon: const SizedBox(width: 16),
             menuChildren: [
@@ -390,7 +394,9 @@ class _TitleMenuState extends State<_TitleMenu> {
   Widget build(BuildContext context) {
     return MenuAnchor(
       controller: menuController,
-      style: _rootMenuStyle,
+      style: Theme.of(
+        context,
+      ).menuTheme.style?.copyWith(alignment: AlignmentDirectional.bottomStart),
       // The title buttons are 34 px high and vertically centered in the
       // 46 px title bar. Move the root menu to the bottom edge of that bar.
       alignmentOffset: const Offset(0, 6),
@@ -421,7 +427,7 @@ class _TitleMenuState extends State<_TitleMenu> {
                 }
               },
               child: Container(
-                height: 34,
+                height: TalUiTheme.of(context).titleButtonHeight,
                 padding: const EdgeInsets.symmetric(horizontal: 14),
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
@@ -462,7 +468,6 @@ MenuItemButton _menuItem({
   MenuSerializableShortcut? shortcut,
 }) {
   return MenuItemButton(
-    style: _menuButtonStyle,
     leadingIcon: reserveLeading
         ? SizedBox(
             width: 16,
@@ -476,12 +481,6 @@ MenuItemButton _menuItem({
     child: Text(label),
   );
 }
-
-final _menuButtonStyle = talContextMenuButtonStyle;
-final _rootMenuStyle = talContextMenuStyle.copyWith(
-  alignment: AlignmentDirectional.bottomStart,
-);
-final _submenuStyle = talContextSubmenuStyle;
 
 class _MenuDivider extends StatelessWidget {
   const _MenuDivider();
@@ -513,8 +512,8 @@ class _CaptionButton extends StatelessWidget {
         onTap: onPressed,
         hoverColor: close ? const Color(0xFFC42B1C) : TalColors.hover,
         child: SizedBox(
-          width: 44,
-          height: 34,
+          width: TalUiTheme.of(context).touchOptimized ? 48 : 44,
+          height: TalUiTheme.of(context).titleButtonHeight,
           child: Icon(icon, size: 18, color: TalColors.text),
         ),
       ),

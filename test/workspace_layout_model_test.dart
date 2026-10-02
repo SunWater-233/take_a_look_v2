@@ -2,9 +2,9 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:take_a_look_v2/src/panel_types.dart';
-import 'package:take_a_look_v2/src/workspace_geometry.dart';
-import 'package:take_a_look_v2/src/workspace_layout.dart';
+import 'package:take_a_look_v2/src/workspace/panel_types.dart';
+import 'package:take_a_look_v2/src/workspace/workspace_geometry.dart';
+import 'package:take_a_look_v2/src/workspace/workspace_layout.dart';
 
 void main() {
   test('workspace layout repository round-trips a validated layout', () async {

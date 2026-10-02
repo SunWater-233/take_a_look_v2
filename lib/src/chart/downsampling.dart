@@ -2,7 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import '../sample_buffer.dart';
+import '../telemetry/sample_buffer.dart';
 
 List<Offset> downsampleTelemetrySamples(
   Iterable<Offset> samples, {

@@ -1,9 +1,9 @@
 import 'dart:math' as math;
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:take_a_look_v2/src/analysis_data.dart';
-import 'package:take_a_look_v2/src/analysis_fft.dart';
-import 'package:take_a_look_v2/src/analysis_worker.dart';
+import 'package:take_a_look_v2/src/analysis/analysis_data.dart';
+import 'package:take_a_look_v2/src/analysis/analysis_fft.dart';
+import 'package:take_a_look_v2/src/analysis/analysis_worker.dart';
 
 void main() {
   test(

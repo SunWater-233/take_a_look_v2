@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:take_a_look_v2/src/theme.dart';
+import 'package:take_a_look_v2/src/theme/theme.dart';
 
 void main() {
   test('theme prefers JetBrains Mono and falls back to MiSans', () {

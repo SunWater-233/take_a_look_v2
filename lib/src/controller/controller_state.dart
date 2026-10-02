@@ -1,5 +1,5 @@
-import 'models.dart';
-import 'analysis.dart';
+import '../models/models.dart';
+import '../analysis/analysis.dart';
 
 /// Aggregate state owned by the application controller.
 ///

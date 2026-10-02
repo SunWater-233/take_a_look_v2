@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:take_a_look_v2/src/app.dart';
-import 'package:take_a_look_v2/src/controller.dart';
+import 'package:take_a_look_v2/src/app/app.dart';
+import 'package:take_a_look_v2/src/controller/controller.dart';
 
 void main() {
   test('UI scale is included in synchronized controller snapshots', () {

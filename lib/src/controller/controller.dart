@@ -4,18 +4,18 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import 'backend_client.dart';
-import 'analysis.dart';
+import '../backend/backend_client.dart';
+import '../analysis/analysis.dart';
 import 'controller_command_router.dart';
 import 'controller_signals.dart';
 import 'controller_state.dart';
-import 'demo_data.dart';
-import 'models.dart';
-import 'protocol/commands.dart';
-import 'protocol/events.dart';
-import 'telemetry_store.dart';
+import '../models/demo_data.dart';
+import '../models/models.dart';
+import '../protocol/commands.dart';
+import '../protocol/events.dart';
+import '../telemetry/telemetry_store.dart';
 
-export 'demo_data.dart';
+export '../models/demo_data.dart';
 
 part 'controller_snapshot.dart';
 part 'controller_telemetry.dart';

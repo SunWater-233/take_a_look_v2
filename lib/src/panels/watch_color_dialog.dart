@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
+
 import 'package:flutter/services.dart';
 
-import '../demo_data.dart';
-import '../theme.dart';
-import '../ui_controls.dart';
+import '../models/demo_data.dart';
+import '../theme/theme.dart';
 
 class WatchColorDialog extends StatefulWidget {
   const WatchColorDialog({required this.initialColor, super.key});
@@ -68,7 +68,7 @@ class WatchColorDialogState extends State<WatchColorDialog> {
     required ValueChanged<double> onChanged,
   }) {
     return SizedBox(
-      height: 42,
+      height: TalUiTheme.of(context).targetExtent(42),
       child: Row(
         children: [
           SizedBox(width: 48, child: Text(label, style: talMuted)),
@@ -97,7 +97,7 @@ class WatchColorDialogState extends State<WatchColorDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
+    return TalDialog(
       title: const Row(
         children: [
           Icon(Icons.palette_outlined, size: 19),
@@ -133,8 +133,8 @@ class WatchColorDialogState extends State<WatchColorDialog> {
                       onTap: () => _setColor(color),
                       borderRadius: BorderRadius.circular(3),
                       child: SizedBox(
-                        width: 26,
-                        height: 22,
+                        width: TalUiTheme.of(context).targetExtent(26),
+                        height: TalUiTheme.of(context).compactIconButtonSize,
                         child: color == _color
                             ? Icon(
                                 Icons.check,

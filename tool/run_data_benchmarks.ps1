@@ -47,11 +47,11 @@ flutter:
 $processor = Get-CimInstance Win32_Processor
 $computer = Get-CimInstance Win32_ComputerSystem
 $sourcePaths = @(
-  'lib/src/backend_transport.dart', 'lib/src/telemetry_store.dart',
-  'lib/src/sample_buffer.dart', 'lib/src/models.dart',
-  'lib/src/analysis_data.dart', 'lib/src/analysis_worker.dart',
-  'lib/src/analysis.dart', 'lib/src/analysis_fft.dart',
-  'lib/src/controller.dart', 'lib/src/controller_telemetry.dart',
+  'lib/src/backend/backend_transport.dart', 'lib/src/telemetry/telemetry_store.dart',
+  'lib/src/telemetry/sample_buffer.dart', 'lib/src/models/models.dart',
+  'lib/src/analysis/analysis_data.dart', 'lib/src/analysis/analysis_worker.dart',
+  'lib/src/analysis/analysis.dart', 'lib/src/analysis/analysis_fft.dart',
+  'lib/src/controller/controller.dart', 'lib/src/controller/controller_telemetry.dart',
   'lib/src/panels/analysis_chart_panel.dart', 'lib/src/panels/analysis_fft_panel.dart',
   'lib/src/chart/downsampling.dart', 'lib/src/chart/painter.dart',
   'tool/benchmarks/data_benchmark.dart'

@@ -2,9 +2,9 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:take_a_look_v2/src/backend_client.dart';
-import 'package:take_a_look_v2/src/controller.dart';
-import 'package:take_a_look_v2/src/models.dart';
+import 'package:take_a_look_v2/src/backend/backend_client.dart';
+import 'package:take_a_look_v2/src/controller/controller.dart';
+import 'package:take_a_look_v2/src/models/models.dart';
 import 'package:take_a_look_v2/src/protocol/commands.dart';
 import 'package:take_a_look_v2/src/protocol/events.dart';
 

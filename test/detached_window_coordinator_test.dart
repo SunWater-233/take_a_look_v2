@@ -2,11 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:take_a_look_v2/src/controller.dart';
-import 'package:take_a_look_v2/src/detached_window_coordinator.dart';
-import 'package:take_a_look_v2/src/panel_types.dart';
-import 'package:take_a_look_v2/src/tab_drag_preview_coordinator.dart';
-import 'package:take_a_look_v2/src/window_sync.dart';
+import 'package:take_a_look_v2/src/controller/controller.dart';
+import 'package:take_a_look_v2/src/workspace/detached_window_coordinator.dart';
+import 'package:take_a_look_v2/src/workspace/panel_types.dart';
+import 'package:take_a_look_v2/src/workspace/tab_drag_preview_coordinator.dart';
+import 'package:take_a_look_v2/src/workspace/window_sync.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

@@ -38,6 +38,55 @@ The app searches for Python in this order:
 overrides are useful for development and diagnostics; normal development uses
 `backend/.venv` automatically.
 
+## Source layout
+
+Flutter implementation files are grouped by responsibility under `lib/src/`:
+
+| Directory | Responsibility |
+| --- | --- |
+| `app/` | App bootstrap, main/detached window composition, title bar, and file pickers |
+| `controller/` | Application state, command routing, notifications, and controller extensions |
+| `backend/` | Local Python process client, RPC transport, and sample decoding |
+| `protocol/` | Shared command and event definitions |
+| `models/` | Domain models and demo data |
+| `telemetry/` | Sample buffers and telemetry storage |
+| `analysis/` | Analysis data, statistics, FFT, and background workers |
+| `chart/` | Realtime chart interaction, rendering, axes, viewport, and downsampling |
+| `panels/` | Workspace panel bodies, tables, source search, and panel-specific widgets |
+| `workspace/` | Docking layout, panel types, keyboard shortcuts, window sync, and drag coordination |
+| `theme/` | Shared visual styles, adaptive input policy, and common UI controls |
+
+`lib/main.dart` starts `app/app.dart`. The controller and panel libraries keep
+their existing `part` organization inside their directories; import
+`controller/controller.dart` or `panels/panels.dart` instead of importing a
+`part` file directly. Benchmark scripts use the current source paths; archived
+performance results retain the paths recorded when those measurements ran.
+
+## Shared UI and input modes
+
+The shared UI module lives in `lib/src/theme/`. Pages import its public entry
+point, `theme/theme.dart`; module internals import their specific dependencies
+directly instead of importing the public entry point.
+
+- `tokens.dart`: colors, fonts, text styles, and shared border tokens.
+- `material_theme.dart`: `buildTalTheme` and Material component styles.
+- `interaction.dart`: `TalUiTheme` dimensions and `TalInteractionRegion` input policy.
+- `controls.dart` / `dropdown.dart`: `TalButton`, `TalIconButton`,
+  `TalPopupMenuButton`, and `TalDropdown`.
+- `menus.dart`: context menus, selection menus, and menu animation.
+- `feedback.dart`: `showTalDialog`, `TalDialog`, and `TalFeedbackController`.
+
+New panels should use these shared controls and theme values instead of adding
+their own device checks or fixed control sizes.
+
+`TalInteractionRegion` follows actual mouse/keyboard, touch, and pen input in
+each window. Desktop controls are compact (32 logical pixels); touch controls
+use 48-pixel targets. Size changes wait until the active gesture ends. Desktop
+errors appear at the bottom right without blocking the workspace, retain
+expandable/copyable details, and stay until closed or replaced by a newer error.
+Touch errors keep the centered confirmation dialog. Full error history remains
+in the event log. This input policy is independent of UI zoom and window width.
+
 ## GPU selection
 
 Windows, Linux and macOS desktop windows prefer a high-performance GPU when one

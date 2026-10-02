@@ -1,4 +1,4 @@
-part of '../panels.dart';
+part of 'panels.dart';
 
 enum _AnalysisImportSource { csv, realtime }
 
@@ -198,7 +198,7 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
 
   Widget _buildToolbar() {
     return Container(
-      height: 48,
+      height: TalUiTheme.of(context).controlHeight + 16,
       padding: const EdgeInsets.symmetric(horizontal: 10),
       decoration: const BoxDecoration(
         color: TalColors.surface,
@@ -388,7 +388,7 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
             return MenuAnchor(
               key: const ValueKey('analysis-plot-menu-anchor'),
               controller: _plotMenuController,
-              style: talContextMenuStyle,
+              style: Theme.of(context).menuTheme.style,
               consumeOutsideTap: true,
               animated: true,
               onAnimationStatusChanged: _handlePlotMenuAnimationStatus,
@@ -473,7 +473,7 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
 
   Widget _buildChartToolbar() {
     return Container(
-      height: 34,
+      height: TalUiTheme.of(context).targetExtent(34),
       color: TalColors.surfaceAlt,
       child: Row(
         children: [
@@ -508,53 +508,51 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
   List<Widget> _buildPlotDesktopMenu() => [
     MenuItemButton(
       key: const ValueKey('analysis-plot-view-all'),
-      style: talContextMenuButtonStyle,
       onPressed: _showAllAnalysisData,
       child: const Text('View All'),
     ),
     MenuItemButton(
       key: const ValueKey('analysis-plot-select-all'),
-      style: talContextMenuButtonStyle,
       onPressed: _selectAllAnalysisRange,
       child: const Text('Select All'),
     ),
     MenuItemButton(
       key: const ValueKey('analysis-plot-clear-selection'),
-      style: talContextMenuButtonStyle,
       onPressed: _clearAnalysisSelection,
       child: const Text('Clear Selection'),
     ),
     SubmenuButton(
       key: const ValueKey('analysis-plot-x-axis'),
-      style: talContextMenuButtonStyle,
-      menuStyle: talContextSubmenuStyle,
+      menuStyle: Theme.of(
+        context,
+      ).menuTheme.style?.copyWith(alignment: AlignmentDirectional.topEnd),
       animated: true,
       menuChildren: _buildAxisMenu(xAxis: true),
       child: const Text('X Axis'),
     ),
     SubmenuButton(
       key: const ValueKey('analysis-plot-y-axis'),
-      style: talContextMenuButtonStyle,
-      menuStyle: talContextSubmenuStyle,
+      menuStyle: Theme.of(
+        context,
+      ).menuTheme.style?.copyWith(alignment: AlignmentDirectional.topEnd),
       animated: true,
       menuChildren: _buildAxisMenu(xAxis: false),
       child: const Text('Y Axis'),
     ),
     SubmenuButton(
       key: const ValueKey('analysis-plot-mouse-mode'),
-      style: talContextMenuButtonStyle,
-      menuStyle: talContextSubmenuStyle,
+      menuStyle: Theme.of(
+        context,
+      ).menuTheme.style?.copyWith(alignment: AlignmentDirectional.topEnd),
       animated: true,
       menuChildren: [
         RadioMenuButton<AnalysisMouseMode>(
-          style: talContextMenuButtonStyle,
           value: AnalysisMouseMode.threeButton,
           groupValue: _mouseMode,
           onChanged: _setAnalysisMouseMode,
           child: const Text('3 Button'),
         ),
         RadioMenuButton<AnalysisMouseMode>(
-          style: talContextMenuButtonStyle,
           value: AnalysisMouseMode.rectangle,
           groupValue: _mouseMode,
           onChanged: _setAnalysisMouseMode,
@@ -567,12 +565,10 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
 
   List<Widget> _buildAxisMenu({required bool xAxis}) => [
     MenuItemButton(
-      style: talContextMenuButtonStyle,
       onPressed: () => _resetAnalysisAxis(xAxis: xAxis),
       child: const Text('Auto'),
     ),
     MenuItemButton(
-      style: talContextMenuButtonStyle,
       onPressed: () => unawaited(_showAnalysisAxisSettings(xAxis: xAxis)),
       child: const Text('Manual…'),
     ),
@@ -626,7 +622,7 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
 
   Future<void> _showAnalysisAxisSettings({required bool xAxis}) async {
     final bounds = _viewportBounds;
-    final result = await showDialog<AxisSettings>(
+    final result = await showTalDialog<AxisSettings>(
       context: context,
       builder: (context) => PlotAxisSettingsDialog(
         xAxis: xAxis,
@@ -803,7 +799,7 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
 
   Widget _buildStatsHeader() {
     return Container(
-      height: 36,
+      height: TalUiTheme.of(context).targetExtent(36),
       decoration: const BoxDecoration(
         color: TalColors.surfaceAlt,
         border: Border(bottom: BorderSide(color: TalColors.border)),

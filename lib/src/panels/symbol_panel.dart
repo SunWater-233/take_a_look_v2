@@ -1,4 +1,4 @@
-part of '../panels.dart';
+part of 'panels.dart';
 
 enum _SymbolTreeNodeKind { folder, sourceFile, symbol }
 
@@ -337,7 +337,7 @@ class _SymbolPanelState extends State<_SymbolPanel> {
                 children: [
                   Expanded(
                     child: Container(
-                      height: 32,
+                      height: TalUiTheme.of(context).controlHeight,
                       padding: const EdgeInsets.symmetric(horizontal: 9),
                       decoration: BoxDecoration(
                         color: TalColors.input,
@@ -358,12 +358,9 @@ class _SymbolPanelState extends State<_SymbolPanel> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  SizedBox(
-                    width: 76,
-                    child: TalButton(
-                      onPressed: widget.controller.chooseSymbolFile,
-                      child: const Text('选择文件'),
-                    ),
+                  TalButton(
+                    onPressed: widget.controller.chooseSymbolFile,
+                    child: const Text('选择文件'),
                   ),
                   const SizedBox(width: 8),
                   SizedBox(
@@ -381,7 +378,7 @@ class _SymbolPanelState extends State<_SymbolPanel> {
             Padding(
               padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
               child: SizedBox(
-                height: 32,
+                height: TalUiTheme.of(context).controlHeight,
                 child: TextField(
                   key: const ValueKey('symbol-search-field'),
                   controller: search,

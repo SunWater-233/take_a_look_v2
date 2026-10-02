@@ -3,17 +3,17 @@ import 'dart:math' as math;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
-import 'chart/axis_settings.dart';
-import 'chart/cartesian_renderer.dart';
-import 'chart/desktop_axis_menu.dart';
-import 'chart/painter.dart';
-import 'chart/selection_painter.dart';
-import 'chart/viewport.dart';
-import 'controller.dart';
-import 'theme.dart';
+import 'axis_settings.dart';
+import 'cartesian_renderer.dart';
+import 'desktop_axis_menu.dart';
+import 'painter.dart';
+import 'selection_painter.dart';
+import 'viewport.dart';
+import '../controller/controller.dart';
+import '../theme/theme.dart';
 
-export 'chart/downsampling.dart';
-export 'chart/viewport.dart';
+export 'downsampling.dart';
+export 'viewport.dart';
 
 class TelemetryChart extends StatefulWidget {
   const TelemetryChart({required this.controller, super.key});
@@ -45,7 +45,7 @@ class _TelemetryChartState extends State<TelemetryChart> {
         return MenuAnchor(
           key: const ValueKey('desktop-plot-menu-anchor'),
           controller: _desktopMenuController,
-          style: talContextMenuStyle,
+          style: Theme.of(context).menuTheme.style,
           consumeOutsideTap: true,
           animated: true,
           onAnimationStatusChanged: _handleDesktopMenuAnimationStatus,
@@ -337,13 +337,11 @@ class _TelemetryChartState extends State<TelemetryChart> {
     return [
       MenuItemButton(
         key: const ValueKey('desktop-plot-view-all'),
-        style: talContextMenuButtonStyle,
         onPressed: controller.showAllPlotSamples,
         child: const Text('View All'),
       ),
       SubmenuButton(
         key: const ValueKey('desktop-plot-x-axis'),
-        style: talContextMenuButtonStyle,
         menuStyle: desktopAxisSubmenuStyle,
         animated: true,
         menuChildren: [
@@ -358,7 +356,6 @@ class _TelemetryChartState extends State<TelemetryChart> {
       ),
       SubmenuButton(
         key: const ValueKey('desktop-plot-y-axis'),
-        style: talContextMenuButtonStyle,
         menuStyle: desktopAxisSubmenuStyle,
         animated: true,
         menuChildren: [
@@ -373,13 +370,13 @@ class _TelemetryChartState extends State<TelemetryChart> {
       ),
       SubmenuButton(
         key: const ValueKey('desktop-plot-mouse-mode'),
-        style: talContextMenuButtonStyle,
-        menuStyle: talContextSubmenuStyle,
+        menuStyle: Theme.of(
+          context,
+        ).menuTheme.style?.copyWith(alignment: AlignmentDirectional.topEnd),
         animated: true,
         menuChildren: [
           RadioMenuButton<_DesktopMouseMode>(
             key: const ValueKey('desktop-mouse-mode-pan'),
-            style: talContextMenuButtonStyle,
             value: _DesktopMouseMode.pan,
             groupValue: _desktopMouseMode,
             onChanged: (value) {
@@ -390,7 +387,6 @@ class _TelemetryChartState extends State<TelemetryChart> {
           ),
           RadioMenuButton<_DesktopMouseMode>(
             key: const ValueKey('desktop-mouse-mode-rect'),
-            style: talContextMenuButtonStyle,
             value: _DesktopMouseMode.rect,
             groupValue: _desktopMouseMode,
             onChanged: (value) {
@@ -488,7 +484,7 @@ class _TelemetryChartState extends State<TelemetryChart> {
 
   Future<void> _showAxisSettings({required bool xAxis}) async {
     final viewport = telemetryViewport(controller, _size);
-    final result = await showDialog<AxisSettings>(
+    final result = await showTalDialog<AxisSettings>(
       context: context,
       builder: (context) => PlotAxisSettingsDialog(
         xAxis: xAxis,

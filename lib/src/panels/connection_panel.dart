@@ -1,4 +1,4 @@
-part of '../panels.dart';
+part of 'panels.dart';
 
 class _ConnectionPanel extends StatelessWidget {
   const _ConnectionPanel({required this.controller});

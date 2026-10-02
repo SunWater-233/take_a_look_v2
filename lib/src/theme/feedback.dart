@@ -78,12 +78,15 @@ class TalFeedbackController {
       );
       return;
     }
+    final noticeKey = UniqueKey();
     _notice = _DesktopErrorNotice(
-      key: UniqueKey(),
+      key: noticeKey,
       title: title,
       message: message,
       details: details,
-      onClose: dismiss,
+      onClose: () {
+        if (_notice?.key == noticeKey) dismiss();
+      },
     );
     if (_entry != null) {
       _entry!.markNeedsBuild();
@@ -121,88 +124,178 @@ class _DesktopErrorNotice extends StatefulWidget {
   State<_DesktopErrorNotice> createState() => _DesktopErrorNoticeState();
 }
 
-class _DesktopErrorNoticeState extends State<_DesktopErrorNotice> {
+class _DesktopErrorNoticeState extends State<_DesktopErrorNotice>
+    with TickerProviderStateMixin {
+  late final AnimationController _entranceController;
+  late final AnimationController _dismissController;
+  late final Animation<double> _entrance;
+  late final Animation<double> _dismissScale;
+  late final Animation<double> _dismissOpacity;
   bool _expanded = false;
+  bool _closing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _entranceController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 320),
+    );
+    _dismissController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 260),
+    );
+    _entrance = _entranceController.drive(
+      CurveTween(curve: Curves.easeOutCubic),
+    );
+    _dismissScale = _dismissController.drive(
+      Tween<double>(begin: 1, end: 0.86).chain(
+        CurveTween(curve: const Interval(0, 0.7, curve: Curves.easeOutCubic)),
+      ),
+    );
+    _dismissOpacity = _dismissController.drive(
+      Tween<double>(begin: 1, end: 0).chain(
+        CurveTween(curve: const Interval(0.25, 1, curve: Curves.easeInQuad)),
+      ),
+    );
+    _entranceController.forward();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _entranceController.value = 1;
+    }
+  }
+
+  Future<void> _close() async {
+    if (_closing) return;
+    if (MediaQuery.disableAnimationsOf(context)) {
+      widget.onClose();
+      return;
+    }
+    setState(() => _closing = true);
+    _entranceController.stop();
+    try {
+      await _dismissController.forward().orCancel;
+    } on TickerCanceled {
+      return;
+    }
+    if (mounted) widget.onClose();
+  }
+
+  @override
+  void dispose() {
+    _entranceController.dispose();
+    _dismissController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final ui = TalUiTheme.of(context);
     final size = MediaQuery.sizeOf(context);
-    final hasDetails = widget.details?.isNotEmpty == true;
+    final width = (size.width - ui.overlayMargin * 2).clamp(
+      0.0,
+      ui.notificationWidth,
+    );
+    // Include the outer margin, safe area, and shadow in the offscreen start.
+    final slideDistance =
+        width + ui.overlayMargin + MediaQuery.paddingOf(context).right + 32;
     return Positioned(
       right: ui.overlayMargin,
       bottom: ui.overlayMargin + MediaQuery.viewInsetsOf(context).bottom,
       child: SafeArea(
         child: SizedBox(
-          width: (size.width - ui.overlayMargin * 2).clamp(
-            0.0,
-            ui.notificationWidth,
+          width: width,
+          child: AnimatedBuilder(
+            animation: _entrance,
+            builder: (context, child) => Transform.translate(
+              offset: Offset(slideDistance * (1 - _entrance.value), 0),
+              child: child,
+            ),
+            child: IgnorePointer(
+              ignoring: _closing,
+              child: FadeTransition(
+                opacity: _dismissOpacity,
+                child: ScaleTransition(
+                  scale: _dismissScale,
+                  child: _buildContent(context),
+                ),
+              ),
+            ),
           ),
-          child: Semantics(
-            container: true,
-            liveRegion: true,
-            child: Material(
-              key: const ValueKey('tal-error-popup'),
-              color: TalColors.surfaceAlt,
-              elevation: 12,
-              shadowColor: Colors.black,
-              shape: RoundedRectangleBorder(
-                borderRadius: ui.menuRadius,
-                side: BorderSide(color: Theme.of(context).colorScheme.error),
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxHeight:
-                      (size.height -
-                              ui.overlayMargin * 2 -
-                              MediaQuery.viewInsetsOf(context).bottom)
-                          .clamp(0.0, ui.notificationMaxHeight),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildContent(BuildContext context) {
+    final ui = TalUiTheme.of(context);
+    final size = MediaQuery.sizeOf(context);
+    final hasDetails = widget.details?.isNotEmpty == true;
+    return Semantics(
+      container: true,
+      liveRegion: true,
+      child: Material(
+        key: const ValueKey('tal-error-popup'),
+        color: TalColors.surfaceAlt,
+        elevation: 12,
+        shadowColor: Colors.black,
+        shape: RoundedRectangleBorder(
+          borderRadius: ui.menuRadius,
+          side: BorderSide(color: Theme.of(context).colorScheme.error),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight:
+                (size.height -
+                        ui.overlayMargin * 2 -
+                        MediaQuery.viewInsetsOf(context).bottom)
+                    .clamp(0.0, ui.notificationMaxHeight),
+          ),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.error_outline,
+                      size: 20,
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text(widget.title, style: talStrong)),
+                    TalIconButton(
+                      tooltip: '关闭提示',
+                      onPressed: _close,
+                      icon: const Icon(Icons.close, size: 18),
+                    ),
+                  ],
                 ),
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.error_outline,
-                            size: 20,
-                            color: Theme.of(context).colorScheme.error,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(child: Text(widget.title, style: talStrong)),
-                          TalIconButton(
-                            tooltip: '关闭提示',
-                            onPressed: widget.onClose,
-                            icon: const Icon(Icons.close, size: 18),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-                      SelectableText(widget.message, style: talBody),
-                      if (hasDetails) ...[
-                        const SizedBox(height: 8),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: TalButton(
-                            variant: TalButtonVariant.text,
-                            onPressed: () =>
-                                setState(() => _expanded = !_expanded),
-                            child: Text(_expanded ? '收起详情' : '查看详情'),
-                          ),
-                        ),
-                        if (_expanded) ...[
-                          const SizedBox(height: 8),
-                          SelectableText(widget.details!, style: talMono),
-                        ],
-                      ],
-                    ],
+                const SizedBox(height: 6),
+                SelectableText(widget.message, style: talBody),
+                if (hasDetails) ...[
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TalButton(
+                      variant: TalButtonVariant.text,
+                      onPressed: () => setState(() => _expanded = !_expanded),
+                      child: Text(_expanded ? '收起详情' : '查看详情'),
+                    ),
                   ),
-                ),
-              ),
+                  if (_expanded) ...[
+                    const SizedBox(height: 8),
+                    SelectableText(widget.details!, style: talMono),
+                  ],
+                ],
+              ],
             ),
           ),
         ),

@@ -17,6 +17,9 @@ final ButtonStyle talSelectedOutlinedButtonStyle = ButtonStyle(
 ThemeData buildTalTheme({TalInputMode inputMode = TalInputMode.mouseKeyboard}) {
   final ui = TalUiTheme(inputMode: inputMode);
   final radius = ui.controlRadius;
+  final buttonTextStyle = WidgetStatePropertyAll(
+    talBody.copyWith(fontWeight: FontWeight.w400),
+  );
   final controlSize = WidgetStatePropertyAll(Size(0, ui.controlHeight));
   final controlMaximumSize = WidgetStatePropertyAll(
     Size(double.infinity, ui.controlHeight),
@@ -164,7 +167,7 @@ ThemeData buildTalTheme({TalInputMode inputMode = TalInputMode.mouseKeyboard}) {
         shape: WidgetStatePropertyAll(
           RoundedRectangleBorder(borderRadius: radius),
         ),
-        textStyle: const WidgetStatePropertyAll(talStrong),
+        textStyle: buttonTextStyle,
       ),
     ),
     textButtonTheme: TextButtonThemeData(
@@ -185,7 +188,7 @@ ThemeData buildTalTheme({TalInputMode inputMode = TalInputMode.mouseKeyboard}) {
         shape: WidgetStatePropertyAll(
           RoundedRectangleBorder(borderRadius: radius),
         ),
-        textStyle: const WidgetStatePropertyAll(talStrong),
+        textStyle: buttonTextStyle,
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
@@ -213,7 +216,7 @@ ThemeData buildTalTheme({TalInputMode inputMode = TalInputMode.mouseKeyboard}) {
         shape: WidgetStatePropertyAll(
           RoundedRectangleBorder(borderRadius: radius),
         ),
-        textStyle: const WidgetStatePropertyAll(talStrong),
+        textStyle: buttonTextStyle,
       ),
     ),
     iconButtonTheme: IconButtonThemeData(

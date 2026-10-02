@@ -437,7 +437,10 @@ class _TitleMenuState extends State<_TitleMenu> {
                       : null,
                   borderRadius: const BorderRadius.all(Radius.circular(7)),
                 ),
-                child: Text(widget.label, style: talStrong),
+                child: Text(
+                  widget.label,
+                  style: talBody.copyWith(fontWeight: FontWeight.w400),
+                ),
               ),
             ),
           ),

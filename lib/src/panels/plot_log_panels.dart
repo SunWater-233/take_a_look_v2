@@ -89,7 +89,17 @@ class _LogPanelState extends State<_LogPanel> {
                     contextMenuBuilder: (context, state) =>
                         TalSelectionContextMenu(
                           anchors: state.contextMenuAnchors,
-                          buttonItems: state.contextMenuButtonItems,
+                          buttonItems: [
+                            ...state.contextMenuButtonItems,
+                            ContextMenuButtonItem(
+                              label: 'Clear all',
+                              onPressed: () {
+                                state.hideToolbar();
+                                state.clearSelection();
+                                widget.controller.clearLogs();
+                              },
+                            ),
+                          ],
                           touchOptimized:
                               _lastPointerKind != PointerDeviceKind.mouse,
                         ),

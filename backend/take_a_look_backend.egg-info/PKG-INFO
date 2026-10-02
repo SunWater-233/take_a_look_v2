@@ -1,0 +1,11 @@
+Metadata-Version: 2.4
+Name: take-a-look-backend
+Version: 0.1.0
+Summary: Local hardware backend for the Take A Look Flutter workstation
+Requires-Python: >=3.11
+Requires-Dist: libusb-package>=1.0.26.3; platform_system == "Windows"
+Requires-Dist: pyelftools>=0.32
+Requires-Dist: pyocd>=0.45.1
+Provides-Extra: dev
+Requires-Dist: pyinstaller>=6.0; extra == "dev"
+Requires-Dist: pytest>=8.0; extra == "dev"

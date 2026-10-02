@@ -130,23 +130,42 @@ class WatchItem {
   }
 }
 
+enum LogLevel {
+  debug,
+  info,
+  warning,
+  error,
+  critical;
+
+  static LogLevel parse(String? value) {
+    return values.firstWhere(
+      (level) => level.name == value?.toLowerCase(),
+      orElse: () => info,
+    );
+  }
+}
+
 class LogEntry {
-  LogEntry(this.message) : timestamp = DateTime.now();
-  LogEntry.at(this.message, this.timestamp);
+  LogEntry(this.message, {this.level = LogLevel.info})
+    : timestamp = DateTime.now();
+  LogEntry.at(this.message, this.timestamp, {this.level = LogLevel.info});
 
   final DateTime timestamp;
   final String message;
+  final LogLevel level;
 
   factory LogEntry.fromJson(Map<String, dynamic> json) {
     return LogEntry.at(
       json['message'] as String,
       DateTime.fromMillisecondsSinceEpoch(json['timestamp'] as int),
+      level: LogLevel.parse(json['level'] as String?),
     );
   }
 
   Map<String, Object?> toJson() => {
     'timestamp': timestamp.millisecondsSinceEpoch,
     'message': message,
+    'level': level.name,
   };
 
   String get timeLabel {

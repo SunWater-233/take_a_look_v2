@@ -252,13 +252,13 @@ class TakeALookController extends ChangeNotifier {
     _emitTelemetry();
   }
 
-  void addLog(String message) {
-    _appendLog(message);
+  void addLog(String message, {LogLevel level = LogLevel.info}) {
+    _appendLog(message, level: level);
     _emitState([signals.logs]);
   }
 
-  void _appendLog(String message) {
-    _logs.add(LogEntry(message));
+  void _appendLog(String message, {LogLevel level = LogLevel.info}) {
+    _logs.add(LogEntry(message, level: level));
     if (_logs.length > 500) _logs.removeAt(0);
   }
 

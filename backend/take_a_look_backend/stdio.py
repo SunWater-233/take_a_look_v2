@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sys
 import threading
 from collections.abc import Mapping, Sequence
@@ -128,7 +129,23 @@ class StdioServer:
 
 def main() -> None:
     _configure_standard_stream_encoding()
+    _configure_stderr_logging()
     raise SystemExit(StdioServer(sys.stdin, sys.stdout.buffer).run())
+
+
+class _StderrLogFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        # Label every line, including tracebacks, so stderr line splitting does
+        # not lose the severity of a multiline logging record.
+        message = super().format(record)
+        return "\n".join(f"[{record.levelname}] {line}" for line in message.split("\n"))
+
+
+def _configure_stderr_logging() -> None:
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(_StderrLogFormatter())
+    # Preserve Python's default verbosity while making the record level explicit.
+    logging.basicConfig(level=logging.WARNING, handlers=[handler])
 
 
 def _configure_standard_stream_encoding() -> None:

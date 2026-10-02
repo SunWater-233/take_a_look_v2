@@ -102,8 +102,17 @@ class _LogPanelState extends State<_LogPanel> {
                             Padding(
                               padding: const EdgeInsets.only(bottom: 3),
                               child: Text(
-                                '[${entry.timeLabel}] ${entry.message}',
-                                style: talMono,
+                                '[${entry.timeLabel}] '
+                                '[${entry.level.name.toUpperCase()}] ${entry.message}',
+                                style: talMono.copyWith(
+                                  color: switch (entry.level) {
+                                    LogLevel.debug => TalColors.muted,
+                                    LogLevel.warning => TalColors.amber,
+                                    LogLevel.error ||
+                                    LogLevel.critical => TalColors.accent,
+                                    LogLevel.info => TalColors.text,
+                                  },
+                                ),
                               ),
                             ),
                         ],

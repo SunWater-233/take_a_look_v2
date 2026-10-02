@@ -1,0 +1,9 @@
+pyelftools>=0.32
+pyocd>=0.45.1
+
+[:platform_system == "Windows"]
+libusb-package>=1.0.26.3
+
+[dev]
+pyinstaller>=6.0
+pytest>=8.0

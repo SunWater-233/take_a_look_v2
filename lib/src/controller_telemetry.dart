@@ -84,14 +84,19 @@ extension TakeALookControllerTelemetry on TakeALookController {
       case BackendEventType.log:
         final payload = _asMap(params);
         final message = payload?['message'];
-        if (message is String && message.isNotEmpty) addLog(message);
+        if (message is String && message.isNotEmpty) {
+          addLog(message, level: LogLevel.parse(payload?['level'] as String?));
+        }
       case BackendEventType.error:
         final payload = _asMap(params);
         if (payload == null) break;
         lastBackendError = payload;
         final message = payload['message'] as String? ?? '后端操作失败。';
         final details = payload['details'];
-        _appendLog(details == null ? message : '$message（$details）');
+        _appendLog(
+          details == null ? message : '$message（$details）',
+          level: LogLevel.error,
+        );
         _emitState([signals.connection, signals.logs]);
       case BackendEventType.perf:
         final payload = _asMap(params);

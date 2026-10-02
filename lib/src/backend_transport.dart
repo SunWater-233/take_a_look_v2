@@ -1,6 +1,20 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+final _backendStderrLevelPattern = RegExp(
+  r'^\[(DEBUG|INFO|WARNING|ERROR|CRITICAL)\]\s*',
+  caseSensitive: false,
+);
+
+({String level, String message})? decodeBackendStderrLine(String line) {
+  final text = line.trim();
+  if (text.isEmpty) return null;
+  final match = _backendStderrLevelPattern.firstMatch(text);
+  final message = text.substring(match?.end ?? 0);
+  if (message.isEmpty) return null;
+  return (level: match?.group(1)?.toLowerCase() ?? 'error', message: message);
+}
+
 class BackendSampleBatch {
   const BackendSampleBatch({
     required this.schemaId,

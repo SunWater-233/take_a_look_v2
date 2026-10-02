@@ -1,0 +1,2 @@
+[console_scripts]
+take-a-look-backend = take_a_look_backend.stdio:main

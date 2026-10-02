@@ -74,10 +74,11 @@ class BackendClient {
           .transform(utf8.decoder)
           .transform(const LineSplitter())
           .listen((line) {
-            if (line.trim().isNotEmpty) {
+            final log = decodeBackendStderrLine(line);
+            if (log != null) {
               eventHandler?.call(BackendEventType.log, {
-                'level': 'error',
-                'message': '后端：${line.trim()}',
+                'level': log.level,
+                'message': '后端：${log.message}',
               });
             }
           });

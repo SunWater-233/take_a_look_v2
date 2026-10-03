@@ -371,7 +371,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
   });
 
-  testWidgets('holding over panel content for one second merges the tab', (
+  testWidgets('moving within a target still highlights and merges the tab', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(1600, 900));
@@ -415,7 +415,10 @@ void main() {
       of: headerGroup,
       matching: find.text(WorkspacePanelId.sampling.title),
     );
-    final gesture = await tester.startGesture(tester.getCenter(sourceTab));
+    final gesture = await tester.startGesture(
+      tester.getCenter(sourceTab),
+      kind: PointerDeviceKind.mouse,
+    );
     await gesture.moveBy(const Offset(0, 20));
     await tester.pump();
     await gesture.moveTo(tester.getCenter(plotGroup));
@@ -426,17 +429,28 @@ void main() {
       find.descendant(of: plotGroup, matching: find.byType(TalPanelFrame)),
     );
     expect(plotFrame().chrome!.highlighted, isFalse);
-    await tester.pump(const Duration(milliseconds: 750));
-    expect(plotFrame().chrome!.highlighted, isFalse);
-    await gesture.moveBy(const Offset(1, 0));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 999));
+    for (var index = 0; index < 5; index++) {
+      await tester.pump(const Duration(milliseconds: 50));
+      await gesture.moveBy(const Offset(1, 0));
+      await tester.pump();
+      expect(plotFrame().chrome!.highlighted, isFalse);
+    }
+    await tester.pump(const Duration(milliseconds: 49));
     expect(plotFrame().chrome!.highlighted, isFalse);
     await tester.pump(const Duration(milliseconds: 1));
+    expect(plotFrame().chrome!.highlighted, isTrue);
+    final frameContainer = tester.widget<Container>(
+      find.byKey(const ValueKey('panel-frame-group-plot')),
+    );
+    final decoration = frameContainer.foregroundDecoration! as BoxDecoration;
+    expect(decoration.border, Border.all(color: TalColors.accent, width: 3));
+    await gesture.moveBy(const Offset(20, 10));
+    await tester.pump();
     expect(plotFrame().chrome!.highlighted, isTrue);
 
     await gesture.up();
     await tester.pumpAndSettle();
+    expect(plotFrame().chrome!.highlighted, isFalse);
 
     expect(
       find.descendant(
@@ -453,6 +467,85 @@ void main() {
       findsOneWidget,
     );
 
+    controller.dispose();
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('leaving or switching tab targets resets their highlight', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1600, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final controller = TakeALookController();
+    final windowSync = MainWindowSync(controller);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTalTheme(),
+        home: Scaffold(
+          body: DockingWorkspace(
+            controller: controller,
+            windowSync: windowSync,
+          ),
+        ),
+      ),
+    );
+
+    Finder group(String id) => find.byKey(ValueKey('workspace-group-$id'));
+    bool highlighted(String id) => tester
+        .widget<TalPanelFrame>(
+          find.descendant(of: group(id), matching: find.byType(TalPanelFrame)),
+        )
+        .chrome!
+        .highlighted;
+    final sourceTab = find.byKey(const ValueKey('panel-tab-sampling'));
+    final gesture = await tester.startGesture(
+      tester.getCenter(sourceTab),
+      kind: PointerDeviceKind.mouse,
+    );
+    await gesture.moveBy(const Offset(0, 20));
+    await tester.pump();
+    await gesture.moveTo(tester.getCenter(group('plot')));
+    await tester.pump(const Duration(milliseconds: 200));
+    await gesture.moveTo(tester.getCenter(group('symbols')));
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(highlighted('plot'), isFalse);
+    expect(highlighted('symbols'), isFalse);
+
+    await gesture.moveTo(const Offset(1700, 450));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(highlighted('symbols'), isFalse);
+    await gesture.moveTo(tester.getCenter(group('symbols')));
+    await tester.pump(const Duration(milliseconds: 299));
+    expect(highlighted('symbols'), isFalse);
+    await tester.pump(const Duration(milliseconds: 1));
+    expect(highlighted('symbols'), isTrue);
+
+    await gesture.moveTo(tester.getCenter(group('plot')));
+    await tester.pump(const Duration(milliseconds: 299));
+    expect(highlighted('symbols'), isFalse);
+    expect(highlighted('plot'), isFalse);
+    await tester.pump(const Duration(milliseconds: 1));
+    expect(highlighted('plot'), isTrue);
+
+    await gesture.moveTo(
+      tester.getCenter(find.byKey(const ValueKey('panel-tab-header'))),
+    );
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(highlighted('plot'), isFalse);
+    expect(highlighted('header'), isFalse);
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(find.byType(TalPanelFrame), findsNWidgets(4));
+    expect(
+      find.descendant(
+        of: group('header'),
+        matching: find.byKey(const ValueKey('panel-tab-sampling')),
+      ),
+      findsOneWidget,
+    );
+
+    await windowSync.dispose();
     controller.dispose();
     await tester.pumpWidget(const SizedBox.shrink());
   });

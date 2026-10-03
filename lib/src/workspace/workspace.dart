@@ -871,7 +871,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         hoveredGroup == null || hoveredGroup.id == data.sourceGroupId
         ? null
         : hoveredGroup.id;
-    _setTabMergeCandidate(targetId, restartTimer: true);
+    _setTabMergeCandidate(targetId);
   }
 
   Future<void> _moveTabDragPreview(Offset globalPosition) async {
@@ -881,11 +881,10 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     await tabDragPreview.showAt(position);
   }
 
-  void _setTabMergeCandidate(String? targetId, {bool restartTimer = false}) {
-    if (_tabMergeCandidate == targetId &&
-        (!restartTimer || _armedTabMergeTarget == targetId)) {
-      return;
-    }
+  void _setTabMergeCandidate(String? targetId) {
+    // Count time inside the target, including pointer movement and mouse jitter.
+    // Only leaving or switching targets should restart the merge delay.
+    if (_tabMergeCandidate == targetId) return;
     _tabMergeTimer?.cancel();
     _tabMergeCandidate = targetId;
     if (_armedTabMergeTarget != null || _session.mergeTarget != null) {
@@ -895,7 +894,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
       });
     }
     if (targetId == null) return;
-    _tabMergeTimer = Timer(const Duration(seconds: 1), () {
+    _tabMergeTimer = Timer(const Duration(milliseconds: 300), () {
       if (!mounted || _tabMergeCandidate != targetId) return;
       setState(() {
         _armedTabMergeTarget = targetId;

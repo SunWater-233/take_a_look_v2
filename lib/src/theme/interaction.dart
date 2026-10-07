@@ -37,6 +37,8 @@ class TalUiTheme extends ThemeExtension<TalUiTheme> {
   double get titleBarHeight => touchOptimized ? 56 : 46;
   double get titleButtonHeight => touchOptimized ? 48 : 34;
   double get dialogMaxWidth => touchOptimized ? 560 : 480;
+  double get progressDialogWidth => touchOptimized ? 560 : 440;
+  double get progressIndicatorHeight => touchOptimized ? 8 : 6;
   double get notificationWidth => 420;
   double get notificationMaxHeight => 340;
   double get overlayMargin => 16;

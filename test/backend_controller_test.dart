@@ -21,10 +21,10 @@ void main() {
     addTearDown(controller.dispose);
 
     await controller.chooseSymbolFile();
-    expect(commands.removeAt(0), (
-      ControllerCommand.loadSymbols,
-      r'C:\firmware\motor.axf',
-    ));
+    final loadCommand = commands.removeAt(0);
+    expect(loadCommand.$1, ControllerCommand.loadSymbols);
+    expect((loadCommand.$2 as Map)['path'], r'C:\firmware\motor.axf');
+    expect((loadCommand.$2 as Map)['loadId'], isA<String>());
 
     controller.applyBackendEvent(BackendEventType.state, {
       'connectionStatus': 'connected',

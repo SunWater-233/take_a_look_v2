@@ -12,6 +12,7 @@ class ControllerState {
   final PlotState plot = PlotState();
   final AnalysisSession analysis = AnalysisSession();
   final DebugState debug = DebugState();
+  SymbolLoadProgress? symbolLoad;
 }
 
 class DebugState {

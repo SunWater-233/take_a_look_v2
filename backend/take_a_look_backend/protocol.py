@@ -43,6 +43,7 @@ class EventName(StrEnum):
     ERROR = "error"
     PERF = "perf"
     DEBUG = "debug"
+    SYMBOL_LOAD_PROGRESS = "symbolLoadProgress"
 
 
 @dataclass(frozen=True)

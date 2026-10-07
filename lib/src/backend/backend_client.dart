@@ -25,11 +25,21 @@ class BackendException implements Exception {
 }
 
 class BackendClient {
-  BackendClient({this.eventHandler});
+  BackendClient({
+    this.eventHandler,
+    this.commandTimeout = const Duration(seconds: 30),
+    this.symbolLoadTimeout = const Duration(minutes: 11),
+    this.processStarter,
+  });
 
   static const protocolVersion = 2;
 
   BackendEventHandler? eventHandler;
+  final Duration commandTimeout;
+  // The parser has a ten-minute deadline and checks it before committing.
+  // Leave time for it to return its structured error without killing a probe.
+  final Duration symbolLoadTimeout;
+  final Future<Process> Function()? processStarter;
   Process? _process;
   StreamSubscription<List<int>>? _stdoutSubscription;
   StreamSubscription<String>? _stderrSubscription;
@@ -50,17 +60,19 @@ class BackendClient {
     try {
       final backendDirectory = _findBackendDirectory();
       final launch = _pythonLaunch(backendDirectory);
-      final process = await Process.start(
-        launch.executable,
-        launch.arguments,
-        workingDirectory: backendDirectory.path,
-        environment: {
-          ...Platform.environment,
-          'PYTHONPATH': backendDirectory.path,
-          'PYTHONUTF8': '1',
-        },
-        runInShell: launch.runInShell,
-      );
+      final process =
+          await (processStarter?.call() ??
+              Process.start(
+                launch.executable,
+                launch.arguments,
+                workingDirectory: backendDirectory.path,
+                environment: {
+                  ...Platform.environment,
+                  'PYTHONPATH': backendDirectory.path,
+                  'PYTHONUTF8': '1',
+                },
+                runInShell: launch.runInShell,
+              ));
       _process = process;
       _streamDecoder = BackendStreamDecoder(
         onJsonLine: _handleLine,
@@ -109,6 +121,8 @@ class BackendClient {
       if (call == null) return;
       await request(call.method, call.params);
     } catch (error) {
+      // Loading owns its lifecycle in the controller, including error feedback.
+      if (command == ControllerCommand.loadSymbols) rethrow;
       if (error is BackendException) {
         eventHandler?.call(BackendEventType.error, {
           'code': error.code,
@@ -136,22 +150,34 @@ class BackendClient {
     final requestId = _nextRequestId++;
     final completer = Completer<Map<String, dynamic>>();
     _pending[requestId] = completer;
-    process.stdin.writeln(
-      jsonEncode({
-        'v': protocolVersion,
-        'id': requestId,
-        'method': method.wireName,
-        'params': params,
-      }),
-    );
-    await process.stdin.flush();
-    return completer.future.timeout(
-      const Duration(seconds: 30),
-      onTimeout: () {
-        _pending.remove(requestId);
-        throw BackendException('timeout', '后端命令超时：${method.wireName}');
-      },
-    );
+    try {
+      // Listen to the response before yielding for stdin.flush(): a fast
+      // protocol error or process exit can arrive while the pipe is flushing.
+      final response = completer.future.timeout(
+        method == BackendMethod.loadSymbols
+            ? symbolLoadTimeout
+            : commandTimeout,
+        onTimeout: () =>
+            throw BackendException('timeout', '后端命令超时：${method.wireName}'),
+      );
+      final results = await Future.wait<dynamic>([
+        response,
+        Future<void>.sync(() async {
+          process.stdin.writeln(
+            jsonEncode({
+              'v': protocolVersion,
+              'id': requestId,
+              'method': method.wireName,
+              'params': params,
+            }),
+          );
+          await process.stdin.flush();
+        }),
+      ]);
+      return results.first as Map<String, dynamic>;
+    } finally {
+      _pending.remove(requestId);
+    }
   }
 
   Future<void> close({bool force = false}) async {
@@ -209,10 +235,11 @@ class BackendClient {
       }
       final id = message['id'];
       if (id is! int) throw const FormatException('Response id is missing');
-      final completer = _pending.remove(id);
+      final completer = _pending[id];
       if (completer == null) return;
       final error = _map(message['error']);
       if (error != null) {
+        _pending.remove(id);
         completer.completeError(
           BackendException(
             error['code'] as String? ?? 'backend_error',
@@ -228,6 +255,7 @@ class BackendClient {
       }
       final state = _map(result['state']);
       if (state != null) _state = {..._state, ...state};
+      _pending.remove(id);
       completer.complete(result);
     } catch (error) {
       _handleTransportError(error);
@@ -278,6 +306,15 @@ class BackendClient {
   }
 
   void _handleTransportError(Object error) {
+    final failure = BackendException(
+      'protocol_error',
+      '后端协议错误。',
+      error.toString(),
+    );
+    for (final pending in _pending.values) {
+      if (!pending.isCompleted) pending.completeError(failure);
+    }
+    _pending.clear();
     eventHandler?.call(BackendEventType.error, {
       'code': 'protocol_error',
       'message': '后端协议错误。',

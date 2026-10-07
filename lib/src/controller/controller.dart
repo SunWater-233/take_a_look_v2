@@ -64,6 +64,8 @@ class TakeALookController extends ChangeNotifier {
   final Set<String> _selectedSymbols = <String>{};
   final Set<String> _expandedSymbolTreeNodes = <String>{};
   int _symbolRevision = 0;
+  bool _pickingSymbolFile = false;
+  int _nextSymbolLoadId = 0;
   Timer? _ticker;
   Timer? _plotRefreshTimer;
   Timer? _samplingClockTimer;
@@ -164,6 +166,9 @@ class TakeALookController extends ChangeNotifier {
   Listenable get connectionChanges => signals.connection;
   Listenable get samplingChanges => signals.sampling;
   Listenable get symbolChanges => signals.symbols;
+  Listenable get symbolLoadChanges => signals.symbolLoad;
+  SymbolLoadProgress? get symbolLoadProgress => state.symbolLoad;
+  bool get isSymbolLoading => state.symbolLoad?.isLoading ?? false;
   Listenable get watchChanges => signals.watches;
   Listenable get telemetryChanges => signals.telemetry;
   Listenable get plotChanges => signals.plot;

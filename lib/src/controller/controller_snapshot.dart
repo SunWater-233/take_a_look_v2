@@ -34,6 +34,8 @@ extension TakeALookControllerSnapshot on TakeALookController {
       'gatewayProtocolVersion': state.connection.gatewayProtocolVersion,
       'remoteConfig': Map<String, String>.from(remoteConfig),
       'symbolFile': symbolFile,
+      if (symbolLoadProgress != null)
+        'symbolLoad': symbolLoadProgress!.toJson(),
       'sampleRateHz': sampleRateHz,
       'rttSampleRateHz': rttSampleRateHz,
       'displayRefreshMode': displayRefreshMode,
@@ -381,6 +383,12 @@ extension TakeALookControllerSnapshot on TakeALookController {
       applyDebugState(
         Map<String, dynamic>.from(data['debug'] as Map),
         emit: false,
+      );
+    }
+    // Apply after symbol/source data so a detached window cannot finish early.
+    if (data['symbolLoad'] is Map) {
+      applySymbolLoadSnapshot(
+        Map<String, dynamic>.from(data['symbolLoad'] as Map),
       );
     }
     if (hasPlotState) {

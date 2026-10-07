@@ -5,6 +5,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from take_a_look_backend.backends.pyocd_memory import PyOcdConnectionConfig
@@ -95,8 +96,8 @@ class BackendServiceTests(unittest.TestCase):
             memory_backend=self.memory,  # type: ignore[arg-type]
             normal_rtt_backend=_FakeRtt(),  # type: ignore[arg-type]
             plus_rtt_backend=_FakeRtt(),  # type: ignore[arg-type]
-            symbol_loader=lambda _path: list(self.symbols),
-            debug_info_loader=lambda _path: DebugInfoIndex(
+            symbol_loader=lambda _path, **_kwargs: list(self.symbols),
+            debug_info_loader=lambda _path, **_kwargs: DebugInfoIndex(
                 [
                     SourceLocation("C:/firmware/main.c", 10, 0x08000100),
                     SourceLocation("C:/firmware/main.c", 12, 0x08000108),
@@ -169,6 +170,79 @@ class BackendServiceTests(unittest.TestCase):
             self.service.handle(RpcMethod.SET_WATCHES, {"watches": [{"key": readonly}]})
             with self.assertRaisesRegex(ProtocolError, "read-only"):
                 self.service.handle(RpcMethod.WRITE_WATCH, {"key": readonly, "value": "1"})
+
+    def test_symbol_progress_precedes_atomic_state_and_is_throttled(self) -> None:
+        def symbols(_path, *, progress):
+            progress("debug", 0, 1000)
+            for count in range(1, 1001):
+                progress("debug", count, 1000)
+            progress("scan", 0, 0)
+            progress("variables", 0, 2)
+            progress("variables", 2, 2)
+            return self.symbols
+
+        def debug(_path, *, progress):
+            progress("source", 0, 2)
+            progress("source", 2, 2)
+            self.assertEqual(self.service.state_snapshot()["symbols"], [])
+            return DebugInfoIndex()
+
+        self.service._symbol_loader = symbols
+        self.service._debug_info_loader = debug
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "firmware.elf"
+            path.touch()
+            result = self.service.handle(RpcMethod.LOAD_SYMBOLS, {"path": str(path), "loadId": "load-1"})
+        progress = [payload for event, payload in self.events if event == EventName.SYMBOL_LOAD_PROGRESS]
+        self.assertEqual(progress[0]["phase"], "check")
+        self.assertEqual(progress[-1]["phase"], "ui")
+        self.assertTrue(all(item["loadId"] == "load-1" for item in progress))
+        self.assertLess(len(progress), 20)
+        self.assertIn((1000, 1000), [(p["current"], p["total"]) for p in progress if p["phase"] == "debug"])
+        self.assertEqual(len(result["state"]["symbols"]), 2)
+        self.assertEqual(self.events[-1][0], EventName.STATE)
+
+    def test_failed_or_expired_load_keeps_previous_symbols_and_watches(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "firmware.elf"
+            path.touch()
+            self.service.handle(RpcMethod.LOAD_SYMBOLS, {"path": str(path)})
+            self.service.handle(RpcMethod.SET_WATCHES, {"watches": [{"key": self.symbols[0].key}]})
+            before = self.service.state_snapshot()
+
+            def fail(_path, **_kwargs):
+                raise ValueError("bad ELF header")
+
+            self.service._symbol_loader = fail
+            with self.assertRaises(ProtocolError) as caught:
+                self.service.handle(RpcMethod.LOAD_SYMBOLS, {"path": str(path), "loadId": "bad"})
+            self.assertEqual(caught.exception.code, "symbol_load_failed")
+
+            def slow(_path, **_kwargs):
+                time.sleep(0.03)
+                return []
+
+            self.service._symbol_loader = slow
+            with patch("take_a_look_backend.service.SYMBOL_LOAD_TIMEOUT_SECONDS", 0.01):
+                with self.assertRaises(ProtocolError) as caught:
+                    self.service.handle(RpcMethod.LOAD_SYMBOLS, {"path": str(path), "loadId": "slow"})
+            self.assertEqual(caught.exception.code, "symbol_load_timeout")
+            after = self.service.state_snapshot()
+            for key in ("symbols", "watches", "symbolFile", "debug"):
+                self.assertEqual(after[key], before[key])
+
+    def test_source_index_failure_remains_a_warning_and_load_completes(self) -> None:
+        def fail(_path, **_kwargs):
+            raise ValueError("bad line information")
+
+        self.service._debug_info_loader = fail
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "firmware.axf"
+            path.touch()
+            result = self.service.handle(RpcMethod.LOAD_SYMBOLS, {"path": str(path)})
+        self.assertEqual(len(result["state"]["symbols"]), 2)
+        self.assertEqual(result["state"]["debug"]["sourceFiles"], [])
+        self.assertTrue(any(name == EventName.LOG and payload.get("level") == "warning" for name, payload in self.events))
 
     def test_config_and_pause_round_trip_in_state(self) -> None:
         state = self.service.handle(

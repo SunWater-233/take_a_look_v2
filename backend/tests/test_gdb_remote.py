@@ -246,7 +246,7 @@ def test_ember_private_rtt_and_real_gdb_run_together(tmp_path):
             options.update(gdbPort=str(server.port), gdbPath=executable)
             symbol = SymbolInfo("counter", 0x20000000, 4, "uint32_t", ".data")
             service = BackendService(lambda event, payload: events.append((event, payload)),
-                                     symbol_loader=lambda _: [symbol])
+                                     symbol_loader=lambda _, **_kwargs: [symbol])
             try:
                 path = tmp_path / "test.axf"
                 path.write_bytes(b"fake elf; symbol loader is injected")

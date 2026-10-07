@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import bisect
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PurePath
 
@@ -81,16 +82,26 @@ class DebugInfoIndex:
         return matches[0] if len(matches) == 1 else None
 
 
-def load_debug_info_from_elf(path: Path) -> DebugInfoIndex:
+def load_debug_info_from_elf(
+    path: Path, progress: Callable[[str, int, int], None] | None = None,
+) -> DebugInfoIndex:
     from elftools.elf.elffile import ELFFile
 
     locations: list[SourceLocation] = []
+    total = 0
     with path.open("rb") as handle:
         elf = ELFFile(handle)
         if not elf.has_dwarf_info():
             return DebugInfoIndex()
         dwarf_info = elf.get_dwarf_info()
-        for compile_unit in dwarf_info.iter_CUs():
+        compile_units = list(dwarf_info.iter_CUs())
+        # The final work item builds the bidirectional line/address index.
+        total = len(compile_units) + 1
+        if progress is not None:
+            progress("source", 0, total)
+        for unit_index, compile_unit in enumerate(compile_units):
+            if progress is not None:
+                progress("source", unit_index, total)
             try:
                 line_program = dwarf_info.line_program_for_CU(compile_unit)
             except Exception:
@@ -112,7 +123,12 @@ def load_debug_info_from_elf(path: Path) -> DebugInfoIndex:
                             address=int(state.address),
                         )
                     )
-    return DebugInfoIndex(locations)
+    if progress is not None:
+        progress("source", max(0, total - 1), total)
+    result = DebugInfoIndex(locations)
+    if progress is not None:
+        progress("source", total, total)
+    return result
 
 
 def _source_path(line_program, file_index: int, compile_dir: str) -> str:

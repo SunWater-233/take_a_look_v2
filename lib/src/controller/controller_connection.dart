@@ -122,6 +122,7 @@ extension TakeALookControllerConnection on TakeALookController {
   }
 
   Future<void> chooseSymbolFile() async {
+    if (isSymbolLoading || _pickingSymbolFile) return;
     if (_isDetachedRemote) {
       _dispatchRemote(ControllerCommand.loadSymbols);
       return;
@@ -131,18 +132,126 @@ extension TakeALookControllerConnection on TakeALookController {
       loadDemoSymbols();
       return;
     }
-    final path = await picker();
-    if (path == null || path.isEmpty) return;
-    loadSymbolsFromPath(path);
+    _pickingSymbolFile = true;
+    try {
+      final path = await picker();
+      if (_disposed || path == null || path.isEmpty) return;
+      unawaited(loadSymbolsFromPath(path));
+    } finally {
+      _pickingSymbolFile = false;
+    }
   }
 
-  void loadSymbolsFromPath(String path) {
-    if (_dispatchCommand(ControllerCommand.loadSymbols, path)) return;
-    loadDemoSymbols();
+  Future<void> loadSymbolsFromPath(String path) async {
+    if (_disposed || isSymbolLoading || path.isEmpty) return;
+    if (_isDetachedRemote) {
+      _dispatchRemote(ControllerCommand.loadSymbols, path);
+      return;
+    }
+    final sender = backendCommand;
+    if (sender == null) {
+      loadDemoSymbols();
+      return;
+    }
+    final startedAt = DateTime.now();
+    final loadId = '${startedAt.microsecondsSinceEpoch}-${_nextSymbolLoadId++}';
+    lastBackendError = null;
+    _setSymbolLoad(
+      SymbolLoadProgress(loadId: loadId, path: path, startedAt: startedAt),
+    );
+    try {
+      await sender(ControllerCommand.loadSymbols, {
+        'path': path,
+        'loadId': loadId,
+      });
+      if (_disposed || state.symbolLoad?.loadId != loadId) return;
+      _setSymbolLoad(
+        state.symbolLoad!.copyWith(
+          phase: 'ui',
+          current: 0,
+          total: 0,
+          status: SymbolLoadStatus.complete,
+          finishedAt: DateTime.now(),
+        ),
+      );
+    } catch (error) {
+      if (_disposed || state.symbolLoad?.loadId != loadId) return;
+      _setSymbolLoad(
+        state.symbolLoad!.copyWith(
+          status: SymbolLoadStatus.failed,
+          finishedAt: DateTime.now(),
+        ),
+      );
+      final failure = error is BackendException
+          ? error
+          : BackendException(
+              'symbol_load_failed',
+              '无法读取 ELF 文件。',
+              error.toString(),
+            );
+      // A process exit is also reported globally by the client.
+      if (lastBackendError?['code'] != failure.code) {
+        applyBackendEvent(BackendEventType.error, {
+          'code': failure.code,
+          'operation': 'loadSymbols',
+          'message': failure.message,
+          if (failure.details != null) 'details': failure.details,
+        });
+      }
+    }
+  }
+
+  void _setSymbolLoad(SymbolLoadProgress progress) {
+    final wasLoading = isSymbolLoading;
+    state.symbolLoad = progress;
+    signals.symbolLoad.emit();
+    if (wasLoading != isSymbolLoading) signals.symbols.emit();
+  }
+
+  void applySymbolLoadProgress(Map<String, dynamic> payload) {
+    final current = state.symbolLoad;
+    if (_disposed ||
+        current == null ||
+        !current.isLoading ||
+        payload['loadId'] != current.loadId) {
+      return;
+    }
+    final phase = payload['phase'];
+    if (phase is! String ||
+        !const {
+          'check',
+          'debug',
+          'scan',
+          'variables',
+          'source',
+          'ui',
+        }.contains(phase)) {
+      return;
+    }
+    _setSymbolLoad(
+      current.copyWith(
+        phase: phase,
+        current: math.max(0, (payload['current'] as num?)?.toInt() ?? 0),
+        total: math.max(0, (payload['total'] as num?)?.toInt() ?? 0),
+      ),
+    );
+  }
+
+  void applySymbolLoadSnapshot(Map<String, dynamic> payload) {
+    if (_disposed) return;
+    final next = SymbolLoadProgress.fromJson(payload);
+    final current = state.symbolLoad;
+    if (current != null &&
+        (next.startedAt.isBefore(current.startedAt) ||
+            (next.loadId == current.loadId &&
+                next.revision <= current.revision))) {
+      return;
+    }
+    _setSymbolLoad(next);
   }
 
   void refreshSymbols() {
-    if (symbolFile.isEmpty) return;
+    if (symbolFile.isEmpty || isSymbolLoading) return;
     if (_isDetachedRemote) {
       _dispatchRemote(ControllerCommand.loadSymbols, symbolFile);
       return;

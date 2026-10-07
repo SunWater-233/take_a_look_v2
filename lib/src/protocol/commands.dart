@@ -107,7 +107,12 @@ class BackendCommandMapper {
       case ControllerCommand.toggleConnection:
         return const BackendCall(BackendMethod.toggleConnection);
       case ControllerCommand.loadSymbols:
-        return BackendCall(BackendMethod.loadSymbols, {'path': arguments});
+        return BackendCall(
+          BackendMethod.loadSymbols,
+          arguments is Map
+              ? Map<String, Object?>.from(arguments)
+              : {'path': arguments},
+        );
       case ControllerCommand.setSampleRate:
         return BackendCall(BackendMethod.setConfig, {
           'sampleRateHz': arguments,

@@ -21,8 +21,9 @@ from take_a_look_backend.services.symbols import load_symbols_from_elf
 
 
 EventSink = Callable[[EventName, object], None]
-SymbolLoader = Callable[[Path], list[SymbolInfo]]
-DebugInfoLoader = Callable[[Path], DebugInfoIndex]
+SymbolLoader = Callable[..., list[SymbolInfo]]
+DebugInfoLoader = Callable[..., DebugInfoIndex]
+SYMBOL_LOAD_TIMEOUT_SECONDS = 600
 
 
 class BackendService(SamplingServiceMixin):
@@ -259,21 +260,48 @@ class BackendService(SamplingServiceMixin):
 
     def _load_symbols(self, params: Mapping[str, object]) -> dict[str, object]:
         path_text = _required_string(params, "path")
+        load_id = params.get("loadId")
+        deadline = time.monotonic() + SYMBOL_LOAD_TIMEOUT_SECONDS
+        last_phase = ""
+        last_report_at = 0.0
+
+        def report_progress(phase: str, current: int = 0, total: int = 0) -> None:
+            nonlocal last_phase, last_report_at
+            now = time.monotonic()
+            # Also checked before committing, so a late parse cannot replace
+            # the previous symbols after the frontend has timed out.
+            if now > deadline:
+                raise ProtocolError("symbol_load_timeout", "读取 ELF 文件超时，请检查文件后重试。")
+            if phase == last_phase and current != total and now - last_report_at < 0.1:
+                return
+            last_phase, last_report_at = phase, now
+            self._emit(EventName.SYMBOL_LOAD_PROGRESS, {
+                "loadId": load_id, "path": path_text, "phase": phase,
+                "current": current, "total": total,
+            })
+
+        report_progress("check")
         path = Path(path_text).expanduser()
         if not path.is_file():
             raise ProtocolError("file_not_found", "Symbol file does not exist.", str(path))
         if path.suffix.lower() not in {".elf", ".axf"}:
             raise ProtocolError("unsupported_symbol_file", "Symbol file must use .elf or .axf.", str(path))
         try:
-            symbols = self._symbol_loader(path)
+            symbols = self._symbol_loader(path, progress=report_progress)
+        except ProtocolError:
+            raise
         except Exception as error:
             raise ProtocolError("symbol_load_failed", "Unable to parse the symbol file.", str(error)) from error
         try:
-            debug_info = self._debug_info_loader(path)
+            report_progress("source")
+            debug_info = self._debug_info_loader(path, progress=report_progress)
+        except ProtocolError:
+            raise
         except Exception as error:
             debug_info = DebugInfoIndex()
             self._emit(EventName.LOG, {"level": "warning", "message": f"无法读取源码行调试信息：{error}"})
         with self._lock:
+            report_progress("ui")
             self._remove_all_breakpoints_locked()
             self._symbols = {symbol.key: symbol for symbol in symbols}
             self._symbol_file = str(path)

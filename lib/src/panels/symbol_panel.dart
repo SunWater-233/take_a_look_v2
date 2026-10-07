@@ -359,14 +359,18 @@ class _SymbolPanelState extends State<_SymbolPanel> {
                   ),
                   const SizedBox(width: 8),
                   TalButton(
-                    onPressed: widget.controller.chooseSymbolFile,
+                    onPressed: widget.controller.isSymbolLoading
+                        ? null
+                        : widget.controller.chooseSymbolFile,
                     child: const Text('选择文件'),
                   ),
                   const SizedBox(width: 8),
                   SizedBox(
                     width: 56,
                     child: TalButton(
-                      onPressed: widget.controller.symbols.isEmpty
+                      onPressed:
+                          widget.controller.symbols.isEmpty ||
+                              widget.controller.isSymbolLoading
                           ? null
                           : widget.controller.refreshSymbols,
                       child: const Text('刷新'),

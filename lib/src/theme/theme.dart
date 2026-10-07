@@ -6,6 +6,7 @@ library;
 export 'controls.dart';
 export 'dropdown.dart';
 export 'feedback.dart';
+export 'progress_dialog.dart';
 export 'interaction.dart';
 export 'material_theme.dart';
 export 'menus.dart';

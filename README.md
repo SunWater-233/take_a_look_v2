@@ -89,6 +89,26 @@ expandable/copyable details, and stay until closed or replaced by a newer error.
 Touch errors keep the centered confirmation dialog. Full error history remains
 in the event log. This input policy is independent of UI zoom and window width.
 
+ELF/AXF selection and refresh show a centered progress dialog through variable
+parsing, source-line indexing, and the first updated UI frame. Counts come from
+the parser; steps with no known total use an indeterminate bar. The dialog
+keeps the input mode captured when it opens: mouse/keyboard uses a compact
+440-pixel layout, while touch uses larger text, spacing, and a width capped at
+560 pixels. Loading blocks duplicate reads and accidental dismissal. Completion
+closes automatically; failures preserve existing symbols and use the adaptive
+error feedback above. Detached windows receive ordered progress updates.
+
+Symbol parsing has a ten-minute backend deadline checked before replacing the
+current data; its RPC allows an additional minute for error delivery. Other
+commands retain their 30-second timeout. Rebuild `tool/build_backend.ps1` when
+changing the parser, since packaged backend executables take precedence over
+the Python sources. Optional end-to-end validation:
+
+```powershell
+$env:TAL_TEST_ELF = 'C:\firmware\motor.axf'
+flutter test test/backend_symbol_load_test.dart
+```
+
 ## GPU selection
 
 Windows, Linux and macOS desktop windows prefer a high-performance GPU when one

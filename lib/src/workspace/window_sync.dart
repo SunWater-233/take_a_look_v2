@@ -51,6 +51,7 @@ class MainWindowSync {
       <WorkspacePanelId, Map<String, int>>{};
   Timer? _stateBroadcastTimer;
   Timer? _telemetryBroadcastTimer;
+  Future<void> _stateDelivery = Future<void>.value();
   bool _telemetryBroadcasting = false;
   bool _telemetryBroadcastPending = false;
   bool _started = false;
@@ -68,6 +69,7 @@ class MainWindowSync {
     _started = true;
     await _mainChannel.setMethodCallHandler(_handleCall);
     controller.stateSyncChanges.addListener(_scheduleStateBroadcast);
+    controller.symbolLoadChanges.addListener(_broadcastSymbolLoad);
     controller.telemetrySyncChanges.addListener(_scheduleTelemetryBroadcast);
   }
 
@@ -131,6 +133,21 @@ class MainWindowSync {
     );
   }
 
+  void _broadcastSymbolLoad() {
+    final progress = controller.symbolLoadProgress;
+    if (progress == null || _windows.isEmpty) return;
+    // Progress ticks must not repeatedly serialize the entire symbol table.
+    // Completion carries the final symbols/source index before closing dialogs.
+    unawaited(
+      _broadcast(
+        'state',
+        progress.isLoading
+            ? {'symbolLoad': progress.toJson()}
+            : controller.stateSnapshot(),
+      ),
+    );
+  }
+
   void _scheduleTelemetryBroadcast() {
     if (_telemetryBroadcasting) {
       _telemetryBroadcastPending = true;
@@ -173,20 +190,25 @@ class MainWindowSync {
     }
   }
 
-  Future<void> _broadcast(String method, Map<String, dynamic> state) async {
-    for (final entry in _windows.entries) {
-      try {
-        await entry.value.invokeMethod<void>(method, state);
-      } on Object {
-        // Window lifecycle reconciliation removes closed windows. A newly
-        // created window may not have installed its handler yet, so a single
-        // failed delivery must not unregister it.
+  Future<void> _broadcast(String method, Map<String, dynamic> state) {
+    // Keep full snapshots and progress patches in the same order for every
+    // window, even when one window acknowledges a message slowly.
+    _stateDelivery = _stateDelivery.then((_) async {
+      for (final entry in _windows.entries.toList(growable: false)) {
+        try {
+          await entry.value.invokeMethod<void>(method, state);
+        } on Object {
+          // Window lifecycle reconciliation removes closed windows. A newly
+          // created window may not have installed its handler yet.
+        }
       }
-    }
+    });
+    return _stateDelivery;
   }
 
   Future<void> dispose() async {
     controller.stateSyncChanges.removeListener(_scheduleStateBroadcast);
+    controller.symbolLoadChanges.removeListener(_broadcastSymbolLoad);
     controller.telemetrySyncChanges.removeListener(_scheduleTelemetryBroadcast);
     _stateBroadcastTimer?.cancel();
     _telemetryBroadcastTimer?.cancel();

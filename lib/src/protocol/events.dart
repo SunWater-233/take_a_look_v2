@@ -5,7 +5,8 @@ enum BackendEventType {
   log,
   error,
   perf,
-  debug;
+  debug,
+  symbolLoadProgress;
 
   String get wireName => name;
 

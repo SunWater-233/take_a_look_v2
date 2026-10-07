@@ -9,6 +9,7 @@ class ControllerSignals {
   final ControllerSignal connection = ControllerSignal();
   final ControllerSignal sampling = ControllerSignal();
   final ControllerSignal symbols = ControllerSignal();
+  final ControllerSignal symbolLoad = ControllerSignal();
   final ControllerSignal watches = ControllerSignal();
   final ControllerSignal telemetry = ControllerSignal();
   final ControllerSignal plot = ControllerSignal();
@@ -24,6 +25,7 @@ class ControllerSignals {
     connection.dispose();
     sampling.dispose();
     symbols.dispose();
+    symbolLoad.dispose();
     watches.dispose();
     telemetry.dispose();
     plot.dispose();

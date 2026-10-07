@@ -2,6 +2,8 @@ import 'dart:ui';
 
 import '../telemetry/sample_buffer.dart';
 
+export 'symbol_load_progress.dart';
+
 enum ConnectionStatus { disconnected, connecting, connected }
 
 enum DebugExecutionState { unavailable, running, halted, unknown }

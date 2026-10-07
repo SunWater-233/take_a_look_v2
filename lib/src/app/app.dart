@@ -7,6 +7,7 @@ import 'package:tal_drag_preview/tal_drag_preview.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'title_bar.dart';
+import 'workbench_feedback.dart';
 import '../backend/backend_client.dart';
 import '../controller/controller.dart';
 import '../workspace/keyboard_shortcuts.dart';
@@ -394,69 +395,6 @@ class MainWorkbench extends StatefulWidget {
 
 class _MainWorkbenchState extends State<MainWorkbench> {
   final workspaceKey = GlobalKey<DockingWorkspaceState>();
-  final _feedback = TalFeedbackController();
-  Map<String, dynamic>? _lastObservedBackendError;
-  Map<String, dynamic>? _pendingBackendError;
-  bool _feedbackScheduled = false;
-  bool _feedbackShowing = false;
-
-  @override
-  void initState() {
-    super.initState();
-    widget.controller.connectionChanges.addListener(_handleBackendError);
-    _handleBackendError();
-  }
-
-  @override
-  void didUpdateWidget(covariant MainWorkbench oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.controller == widget.controller) return;
-    oldWidget.controller.connectionChanges.removeListener(_handleBackendError);
-    widget.controller.connectionChanges.addListener(_handleBackendError);
-    _lastObservedBackendError = null;
-    _handleBackendError();
-  }
-
-  @override
-  void dispose() {
-    widget.controller.connectionChanges.removeListener(_handleBackendError);
-    _feedback.dispose();
-    super.dispose();
-  }
-
-  void _handleBackendError() {
-    final error = widget.controller.lastBackendError;
-    if (error == null || identical(error, _lastObservedBackendError)) return;
-    _lastObservedBackendError = error;
-    _pendingBackendError = Map<String, dynamic>.from(error);
-    if (_feedbackShowing || _feedbackScheduled) return;
-    _feedbackScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _feedbackScheduled = false;
-      if (mounted) unawaited(_showPendingBackendErrors());
-    });
-  }
-
-  Future<void> _showPendingBackendErrors() async {
-    if (_feedbackShowing) return;
-    _feedbackShowing = true;
-    try {
-      while (mounted && _pendingBackendError != null) {
-        final error = _pendingBackendError!;
-        _pendingBackendError = null;
-        final message = error['message'] as String? ?? '后端操作失败。';
-        final details = error['details'];
-        await _feedback.showError(
-          context: context,
-          title: _backendErrorTitle(error),
-          message: message,
-          details: details?.toString(),
-        );
-      }
-    } finally {
-      _feedbackShowing = false;
-    }
-  }
 
   KeyEventResult _handleWorkbenchShortcut(KeyEvent event) {
     if (WorkspaceShortcut.resetUiScale.matches(event)) {
@@ -476,45 +414,34 @@ class _MainWorkbenchState extends State<MainWorkbench> {
 
   @override
   Widget build(BuildContext context) {
-    return WorkspaceKeyboardShortcuts(
-      onKeyEvent: _handleWorkbenchShortcut,
-      child: Scaffold(
-        body: Column(
-          children: [
-            TalWindowTitleBar(
-              controller: widget.controller,
-              workspaceKey: workspaceKey,
-            ),
-            Expanded(
-              child: DockingWorkspace(
-                key: workspaceKey,
+    return WorkbenchFeedback(
+      controller: widget.controller,
+      child: WorkspaceKeyboardShortcuts(
+        onKeyEvent: _handleWorkbenchShortcut,
+        child: Scaffold(
+          body: Column(
+            children: [
+              TalWindowTitleBar(
                 controller: widget.controller,
-                windowSync: widget.windowSync,
-                layoutFile: widget.layoutFile,
-                onPanelVisibilityChanged: () {
-                  if (mounted) setState(() {});
-                },
+                workspaceKey: workspaceKey,
               ),
-            ),
-          ],
+              Expanded(
+                child: DockingWorkspace(
+                  key: workspaceKey,
+                  controller: widget.controller,
+                  windowSync: widget.windowSync,
+                  layoutFile: widget.layoutFile,
+                  onPanelVisibilityChanged: () {
+                    if (mounted) setState(() {});
+                  },
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
-}
-
-String _backendErrorTitle(Map<String, dynamic> error) {
-  return switch (error['code']) {
-    'startup_failed' => '后端启动失败',
-    'connect_failed' => 'pyOCD 连接失败',
-    'file_not_found' ||
-    'unsupported_symbol_file' ||
-    'symbol_load_failed' => '读取失败',
-    'write_failed' || 'readonly_symbol' || 'unknown_watch' => '写入失败',
-    'reset_failed' => '目标复位失败',
-    'no_samples' => '导出失败',
-    _ => '操作失败',
-  };
 }
 
 class DetachedPanelWindow extends StatefulWidget {
@@ -583,33 +510,36 @@ class _DetachedPanelWindowState extends State<DetachedPanelWindow> {
       onTabDragUpdate: (_, details) => _updatePanelDrag(details),
       onTabDragEnd: (_, _) => _endPanelDrag(),
     );
-    return WorkspaceKeyboardShortcuts(
-      onKeyEvent: (event) {
-        if (WorkspaceShortcut.resetUiScale.matches(event)) {
-          widget.controller.setUiScale(1);
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
-      },
-      child: Scaffold(
-        body: Column(
-          children: [
-            TalWindowTitleBar(
-              subtitle: panels.length > 1
-                  ? '${activePanel.title} 组合'
-                  : activePanel.title,
-            ),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(4),
-                child: buildWorkspacePanel(
-                  activePanel,
-                  widget.controller,
-                  chrome: chrome,
+    return WorkbenchFeedback(
+      controller: widget.controller,
+      child: WorkspaceKeyboardShortcuts(
+        onKeyEvent: (event) {
+          if (WorkspaceShortcut.resetUiScale.matches(event)) {
+            widget.controller.setUiScale(1);
+            return KeyEventResult.handled;
+          }
+          return KeyEventResult.ignored;
+        },
+        child: Scaffold(
+          body: Column(
+            children: [
+              TalWindowTitleBar(
+                subtitle: panels.length > 1
+                    ? '${activePanel.title} 组合'
+                    : activePanel.title,
+              ),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: buildWorkspacePanel(
+                    activePanel,
+                    widget.controller,
+                    chrome: chrome,
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

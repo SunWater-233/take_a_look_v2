@@ -54,6 +54,9 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
 
   TakeALookController get controller => widget.controller;
 
+  double get _lineNumberWidth =>
+      math.max(46.0, 22 + _lines.length.toString().length * 8.0);
+
   @override
   void initState() {
     super.initState();
@@ -1579,7 +1582,10 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
           0,
           (value, line) => math.max(value, line.textLength),
         );
-        final contentWidth = math.max(constraints.maxWidth, 82 + longest * 8.2);
+        final contentWidth = math.max(
+          constraints.maxWidth,
+          30 + _lineNumberWidth + 14 + longest * 8.2,
+        );
         return Scrollbar(
           controller: _horizontalController,
           thumbVisibility: true,
@@ -1638,26 +1644,36 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
           : Colors.transparent,
       child: Row(
         children: [
+          SizedBox(
+            width: 30,
+            child: Center(
+              child: isCurrent
+                  ? const Icon(
+                      Icons.arrow_right,
+                      size: 18,
+                      color: Color(0xFF65A7FF),
+                    )
+                  : const SizedBox.shrink(),
+            ),
+          ),
           InkWell(
             key: ValueKey('breakpoint-$lineNumber'),
             onTap: canSetBreakpoint
                 ? () => controller.toggleBreakpoint(path, lineNumber)
                 : null,
-            child: SizedBox(
-              width: 76,
+            child: Container(
+              key: ValueKey('executable-line-$lineNumber'),
+              width: _lineNumberWidth,
               height: _lineHeight,
+              color: canSetBreakpoint
+                  ? const Color(0xFF353236)
+                  : Colors.transparent,
               child: Row(
                 children: [
                   SizedBox(
-                    width: 30,
+                    width: 18,
                     child: Center(
-                      child: isCurrent
-                          ? const Icon(
-                              Icons.arrow_right,
-                              size: 18,
-                              color: Color(0xFF65A7FF),
-                            )
-                          : hasBreakpoint
+                      child: hasBreakpoint
                           ? Tooltip(
                               message:
                                   breakpoint?.message ??
@@ -1675,25 +1691,20 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
                           : const SizedBox.shrink(),
                     ),
                   ),
-                  Container(
-                    key: ValueKey('executable-line-$lineNumber'),
-                    width: 46,
-                    height: _lineHeight,
-                    alignment: Alignment.centerRight,
-                    padding: const EdgeInsets.only(right: 4),
-                    color: canSetBreakpoint
-                        ? const Color(0xFF353236)
-                        : Colors.transparent,
-                    child: Text(
-                      '$lineNumber',
-                      textAlign: TextAlign.right,
-                      style: TextStyle(
-                        color: canSetBreakpoint
-                            ? const Color(0xFFC8C4C9)
-                            : const Color(0xFF625E63),
-                        fontSize: 12,
-                        height: 1.45,
-                        fontFamily: talFontFamily,
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 4),
+                      child: Text(
+                        '$lineNumber',
+                        textAlign: TextAlign.right,
+                        style: TextStyle(
+                          color: canSetBreakpoint
+                              ? const Color(0xFFC8C4C9)
+                              : const Color(0xFF625E63),
+                          fontSize: 12,
+                          height: 1.45,
+                          fontFamily: talFontFamily,
+                        ),
                       ),
                     ),
                   ),

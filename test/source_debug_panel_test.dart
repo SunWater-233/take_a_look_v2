@@ -129,7 +129,7 @@ void main() {
     },
   );
 
-  testWidgets('configured source root resolves build-machine source paths', (
+  testWidgets('source files wait for selection and resolve the source root', (
     tester,
   ) async {
     late final Directory sourceRoot;
@@ -152,7 +152,7 @@ void main() {
     addTearDown(() => sourceRoot.delete(recursive: true));
 
     const debugPath = 'C:/build/firmware/src/mapped_source.c';
-    final controller = TakeALookController()..setSourceRoot(sourceRoot.path);
+    final controller = TakeALookController();
     controller.applyDebugState({
       'executionState': 'halted',
       'sourceFiles': [debugPath],
@@ -178,6 +178,24 @@ void main() {
       ),
     );
     final sourceView = find.byKey(const ValueKey('source-view-$debugPath'));
+    expect(find.byKey(const ValueKey('source-tab-$debugPath')), findsNothing);
+    expect(find.text('选择要查看的源码'), findsOneWidget);
+
+    controller.applySnapshot({
+      'symbolFile': 'firmware.axf',
+      'symbols': <Object?>[],
+    });
+    controller.setSourceRoot(sourceRoot.path);
+    await tester.pump();
+    expect(find.byKey(const ValueKey('source-tab-$debugPath')), findsNothing);
+    expect(find.text('符号文件已打开'), findsOneWidget);
+    expect(find.text('文件根目录已选择'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('source-file-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey('source-file-option-$debugPath')),
+    );
     for (
       var attempt = 0;
       attempt < 20 && sourceView.evaluate().isEmpty;
@@ -192,6 +210,12 @@ void main() {
     expect(sourceView, findsOneWidget);
     expect(find.textContaining('mapped_source'), findsWidgets);
     expect(controller.debugState.sourceRoot, sourceRoot.path);
+
+    await tester.tap(find.byKey(const ValueKey('source-tab-close-$debugPath')));
+    controller.selectSymbols(const []);
+    await tester.pump();
+    expect(find.byKey(const ValueKey('source-tab-$debugPath')), findsNothing);
+    expect(find.text('选择要查看的源码'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());
     controller.dispose();
@@ -783,7 +807,7 @@ void main() {
     expect(tester.widget<TextField>(field).focusNode!.hasFocus, isTrue);
     expect(
       find.byKey(ValueKey('source-tab-active-${sourcePaths.first}')),
-      findsOneWidget,
+      findsNothing,
     );
     expect(find.byKey(ValueKey('source-tab-${sourcePaths[8]}')), findsNothing);
 
@@ -1083,6 +1107,9 @@ void main() {
         ),
       ),
     );
+    await tester.tap(find.byKey(const ValueKey('source-file-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(ValueKey('source-file-option-$sourcePath')));
     for (
       var attempt = 0;
       attempt < 20 && find.byKey(ValueKey('source-line-2')).evaluate().isEmpty;

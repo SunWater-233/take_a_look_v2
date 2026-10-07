@@ -46,7 +46,6 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   _SourceTokenSelection? _sourceSelection;
   Timer? _searchDebounce;
   List<_SourceSearchResult> _searchResults = const [];
-  final Map<String, String> _sourceOverrides = <String, String>{};
   final Map<String, String> _resolvedSourcePaths = <String, String>{};
   Future<Map<String, List<String>>>? _sourceRootIndexFuture;
   String _observedSourceRoot = '';
@@ -78,7 +77,6 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     _externalPathKeys.clear();
     _sourceTextCache.clear();
     _sourceFiles = const [];
-    _sourceOverrides.clear();
     _resolvedSourcePaths.clear();
     _invalidateSearchFileIndex();
     _sourceRootIndexFuture = null;
@@ -150,7 +148,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     } else if (nextPath == null ||
         (!_externalPathKeys.contains(_pathKey(nextPath)) &&
             _matchingPath(nextPath, files) == null)) {
-      nextPath = _openPaths.firstOrNull ?? files.firstOrNull;
+      nextPath = _openPaths.firstOrNull;
     }
     if (nextPath != null &&
         !_openPaths.any(
@@ -214,8 +212,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     // Cache in-flight reads and failures as well as successful reads. Typing a
     // new query must not re-read the same file or retry unavailable debug paths.
     return _sourceTextCache.putIfAbsent(key, () async {
-      final sourcePath =
-          localPath ?? _sourceOverrides[key] ?? await _resolveSourcePath(path);
+      final sourcePath = localPath ?? await _resolveSourcePath(path);
       return SourceSearchText(await File(sourcePath).readAsString());
     });
   }
@@ -464,7 +461,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
       paths,
       root,
       rootIndex,
-      {..._resolvedSourcePaths, ..._sourceOverrides},
+      Map.of(_resolvedSourcePaths),
       indexGeneration,
     );
   }
@@ -1017,20 +1014,6 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     return index;
   }
 
-  Future<void> _locateSourceFile() async {
-    final selectedPath = _selectedPath;
-    if (selectedPath == null) return;
-    final localPath = await pickSourceFile();
-    if (localPath == null || localPath.isEmpty) return;
-    _sourceOverrides[_pathKey(selectedPath)] = localPath;
-    _sourceTextCache.remove(_pathKey(selectedPath));
-    _invalidateSearchFileIndex();
-    await _loadSource(selectedPath);
-    if (mounted && _searchVisible && _searchController.text.isNotEmpty) {
-      _queueSearch(_searchController.text, immediate: true);
-    }
-  }
-
   void _scrollToCurrentLine({bool immediate = false}) {
     final currentPath = controller.debugState.currentSource;
     final currentLine = controller.debugState.currentLine;
@@ -1528,12 +1511,55 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     );
   }
 
+  List<Widget> _buildSourceSetupActions() {
+    final symbolFile = controller.symbolFile;
+    final sourceRoot = controller.debugState.sourceRoot;
+    final hasSymbolFile = symbolFile.isNotEmpty;
+    final hasSourceRoot = sourceRoot.isNotEmpty;
+    return [
+      Tooltip(
+        message: hasSymbolFile ? '$symbolFile\n点击更换符号文件' : '打开 ELF / AXF 符号文件',
+        child: TalButton.icon(
+          key: const ValueKey('source-symbol-file-button'),
+          onPressed: controller.chooseSymbolFile,
+          style: hasSymbolFile ? talSuccessOutlinedButtonStyle : null,
+          icon: Icon(
+            hasSymbolFile
+                ? Icons.check_circle_outline
+                : Icons.file_open_outlined,
+            size: 16,
+            color: hasSymbolFile ? TalColors.success : null,
+          ),
+          label: Text(hasSymbolFile ? '符号文件已打开' : '打开符号文件'),
+        ),
+      ),
+      Tooltip(
+        message: hasSourceRoot ? '$sourceRoot\n点击更换文件根目录' : '选择工程源码所在的根目录',
+        child: TalButton.icon(
+          key: const ValueKey('source-root-directory-button'),
+          onPressed: controller.chooseSourceRoot,
+          style: hasSourceRoot ? talSuccessOutlinedButtonStyle : null,
+          icon: Icon(
+            hasSourceRoot ? Icons.check_circle_outline : Icons.folder_open,
+            size: 16,
+            color: hasSourceRoot ? TalColors.success : null,
+          ),
+          label: Text(hasSourceRoot ? '文件根目录已选择' : '选择文件根目录'),
+        ),
+      ),
+    ];
+  }
+
   Widget _buildBody() {
     if (_selectedPath == null) {
-      return const _SourceDebugEmptyState(
-        icon: Icons.code_off,
-        title: '没有可显示的源码',
-        detail: '请加载带 DWARF 调试信息的 ELF / AXF 文件。',
+      final hasSourceFiles = _sourceFiles.isNotEmpty;
+      return _SourceDebugEmptyState(
+        icon: hasSourceFiles ? Icons.code : Icons.code_off,
+        title: hasSourceFiles ? '选择要查看的源码' : '没有可显示的源码',
+        detail: hasSourceFiles
+            ? '点击右上角 + 或按 Ctrl+F 查找并打开源码文件。'
+            : '请加载带 DWARF 调试信息的 ELF / AXF 文件。',
+        actions: _buildSourceSetupActions(),
       );
     }
     if (_loadError != null) {
@@ -1541,8 +1567,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
         icon: Icons.link_off,
         title: '找不到本地源码文件',
         detail: '$_selectedPath\n$_loadError',
-        actionLabel: '定位本地源码',
-        onAction: _locateSourceFile,
+        actions: _buildSourceSetupActions(),
       );
     }
     if (_lines.isEmpty) {
@@ -1819,15 +1844,13 @@ class _SourceDebugEmptyState extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.detail,
-    this.actionLabel,
-    this.onAction,
+    this.actions = const [],
   });
 
   final IconData icon;
   final String title;
   final String detail;
-  final String? actionLabel;
-  final VoidCallback? onAction;
+  final List<Widget> actions;
 
   @override
   Widget build(BuildContext context) {
@@ -1846,12 +1869,13 @@ class _SourceDebugEmptyState extends StatelessWidget {
               textAlign: TextAlign.center,
               style: talMuted.copyWith(fontSize: 12),
             ),
-            if (actionLabel != null && onAction != null) ...[
+            if (actions.isNotEmpty) ...[
               const SizedBox(height: 14),
-              OutlinedButton.icon(
-                onPressed: onAction,
-                icon: const Icon(Icons.folder_open, size: 16),
-                label: Text(actionLabel!),
+              Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 8,
+                runSpacing: 8,
+                children: actions,
               ),
             ],
           ],

@@ -16,7 +16,6 @@ import '../analysis/analysis.dart';
 import '../analysis/analysis_fft.dart';
 import '../analysis/analysis_worker.dart';
 import '../controller/controller.dart';
-import '../app/file_pickers.dart';
 import '../workspace/keyboard_shortcuts.dart';
 import '../models/models.dart';
 import '../workspace/panel_types.dart';

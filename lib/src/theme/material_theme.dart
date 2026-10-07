@@ -14,6 +14,18 @@ final ButtonStyle talSelectedOutlinedButtonStyle = ButtonStyle(
   side: const WidgetStatePropertyAll(BorderSide(color: TalColors.accent)),
 );
 
+/// Feedback for actions with a successfully configured file or directory.
+final ButtonStyle talSuccessOutlinedButtonStyle = ButtonStyle(
+  foregroundColor: const WidgetStatePropertyAll(TalColors.success),
+  backgroundColor: WidgetStatePropertyAll(
+    TalColors.success.withValues(alpha: 0.12),
+  ),
+  overlayColor: WidgetStatePropertyAll(
+    TalColors.success.withValues(alpha: 0.12),
+  ),
+  side: const WidgetStatePropertyAll(BorderSide(color: TalColors.success)),
+);
+
 ThemeData buildTalTheme({TalInputMode inputMode = TalInputMode.mouseKeyboard}) {
   final ui = TalUiTheme(inputMode: inputMode);
   final radius = ui.controlRadius;

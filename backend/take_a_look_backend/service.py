@@ -11,6 +11,8 @@ from pathlib import Path
 from take_a_look_backend.backends.j_scope_rtt import JScopeRttBackend
 from take_a_look_backend.backends.pyocd_memory import PyOcdConnectionConfig, PyOcdMemoryBackend
 from take_a_look_backend.backends.rtt_plus import JScopeRttPlusBackend
+from take_a_look_backend.backends.remote_backend import CONNECTION_KINDS, REMOTE_DEFAULTS, RemoteMemoryBackend
+from take_a_look_backend.backends.ember_transport import EmberError
 from take_a_look_backend.models import SymbolInfo, WatchedVariable, json_value
 from take_a_look_backend.protocol import EventName, PROTOCOL_VERSION, ProtocolError, RpcMethod
 from take_a_look_backend.services.sampling import SamplingServiceMixin
@@ -39,9 +41,12 @@ class BackendService(SamplingServiceMixin):
         plus_rtt_backend: JScopeRttPlusBackend | None = None,
         symbol_loader: SymbolLoader = load_symbols_from_elf,
         debug_info_loader: DebugInfoLoader = load_debug_info_from_elf,
+        remote_backend_factory: Callable[..., RemoteMemoryBackend] = RemoteMemoryBackend,
     ) -> None:
         self._emit_event = event_sink
         self._memory = memory_backend or PyOcdMemoryBackend()
+        self._local_memory = self._memory
+        self._remote_backend_factory = remote_backend_factory
         self._normal_rtt = normal_rtt_backend or JScopeRttBackend()
         self._plus_rtt = plus_rtt_backend or JScopeRttPlusBackend()
         self._symbol_loader = symbol_loader
@@ -56,6 +61,8 @@ class BackendService(SamplingServiceMixin):
         self._target_name = "auto"
         self._swd_clock = "4 MHz"
         self._serial_number = ""
+        self._connection_kind = "local"
+        self._remote_config = dict(REMOTE_DEFAULTS)
         self._sample_rate_hz = 50.0
         self._rtt_sample_rate_hz = 1000.0
         self._sampling_paused = False
@@ -106,6 +113,8 @@ class BackendService(SamplingServiceMixin):
                     "sourceDebug",
                     "breakpoints",
                     "runControl",
+                    "emberMobile",
+                    "remoteGdb",
                 ],
                 "state": self.state_snapshot(),
             }
@@ -161,6 +170,14 @@ class BackendService(SamplingServiceMixin):
             "targetName": self._target_name,
             "swdClock": self._swd_clock,
             "serialNumber": self._serial_number,
+            "connectionKind": self._connection_kind,
+            "remoteConfig": dict(self._remote_config),
+            "gatewayProtocolVersion": getattr(getattr(self._memory, "client", None), "protocol_version", None),
+            "connectionCapabilities": {
+                "memorySampling": self._connection_kind in {"local", "ember"},
+                "memoryWrite": self._connection_kind != "ember",
+                "rtt": self._connection_kind != "gdb",
+            },
             "sampleRateHz": self._sample_rate_hz,
             "rttSampleRateHz": self._rtt_sample_rate_hz,
             "samplingPaused": self._sampling_paused,
@@ -182,6 +199,8 @@ class BackendService(SamplingServiceMixin):
             connecting_state = self._runtime_state_locked()
         self._emit(EventName.STATE, connecting_state)
         try:
+            self._memory = (self._local_memory if self._connection_kind == "local" else
+                            self._remote_backend_factory(self._connection_kind, self._remote_config))
             config = PyOcdConnectionConfig(
                 target=_target_override(self._target_name),
                 frequency_hz=_parse_frequency_hz(self._swd_clock),
@@ -189,9 +208,20 @@ class BackendService(SamplingServiceMixin):
                 probe_filter=_probe_filter(self._probe_type),
             )
             self._memory.connect(config)
+            initial_execution_state = self._memory.debug_state()
+            with self._lock:
+                self._target_execution_state = initial_execution_state
+                self._refresh_debug_state_locked(force=True)
         except Exception as error:
+            try:
+                self._memory.disconnect()
+            except Exception:
+                pass
             with self._lock:
                 self._connection_status = "disconnected"
+                self._target_execution_state = "unavailable"
+                self._stopped_location = None
+                self._registers = {}
                 failed_state = self._runtime_state_locked()
             self._emit(EventName.LOG, {"level": "error", "message": f"连接调试探针失败：{error}"})
             self._emit(EventName.STATE, failed_state)
@@ -200,10 +230,12 @@ class BackendService(SamplingServiceMixin):
             self._connection_status = "connected"
             self._connection_started_at = time.monotonic()
             self._sampling_paused = False
-            self._target_execution_state = "running"
+            self._target_execution_state = initial_execution_state
             self._apply_all_breakpoints_locked()
             state = self._runtime_state_locked()
-        self._emit(EventName.LOG, {"level": "info", "message": "已连接 pyOCD 调试探针。"})
+        label = {"local": "pyOCD 调试探针", "ember": "EmberMobile 私有协议",
+                 "emberGdb": "EmberMobile + GDB", "gdb": "远程 GDB"}[self._connection_kind]
+        self._emit(EventName.LOG, {"level": "info", "message": f"已连接 {label}。"})
         self._emit(EventName.STATE, state)
         self._wake.set()
         return {"state": state}
@@ -316,6 +348,14 @@ class BackendService(SamplingServiceMixin):
         return {"debug": payload}
 
     def _continue_or_step_locked(self, *, resume: bool) -> None:
+        if getattr(self._memory, "manages_breakpoint_step", False):
+            if resume:
+                self._memory.resume()
+            else:
+                self._memory.step()
+            return
+        if resume and self._memory.debug_state() == "running":
+            return
         registers = self._registers or self._memory.read_core_registers()
         pc = registers.get("pc")
         current_breakpoint = next(
@@ -361,11 +401,30 @@ class BackendService(SamplingServiceMixin):
     def _poll_debug_state_locked(self) -> None:
         try:
             self._refresh_debug_state_locked(force=False)
-        except Exception:
+        except Exception as error:
+            if self._handle_remote_failure_locked(error):
+                return
             # Sampling and a temporarily inaccessible target should recover on
             # their next poll without turning a transient status read into a
             # transport-level failure.
             return
+
+    def _handle_remote_failure_locked(self, error: Exception) -> bool:
+        fatal = isinstance(error, (ConnectionError, TimeoutError, OSError)) or (
+            isinstance(error, EmberError) and error.code in {"unauthorized", "stale_session", "not_attached"})
+        if self._connection_kind == "local" or not fatal:
+            return False
+        self._stop_rtt_locked()
+        self._memory.disconnect()
+        self._connection_status = "disconnected"
+        self._connection_started_at = None
+        self._target_execution_state = "unavailable"
+        self._stopped_location = None
+        self._registers = {}
+        self._mark_breakpoints_pending_locked()
+        self._emit(EventName.LOG, {"level": "error", "message": f"远程连接已中断：{error}"})
+        self._emit(EventName.STATE, self._runtime_state_locked())
+        return True
 
     def _refresh_debug_state_locked(self, *, force: bool) -> None:
         next_state = self._memory.debug_state()
@@ -379,6 +438,12 @@ class BackendService(SamplingServiceMixin):
             self._stopped_location = {"address": pc}
             if location is not None:
                 self._stopped_location.update({"path": location.path, "line": location.line})
+            if not getattr(self._memory, "supports_running_memory", True):
+                symbols = [watch.symbol for watch in self._watches.values() if not watch.symbol.is_rtt]
+                if symbols:
+                    for key, value in self._memory.read_symbols(symbols).items():
+                        self._watches[key].value = value
+                    self._emit(EventName.STATE, {"watches": [self._watch_json(w) for w in self._watches.values()]})
         else:
             self._registers = {}
             self._stopped_location = None
@@ -468,6 +533,9 @@ class BackendService(SamplingServiceMixin):
                     value=old.value if old else "",
                 )
             self._watches = new_watches
+            if (self._connection_status == "connected" and self._target_execution_state == "halted"
+                    and not getattr(self._memory, "supports_running_memory", True)):
+                self._refresh_debug_state_locked(force=True)
             if self._rtt_protocol == "plus":
                 self._stop_rtt_locked()
             state = {"watches": [self._watch_json(watch) for watch in self._watches.values()]}
@@ -484,6 +552,8 @@ class BackendService(SamplingServiceMixin):
                 raise ProtocolError("unknown_watch", "Watch does not exist.", key)
             if not watch.symbol.is_writable:
                 raise ProtocolError("readonly_symbol", "This symbol is read-only.", watch.symbol.name)
+            if not getattr(self._memory, "supports_memory_write", True):
+                raise ProtocolError("unsupported_operation", "EmberMobile 私有协议不支持内存写入，请使用 GDB。")
             if self._connection_status != "connected":
                 raise ProtocolError("not_connected", "Connect a debug probe before writing variables.")
             try:
@@ -518,6 +588,8 @@ class BackendService(SamplingServiceMixin):
         if protocol not in {"normal", "plus"}:
             raise ProtocolError("invalid_request", "RTT protocol must be normal or plus.")
         with self._lock:
+            if enabled and self._connection_kind == "gdb":
+                raise ProtocolError("unsupported_operation", "独立 GDB 连接不提供 RTT，请使用 EmberMobile + GDB。")
             self._rtt_enabled = enabled
             self._rtt_protocol = str(protocol)
             if "rateHz" in params:
@@ -548,7 +620,9 @@ class BackendService(SamplingServiceMixin):
             if self._connection_status != "connected":
                 raise ProtocolError("not_connected", "Connect a debug probe before resetting the target.")
             try:
+                self._stop_rtt_locked()
                 self._memory.reset(halt=halt)
+                self._refresh_debug_state_locked(force=True)
             except Exception as error:
                 raise ProtocolError("reset_failed", "Unable to reset target.", str(error)) from error
         self._emit(EventName.LOG, {"level": "info", "message": "目标已复位并暂停。" if halt else "目标已复位并运行。"})
@@ -577,6 +651,21 @@ class BackendService(SamplingServiceMixin):
         return {"path": str(path), "sampleCount": len(frames)}
 
     def _apply_config_locked(self, params: Mapping[str, object]) -> None:
+        kind = params.get("connectionKind", self._connection_kind)
+        if not isinstance(kind, str) or kind not in CONNECTION_KINDS:
+            raise ProtocolError("invalid_request", "Unknown connectionKind.")
+        remote = params.get("remoteConfig", {})
+        if not isinstance(remote, Mapping) or any(key not in REMOTE_DEFAULTS for key in remote):
+            raise ProtocolError("invalid_request", "Invalid remoteConfig fields.")
+        if any(not isinstance(value, str) for value in remote.values()):
+            raise ProtocolError("invalid_request", "remoteConfig values must be strings.")
+        merged = {**self._remote_config, **remote}
+        if self._connection_status != "disconnected" and (kind != self._connection_kind or merged != self._remote_config):
+            raise ProtocolError("already_connected", "请先断开连接，再修改远程连接设置。")
+        self._connection_kind = kind
+        self._remote_config = merged
+        if kind == "gdb":
+            self._rtt_enabled = False
         if "probeType" in params:
             self._probe_type = _required_string(params, "probeType")
         if "targetName" in params:

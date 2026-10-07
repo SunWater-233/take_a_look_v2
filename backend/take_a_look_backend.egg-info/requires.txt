@@ -1,4 +1,6 @@
+aioquic<2,>=1.2
 pyelftools>=0.32
+pygdbmi<0.12,>=0.11
 pyocd>=0.45.1
 
 [:platform_system == "Windows"]

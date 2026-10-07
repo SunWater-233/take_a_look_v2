@@ -154,6 +154,21 @@ class JScopeRttBackend:
         probe: Any | None = None,
     ) -> tuple[SymbolInfo, ...]:
         self.stop()
+        open_remote = getattr(target, "open_rtt", None)
+        if callable(open_remote):
+            control_block = open_remote(control_block_address)
+            try:
+                for channel in control_block.up_channels:
+                    try:
+                        data_format = parse_j_scope_channel_name(channel.name or "")
+                    except ValueError:
+                        continue
+                    self.transport_name = control_block.transport_name
+                    return self._activate_channel(control_block, channel, channel.number, data_format)
+                raise RuntimeError("手机 RTT 没有 JScope_<FORMAT> 上行通道。")
+            except Exception:
+                control_block.close()
+                raise
         native_jlink = _find_native_jlink(probe)
         if native_jlink is not None:
             return self._start_native_jlink(native_jlink, target, control_block_address)
@@ -176,6 +191,9 @@ class JScopeRttBackend:
         raise RuntimeError("已找到 RTT 控制块，但没有名为 JScope_<FORMAT> 的 Up Channel。")
 
     def stop(self) -> None:
+        close_remote = getattr(self.control_block, "close", None)
+        if callable(close_remote):
+            close_remote()
         native_jlink = self._native_jlink
         self._native_jlink = None
         if native_jlink is not None:
@@ -249,6 +267,9 @@ class JScopeRttBackend:
         self.up_channel = channel
         self.channel_index = channel_index
         self.data_format = data_format
+        configure = getattr(channel, "set_frame_bytes", None)
+        if callable(configure):
+            configure(data_format.packet_size)
         self.decoder = JScopeStreamDecoder(data_format)
         self.symbols = _symbols_for_format(channel_index, data_format)
         self.reset_timing()

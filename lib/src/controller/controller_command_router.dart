@@ -35,6 +35,10 @@ Future<JsonObject> executeControllerCommand(
       controller.setSwdClock(arguments as String);
     case ControllerCommand.setSerialNumber:
       controller.setSerialNumber(arguments as String);
+    case ControllerCommand.setConnectionKind:
+      controller.setConnectionKind(arguments as String);
+    case ControllerCommand.setRemoteConfig:
+      controller.setRemoteConfig(Map<String, String>.from(arguments! as Map));
     case ControllerCommand.setUiScale:
       controller.setUiScale((arguments as num).toDouble());
     case ControllerCommand.toggleSampling:

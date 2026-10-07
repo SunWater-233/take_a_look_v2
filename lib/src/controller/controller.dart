@@ -94,6 +94,10 @@ class TakeALookController extends ChangeNotifier {
   set swdClock(String value) => state.connection.swdClock = value;
   String get serialNumber => state.connection.serialNumber;
   set serialNumber(String value) => state.connection.serialNumber = value;
+  String get connectionKind => state.connection.connectionKind;
+  set connectionKind(String value) => state.connection.connectionKind = value;
+  Map<String, String> get remoteConfig => state.connection.remoteConfig;
+  bool get supportsMemoryWrite => connectionKind != 'ember';
   String get symbolFile => state.connection.symbolFile;
   set symbolFile(String value) => state.connection.symbolFile = value;
   Map<String, dynamic>? get lastBackendError => state.connection.lastError;

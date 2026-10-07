@@ -2,7 +2,8 @@
 
 Flutter desktop rewrite of the Take A Look embedded real-time tuning
 workstation. The UI runs in Flutter; hardware access runs in a local Python
-process and is never exposed over the network.
+process. This process can use a local USB probe or act as a client of an
+EmberMobile gateway / remote GDB Server; it does not expose a network listener.
 
 ## Implemented backend capabilities
 
@@ -11,6 +12,7 @@ process and is never exposed over the network.
 - Configurable memory sampling from 1 Hz to 10 kHz
 - J-Scope-compatible RTT-Normal and configured-variable RTT-Plus sampling
 - Target reset/run and reset/halt control
+- EmberMobile v2 QUIC binary push (with v1 compatibility), remote RTT-Normal/RTT-Plus, and GDB/MI remote debugging
 - DWARF source browsing with C/C++ syntax highlighting, source-line breakpoints,
   halt/resume/instruction-step controls, current-PC highlighting, and registers
 - In-memory raw sample cache, pause/resume, clear and UTF-8 CSV export
@@ -112,6 +114,66 @@ constraints and native validation commands.
 
 ## Source debugging
 
+The connection panel supports **本地 USB / pyOCD**, **EmberMobile 私有协议**,
+**EmberMobile + GDB**, and **远程 GDB**. For the phone workflow, authorize the
+USB probe, attach the target, and start the gateway in EmberMobile first. Enter
+the phone address, gateway port (4242), and the current access token in Take A
+Look. The symbol file remains on the computer.
+
+**EmberMobile 私有协议** supports live memory reads, run control, registers,
+address breakpoints, and both RTT sampling formats. The v1 gateway does not
+provide arbitrary memory writes, so variable write controls are disabled.
+
+**EmberMobile + GDB** uses the private gateway for RTT and an installed GDB for
+debug control and memory writes. Enter the GDB port (3333) and the path to an
+appropriate GDB, such as `arm-none-eabi-gdb.exe` for Cortex-M. An empty path
+uses `TAKE_A_LOOK_GDB`, then `arm-none-eabi-gdb`, `gdb-multiarch`, or `gdb` on
+PATH. The application starts the phone GDB listener if needed; an existing
+listener must match the port/core and have no connected client. GDB attaches
+with the target halted. Resume it to capture RTT; halt it to inspect or write
+variables. Full-stop GDB is not used for running-target memory polling.
+
+**远程 GDB** connects to an already running RSP server without requiring an
+EmberMobile token. The current register panel targets ARM/Cortex-M. This mode
+does not supply RTT. GDB is an external executable and is not included in the
+application bundle; `pygdbmi` is included in the Python backend dependencies.
+
+On disconnect, the application detaches GDB and closes only the phone GDB/RTT
+services it started. It preserves an adopted phone listener or RTT capture.
+Network errors do not automatically replay target mutations. RTT overflow,
+session changes, and target epochs stop decoding rather than joining unrelated
+sample bytes; restart RTT sampling after restoring the target. A shared capture
+whose retained history has already overflowed must be restarted on the phone.
+RTT channels still need the existing `JScope_<FORMAT>` or RTT-Plus firmware
+format; arbitrary text logs are not interpreted as waveform samples.
+
+New phone tokens contain a secret and certificate fingerprint. The adapter
+retrieves only the public certificate over TCP 4242, checks its fingerprint,
+and connects with verified TLS to QUIC/UDP 4243. It does not send the secret
+over the bootstrap TCP connection. Older tokens continue to use v1; a failed
+v2 handshake never silently downgrades. The connection panel displays the
+negotiated version. Install `aioquic` through the backend setup script; it is
+included in packaged builds.
+
+TCP-only ADB forwarding cannot carry QUIC. Use the phone's LAN address for v2,
+or explicitly launch with `EMBER_PROTOCOL=1` for the v1 TCP compatibility path.
+This is an explicit legacy choice, not an automatic fallback after TLS failure.
+
+RTT v2 data is pushed as raw binary on a separate authenticated data connection,
+so its congestion window and buffers do not block control RPCs. Reliable
+delivery is the default. **实时优先（Normal）** sends whole sample frames as
+QUIC Datagrams, discards outdated data, and reports skipped bytes in
+`perf.rttDroppedBytes`. RTT-Plus stays reliable because configuration responses
+and data share its channel. Timestamped firmware samples are recommended;
+untimestamped samples still use a nominal, approximate time axis. The reliable
+client cache is limited to 1 MiB and reports overflow; realtime preview uses
+64 KiB and an approximately 20 ms local queue budget. Reset/epoch changes stop
+the old stream. v2 memory blocks can carry 64 KiB without JSON byte arrays.
+
+Sampling rate remains limited by the probe, phone capture loop, and network;
+the UI's requested frequency does not guarantee physical throughput. See
+EmberMobile's `docs/protocol-v2.md` for the wire contract and benchmark scope.
+
 Load an ELF/AXF file built with DWARF debug information (`-Og -g3` is
 recommended for GCC/Clang), then open the **源码调试** tab beside the realtime
 plot. Executable line numbers are highlighted in gray; click one to add or
@@ -179,6 +241,14 @@ not depend on a specific probe backend.
 .\backend\.venv\Scripts\python -m pytest -q backend
 flutter analyze
 flutter test
+```
+
+Optional real-GDB protocol integration tests (the target is a local simulated
+Cortex-M RSP server, not physical hardware):
+
+```powershell
+$env:TAKE_A_LOOK_TEST_GDB = 'C:\toolchain\bin\arm-none-eabi-gdb.exe'
+.\backend\.venv\Scripts\python -m pytest -q backend/tests/test_gdb_remote.py
 ```
 
 The Python suite is hardware-independent. It uses fake targets and channels to

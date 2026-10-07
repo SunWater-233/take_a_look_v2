@@ -799,7 +799,9 @@ class _WatchRowState extends State<_WatchRow> {
                         height: TalUiTheme.of(context).targetExtent(30),
                         child: TextField(
                           controller: editor,
-                          enabled: watch.symbol.writable,
+                          enabled:
+                              watch.symbol.writable &&
+                              widget.controller.supportsMemoryWrite,
                           style: talMono,
                         ),
                       ),
@@ -824,7 +826,9 @@ class _WatchRowState extends State<_WatchRow> {
                       TalIconButton(
                         key: ValueKey('watch-edit-${watch.symbol.key}'),
                         tooltip: '写入当前输入值',
-                        onPressed: watch.symbol.writable
+                        onPressed:
+                            watch.symbol.writable &&
+                                widget.controller.supportsMemoryWrite
                             ? () => widget.controller.writeWatch(
                                 watch.symbol.key,
                                 editor.text,

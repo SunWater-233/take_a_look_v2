@@ -33,6 +33,17 @@ class ConnectionState {
   String targetName = 'auto';
   String swdClock = '4 MHz';
   String serialNumber = '';
+  String connectionKind = 'local';
+  int? gatewayProtocolVersion;
+  final Map<String, String> remoteConfig = {
+    'host': '127.0.0.1',
+    'gatewayPort': '4242',
+    'gdbPort': '3333',
+    'token': '',
+    'gdbPath': '',
+    'core': '0',
+    'rttDelivery': 'reliable',
+  };
   String symbolFile = '';
   Map<String, dynamic>? lastError;
 }

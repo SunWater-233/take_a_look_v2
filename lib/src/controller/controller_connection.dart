@@ -201,6 +201,21 @@ extension TakeALookControllerConnection on TakeALookController {
     _emitState([signals.connection]);
   }
 
+  void setConnectionKind(String value) {
+    if (connectionStatus != ConnectionStatus.disconnected) return;
+    if (!const {'local', 'ember', 'emberGdb', 'gdb'}.contains(value)) return;
+    if (_dispatchCommand(ControllerCommand.setConnectionKind, value)) return;
+    connectionKind = value;
+    _emitState([signals.connection, signals.watches]);
+  }
+
+  void setRemoteConfig(Map<String, String> values) {
+    if (connectionStatus != ConnectionStatus.disconnected) return;
+    if (_dispatchCommand(ControllerCommand.setRemoteConfig, values)) return;
+    remoteConfig.addAll(values);
+    _emitState([signals.connection]);
+  }
+
   void toggleSampling() {
     if (_isDetachedRemote &&
         _dispatchRemote(ControllerCommand.toggleSampling)) {

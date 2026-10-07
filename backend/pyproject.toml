@@ -4,8 +4,10 @@ version = "0.1.0"
 description = "Local hardware backend for the Take A Look Flutter workstation"
 requires-python = ">=3.11"
 dependencies = [
+    "aioquic>=1.2,<2",
     "libusb-package>=1.0.26.3; platform_system == 'Windows'",
     "pyelftools>=0.32",
+    "pygdbmi>=0.11,<0.12",
     "pyocd>=0.45.1",
 ]
 

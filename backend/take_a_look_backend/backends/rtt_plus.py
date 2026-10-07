@@ -114,6 +114,21 @@ class JScopeRttPlusBackend:
     ) -> tuple[SymbolInfo, ...]:
         self.stop()
         symbols = self._symbols_for_variables(variables)
+        open_remote = getattr(target, "open_rtt", None)
+        if callable(open_remote):
+            control_block = open_remote(control_block_address)
+            try:
+                up_index, up_channel = self._find_up_channel(control_block.up_channels)
+                down_index, down_channel = self._find_down_channel(control_block.down_channels)
+                if up_channel is None or down_channel is None:
+                    raise RuntimeError("手机 RTT-Plus 需要 JScope_Config 和 JScope_Data[_t] 通道。")
+                self.transport_name = control_block.transport_name
+                return self._activate(control_block, up_channel.number, up_channel,
+                                      down_channel.number, down_channel, symbols)
+            except Exception:
+                control_block.close()
+                self.stop()
+                raise
         native_jlink = _find_native_jlink(probe, require_down=True)
         if native_jlink is not None:
             try:
@@ -137,6 +152,9 @@ class JScopeRttPlusBackend:
         return self._activate(control_block, up_index, up_channel, down_index, down_channel, symbols)
 
     def stop(self) -> None:
+        close_remote = getattr(self.control_block, "close", None)
+        if callable(close_remote):
+            close_remote()
         if self.decoder is not None and self.decoder.packet_size > 0:
             self._previous_packet_size = self.decoder.packet_size
         native_jlink = self._native_jlink

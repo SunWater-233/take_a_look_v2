@@ -30,6 +30,9 @@ extension TakeALookControllerSnapshot on TakeALookController {
       'targetName': targetName,
       'swdClock': swdClock,
       'serialNumber': serialNumber,
+      'connectionKind': connectionKind,
+      'gatewayProtocolVersion': state.connection.gatewayProtocolVersion,
+      'remoteConfig': Map<String, String>.from(remoteConfig),
       'symbolFile': symbolFile,
       'sampleRateHz': sampleRateHz,
       'rttSampleRateHz': rttSampleRateHz,
@@ -166,6 +169,9 @@ extension TakeALookControllerSnapshot on TakeALookController {
       'targetName',
       'swdClock',
       'serialNumber',
+      'connectionKind',
+      'gatewayProtocolVersion',
+      'remoteConfig',
       'lastBackendError',
     }.any(data.containsKey);
     final hasSamplingState = const {
@@ -211,6 +217,14 @@ extension TakeALookControllerSnapshot on TakeALookController {
     targetName = data['targetName'] as String? ?? targetName;
     swdClock = data['swdClock'] as String? ?? swdClock;
     serialNumber = data['serialNumber'] as String? ?? serialNumber;
+    connectionKind = data['connectionKind'] as String? ?? connectionKind;
+    if (data.containsKey('gatewayProtocolVersion')) {
+      state.connection.gatewayProtocolVersion =
+          data['gatewayProtocolVersion'] as int?;
+    }
+    if (data['remoteConfig'] case final Map config) {
+      remoteConfig.addAll(Map<String, String>.from(config));
+    }
     symbolFile = data['symbolFile'] as String? ?? symbolFile;
     sampleRateHz = (data['sampleRateHz'] as num?)?.toDouble() ?? sampleRateHz;
     rttSampleRateHz =
@@ -385,7 +399,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
       if (hasConnectionState) signals.connection,
       if (hasSamplingState) signals.sampling,
       if (hasSymbolState) signals.symbols,
-      if (hasWatchState) signals.watches,
+      if (hasWatchState || data.containsKey('connectionKind')) signals.watches,
       if (hasWatchState || hasElapsedState) signals.telemetry,
       if (hasPlotState) signals.plot,
       if (hasPlotState) signals.plotControls,

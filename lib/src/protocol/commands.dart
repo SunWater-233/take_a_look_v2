@@ -14,6 +14,8 @@ enum ControllerCommand {
   setTargetName,
   setSwdClock,
   setSerialNumber,
+  setConnectionKind,
+  setRemoteConfig,
   setUiScale,
   toggleSampling,
   setSamplingPaused,
@@ -123,6 +125,14 @@ class BackendCommandMapper {
       case ControllerCommand.setSerialNumber:
         return BackendCall(BackendMethod.setConfig, {
           'serialNumber': arguments,
+        });
+      case ControllerCommand.setConnectionKind:
+        return BackendCall(BackendMethod.setConfig, {
+          'connectionKind': arguments,
+        });
+      case ControllerCommand.setRemoteConfig:
+        return BackendCall(BackendMethod.setConfig, {
+          'remoteConfig': arguments,
         });
       case ControllerCommand.toggleSampling:
         return BackendCall(BackendMethod.setSamplingPaused, {

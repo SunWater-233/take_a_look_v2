@@ -509,15 +509,23 @@ class _CaptionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ui = TalUiTheme.of(context);
     return Tooltip(
       message: tooltip,
-      child: InkWell(
-        onTap: onPressed,
-        hoverColor: close ? const Color(0xFFC42B1C) : TalColors.hover,
-        child: SizedBox(
-          width: TalUiTheme.of(context).touchOptimized ? 48 : 44,
-          height: TalUiTheme.of(context).titleButtonHeight,
-          child: Icon(icon, size: 18, color: TalColors.text),
+      // Paint ink above the title bar's opaque background.
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: ui.controlRadius,
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: ui.controlRadius,
+          hoverColor: close ? TalColors.accent : TalColors.hover,
+          child: SizedBox(
+            width: ui.touchOptimized ? 48 : 44,
+            height: ui.titleButtonHeight,
+            child: Icon(icon, size: 18, color: TalColors.text),
+          ),
         ),
       ),
     );

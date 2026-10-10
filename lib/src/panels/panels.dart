@@ -18,6 +18,7 @@ import '../analysis/analysis_worker.dart';
 import '../controller/controller.dart';
 import '../workspace/keyboard_shortcuts.dart';
 import '../models/models.dart';
+import '../models/watch_tree.dart';
 import '../workspace/panel_types.dart';
 import 'source_search.dart';
 import '../theme/theme.dart';

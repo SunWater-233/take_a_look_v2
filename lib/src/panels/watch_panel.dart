@@ -14,14 +14,6 @@ const _watchColumnLabels = <String>[
 typedef _WatchRowContextMenuCallback =
     void Function(String key, _ContextMenuRequest request);
 
-class _WatchTreeNode {
-  _WatchTreeNode(this.watch) : label = watch.symbol.name;
-
-  final WatchItem watch;
-  String label;
-  final List<_WatchTreeNode> children = <_WatchTreeNode>[];
-}
-
 class _WatchPanel extends StatefulWidget {
   const _WatchPanel({required this.controller});
 
@@ -83,36 +75,6 @@ class _WatchPanelState extends State<_WatchPanel> {
     if (!available.contains(_selectionAnchorKey)) _selectionAnchorKey = null;
   }
 
-  List<_WatchTreeNode> _buildWatchTree() {
-    final watches = controller.watches;
-    final nodes = <String, _WatchTreeNode>{
-      for (final watch in watches) watch.symbol.key: _WatchTreeNode(watch),
-    };
-    final bySourceAndName = <String, _WatchTreeNode>{};
-    for (final watch in watches) {
-      bySourceAndName[_watchPathKey(watch.symbol)] = nodes[watch.symbol.key]!;
-    }
-
-    final roots = <_WatchTreeNode>[];
-    for (final watch in watches) {
-      final node = nodes[watch.symbol.key]!;
-      var parentName = _watchParentName(watch.symbol.name);
-      _WatchTreeNode? parent;
-      while (parentName != null) {
-        parent = bySourceAndName['${watch.symbol.source}\u0000$parentName'];
-        if (parent != null) break;
-        parentName = _watchParentName(parentName);
-      }
-      if (parent == null) {
-        roots.add(node);
-      } else {
-        node.label = _watchLeafLabel(watch.symbol.name);
-        parent.children.add(node);
-      }
-    }
-    return roots;
-  }
-
   void _toggleWatchTreeNode(String key) {
     setState(() {
       if (!_expandedWatchKeys.add(key)) _expandedWatchKeys.remove(key);
@@ -120,7 +82,7 @@ class _WatchPanelState extends State<_WatchPanel> {
   }
 
   void _reorderWatchRoot(
-    List<_WatchTreeNode> roots,
+    List<WatchTreeNode> roots,
     int oldIndex,
     int newIndex,
   ) {
@@ -136,7 +98,7 @@ class _WatchPanelState extends State<_WatchPanel> {
     controller.reorderWatch(oldWatchIndex, newWatchIndex);
   }
 
-  Widget _buildWatchTreeBranch(_WatchTreeNode node, {required int depth}) {
+  Widget _buildWatchTreeBranch(WatchTreeNode node, {required int depth}) {
     final watch = node.watch;
     final expanded = _expandedWatchKeys.contains(watch.symbol.key);
     return Column(
@@ -451,7 +413,7 @@ class _WatchPanelState extends State<_WatchPanel> {
       animation: controller.watchChanges,
       builder: (context, _) {
         _normalizeSelection();
-        final treeRoots = _buildWatchTree();
+        final treeRoots = buildWatchTree(controller.watches);
         return Padding(
           padding: const EdgeInsets.all(10),
           child: Column(
@@ -913,43 +875,6 @@ class _WatchRowState extends State<_WatchRow> {
       ),
     );
   }
-}
-
-String _watchPathKey(SymbolItem symbol) =>
-    '${symbol.source}\u0000${symbol.name}';
-
-String? _watchParentName(String name) {
-  final parts = _watchNameParts(name);
-  if (parts.length <= 1) return null;
-  return _joinWatchName(parts.take(parts.length - 1));
-}
-
-String _watchLeafLabel(String name) {
-  final parts = _watchNameParts(name);
-  return parts.isEmpty ? name : parts.last;
-}
-
-List<String> _watchNameParts(String name) {
-  final parts = <String>[];
-  final tokenPattern = RegExp(r'[^\[\]]+|\[[^\]]*\]');
-  for (final chunk in name.split('.')) {
-    parts.addAll(
-      tokenPattern
-          .allMatches(chunk)
-          .map((match) => match.group(0)!)
-          .where((part) => part.isNotEmpty),
-    );
-  }
-  return parts;
-}
-
-String _joinWatchName(Iterable<String> parts) {
-  final buffer = StringBuffer();
-  for (final part in parts) {
-    if (buffer.isNotEmpty && !part.startsWith('[')) buffer.write('.');
-    buffer.write(part);
-  }
-  return buffer.toString();
 }
 
 PopupMenuEntry<String> _watchPopupItem({

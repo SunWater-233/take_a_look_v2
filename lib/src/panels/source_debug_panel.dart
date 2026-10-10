@@ -1287,26 +1287,23 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   Widget _buildToolbar() {
     final state = controller.debugState.executionState;
     final connected = controller.connectionStatus == ConnectionStatus.connected;
+    final isRunning = state == DebugExecutionState.running;
     return SizedBox(
       height: TalUiTheme.of(context).targetExtent(42),
       child: Row(
         children: [
           const SizedBox(width: 8),
           _DebugToolbarButton(
-            key: const ValueKey('debug-halt'),
-            tooltip: '暂停目标',
-            icon: Icons.pause,
-            onPressed: connected && state == DebugExecutionState.running
-                ? controller.haltTarget
-                : null,
-          ),
-          _DebugToolbarButton(
-            key: const ValueKey('debug-resume'),
-            tooltip: '继续运行',
-            icon: Icons.play_arrow,
-            onPressed: connected && state == DebugExecutionState.halted
-                ? controller.resumeTarget
-                : null,
+            key: const ValueKey('debug-run-control'),
+            tooltip: isRunning ? '暂停目标' : '继续运行',
+            icon: isRunning ? Icons.pause : Icons.play_arrow,
+            onPressed: !connected
+                ? null
+                : switch (state) {
+                    DebugExecutionState.running => controller.haltTarget,
+                    DebugExecutionState.halted => controller.resumeTarget,
+                    _ => null,
+                  },
           ),
           _DebugToolbarButton(
             key: const ValueKey('debug-step'),

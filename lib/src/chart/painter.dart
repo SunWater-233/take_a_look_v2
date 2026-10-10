@@ -1,14 +1,20 @@
+import 'dart:math' as math;
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../controller/controller.dart';
+import '../theme/theme.dart';
 import 'cartesian_renderer.dart';
-import 'downsampling.dart';
+import 'hover.dart';
 import 'viewport.dart';
 
 class TelemetryPainter extends CustomPainter {
-  TelemetryPainter(this.controller) : super(repaint: controller.plotChanges);
+  TelemetryPainter(this.controller, {this.hoverPosition})
+    : super(repaint: Listenable.merge([controller.plotChanges, hoverPosition]));
 
   final TakeALookController controller;
+  final ValueListenable<Offset?>? hoverPosition;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -32,19 +38,41 @@ class TelemetryPainter extends CustomPainter {
     renderer.drawGrid(visible: controller.plotShowGrid);
     renderer.drawTitle('变量实时趋势');
 
-    final plotted = controller.watches.where((item) => item.plotted).toList();
+    final plotted = telemetryPlotSeries(controller, viewport);
+    final pointer = hoverPosition?.value;
+    final hovered = pointer == null
+        ? null
+        : hitTestTelemetrySeries(plotted, viewport, pointer);
     if (plotted.isNotEmpty) {
       canvas.save();
       canvas.clipRect(viewport.plot);
-      for (final watch in plotted) {
+      for (final series in plotted) {
+        renderer.drawPolyline(series.points, series.watch.color);
+      }
+      if (hovered != null) {
+        final series = hovered.series;
         renderer.drawPolyline(
-          downsampleTelemetrySamples(
-            controller.plotSamplesFor(watch),
-            xMin: viewport.xMin,
-            xMax: viewport.xMax,
-            pixelWidth: viewport.plot.width,
-          ),
-          watch.color,
+          series.points,
+          series.watch.color.withValues(alpha: 0.25),
+          strokeWidth: 7,
+        );
+        renderer.drawPolyline(
+          series.points,
+          Color.lerp(series.watch.color, Colors.white, 0.3)!,
+          strokeWidth: 3.4,
+        );
+        canvas.drawCircle(
+          hovered.position,
+          4,
+          Paint()..color = series.watch.color,
+        );
+        canvas.drawCircle(
+          hovered.position,
+          4,
+          Paint()
+            ..color = Colors.white
+            ..strokeWidth = 1.5
+            ..style = PaintingStyle.stroke,
         );
       }
       canvas.restore();
@@ -53,14 +81,63 @@ class TelemetryPainter extends CustomPainter {
     renderer.drawAxisLabels(yLabelOffset: 42);
     if (controller.plotShowLegend) {
       renderer.drawLegend([
-        for (final watch in plotted)
-          CartesianLegendItem(label: watch.symbol.name, color: watch.color),
+        for (final series in plotted)
+          CartesianLegendItem(
+            label: series.watch.symbol.name,
+            color: series.watch.color,
+          ),
       ], maximumItems: 6);
     }
+    if (hovered != null) _drawHoverTooltip(canvas, size, pointer!, hovered);
+  }
+
+  void _drawHoverTooltip(
+    Canvas canvas,
+    Size size,
+    Offset pointer,
+    TelemetryHoverHit hovered,
+  ) {
+    final maxWidth = math.max(1.0, math.min(280.0, size.width - 36));
+    final title = TextPainter(
+      text: TextSpan(text: hovered.series.watch.symbol.name, style: talStrong),
+      textDirection: TextDirection.ltr,
+      maxLines: 1,
+      ellipsis: '…',
+    )..layout(maxWidth: maxWidth);
+    final values = TextPainter(
+      text: TextSpan(text: hovered.valueText, style: talMono),
+      textDirection: TextDirection.ltr,
+      maxLines: 2,
+      ellipsis: '…',
+    )..layout(maxWidth: maxWidth);
+    final width = math.max(title.width, values.width) + 20;
+    final height = title.height + values.height + 20;
+    var left = pointer.dx + 14;
+    var top = pointer.dy + 14;
+    if (left + width > size.width - 8) left = pointer.dx - width - 14;
+    if (top + height > size.height - 8) top = pointer.dy - height - 14;
+    left = left.clamp(8.0, math.max(8.0, size.width - width - 8));
+    top = top.clamp(8.0, math.max(8.0, size.height - height - 8));
+    final box = RRect.fromRectAndRadius(
+      Rect.fromLTWH(left, top, width, height),
+      const Radius.circular(6),
+    );
+    canvas.drawRRect(box, Paint()..color = TalColors.surfaceAlt);
+    canvas.drawRRect(
+      box,
+      Paint()
+        ..color = hovered.series.watch.color
+        ..style = PaintingStyle.stroke,
+    );
+    title.paint(canvas, Offset(left + 10, top + 8));
+    values.paint(canvas, Offset(left + 10, top + 12 + title.height));
+    title.dispose();
+    values.dispose();
   }
 
   @override
   bool shouldRepaint(covariant TelemetryPainter oldDelegate) {
-    return oldDelegate.controller != controller;
+    return oldDelegate.controller != controller ||
+        oldDelegate.hoverPosition != hoverPosition;
   }
 }

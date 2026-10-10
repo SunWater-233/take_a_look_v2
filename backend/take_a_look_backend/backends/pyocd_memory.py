@@ -161,10 +161,24 @@ class PyOcdMemoryBackend:
         return str(getattr(state, "name", state)).lower()
 
     def set_breakpoint(self, address: int) -> bool:
-        return bool(self._require_target().set_breakpoint(address))
+        target = self._require_target()
+        if not target.set_breakpoint(address):
+            return False
+        self._flush_breakpoints()
+        breakpoint = target.find_breakpoint(address & ~1)
+        return breakpoint is not None and breakpoint.enabled
 
     def remove_breakpoint(self, address: int) -> None:
         self._require_target().remove_breakpoint(address)
+        self._flush_breakpoints()
+
+    def _flush_breakpoints(self) -> None:
+        target = self._require_target()
+        # pyOCD queues breakpoint changes until the next PRE_RUN notification.
+        # A running target may never resume again, so commit changes now and
+        # drain probe writes before reporting the breakpoint as verified.
+        target.selected_core.bp_manager.flush()
+        target.flush()
 
     def read_core_registers(self) -> dict[str, int]:
         target = self._require_target()

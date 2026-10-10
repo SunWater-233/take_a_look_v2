@@ -125,6 +125,14 @@ class RemoteMemoryBackend(PyOcdMemoryBackend):
             self._read_plan_signature = None
             self._read_plan = ()
 
+    def set_breakpoint(self, address: int) -> bool:
+        # Remote adapters apply changes through their own protocol, without a
+        # local pyOCD breakpoint manager or probe write queue.
+        return bool(self._require_target().set_breakpoint(address))
+
+    def remove_breakpoint(self, address: int) -> None:
+        self._require_target().remove_breakpoint(address)
+
     def _require_target(self) -> Any:
         if self.target is None:
             raise RuntimeError("远程目标尚未连接。")

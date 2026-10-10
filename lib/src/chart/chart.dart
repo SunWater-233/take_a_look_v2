@@ -26,10 +26,15 @@ class TelemetryChart extends StatefulWidget {
 
 class _TelemetryChartState extends State<TelemetryChart> {
   final MenuController _desktopMenuController = MenuController();
+  final ValueNotifier<Offset?> _hoverPosition = ValueNotifier(null);
+  int? _dragPointer;
   Offset? _lastDragPosition;
   Offset? _dragStartPosition;
+  Offset? _rightZoomAnchorFraction;
   Rect? _zoomSelection;
   bool _dragging = false;
+  bool _rightZoomDragging = false;
+  bool _rightZoomMoved = false;
   Size _size = Size.zero;
   PointerDeviceKind _lastPointerKind = PointerDeviceKind.mouse;
   _DesktopMouseMode _desktopMouseMode = _DesktopMouseMode.pan;
@@ -51,7 +56,14 @@ class _TelemetryChartState extends State<TelemetryChart> {
           onAnimationStatusChanged: _handleDesktopMenuAnimationStatus,
           menuChildren: _buildDesktopMenu(),
           child: MouseRegion(
-            onHover: (event) => _rememberPointerKind(event.kind),
+            onHover: (event) {
+              _rememberPointerKind(event.kind);
+              _hoverPosition.value =
+                  _dragPointer == null && !_desktopMenuController.isOpen
+                  ? event.localPosition
+                  : null;
+            },
+            onExit: (_) => _hoverPosition.value = null,
             cursor: _mouseCursor,
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
@@ -66,11 +78,16 @@ class _TelemetryChartState extends State<TelemetryChart> {
                 onPointerDown: _handlePointerDown,
                 onPointerMove: _handlePointerMove,
                 onPointerUp: _handlePointerUp,
-                onPointerCancel: (_) => _endDrag(),
+                onPointerCancel: (event) {
+                  if (event.pointer == _dragPointer) _endDrag();
+                },
                 onPointerSignal: _handlePointerSignal,
                 child: RepaintBoundary(
                   child: CustomPaint(
-                    painter: TelemetryPainter(controller),
+                    painter: TelemetryPainter(
+                      controller,
+                      hoverPosition: _hoverPosition,
+                    ),
                     isComplex: true,
                     willChange: true,
                     child: Stack(
@@ -122,6 +139,7 @@ class _TelemetryChartState extends State<TelemetryChart> {
     if (_lastPointerKind != PointerDeviceKind.mouse) {
       return SystemMouseCursors.basic;
     }
+    if (_rightZoomDragging) return SystemMouseCursors.grabbing;
     if (_desktopMouseMode == _DesktopMouseMode.rect) {
       return SystemMouseCursors.precise;
     }
@@ -135,16 +153,29 @@ class _TelemetryChartState extends State<TelemetryChart> {
 
   @override
   void dispose() {
+    _hoverPosition.dispose();
     _releaseMenuAnimation();
     super.dispose();
   }
 
   void _handlePointerDown(PointerDownEvent event) {
+    _hoverPosition.value = null;
+    if (_dragPointer != null) return;
     _rememberPointerKind(event.kind);
     if (event.buttons & kSecondaryMouseButton != 0) {
       if (event.kind == PointerDeviceKind.mouse) {
-        _endDrag();
-        _openDesktopMenu(event.localPosition);
+        _desktopMenuController.close();
+        _dragPointer = event.pointer;
+        _lastDragPosition = event.localPosition;
+        _dragStartPosition = event.localPosition;
+        if (telemetryPlotRect(_size).contains(event.localPosition)) {
+          final mapping = _mappingFor(telemetryViewport(controller, _size));
+          _rightZoomAnchorFraction = Offset(
+            mapping.xFractionAt(event.localPosition.dx),
+            mapping.yFractionAt(event.localPosition.dy),
+          );
+        }
+        setState(() => _rightZoomDragging = true);
       } else {
         _showTouchContextMenu(event.position);
       }
@@ -159,6 +190,7 @@ class _TelemetryChartState extends State<TelemetryChart> {
         (!controller.plotMouseXEnabled && !controller.plotMouseYEnabled)) {
       return;
     }
+    _dragPointer = event.pointer;
     _lastDragPosition = event.localPosition;
     _dragStartPosition = event.localPosition;
     setState(() => _dragging = true);
@@ -181,6 +213,23 @@ class _TelemetryChartState extends State<TelemetryChart> {
   }
 
   void _handlePointerMove(PointerMoveEvent event) {
+    if (event.pointer != _dragPointer) return;
+    if (_rightZoomDragging) {
+      if (event.buttons & kSecondaryMouseButton == 0) {
+        _endDrag();
+        return;
+      }
+      final start = _dragStartPosition;
+      if (!_rightZoomMoved) {
+        if (start == null ||
+            (event.localPosition - start).distanceSquared <= 9) {
+          return;
+        }
+        _rightZoomMoved = true;
+      }
+      _updateRightButtonZoom(event.localPosition);
+      return;
+    }
     final previous = _lastDragPosition;
     if (!_dragging ||
         previous == null ||
@@ -239,6 +288,13 @@ class _TelemetryChartState extends State<TelemetryChart> {
   }
 
   void _handlePointerUp(PointerUpEvent event) {
+    if (event.pointer != _dragPointer) return;
+    if (_rightZoomDragging) {
+      final openMenu = !_rightZoomMoved;
+      _endDrag();
+      if (openMenu) _openDesktopMenu(event.localPosition);
+      return;
+    }
     if (event.buttons & kPrimaryMouseButton != 0) return;
     if (_zoomSelection case final selection?) {
       _applyZoomSelection(selection);
@@ -247,14 +303,36 @@ class _TelemetryChartState extends State<TelemetryChart> {
   }
 
   void _endDrag() {
+    _dragPointer = null;
     _lastDragPosition = null;
     _dragStartPosition = null;
-    if ((_dragging || _zoomSelection != null) && mounted) {
+    _rightZoomAnchorFraction = null;
+    _rightZoomMoved = false;
+    if ((_dragging || _rightZoomDragging || _zoomSelection != null) &&
+        mounted) {
       setState(() {
         _dragging = false;
+        _rightZoomDragging = false;
         _zoomSelection = null;
       });
     }
+  }
+
+  void _updateRightButtonZoom(Offset position) {
+    final previous = _lastDragPosition;
+    final anchor = _rightZoomAnchorFraction;
+    _lastDragPosition = position;
+    if (previous == null || anchor == null) return;
+    final delta = position - previous;
+    if ((!controller.plotMouseXEnabled || delta.dx == 0) &&
+        (!controller.plotMouseYEnabled || delta.dy == 0)) {
+      return;
+    }
+    _zoomPlot(
+      anchorFraction: anchor,
+      xScale: math.pow(1.02, -delta.dx).toDouble(),
+      yScale: math.pow(1.02, delta.dy).toDouble(),
+    );
   }
 
   void _handlePointerSignal(PointerSignalEvent event) {
@@ -266,14 +344,30 @@ class _TelemetryChartState extends State<TelemetryChart> {
     final viewport = telemetryViewport(controller, _size);
     final mapping = _mappingFor(viewport);
     final scale = event.scrollDelta.dy > 0 ? 1.15 : 1 / 1.15;
+    _zoomPlot(
+      anchorFraction: Offset(
+        mapping.xFractionAt(event.localPosition.dx),
+        mapping.yFractionAt(event.localPosition.dy),
+      ),
+      xScale: scale,
+      yScale: scale,
+    );
+  }
+
+  void _zoomPlot({
+    required Offset anchorFraction,
+    required double xScale,
+    required double yScale,
+  }) {
+    final viewport = telemetryViewport(controller, _size);
     var xMin = viewport.xMin;
     var xMax = viewport.xMax;
     var yMin = viewport.yMin;
     var yMax = viewport.yMax;
     if (controller.plotMouseXEnabled) {
-      final fraction = mapping.xFractionAt(event.localPosition.dx);
+      final fraction = anchorFraction.dx;
       final anchor = viewport.xMin + viewport.xSpan * fraction;
-      final span = (viewport.xSpan * scale).clamp(0.2, 120).toDouble();
+      final span = (viewport.xSpan * xScale).clamp(0.2, 120).toDouble();
       xMin = anchor - span * fraction;
       xMax = xMin + span;
       if (xMin < 0) {
@@ -287,9 +381,9 @@ class _TelemetryChartState extends State<TelemetryChart> {
       }
     }
     if (controller.plotMouseYEnabled) {
-      final fraction = mapping.yFractionAt(event.localPosition.dy);
+      final fraction = anchorFraction.dy;
       final anchor = viewport.yMin + viewport.ySpan * fraction;
-      final span = math.max(1e-9, viewport.ySpan * scale);
+      final span = math.max(1e-9, viewport.ySpan * yScale);
       yMin = anchor - span * fraction;
       yMax = yMin + span;
     }
@@ -450,7 +544,7 @@ class _TelemetryChartState extends State<TelemetryChart> {
         ),
         const PopupMenuItem<_PlotMenuAction>(
           enabled: false,
-          child: Text('鼠标模式：左键平移 · 滚轮缩放'),
+          child: Text('鼠标模式：左键平移 · 右键拖动分轴缩放 · 滚轮缩放'),
         ),
         const PopupMenuDivider(),
         const PopupMenuItem(

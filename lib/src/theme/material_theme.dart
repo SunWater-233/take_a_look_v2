@@ -131,7 +131,12 @@ ThemeData buildTalTheme({TalInputMode inputMode = TalInputMode.mouseKeyboard}) {
         borderRadius: radius,
         border: const Border.fromBorderSide(talControlBorder),
       ),
-      textStyle: const TextStyle(color: TalColors.text, fontSize: 13),
+      textStyle: const TextStyle(
+        color: TalColors.text,
+        fontSize: 13,
+        fontFamily: talFontFamily,
+        fontFamilyFallback: talFontFamilyFallback,
+      ),
     ),
     inputDecorationTheme: InputDecorationTheme(
       isDense: !ui.touchOptimized,

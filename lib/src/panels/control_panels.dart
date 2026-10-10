@@ -62,6 +62,9 @@ class _HeaderPanel extends StatelessWidget {
 
   Widget _connectionButton() {
     return TalButton(
+      style: const ButtonStyle(
+        padding: WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 6)),
+      ),
       onPressed: controller.connectionStatus == ConnectionStatus.connecting
           ? null
           : controller.toggleConnection,

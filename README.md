@@ -296,6 +296,13 @@ The recorded baseline and refactor comparison are in
 
 ## Package
 
+For a standalone Linux tar.gz (Arch Linux and other glibc distributions), run
+`bash tool/package_linux.sh` with a Linux Flutter SDK and Python 3.11+. The script
+builds in an isolated source copy, bundles the backend runtime, runs tests, and
+creates an installer, offline self-check, ABI manifest and SHA-256 checksum under
+`build/releases/`. See [Linux installation and packaging](docs/linux-install.md)
+for dependency installation, USB permissions, WSL builds and compatibility limits.
+
 Create a standalone backend before the Flutter release build:
 
 ```powershell

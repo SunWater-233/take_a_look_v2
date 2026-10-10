@@ -1,0 +1,11 @@
+# Access for the active local desktop user through systemd-logind (no MODE=0666).
+# ST-Link V2/V2-1/V3, Arm DAPLink, Raspberry Pi Debug Probe, NXP LPC-Link2/MCU-Link.
+# Custom CMSIS-DAP probes with other USB IDs may require their vendor's rules.
+ACTION=="remove", GOTO="take_a_look_end"
+SUBSYSTEM=="usb", ATTR{idVendor}=="0483", ATTR{idProduct}=="3748|374b|374a|374d|374e|374f|3752|3753|3754|3755|3757", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTR{idVendor}=="0d28", ATTR{idProduct}=="0204", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0d28", ATTRS{idProduct}=="0204", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTR{idVendor}=="2e8a", ATTR{idProduct}=="0004|000c", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTR{idVendor}=="1fc9", ATTR{idProduct}=="0090|0143", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1fc9", ATTRS{idProduct}=="0090|0143", TAG+="uaccess"
+LABEL="take_a_look_end"

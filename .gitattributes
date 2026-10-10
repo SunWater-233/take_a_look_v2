@@ -1,0 +1,5 @@
+*.sh text eol=lf
+*.rules text eol=lf
+*.desktop text eol=lf
+*.py text eol=lf
+packaging/linux/take-a-look text eol=lf

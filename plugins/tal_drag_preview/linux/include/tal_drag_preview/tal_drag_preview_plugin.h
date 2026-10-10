@@ -5,11 +5,17 @@
 
 G_BEGIN_DECLS
 
+#ifdef FLUTTER_PLUGIN_IMPL
+#define TAL_DRAG_PREVIEW_PLUGIN_EXPORT __attribute__((visibility("default")))
+#else
+#define TAL_DRAG_PREVIEW_PLUGIN_EXPORT
+#endif
+
 #define TAL_TYPE_DRAG_PREVIEW_PLUGIN tal_drag_preview_plugin_get_type()
 G_DECLARE_FINAL_TYPE(TalDragPreviewPlugin, tal_drag_preview_plugin, TAL,
                      DRAG_PREVIEW_PLUGIN, GObject)
 
-void tal_drag_preview_plugin_register_with_registrar(
+TAL_DRAG_PREVIEW_PLUGIN_EXPORT void tal_drag_preview_plugin_register_with_registrar(
     FlPluginRegistrar* registrar);
 
 G_END_DECLS

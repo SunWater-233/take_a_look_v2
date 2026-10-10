@@ -78,6 +78,7 @@ class DesktopAxisMenuState extends State<DesktopAxisMenu> {
           style: const TextStyle(
             color: TalColors.text,
             fontFamily: talFontFamily,
+            fontFamilyFallback: talFontFamilyFallback,
             fontSize: 12.5,
           ),
           child: Column(

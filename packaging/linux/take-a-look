@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+app_root="$(dirname "$(readlink -f -- "${BASH_SOURCE[0]}")")"
+backend="$app_root/backend/runtime/take_a_look_backend/take_a_look_backend"
+
+check_platform() {
+  local expected_arch minimum_glibc actual_glibc
+  read -r expected_arch minimum_glibc < "$app_root/runtime-requirements"
+  if [[ "$(uname -m)" != "$expected_arch" ]]; then
+    echo "This package needs $expected_arch; this computer is $(uname -m)." >&2
+    return 1
+  fi
+  actual_glibc="$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{print $2}' || true)"
+  if [[ -z "$actual_glibc" ]] ||
+     [[ "$(printf '%s\n' "$minimum_glibc" "$actual_glibc" | sort -V | head -n1)" != "$minimum_glibc" ]]; then
+    echo "This package needs glibc >= $minimum_glibc (found ${actual_glibc:-none})." >&2
+    return 1
+  fi
+}
+
+check_libraries() {
+  local report
+  if ! report="$(LC_ALL=C ldd "$app_root/take_a_look_v2" 2>&1)" ||
+     [[ "$report" == *'not found'* ]]; then
+    printf '%s\n' "$report" >&2
+    echo "Install desktop dependencies: $app_root/install-deps.sh" >&2
+    return 1
+  fi
+}
+
+case "${1:-}" in
+  --help|-h)
+    echo 'Usage: take-a-look [--doctor | --check-libs | --backend | --software-rendering]'
+    exit 0 ;;
+  --check-platform)
+    check_platform
+    exit 0 ;;
+  --check-libs)
+    check_platform
+    check_libraries
+    exit 0 ;;
+  --doctor)
+    check_platform
+    check_libraries
+    timeout 30 "$backend" --self-test
+    echo 'Runtime check passed. USB hardware access and graphics need a desktop session.'
+    exit 0 ;;
+  --backend)
+    shift
+    check_platform
+    exec "$backend" "$@" ;;
+  --software-rendering)
+    export LIBGL_ALWAYS_SOFTWARE=1 TAKE_A_LOOK_GPU=system
+    shift ;;
+esac
+
+check_platform
+check_libraries
+if [[ -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]]; then
+  echo 'No graphical session found. Start from a Linux desktop or WSLg.' >&2
+  exit 1
+fi
+# Some window plugins use X11 APIs. Prefer XWayland when both transports exist;
+# an explicit GDK_BACKEND is preserved for users testing native Wayland.
+if [[ -z "${GDK_BACKEND:-}" && -n "${DISPLAY:-}" ]]; then
+  export GDK_BACKEND=x11
+fi
+export TAKE_A_LOOK_BACKEND_DIR="${TAKE_A_LOOK_BACKEND_DIR:-$app_root/backend}"
+exec "$app_root/take_a_look_v2" "$@"

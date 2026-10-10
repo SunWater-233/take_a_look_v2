@@ -130,6 +130,10 @@ class StdioServer:
 def main() -> None:
     _configure_standard_stream_encoding()
     _configure_stderr_logging()
+    if sys.argv[1:] == ["--self-test"]:
+        from take_a_look_backend.self_check import run
+
+        raise SystemExit(run())
     raise SystemExit(StdioServer(sys.stdin, sys.stdout.buffer).run())
 
 

@@ -88,6 +88,7 @@ class _TelemetryChartState extends State<TelemetryChart> {
                   child: CustomPaint(
                     painter: TelemetryPainter(
                       controller,
+                      paintInspection: false,
                       hoverPosition: _hoverPosition,
                     ),
                     isComplex: true,
@@ -95,6 +96,16 @@ class _TelemetryChartState extends State<TelemetryChart> {
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
+                        IgnorePointer(
+                          child: RepaintBoundary(
+                            child: CustomPaint(
+                              painter: TelemetryInspectionPainter(
+                                controller,
+                                hoverPosition: _hoverPosition,
+                              ),
+                            ),
+                          ),
+                        ),
                         if (_zoomSelection case final selection?)
                           IgnorePointer(
                             child: CustomPaint(

@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -82,6 +84,12 @@ Offset pixelFor(CartesianPlotViewport viewport, Offset sample) =>
 TestRecordingCanvas recordPainter(TelemetryPainter painter, Size size) {
   final canvas = TestRecordingCanvas();
   painter.paint(canvas, size);
+  if (!painter.paintInspection) {
+    TelemetryInspectionPainter(
+      painter.controller,
+      hoverPosition: painter.hoverPosition!,
+    ).paint(canvas, size);
+  }
   return canvas;
 }
 
@@ -92,6 +100,54 @@ List<Paint> curvePaints(TestRecordingCanvas canvas) => [
 ];
 
 void main() {
+  testWidgets('separate hover layer preserves pixels including the legend', (
+    tester,
+  ) async {
+    final controller = controllerWithSeries({
+      'signal': [const Offset(0, 9.5), const Offset(10, 9.5)],
+    });
+    controller.configurePlotView({
+      'plotAutoY': false,
+      'yMin': 0.0,
+      'yMax': 10.0,
+    });
+    final position = ValueNotifier<Offset?>(const Offset(100, 61));
+    controller.setPlotHighlightedWatch('signal');
+    const size = Size(640, 360);
+    try {
+      await tester.runAsync(() async {
+        Future<List<int>> pixels(bool split) async {
+          final recorder = ui.PictureRecorder();
+          final canvas = Canvas(recorder);
+          TelemetryPainter(
+            controller,
+            hoverPosition: position,
+            paintInspection: !split,
+          ).paint(canvas, size);
+          if (split) {
+            TelemetryInspectionPainter(
+              controller,
+              hoverPosition: position,
+            ).paint(canvas, size);
+          }
+          final picture = recorder.endRecording();
+          final image = await picture.toImage(640, 360);
+          final bytes = await image.toByteData(
+            format: ui.ImageByteFormat.rawRgba,
+          );
+          final result = bytes!.buffer.asUint8List().toList();
+          image.dispose();
+          picture.dispose();
+          return result;
+        }
+
+        expect(await pixels(true), await pixels(false));
+      });
+    } finally {
+      controller.dispose();
+      position.dispose();
+    }
+  });
   test('curve hit reports the nearest real sample, not the latest value', () {
     final controller = controllerWithSeries({
       'signal': [const Offset(2, 2), const Offset(8, 8)],
@@ -239,7 +295,19 @@ void main() {
     final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await mouse.addPointer(location: tester.getTopLeft(chart));
     await mouse.moveTo(tester.getTopLeft(chart) + local);
-    expect(render.debugNeedsPaint, isTrue);
+    expect(render.debugNeedsPaint, isFalse);
+    expect(
+      tester
+          .renderObject<RenderCustomPaint>(
+            find.byWidgetPredicate(
+              (widget) =>
+                  widget is CustomPaint &&
+                  widget.painter is TelemetryInspectionPainter,
+            ),
+          )
+          .debugNeedsPaint,
+      isTrue,
+    );
     await tester.pump();
 
     var paints = curvePaints(recordPainter(painter, render.size));

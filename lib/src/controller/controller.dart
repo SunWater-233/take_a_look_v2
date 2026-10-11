@@ -14,10 +14,12 @@ import '../models/models.dart';
 import '../protocol/commands.dart';
 import '../protocol/events.dart';
 import '../telemetry/telemetry_store.dart';
+import '../telemetry/sample_buffer.dart';
 
 export '../models/demo_data.dart';
 
 part 'controller_snapshot.dart';
+part 'controller_sync.dart';
 part 'controller_telemetry.dart';
 part 'controller_connection.dart';
 part 'controller_plot.dart';
@@ -45,6 +47,7 @@ class TakeALookController extends ChangeNotifier {
     this.sourceRootPicker,
     this.csvExportPathPicker,
     this.csvImportContentsPicker,
+    this.csvImportPathPicker,
   }) {
     _logs.add(LogEntry('UI 已从 .ui 文件加载，pyOCD 内存读写后端已就绪。'));
     _logs.add(LogEntry('读取 .elf / .axf 后，可从符号层级中加入变量到实时调参列表。'));
@@ -59,6 +62,7 @@ class TakeALookController extends ChangeNotifier {
   final PathPicker? sourceRootPicker;
   final PathPicker? csvExportPathPicker;
   final TextFilePicker? csvImportContentsPicker;
+  final PathPicker? csvImportPathPicker;
   final List<SymbolItem> _symbols = <SymbolItem>[];
   final List<WatchItem> _watches = <WatchItem>[];
   final List<LogEntry> _logs = <LogEntry>[];
@@ -75,12 +79,16 @@ class TakeALookController extends ChangeNotifier {
   bool _telemetryDisplayPending = false;
   bool _telemetrySyncPending = false;
   bool _disposed = false;
+  bool _presentationActive = true;
   double _phase = 0;
   double? _frozenPlotEndSeconds;
-  final Map<String, List<Offset>> _frozenPlotSamples = <String, List<Offset>>{};
+  final Map<String, SampleBuffer> _frozenPlotSamples = <String, SampleBuffer>{};
   DateTime? _lastPerformanceLogAt;
   final ValueNotifier<double> _uiScale = ValueNotifier<double>(1);
   final ControllerSignals signals = ControllerSignals();
+  final Map<String, int> _stateFieldRevisions = {};
+  int _stateRevision = 0;
+  int _analysisDataRevision = 0;
   final Set<String> _visibleSourceViews = <String>{};
   bool _sourceWorkspaceNotificationPending = false;
 
@@ -194,6 +202,7 @@ class TakeALookController extends ChangeNotifier {
   SymbolLoadProgress? get symbolLoadProgress => state.symbolLoad;
   bool get isSymbolLoading => state.symbolLoad?.isLoading ?? false;
   Listenable get watchChanges => signals.watches;
+  int get watchRevision => _stateFieldRevisions['watches'] ?? 0;
   Listenable get telemetryChanges => signals.telemetry;
   Listenable get plotChanges => signals.plot;
   Listenable get plotControlChanges => signals.plotControls;
@@ -276,9 +285,15 @@ class TakeALookController extends ChangeNotifier {
 
   Future<JsonObject> handleCommand(
     ControllerCommand command,
-    Object? arguments,
-  ) {
-    return executeControllerCommand(this, command, arguments);
+    Object? arguments, {
+    bool includeResultState = true,
+  }) {
+    return executeControllerCommand(
+      this,
+      command,
+      arguments,
+      includeResultState: includeResultState,
+    );
   }
 
   void _tick(Timer timer) {
@@ -322,7 +337,7 @@ class TakeALookController extends ChangeNotifier {
       ..clear()
       ..addEntries(
         _watches.map(
-          (watch) => MapEntry(watch.symbol.key, List<Offset>.of(watch.samples)),
+          (watch) => MapEntry(watch.symbol.key, watch.samples.snapshot()),
         ),
       );
   }
@@ -340,7 +355,9 @@ class TakeALookController extends ChangeNotifier {
     Iterable<ControllerSignal> changedSignals, {
     bool sync = true,
   }) {
-    for (final signal in changedSignals.toSet()) {
+    final changes = changedSignals.toSet();
+    _recordStateChanges(changes);
+    for (final signal in changes) {
       signal.emit();
     }
     if (sync) signals.stateSync.emit();
@@ -365,7 +382,7 @@ class TakeALookController extends ChangeNotifier {
   }
 
   void _emitDisplayFrame() {
-    if (_disposed) return;
+    if (_disposed || !_presentationActive) return;
     final telemetryChanged = _telemetryDisplayPending;
     if (telemetryChanged) {
       _telemetryDisplayPending = false;
@@ -392,6 +409,7 @@ class TakeALookController extends ChangeNotifier {
 
   void _startPlotRefreshClock() {
     if (_disposed ||
+        !_presentationActive ||
         connectionStatus != ConnectionStatus.connected ||
         _plotRefreshTimer?.isActive == true) {
       return;
@@ -404,7 +422,9 @@ class TakeALookController extends ChangeNotifier {
 
   void _reconcileSamplingClock() {
     final shouldRun =
-        connectionStatus == ConnectionStatus.connected && !samplingPaused;
+        _presentationActive &&
+        connectionStatus == ConnectionStatus.connected &&
+        !samplingPaused;
     if (!shouldRun) {
       if (_samplingElapsedStopwatch.isRunning) {
         _samplingElapsedStopwatch.stop();

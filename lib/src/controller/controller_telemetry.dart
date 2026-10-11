@@ -12,21 +12,12 @@ extension TakeALookControllerTelemetry on TakeALookController {
       final watch = watchesByKey[item['key'] as String?];
       if (watch == null) continue;
       watch.value = _numericValue(item['value'], fallback: watch.value);
-      final samples = item['samples'] as List?;
+      final samples = item['samples'];
       if (samples != null) {
-        watch.samples
-          ..clear()
-          ..addAll(
-            samples.map((rawPoint) {
-              final point = rawPoint as List;
-              return Offset(
-                (point[0] as num).toDouble(),
-                (point[1] as num).toDouble(),
-              );
-            }),
-          );
+        watch.samples.clear();
+        _appendWireSamples(watch.samples, samples);
         watch.totalSampleCount =
-            (item['sampleCursor'] as int?) ?? samples.length;
+            (item['sampleCursor'] as int?) ?? _sampleWireLength(samples);
       }
     }
     _emitTelemetry(sync: false);
@@ -51,17 +42,12 @@ extension TakeALookControllerTelemetry on TakeALookController {
         watch.samples.clear();
         watch.totalSampleCount = sampleStart;
       }
-      final rawSamples = item['samples'] as List? ?? const [];
+      final rawSamples = item['samples'];
       final alreadyApplied = (watch.totalSampleCount - sampleStart)
-          .clamp(0, rawSamples.length)
+          .clamp(0, _sampleWireLength(rawSamples))
           .toInt();
-      for (final rawPoint in rawSamples.skip(alreadyApplied)) {
-        final point = rawPoint as List;
-        telemetryStore.append(
-          watch,
-          Offset((point[0] as num).toDouble(), (point[1] as num).toDouble()),
-        );
-      }
+      telemetryStore.configureWatch(watch);
+      _appendWireSamples(watch.samples, rawSamples, skip: alreadyApplied);
       watch.totalSampleCount = sampleCursor;
     }
     _emitTelemetry(sync: false);
@@ -71,7 +57,10 @@ extension TakeALookControllerTelemetry on TakeALookController {
     switch (event) {
       case BackendEventType.state:
         final state = _asMap(params);
-        if (state != null) applySnapshot(state);
+        if (state != null) {
+          applySnapshot(state);
+          signals.stateSync.emit();
+        }
       case BackendEventType.samples:
         if (params is BackendSampleBatch) {
           applyBackendSampleBatch(params);

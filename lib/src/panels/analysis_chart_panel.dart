@@ -1476,13 +1476,10 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
       final series = [
         for (final watch in controller.watches)
           if (watch.samples.isNotEmpty)
-            AnalysisSeries(
+            AnalysisSeries.fromSamples(
               name: watch.symbol.name,
               color: watch.color,
-              points: [
-                for (final point in watch.samples)
-                  AnalysisPoint(point.dx, point.dy),
-              ],
+              samples: watch.samples,
             ),
       ];
       if (series.isEmpty) {
@@ -1493,15 +1490,26 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
       return;
     }
     final picker = controller.csvImportContentsPicker;
-    if (picker == null) {
+    final pathPicker = controller.csvImportPathPicker;
+    if (picker == null && pathPicker == null) {
       controller.report('当前窗口暂不支持本地 CSV 导入。');
       return;
     }
-    final contents = await picker();
-    if (!mounted || contents == null || contents.trim().isEmpty) return;
-    final series = contents.length < 256 * 1024
-        ? parseAnalysisCsv(contents, colors: seriesColors)
-        : await parseAnalysisCsvInBackground(contents, colors: seriesColors);
+    final List<AnalysisSeries> series;
+    if (pathPicker != null) {
+      final path = await pathPicker();
+      if (!mounted || path == null) return;
+      series = await parseAnalysisCsvFileInBackground(
+        path,
+        colors: seriesColors,
+      );
+    } else {
+      final contents = await picker!();
+      if (!mounted || contents == null || contents.trim().isEmpty) return;
+      series = contents.length < 256 * 1024
+          ? parseAnalysisCsv(contents, colors: seriesColors)
+          : await parseAnalysisCsvInBackground(contents, colors: seriesColors);
+    }
     if (!mounted) return;
     if (series.isEmpty) {
       controller.report('CSV 中没有找到可分析的数值列。');

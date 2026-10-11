@@ -5,56 +5,71 @@ from typing import Any
 
 from take_a_look_backend.models import json_value
 from take_a_look_backend.protocol import EventName
+from take_a_look_backend.services.sampling_clock import advance_deadline, wait_until
 
 
 class SamplingServiceMixin:
     """Time-critical acquisition loop and RTT lifecycle."""
 
     def _sampling_loop(self) -> None:
-        next_memory_at = time.monotonic()
-        next_rtt_at = time.monotonic()
-        last_emit_at = time.monotonic()
+        next_memory_at = next_rtt_at = last_emit_at = time.perf_counter()
+        previous_periods = None
         while not self._shutdown.is_set():
-            now = time.monotonic()
+            now = time.perf_counter()
+            deadlines = [now + 0.05]
             try:
                 with self._lock:
                     connected = self._connection_status == "connected"
-                    paused = self._sampling_paused
                     if connected and now >= self._next_debug_poll_at:
                         self._poll_debug_state_locked()
                         self._next_debug_poll_at = now + 0.05
                         connected = self._connection_status == "connected"
-                    target_halted = self._target_execution_state == "halted"
+                    if connected:
+                        deadlines.append(self._next_debug_poll_at)
+                    active = connected and not self._sampling_paused and self._target_execution_state != "halted"
                     memory_period = 1.0 / self._sample_rate_hz
-                    rtt_period = 1.0 / self._rtt_sample_rate_hz
+                    rtt_period = max(1.0 / self._rtt_sample_rate_hz, 0.002)
+                    periods = (memory_period, rtt_period)
+                    if previous_periods != periods:
+                        next_memory_at = next_rtt_at = now
+                        previous_periods = periods
                     elapsed = self._elapsed_locked(now)
-                    has_watches = bool(self._watches)
                     rtt_enabled = self._rtt_enabled
                     rtt_protocol = self._rtt_protocol
-                    if connected and not paused and not target_halted and has_watches and now >= next_memory_at:
-                        values = self._read_memory_locked(rtt_enabled, rtt_protocol)
-                        if values:
-                            self._queue_samples_locked([(elapsed, values)])
-                        next_memory_at = now + memory_period
-                    if connected and not paused and not target_halted and rtt_enabled and now >= next_rtt_at:
-                        self._queue_samples_locked(self._read_rtt_locked(elapsed, now))
-                        next_rtt_at = now + max(rtt_period, 0.002)
+                    if self._pipeline_backpressure:
+                        self._flush_pending_samples_locked(wait=False)
+                    if active and not self._pipeline_backpressure:
+                        memory_enabled = (bool(self._watches) and
+                            getattr(self._memory, "supports_running_memory", True) and
+                            not (rtt_enabled and rtt_protocol == "plus" and self._plus_rtt.is_started))
+                        if memory_enabled:
+                            if now >= next_memory_at:
+                                values = self._read_memory_locked(rtt_enabled, rtt_protocol)
+                                if values:
+                                    self._queue_samples_locked([(elapsed, values)])
+                                next_memory_at = advance_deadline(next_memory_at, time.perf_counter(), memory_period)
+                            deadlines.append(next_memory_at)
+                        if rtt_enabled:
+                            if now >= next_rtt_at:
+                                self._queue_samples_locked(self._read_rtt_locked(elapsed, now))
+                                next_rtt_at = advance_deadline(next_rtt_at, time.perf_counter(), rtt_period)
+                            deadlines.append(next_rtt_at)
+                    if self._pending_frames:
+                        if len(self._pending_frames) >= 64 or now - last_emit_at >= 0.006:
+                            if self._flush_pending_samples_locked(wait=False):
+                                last_emit_at = now
+                        if not self._pipeline_backpressure:
+                            deadlines.append(last_emit_at + 0.006)
             except Exception as error:
                 with self._lock:
                     self._handle_remote_failure_locked(error)
                 self._emit(EventName.LOG, {"level": "error", "message": f"采样失败：{error}"})
-                next_memory_at = time.monotonic() + 0.25
-
-            now = time.monotonic()
-            with self._lock:
-                if self._pending_frames and (len(self._pending_frames) >= 64 or now - last_emit_at >= 0.006):
-                    self._flush_pending_samples_locked()
-                    last_emit_at = now
+                next_memory_at = time.perf_counter() + 0.25
+                deadlines = [next_memory_at]
+            now = time.perf_counter()
             if now - self._last_perf_at >= 1.0:
                 self._publish_perf(now)
-            wait_s = min(max(next_memory_at - now, 0.001), max(next_rtt_at - now, 0.001), 0.05)
-            self._wake.wait(wait_s)
-            self._wake.clear()
+            wait_until(self._wake, min(deadlines))
 
     def _read_memory_locked(self, rtt_enabled: bool, rtt_protocol: str) -> dict[str, object]:
         if not getattr(self._memory, "supports_running_memory", True):
@@ -136,28 +151,57 @@ class SamplingServiceMixin:
             if recorded:
                 self._pending_recording_frames.append((elapsed, recorded))
 
-    def _flush_pending_samples_locked(self) -> None:
-        if not self._pending_frames or self._recording.failure is not None:
-            return
+    def _flush_pending_samples_locked(self, *, wait: bool = True, block: bool | None = None) -> bool:
+        if self._recording.failure is not None:
+            return False
+        if not self._pending_frames:
+            if wait:
+                self._recording_worker.drain()
+            return True
+        frames = self._pending_frames
+        recorded = self._pending_recording_frames
+        labels = self._pending_recording_labels
+        weight = len(frames) * 128 + sum(len(values) for _, values in frames) * 96
+        future = self._recording_worker.submit(
+            lambda: self._commit_sample_batch(frames, recorded, labels),
+            weight=weight, block=wait if block is None else block)
+        if future is None:
+            # Retain the acquired batch and stop further reads until admitted.
+            # Hardware-side RTT overflow still follows its existing error path.
+            self._pipeline_backpressure = True
+            return False
+        self._pipeline_backpressure = False
+        self._pending_frames = []
+        self._pending_recording_frames = []
+        self._pending_recording_labels = {}
+        if wait:
+            future.result()
+        return True
+
+    def _commit_sample_batch(self, frames, recorded, labels) -> None:
         previous_path = self._recording.path
         try:
-            self._recording.append(self._pending_recording_frames, self._pending_recording_labels)
+            self._recording.append(recorded, labels)
         except Exception as error:
+            first_failure = not self._recording_error_reported
+            self._recording_error_reported = True
             self._recording.failure = error
             self._sampling_paused = True
-            self._emit(EventName.ERROR, {"code": "raw_recording_failed",
-                       "message": "原始记录写入失败，已暂停采样。", "details": str(error)})
-            self._emit(EventName.STATE, self._runtime_state_locked())
+            self._wake.set()
+            if first_failure:
+                self._emit(EventName.ERROR, {"code": "raw_recording_failed",
+                           "message": "原始记录写入失败，已暂停采样。", "details": str(error)})
+                self._emit(EventName.STATE, {"samplingPaused": True,
+                           "rawRecording": self._recording.status()})
             return
-        frames = [{"elapsed": elapsed, "values": values} for elapsed, values in self._pending_frames]
-        self._sample_count_since_perf += len(frames)
-        self._pending_frames.clear()
-        self._pending_recording_frames.clear()
-        self._pending_recording_labels.clear()
+        with self._perf_lock:
+            self._sample_count_since_perf += len(frames)
         if self._recording.path != previous_path:
             self._emit(EventName.LOG, {"level": "info", "message": f"原始采样持续保存：{self._recording.path}"})
             self._emit(EventName.STATE, {"rawRecording": self._recording.status()})
-        self._emit(EventName.SAMPLES, {"frames": frames})
+        self._emit(EventName.SAMPLES, {"frames": [
+            {"elapsed": elapsed, "values": values} for elapsed, values in frames]})
+        self._wake.set()
 
     def _publish_perf(self, now: float) -> None:
         with self._lock:
@@ -167,9 +211,12 @@ class SamplingServiceMixin:
             capture = getattr(rtt_backend, "control_block", None)
             dropped = sum(getattr(getattr(channel, "stream", None), "dropped", 0)
                           for channel in getattr(capture, "up_channels", []))
+            with self._perf_lock:
+                sample_count = self._sample_count_since_perf
+                self._sample_count_since_perf = 0
             payload = {
-                "effectiveHz": self._sample_count_since_perf / interval,
-                "sampleCount": self._sample_count_since_perf,
+                "effectiveHz": sample_count / interval,
+                "sampleCount": sample_count,
                 "watchCount": len(self._watches),
                 "readBlockCount": metrics.get("block_count", 0),
                 "readByteCount": metrics.get("byte_count", 0),
@@ -178,7 +225,6 @@ class SamplingServiceMixin:
                     self._normal_rtt.transport_name if self._rtt_protocol == "normal" else self._plus_rtt.transport_name
                 ),
             }
-            self._sample_count_since_perf = 0
             self._last_perf_at = now
         self._emit(EventName.PERF, payload)
 
@@ -191,4 +237,4 @@ class SamplingServiceMixin:
     def _elapsed_locked(self, now: float | None = None) -> float:
         if self._connection_started_at is None:
             return 0.0
-        return max(0.0, (now if now is not None else time.monotonic()) - self._connection_started_at)
+        return max(0.0, (now if now is not None else time.perf_counter()) - self._connection_started_at)

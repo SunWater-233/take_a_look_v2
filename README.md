@@ -266,7 +266,7 @@ Windows 多窗口/GPU 代码，正式版的构建目录不受影响。
 “读取 ELF/AXF”会加载内置符号，不解析真实固件；源码示例也随测试版生成。
 可以检查变量选择、右键菜单、拖拽拆窗、绘图缩放、分析/FFT 和快捷键。
 CSV 导入仍可选择本地文件，导出读取当前采集记录中的全部原始帧，包含已经离开绘图缓存的数据。
-实时图表的“历史”选项支持 10 / 30 / 60 / 120 秒，默认 60 秒；缓存按时长和采样率分配，
+菜单栏“实时变量 → 绘图缓存”支持 10 / 30 / 60 / 120 秒，默认 60 秒；缓存按时长和采样率分配，
 采样率降低时保留尚未过期的高密度数据，实际输入更快时自动扩容。绘制仅扫描可见时间段，
 按像素保留最小值、最大值和首尾点。主窗口和独立窗口同步完整的保留历史。
 
@@ -309,11 +309,25 @@ flutter test
 `flutter run -d windows -t lib/main_ui_test.dart` 热重载；需要保持正式构建
 产物独立时，使用上面的构建脚本。
 
-Realtime samples are stored in bounded numeric ring buffers (1,800 points per
-watch); writing new samples does not shift the retained history. Sampling updates
+Realtime samples are stored in time-retained numeric ring buffers; writing new
+samples does not shift the retained history. Sampling updates
 values immediately, while display notifications and detached-window telemetry
 notifications are coalesced at the selected display refresh rate. Paused plots
-keep their own frozen snapshot.
+keep an immutable snapshot sharing numeric pages until a later write. Exact
+page/block extrema accelerate dense plots; sparse views use a sequential pass.
+Hover redraws its own layer without rebuilding the curve geometry.
+
+Detached windows exchange typed numeric batches and acknowledged state patches.
+Slow windows have independent delivery pumps with one pending update; history is
+sent only to windows containing plots or analysis, and is refreshed before panel
+reassignment. CSV imports read, parse and prepare numeric data in the background.
+Source documents, path indexes and highlighting have separate reusable services.
+
+The backend serializes hardware access while recording and pipe output use
+bounded ordered workers. Export captures an ordered journal boundary and runs
+without holding the RPC input loop. Acquisition uses `perf_counter()` deadlines;
+on Windows/Python 3.11, `monotonic()` can have a 15.625 ms resolution. Requested
+rates remain subject to Python scheduling and physical probe/network throughput.
 
 FFT calculation runs in a resident analysis isolate, independently of acquisition.
 Immutable signal/time datasets are uploaded once as numeric buffers; subsequent
@@ -349,6 +363,7 @@ executable:
 .\tool\run_data_benchmarks.ps1 -Runs 2 -ResultSet refactor
 .\tool\run_data_benchmarks.ps1 -Runs 2 -Suite worker -ResultSet refactor -SkipBuild
 .\tool\run_data_benchmarks.ps1 -Runs 2 -Suite live -ResultSet refactor -SkipBuild
+.\tool\run_data_benchmarks.ps1 -Runs 2 -Suite audit -ResultSet audit
 ```
 
 `all` measures the data algorithms, `worker` measures the production FFT worker,
@@ -356,6 +371,21 @@ and `live` exercises the real plot/watch/analysis widgets with synthetic 32-chan
 10 kHz samples and changing FFT selections. The live suite records Flutter engine
 frame timings in a hidden window; it does not measure physical screen presentation
 or real debug-probe throughput.
+
+The `audit` suite also covers 60-second histories, frozen and continuously moving
+viewports, large fragmented JSON, window serialization, and analysis imports.
+Use `-SourceRoot` to compile the same fixtures against an archived checkout,
+`-BuildOnly` to finish compilation before timing, and `-FirstRun` to interleave
+before/after runs. `-ProcessorAffinity` optionally limits only the benchmark
+process to a fixed CPU mask on hybrid CPUs; it does not change application or OS
+settings. The protocol adapter selects each checkout's production wire encoding
+while preserving the same samples and operations.
+
+`tool/benchmarks/acquisition_benchmark.py` separately measures the production
+32-channel scheduling/recording loop with a fake probe and verifies that acquired,
+recorded and delivered frame counts agree. It does not measure USB/SWD throughput.
+The current comparison, raw measurements and source fingerprints are in
+[the 2026-10-11 results](docs/performance/2026-10-11/results.json).
 
 The recorded baseline and refactor comparison are in
 [the performance report](docs/performance/2026-09-27/refactor/REPORT.md).

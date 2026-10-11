@@ -63,7 +63,10 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   void initState() {
     super.initState();
     detachedWindows = DetachedWindowCoordinator(widget.windowSync);
-    tabDragPreview = TabDragPreviewCoordinator();
+    tabDragPreview = TabDragPreviewCoordinator(
+      prepareState: (window, panel) =>
+          widget.windowSync.prepareWindow(window, [panel]),
+    );
     _applyDefaultLayout();
     _sourceAdditionRevision =
         widget.controller.sourceWorkspace.additionRevision;

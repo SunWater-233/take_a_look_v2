@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import nullcontext
 from dataclasses import dataclass
 from math import prod
 from pathlib import Path
 
 from take_a_look_backend.models import SymbolInfo
+from take_a_look_backend.services.elf_context import ElfLoadContext
 
 
 VARIABLE_SECTIONS = {".data", ".bss", ".rodata", ".sdata", ".sbss", ".noinit"}
@@ -39,14 +41,14 @@ class DwarfMemberInfo:
     is_pointer: bool = False
 
 
-def load_symbols_from_elf(path: Path, progress: SymbolLoadProgress | None = None) -> list[SymbolInfo]:
-    from elftools.elf.elffile import ELFFile
+def load_symbols_from_elf(path: Path, progress: SymbolLoadProgress | None = None,
+                          *, context: ElfLoadContext | None = None) -> list[SymbolInfo]:
 
     symbols: dict[tuple[str, int], SymbolInfo] = {}
-    with path.open("rb") as handle:
-        elf = ELFFile(handle)
+    with (nullcontext(context) if context is not None else ElfLoadContext(path)) as loaded:
+        elf = loaded.elf
         _emit_progress(progress, "debug", 0, 0)
-        debug_by_name, debug_by_addr = variable_debug_info_from_dwarf(elf, progress=progress)
+        debug_by_name, debug_by_addr = variable_debug_info_from_dwarf(elf, progress=progress, context=loaded)
         _emit_progress(progress, "scan", 0, 0)
         candidates = symbol_candidates_from_elf(elf)
         resolved_candidates = [
@@ -148,6 +150,7 @@ def section_name_for_symbol(elf_file, section_index) -> str:
 def variable_debug_info_from_dwarf(
     elf_file,
     progress: SymbolLoadProgress | None = None,
+    *, context: ElfLoadContext | None = None,
 ) -> tuple[dict[str, DwarfVariableInfo], dict[int, DwarfVariableInfo]]:
     if not elf_file.has_dwarf_info():
         return {}, {}
@@ -157,7 +160,7 @@ def variable_debug_info_from_dwarf(
     by_name: dict[str, DwarfVariableInfo] = {}
     by_addr: dict[int, DwarfVariableInfo] = {}
     try:
-        dwarf_info = elf_file.get_dwarf_info()
+        dwarf_info = context.dwarf_info if context is not None else elf_file.get_dwarf_info()
     except Exception:
         return by_name, by_addr
 
@@ -165,6 +168,7 @@ def variable_debug_info_from_dwarf(
     total_units = len(compile_units)
     _emit_progress(progress, "debug", 0, total_units)
 
+    type_cache = {}
     for unit_index, compile_unit in enumerate(compile_units, start=1):
         try:
             line_program = dwarf_info.line_program_for_CU(compile_unit)
@@ -184,13 +188,22 @@ def variable_debug_info_from_dwarf(
 
             source_file = _source_file_for_die(die, line_program, compile_dir)
             type_die = _type_die_for_die(die)
-            data_type, byte_size = _type_info_for_die(die)
+            type_key = (getattr(compile_unit, "cu_offset", id(compile_unit)),
+                        getattr(type_die, "offset", id(type_die)))
+            metadata = type_cache.get(type_key)
+            if metadata is None:
+                data_type, byte_size = _type_info_for_die(die)
+                metadata = (data_type, byte_size, _is_pointer_type_die(type_die),
+                            tuple(_expand_type_members(type_die, "@", 0, expr_parser, set())))
+                type_cache[type_key] = metadata
+            data_type, byte_size, pointer, members = metadata
             info = DwarfVariableInfo(
-                source_file=source_file or "未知来源",
-                data_type=data_type,
-                byte_size=byte_size,
-                is_pointer=_is_pointer_type_die(type_die),
-                members=tuple(_expand_type_members(type_die, name, 0, expr_parser, set())),
+                source_file=source_file or "未知来源", data_type=data_type,
+                byte_size=byte_size, is_pointer=pointer,
+                members=tuple(DwarfMemberInfo(
+                    name=name + member.name[1:], address_offset=member.address_offset,
+                    data_type=member.data_type, byte_size=member.byte_size,
+                    is_pointer=member.is_pointer) for member in members),
             )
             by_name.setdefault(name, info)
 

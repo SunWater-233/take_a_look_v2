@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:tal_drag_preview/tal_drag_preview.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -57,6 +58,7 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
   List<WorkspacePanelId> detachedPanels = const <WorkspacePanelId>[];
   bool detachedWindowAssigned = false;
   bool releasingDetachedWindow = false;
+  int _detachedAssignmentRevision = 0;
   int _tabDragPreviewSession = 0;
   bool _tabDragPreviewActive = false;
   bool _tabDragPreviewVisible = false;
@@ -75,6 +77,7 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
           sourceRootPicker: pickSourceRootDirectory,
           csvExportPathPicker: pickCsvExportPath,
           csvImportContentsPicker: pickCsvImportContents,
+          csvImportPathPicker: kIsWeb ? null : pickCsvImportPath,
         );
         client.eventHandler = controller.applyBackendEvent;
         backendClient = client;
@@ -92,8 +95,10 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
         remoteCommand: (method, arguments) =>
             sendCommandToMain(remoteController, method, arguments),
         csvImportContentsPicker: pickCsvImportContents,
+        csvImportPathPicker: kIsWeb ? null : pickCsvImportPath,
       );
       controller = remoteController;
+      controller.setPresentationActive(false);
       windowManager.addListener(this);
       unawaited(windowManager.setPreventClose(true));
       unawaited(
@@ -128,6 +133,7 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
     DetachedPanelLaunch configuration,
   ) async {
     if (!mounted) return;
+    _detachedAssignmentRevision++;
     await windowManager.hide();
     await windowManager.setTitleBarStyle(
       TitleBarStyle.hidden,
@@ -151,6 +157,7 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
       await windowManager.setPosition(initialPosition);
     }
     final panels = configuration.groupPanels;
+    controller.setPresentationActive(true);
     await windowManager.setTitle(
       panels.length > 1
           ? 'Take A Look - ${configuration.panel.title} 组合'
@@ -166,6 +173,7 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
     if (!mounted || session <= _tabDragPreviewSession) return;
     _tabDragPreviewSession = session;
     _tabDragPreviewActive = true;
+    controller.setPresentationActive(true);
     _tabDragPreviewVisible = false;
     await windowManager.hide();
     await windowManager.setAsFrameless();
@@ -217,6 +225,9 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
     _tabDragPreviewActive = false;
     _tabDragPreviewVisible = false;
     await windowManager.hide();
+    if (session == _tabDragPreviewSession && !_tabDragPreviewActive) {
+      controller.setPresentationActive(false, releaseHistory: true);
+    }
   }
 
   Future<Rect> _getDetachedWindowBounds() async {
@@ -241,12 +252,17 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
   Future<void> _releaseDetachedWindow() async {
     if (releasingDetachedWindow) return;
     releasingDetachedWindow = true;
+    final revision = _detachedAssignmentRevision;
     try {
       if (detachedWindowAssigned) {
         await releaseDetachedWindow();
+        if (revision != _detachedAssignmentRevision) return;
         if (mounted) setState(() => detachedWindowAssigned = false);
       }
       await windowManager.hide();
+      if (revision == _detachedAssignmentRevision) {
+        controller.setPresentationActive(false, releaseHistory: true);
+      }
     } finally {
       releasingDetachedWindow = false;
     }

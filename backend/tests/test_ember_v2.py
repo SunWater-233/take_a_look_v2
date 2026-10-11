@@ -65,9 +65,11 @@ def test_binary_memory_and_push_do_not_block_control(client):
     stream = client.subscribe(request())
     total = 0
     latencies = []
-    deadline = time.monotonic() + 0.3
+    # Check concurrent progress and control latency, not host timer throughput
+    # during an arbitrary 300 ms startup interval.
+    deadline = time.monotonic() + 5.0
     try:
-        while time.monotonic() < deadline:
+        while time.monotonic() < deadline and (total <= 100_000 or len(latencies) < 10):
             before = time.perf_counter()
             assert client.call("ping", {})["pong"]
             latencies.append(time.perf_counter() - before)
@@ -76,6 +78,7 @@ def test_binary_memory_and_push_do_not_block_control(client):
             total += len(chunk)
             time.sleep(0.005)
         assert total > 100_000
+        assert len(latencies) >= 10
         assert max(latencies) < 1.0
         assert stream.dropped == 0
     finally:
@@ -123,9 +126,17 @@ def test_explicit_tcp_compatibility_accepts_the_new_token(fixture_server, monkey
 def test_slow_reliable_consumer_fails_without_unbounded_memory(client):
     stream = client.subscribe(request())
     try:
-        time.sleep(0.85)
-        with pytest.raises(V2Error, match="缓存"):
+        deadline = time.monotonic() + 15.0
+        while time.monotonic() < deadline:
+            with stream._lock:
+                if stream._error is not None:
+                    break
+            time.sleep(0.01)
+        # Depending on QUIC/host scheduling, either the gateway history or the
+        # client queue can fill first. Both must stop this reliable stream.
+        with pytest.raises(V2Error) as failure:
             stream.read()
+        assert failure.value.code in {"client_overflow", "rtt_overflow"}
         assert stream._bytes <= 1024 * 1024
         assert client.call("ping", {})["pong"]
     finally:
@@ -144,6 +155,20 @@ def test_latest_reorders_drops_whole_samples_and_rejects_epoch_change():
     stream.receive(packet(4, 24, 4.0, epoch=2))
     with pytest.raises(V2Error, match="代次"):
         stream.read()
+
+
+def test_reliable_client_buffer_limit_is_exact_without_network_timing():
+    stream = Subscription(None, request(), 4)
+    for sequence in range(1, 257):
+        cursor = (sequence - 1) * 4096
+        stream.receive(CHUNK.pack(1, 1, 0, 0, sequence, cursor, 0, 0) + bytes(4096))
+    assert stream._error is None
+    assert stream._bytes == 1024 * 1024
+    stream.receive(CHUNK.pack(1, 1, 0, 0, 257, 1024 * 1024, 0, 0) + bytes(8))
+    with pytest.raises(V2Error, match="缓存") as failure:
+        stream.read()
+    assert failure.value.code == "client_overflow"
+    assert stream._bytes == 0
 
 
 def test_v2_bootstrap_never_sends_the_secret_over_tcp(fixture_server):

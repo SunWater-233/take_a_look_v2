@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from contextlib import ExitStack
 import threading
 import time
 from collections.abc import Callable, Mapping
@@ -14,9 +15,11 @@ from take_a_look_backend.backends.ember_transport import EmberError
 from take_a_look_backend.models import SymbolInfo, WatchedVariable, json_value
 from take_a_look_backend.protocol import EventName, PROTOCOL_VERSION, ProtocolError, RpcMethod
 from take_a_look_backend.services.sampling import SamplingServiceMixin
+from take_a_look_backend.services.ordered_worker import OrderedWorker
 from take_a_look_backend.services.recording import RawRecording, export_recording_csv
 from take_a_look_backend.services.debug_info import DebugInfoIndex, load_debug_info_from_elf
 from take_a_look_backend.services.symbols import load_symbols_from_elf
+from take_a_look_backend.services.elf_context import ElfLoadContext
 
 
 EventSink = Callable[[EventName, object], None]
@@ -53,6 +56,8 @@ class BackendService(SamplingServiceMixin):
         self._symbol_loader = symbol_loader
         self._debug_info_loader = debug_info_loader
         self._lock = threading.RLock()
+        self._perf_lock = threading.Lock()
+        self._closed = False
         self._wake = threading.Event()
         self._shutdown = threading.Event()
         self._sampler = threading.Thread(target=self._sampling_loop, name="tal-sampler", daemon=True)
@@ -75,11 +80,14 @@ class BackendService(SamplingServiceMixin):
         self._symbols: dict[str, SymbolInfo] = {}
         self._watches: dict[str, WatchedVariable] = {}
         self._recording = RawRecording(recording_directory)
+        self._recording_worker = OrderedWorker('tal-recording')
+        self._pipeline_backpressure = False
+        self._recording_error_reported = False
         self._pending_frames: list[tuple[float, dict[str, object]]] = []
         self._pending_recording_frames: list[tuple[float, dict[str, object]]] = []
         self._pending_recording_labels: dict[str, str] = {}
         self._sample_count_since_perf = 0
-        self._perf_window_started_at = time.monotonic()
+        self._perf_window_started_at = time.perf_counter()
         self._last_perf_at = self._perf_window_started_at
         self._last_rtt_error = ""
         self._next_rtt_retry_at = 0.0
@@ -93,18 +101,25 @@ class BackendService(SamplingServiceMixin):
         self._sampler.start()
 
     def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
         self._shutdown.set()
         self._wake.set()
         self._sampler.join(timeout=2.0)
-        with self._lock:
-            try:
-                self._flush_pending_samples_locked()
-                self._recording.close()
-            finally:
-                self._stop_rtt_locked()
-                self._remove_all_breakpoints_locked()
-                self._memory.disconnect()
-                self._connection_status = "disconnected"
+        try:
+            with self._lock:
+                try:
+                    self._flush_pending_samples_locked()
+                    self._recording_worker.drain()
+                    self._recording.close()
+                finally:
+                    self._stop_rtt_locked()
+                    self._remove_all_breakpoints_locked()
+                    self._memory.disconnect()
+                    self._connection_status = "disconnected"
+        finally:
+            self._recording_worker.close()
 
     def handle(self, method: RpcMethod, params: Mapping[str, object]) -> dict[str, object]:
         if method is RpcMethod.HANDSHAKE:
@@ -240,7 +255,7 @@ class BackendService(SamplingServiceMixin):
             raise ProtocolError("connect_failed", "Unable to connect to the debug probe.", str(error)) from error
         with self._lock:
             self._connection_status = "connected"
-            self._connection_started_at = time.monotonic()
+            self._connection_started_at = time.perf_counter()
             self._sampling_paused = False
             self._target_execution_state = initial_execution_state
             self._apply_all_breakpoints_locked()
@@ -273,13 +288,13 @@ class BackendService(SamplingServiceMixin):
     def _load_symbols(self, params: Mapping[str, object]) -> dict[str, object]:
         path_text = _required_string(params, "path")
         load_id = params.get("loadId")
-        deadline = time.monotonic() + SYMBOL_LOAD_TIMEOUT_SECONDS
+        deadline = time.perf_counter() + SYMBOL_LOAD_TIMEOUT_SECONDS
         last_phase = ""
         last_report_at = 0.0
 
         def report_progress(phase: str, current: int = 0, total: int = 0) -> None:
             nonlocal last_phase, last_report_at
-            now = time.monotonic()
+            now = time.perf_counter()
             # Also checked before committing, so a late parse cannot replace
             # the previous symbols after the frontend has timed out.
             if now > deadline:
@@ -298,20 +313,24 @@ class BackendService(SamplingServiceMixin):
             raise ProtocolError("file_not_found", "Symbol file does not exist.", str(path))
         if path.suffix.lower() not in {".elf", ".axf"}:
             raise ProtocolError("unsupported_symbol_file", "Symbol file must use .elf or .axf.", str(path))
-        try:
-            symbols = self._symbol_loader(path, progress=report_progress)
-        except ProtocolError:
-            raise
-        except Exception as error:
-            raise ProtocolError("symbol_load_failed", "Unable to parse the symbol file.", str(error)) from error
-        try:
-            report_progress("source")
-            debug_info = self._debug_info_loader(path, progress=report_progress)
-        except ProtocolError:
-            raise
-        except Exception as error:
-            debug_info = DebugInfoIndex()
-            self._emit(EventName.LOG, {"level": "warning", "message": f"无法读取源码行调试信息：{error}"})
+        with ExitStack() as resources:
+            try:
+                options = {}
+                if self._symbol_loader is load_symbols_from_elf and self._debug_info_loader is load_debug_info_from_elf:
+                    options["context"] = resources.enter_context(ElfLoadContext(path))
+                symbols = self._symbol_loader(path, progress=report_progress, **options)
+            except ProtocolError:
+                raise
+            except Exception as error:
+                raise ProtocolError("symbol_load_failed", "Unable to parse the symbol file.", str(error)) from error
+            try:
+                report_progress("source")
+                debug_info = self._debug_info_loader(path, progress=report_progress, **options)
+            except ProtocolError:
+                raise
+            except Exception as error:
+                debug_info = DebugInfoIndex()
+                self._emit(EventName.LOG, {"level": "warning", "message": f"无法读取源码行调试信息：{error}"})
         with self._lock:
             report_progress("ui")
             self._remove_all_breakpoints_locked()
@@ -651,8 +670,11 @@ class BackendService(SamplingServiceMixin):
             self._pending_frames.clear()
             self._pending_recording_frames.clear()
             self._pending_recording_labels.clear()
+            self._recording_worker.drain()
             self._recording.rotate()
-            self._connection_started_at = time.monotonic() if self._connection_status == "connected" else None
+            self._pipeline_backpressure = False
+            self._recording_error_reported = False
+            self._connection_started_at = time.perf_counter() if self._connection_status == "connected" else None
             self._sample_count_since_perf = 0
             state = {"elapsedSeconds": 0.0, "sampleCount": 0, "rawRecording": self._recording.status()}
         self._emit(EventName.SAMPLES_CLEARED, {})
@@ -676,21 +698,31 @@ class BackendService(SamplingServiceMixin):
         with self._lock:
             return {"state": self._runtime_state_locked()}
 
-    def _export_csv(self, params: Mapping[str, object]) -> dict[str, object]:
-        path_text = _required_string(params, "path")
-        path = Path(path_text).expanduser()
+    def prepare_csv_export(self, params: Mapping[str, object]):
+        path = Path(_required_string(params, "path")).expanduser()
         if path.suffix.lower() != ".csv":
             path = path.with_suffix(".csv")
         with self._lock:
-            self._flush_pending_samples_locked()
-            if self._recording.sample_count == 0:
-                raise ProtocolError("no_samples", "There are no samples to export.")
-            source, boundary, expected_count = self._recording.snapshot()
+            self._flush_pending_samples_locked(wait=False, block=True)
+            # This ordered fence captures the click's committed prefix. Later
+            # batches, clear, or reconnect cannot move the export boundary.
+            snapshot = self._recording_worker.submit(self._recording.snapshot)
+        return path, snapshot
+
+    def finish_csv_export(self, prepared) -> dict[str, object]:
+        path, snapshot = prepared
+        try:
+            source, boundary, expected_count = snapshot.result()
+        except ValueError as error:
+            raise ProtocolError("no_samples", "There are no samples to export.") from error
         count = export_recording_csv(source, path, boundary)
         if count != expected_count:
             raise ProtocolError("recording_incomplete", "Raw recording row count mismatch.")
         self._emit(EventName.LOG, {"level": "info", "message": f"已导出 {count} 帧完整原始采样 CSV：{path}"})
         return {"path": str(path), "sampleCount": count}
+
+    def _export_csv(self, params: Mapping[str, object]) -> dict[str, object]:
+        return self.finish_csv_export(self.prepare_csv_export(params))
 
     def _apply_config_locked(self, params: Mapping[str, object]) -> None:
         kind = params.get("connectionKind", self._connection_kind)

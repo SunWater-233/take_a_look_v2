@@ -6,6 +6,7 @@ import 'dart:io';
 import 'dart:isolate';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
+import 'performance_audit.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -46,7 +47,10 @@ Future<void> main() async {
   try {
     if (!kReleaseMode) throw StateError('This benchmark requires release AOT.');
     _checkFixtures();
-    if (Platform.environment['TAL_BENCH_SUITE'] == 'heartbeat') {
+    if (Platform.environment['TAL_BENCH_SUITE'] == 'audit') {
+      await runPerformanceAudit(_measure, _record);
+      await _acquisitionBenchmarks();
+    } else if (Platform.environment['TAL_BENCH_SUITE'] == 'heartbeat') {
       await _responsivenessBenchmarks();
     } else if (Platform.environment['TAL_BENCH_SUITE'] == 'worker') {
       await _productionWorkerBenchmarks();

@@ -1,58 +1,15 @@
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'analysis_data.dart';
+import 'analysis_dataset.dart';
+export 'analysis_dataset.dart';
+export 'analysis_import.dart';
 
 export 'analysis_data.dart';
 
 enum AnalysisMouseMode { threeButton, rectangle }
-
-@immutable
-class AnalysisSeries {
-  const AnalysisSeries({
-    required this.name,
-    required this.color,
-    required this.points,
-  });
-
-  final String name;
-  final Color color;
-  final List<AnalysisPoint> points;
-
-  Map<String, Object?> toJson() => {
-    'name': name,
-    'color': color.toARGB32(),
-    'points': [for (final point in points) point.toJson()],
-  };
-
-  static AnalysisSeries fromJson(Object? value) {
-    final data = Map<String, Object?>.from(value! as Map);
-    return AnalysisSeries(
-      name: data['name'] as String,
-      color: Color(data['color'] as int),
-      points: List<AnalysisPoint>.unmodifiable(
-        (data['points'] as List? ?? const []).map(AnalysisPoint.fromJson),
-      ),
-    );
-  }
-}
-
-@immutable
-class AnalysisStats {
-  const AnalysisStats({
-    required this.count,
-    required this.minimum,
-    required this.maximum,
-    required this.average,
-  });
-
-  final int count;
-  final double minimum;
-  final double maximum;
-  final double average;
-}
 
 /// Controller-owned analysis state.
 ///
@@ -120,12 +77,11 @@ class AnalysisSession {
     var yMin = double.infinity;
     var yMax = -double.infinity;
     for (final item in series) {
-      for (final point in item.points) {
-        xMin = math.min(xMin, point.x);
-        xMax = math.max(xMax, point.x);
-        yMin = math.min(yMin, point.y);
-        yMax = math.max(yMax, point.y);
-      }
+      final bounds = item.rawBounds;
+      xMin = math.min(xMin, bounds.$1);
+      xMax = math.max(xMax, bounds.$2);
+      yMin = math.min(yMin, bounds.$3);
+      yMax = math.max(yMax, bounds.$4);
     }
     if (!xMin.isFinite || !xMax.isFinite) {
       return _dataBounds = (0, 1, -1, 1);
@@ -147,17 +103,9 @@ class AnalysisSession {
   }
 
   void replaceData(List<AnalysisSeries> next, String source) {
-    series = List<AnalysisSeries>.unmodifiable([
-      for (final item in next)
-        AnalysisSeries(
-          name: item.name,
-          color: item.color,
-          points: List<AnalysisPoint>.unmodifiable(
-            List<AnalysisPoint>.of(item.points)
-              ..sort((left, right) => left.x.compareTo(right.x)),
-          ),
-        ),
-    ]);
+    series = List<AnalysisSeries>.unmodifiable(
+      next.map((item) => item.prepare()),
+    );
     seriesVisibility = List<bool>.filled(series.length, true);
     selectedColumns.clear();
     selectedSeriesIndex = null;
@@ -219,8 +167,12 @@ class AnalysisSession {
           ];
   }
 
-  Map<String, Object?> toJson({required bool includeData}) => {
-    if (includeData) 'series': [for (final item in series) item.toJson()],
+  Map<String, Object?> toJson({
+    required bool includeData,
+    bool packed = false,
+  }) => {
+    if (includeData)
+      'series': [for (final item in series) item.toJson(packed: packed)],
     'seriesVisibility': seriesVisibility,
     'sourceLabel': sourceLabel,
     'statsHeight': statsHeight,
@@ -405,95 +357,6 @@ int? _defaultFftSeriesIndex(List<AnalysisSeries> series, int? timeSeriesIndex) {
   return 0;
 }
 
-List<AnalysisSeries> parseAnalysisCsv(
-  String contents, {
-  required List<Color> colors,
-}) {
-  final rows = [
-    for (final line
-        in contents.replaceAll('\r\n', '\n').replaceAll('\r', '\n').split('\n'))
-      if (line.trim().isNotEmpty) parseAnalysisCsvLine(line),
-  ];
-  if (rows.isEmpty || rows.first.length < 2) return const [];
-  final first = rows.first;
-  final hasHeader = double.tryParse(first.first.trim()) == null;
-  final start = hasHeader ? 1 : 0;
-  final columnCount = rows
-      .skip(start)
-      .fold<int>(first.length, (count, row) => math.max(count, row.length));
-  if (columnCount < 2) return const [];
-  final names = [
-    for (var column = 1; column < columnCount; column += 1)
-      hasHeader && first.length > column && first[column].trim().isNotEmpty
-          ? first[column].trim()
-          : '通道 $column',
-  ];
-  final points = [for (var i = 0; i < names.length; i += 1) <AnalysisPoint>[]];
-  for (final row in rows.skip(start)) {
-    final x = double.tryParse(row.isEmpty ? '' : row.first.trim());
-    if (x == null || !x.isFinite) continue;
-    for (var column = 1; column < columnCount; column += 1) {
-      if (row.length <= column) continue;
-      final y = double.tryParse(row[column].trim());
-      if (y != null && y.isFinite) {
-        points[column - 1].add(AnalysisPoint(x, y));
-      }
-    }
-  }
-  return [
-    for (var index = 0; index < points.length; index += 1)
-      if (points[index].isNotEmpty)
-        AnalysisSeries(
-          name: names[index],
-          color: colors[index % colors.length],
-          points: List<AnalysisPoint>.unmodifiable(points[index]),
-        ),
-  ];
-}
-
-Future<List<AnalysisSeries>> parseAnalysisCsvInBackground(
-  String contents, {
-  required List<Color> colors,
-}) {
-  return compute(_parseAnalysisCsvPayload, (
-    contents: contents,
-    colors: [for (final color in colors) color.toARGB32()],
-  ));
-}
-
-List<AnalysisSeries> _parseAnalysisCsvPayload(
-  ({String contents, List<int> colors}) payload,
-) {
-  return parseAnalysisCsv(
-    payload.contents,
-    colors: [for (final value in payload.colors) Color(value)],
-  );
-}
-
-List<String> parseAnalysisCsvLine(String line) {
-  final values = <String>[];
-  var buffer = StringBuffer();
-  var quoted = false;
-  for (var index = 0; index < line.length; index += 1) {
-    final char = line[index];
-    if (char == '"') {
-      if (quoted && index + 1 < line.length && line[index + 1] == '"') {
-        buffer.write('"');
-        index += 1;
-      } else {
-        quoted = !quoted;
-      }
-    } else if (char == ',' && !quoted) {
-      values.add(buffer.toString());
-      buffer = StringBuffer();
-    } else {
-      buffer.write(char);
-    }
-  }
-  values.add(buffer.toString());
-  return values;
-}
-
 AnalysisStats? analysisStatsForRange(
   List<AnalysisPoint> points,
   double start,
@@ -505,11 +368,31 @@ AnalysisStats? analysisStatsForRange(
   var minimum = double.infinity;
   var maximum = -double.infinity;
   var sum = 0.0;
-  for (var index = first; index < afterLast; index += 1) {
-    final value = analysisYAt(points, index);
-    minimum = math.min(minimum, value);
-    maximum = math.max(maximum, value);
-    sum += value;
+  final packed = points is PackedAnalysisPoints;
+  final values = packed
+      ? points.packed
+      : points is UniformAnalysisPoints
+      ? points.values
+      : null;
+  if (values != null) {
+    final stride = packed ? 2 : 1;
+    for (
+      var index = first * stride + (packed ? 1 : 0);
+      index < afterLast * stride;
+      index += stride
+    ) {
+      final value = values[index];
+      minimum = math.min(minimum, value);
+      maximum = math.max(maximum, value);
+      sum += value;
+    }
+  } else {
+    for (var index = first; index < afterLast; index += 1) {
+      final value = analysisYAt(points, index);
+      minimum = math.min(minimum, value);
+      maximum = math.max(maximum, value);
+      sum += value;
+    }
   }
   final count = afterLast - first;
   return AnalysisStats(

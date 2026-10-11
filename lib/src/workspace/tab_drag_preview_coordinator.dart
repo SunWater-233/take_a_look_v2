@@ -12,6 +12,9 @@ import 'window_sync.dart';
 /// always-on-top, click-through and frameless state must never leak into a
 /// real, interactive panel window.
 class TabDragPreviewCoordinator {
+  TabDragPreviewCoordinator({this.prepareState});
+
+  final Future<void> Function(WindowController, WorkspacePanelId)? prepareState;
   static const _warmWindowSize = Size(640, 480);
   static const _configureRetryDelay = Duration(milliseconds: 25);
   static const _configureAttempts = 200;
@@ -38,6 +41,8 @@ class TabDragPreviewCoordinator {
       if (!_isActive(session)) return;
       final window = await _ensureWindow();
       if (window == null || !_isActive(session)) return;
+      await prepareState?.call(window, panel);
+      if (!_isActive(session)) return;
       final arguments = DetachedPanelLaunch(
         panel: panel,
         initialSize: size,

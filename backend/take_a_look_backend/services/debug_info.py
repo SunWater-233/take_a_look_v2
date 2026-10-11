@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import bisect
+from contextlib import nullcontext
+from take_a_look_backend.services.elf_context import ElfLoadContext
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PurePath
@@ -84,16 +86,16 @@ class DebugInfoIndex:
 
 def load_debug_info_from_elf(
     path: Path, progress: Callable[[str, int, int], None] | None = None,
+    *, context: ElfLoadContext | None = None,
 ) -> DebugInfoIndex:
-    from elftools.elf.elffile import ELFFile
 
     locations: list[SourceLocation] = []
     total = 0
-    with path.open("rb") as handle:
-        elf = ELFFile(handle)
+    with (nullcontext(context) if context is not None else ElfLoadContext(path)) as loaded:
+        elf = loaded.elf
         if not elf.has_dwarf_info():
             return DebugInfoIndex()
-        dwarf_info = elf.get_dwarf_info()
+        dwarf_info = loaded.dwarf_info
         compile_units = list(dwarf_info.iter_CUs())
         # The final work item builds the bidirectional line/address index.
         total = len(compile_units) + 1

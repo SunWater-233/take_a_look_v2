@@ -225,14 +225,11 @@ class DetachedWindowCoordinator {
     StackTrace? lastStackTrace;
     for (var attempt = 0; attempt < _configureAttempts; attempt++) {
       try {
+        await windowSync.prepareWindow(window, configuration.groupPanels);
         await window.invokeMethod<void>(
           configureDetachedPanelMethod,
           configuration.toJson(),
         );
-        if (configuration.panels.contains(WorkspacePanelId.analysis) ||
-            configuration.panel == WorkspacePanelId.analysis) {
-          await windowSync.syncAnalysisSessionTo(window);
-        }
         return;
       } on Object catch (error, stackTrace) {
         lastError = error;

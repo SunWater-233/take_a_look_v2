@@ -189,29 +189,33 @@ class _AnalysisFftPanelState extends State<_AnalysisFftPanel> {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    CustomPaint(
-                      key: const ValueKey('analysis-fft-chart'),
-                      painter: _AnalysisFftPainter(
-                        spectrum: widget.spectrum,
-                        signalName: signal?.name ?? '',
-                        color: signal?.color ?? TalColors.accent,
-                        xMin: bounds.$1,
-                        xMax: bounds.$2,
-                        yMin: bounds.$3,
-                        yMax: bounds.$4,
-                        invertX: session.fftInvertX,
-                        invertY: session.fftInvertY,
+                    RepaintBoundary(
+                      child: CustomPaint(
+                        key: const ValueKey('analysis-fft-chart'),
+                        painter: _AnalysisFftPainter(
+                          spectrum: widget.spectrum,
+                          signalName: signal?.name ?? '',
+                          color: signal?.color ?? TalColors.accent,
+                          xMin: bounds.$1,
+                          xMax: bounds.$2,
+                          yMin: bounds.$3,
+                          yMax: bounds.$4,
+                          invertX: session.fftInvertX,
+                          invertY: session.fftInvertY,
+                        ),
                       ),
                     ),
                     IgnorePointer(
-                      child: CustomPaint(
-                        key: const ValueKey('analysis-fft-selection-layer'),
-                        painter: _AnalysisSelectionPainter(
-                          xMin: bounds.$1,
-                          xMax: bounds.$2,
-                          selectionStart: session.fftSelectionStart,
-                          selectionEnd: session.fftSelectionEnd,
-                          invertX: session.fftInvertX,
+                      child: RepaintBoundary(
+                        child: CustomPaint(
+                          key: const ValueKey('analysis-fft-selection-layer'),
+                          painter: _AnalysisSelectionPainter(
+                            xMin: bounds.$1,
+                            xMax: bounds.$2,
+                            selectionStart: session.fftSelectionStart,
+                            selectionEnd: session.fftSelectionEnd,
+                            invertX: session.fftInvertX,
+                          ),
                         ),
                       ),
                     ),

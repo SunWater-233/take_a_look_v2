@@ -279,6 +279,29 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
         ],
         child: const Text('刷新率设置'),
       ),
+      ListenableBuilder(
+        listenable: Listenable.merge([state?.plotControlChanges]),
+        builder: (context, _) => SubmenuButton(
+          menuStyle: Theme.of(
+            context,
+          ).menuTheme.style?.copyWith(alignment: AlignmentDirectional.topEnd),
+          animated: true,
+          menuChildren: [
+            for (final seconds in const [10, 30, 60, 120])
+              _menuItem(
+                label: '$seconds 秒',
+                checked: state?.plotRetentionSeconds == seconds,
+                reserveLeading: true,
+                onPressed: state == null
+                    ? null
+                    : () => state.configurePlotView({
+                        'plotRetentionSeconds': seconds,
+                      }),
+              ),
+          ],
+          child: const Text('绘图缓存'),
+        ),
+      ),
       SubmenuButton(
         menuStyle: Theme.of(
           context,

@@ -130,6 +130,47 @@ class BackendServiceTests(unittest.TestCase):
         self.assertTrue(old_path.exists())
         self.assertEqual(self.service._recording.sample_count, 0)
 
+    def test_recording_io_does_not_hold_the_hardware_lock(self) -> None:
+        entered, release = threading.Event(), threading.Event()
+        original = self.service._recording.append
+        def slow_append(frames, labels):
+            entered.set()
+            self.assertTrue(release.wait(2))
+            original(frames, labels)
+        key = self.symbols[0].key
+        try:
+            with patch.object(self.service._recording, "append", side_effect=slow_append):
+                with self.service._lock:
+                    self.service._watches[key] = WatchedVariable(self.symbols[0], "#00ff00")
+                    self.service._queue_samples_locked([(1.0, {key: 41})])
+                    self.assertTrue(self.service._flush_pending_samples_locked(wait=False))
+                self.assertTrue(entered.wait(1))
+                # The writer is still blocked, but hardware/control state is available.
+                self.assertTrue(self.service._lock.acquire(timeout=0.2))
+                self.service._lock.release()
+                release.set()
+                self.service._recording_worker.drain()
+            self.assertEqual(self.service._recording.sample_count, 1)
+        finally:
+            release.set()
+
+    def test_export_fence_survives_later_samples_and_clear(self) -> None:
+        key = self.symbols[0].key
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "snapshot.csv"
+            with self.service._lock:
+                self.service._watches[key] = WatchedVariable(self.symbols[0], "#00ff00")
+                self.service._queue_samples_locked([(1.0, {key: 1}), (1.0, {key: 2})])
+            prepared = self.service.prepare_csv_export({"path": str(path)})
+            with self.service._lock:
+                self.service._queue_samples_locked([(2.0, {key: 3})])
+            self.service.handle(RpcMethod.CLEAR_SAMPLES, {})
+            result = self.service.finish_csv_export(prepared)
+            self.assertEqual(result["sampleCount"], 2)
+            with path.open(encoding="utf-8-sig", newline="") as stream:
+                self.assertEqual(list(csv.reader(stream))[1:], [
+                    ["1.000000000", "1"], ["1.000000000", "2"]])
+
     def test_recording_failure_pauses_acquisition_and_blocks_resume(self) -> None:
         key = self.symbols[0].key
         with self.service._lock:

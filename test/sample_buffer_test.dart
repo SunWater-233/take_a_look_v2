@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -9,6 +10,67 @@ import 'package:take_a_look_v2/src/telemetry/sample_buffer.dart';
 import 'package:take_a_look_v2/src/telemetry/telemetry_store.dart';
 
 void main() {
+  test(
+    'page snapshots and exact reductions survive wrap, writes and resize',
+    () {
+      final random = math.Random(7182);
+      final buffer = SampleBuffer(capacity: 769);
+      for (var i = 0; i < 3000; i++) {
+        buffer.addXY((i ~/ 3) / 100, random.nextInt(31).toDouble());
+      }
+      final frozen = buffer.snapshot();
+      final original = frozen.toList();
+      void compare(SampleBuffer series) {
+        final points = series.toList();
+        for (final width in [3.3, 53.0, 127.1]) {
+          for (final cut in [0.0, 0.17, 0.63]) {
+            final xMin = points.first.dx + cut;
+            final xMax = points.last.dx - cut;
+            expect(
+              downsampleTelemetrySamples(
+                series,
+                xMin: xMin,
+                xMax: xMax,
+                pixelWidth: width,
+              ),
+              downsampleTelemetrySamples(
+                points,
+                xMin: xMin,
+                xMax: xMax,
+                pixelWidth: width,
+              ),
+            );
+            final visible = points.where((p) => p.dx >= xMin && p.dx <= xMax);
+            expect(series.valueBounds(xMin, xMax), (
+              visible.map((p) => p.dy).reduce(math.min),
+              visible.map((p) => p.dy).reduce(math.max),
+            ));
+          }
+        }
+      }
+
+      compare(buffer);
+      compare(frozen);
+      for (var i = 3000; i < 5000; i++) {
+        buffer.addXY((i ~/ 3) / 100, random.nextInt(31).toDouble());
+      }
+      compare(buffer);
+      compare(frozen);
+      expect(frozen.toList(), original);
+      buffer.configureRetention(seconds: 60, rateHz: 1000);
+      buffer.addXY(18, -100);
+      buffer.clear();
+      expect(frozen.toList(), original);
+      expect(() => frozen.addXY(0, 0), throwsUnsupportedError);
+      expect(frozen.packedRange(1, 3), [
+        original[1].dx,
+        original[1].dy,
+        original[2].dx,
+        original[2].dy,
+      ]);
+    },
+  );
+
   test('bounded history wraps in order and snapshots survive later writes', () {
     final buffer = SampleBuffer(capacity: 3);
     for (var i = 0; i < 8; i++) {

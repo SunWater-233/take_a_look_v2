@@ -5,6 +5,24 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:take_a_look_v2/src/backend/backend_client.dart';
 
 void main() {
+  test('JSON scan survives compaction, growth, CRLF and reset', () {
+    final lines = <String>[];
+    final decoder = BackendStreamDecoder(
+      onJsonLine: lines.add,
+      onSamplePayload: (_) {},
+    );
+    final large = jsonEncode({'text': '源码🙂' * 3000});
+    final bytes = utf8.encode('first\n$large\r\nlast\n');
+    for (var i = 0; i < bytes.length; i += 37) {
+      decoder.add(bytes.sublist(i, (i + 37).clamp(0, bytes.length)));
+    }
+    expect(lines, ['first', large, 'last']);
+    decoder.add(utf8.encode('discarded partial line'));
+    decoder.reset();
+    decoder.add(utf8.encode('fresh\n'));
+    expect(lines.last, 'fresh');
+  });
+
   test(
     'stream decoder handles interleaved JSON and fragmented binary frames',
     () {

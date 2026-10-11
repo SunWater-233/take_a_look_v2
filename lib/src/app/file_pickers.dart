@@ -38,3 +38,12 @@ Future<String?> pickCsvImportContents() async {
   );
   return file?.readAsString();
 }
+
+Future<String?> pickCsvImportPath() async {
+  final file = await openFile(
+    acceptedTypeGroups: const [
+      XTypeGroup(label: 'CSV 文件', extensions: ['csv']),
+    ],
+  );
+  return file?.path;
+}

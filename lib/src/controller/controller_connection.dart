@@ -204,6 +204,7 @@ extension TakeALookControllerConnection on TakeALookController {
   void _setSymbolLoad(SymbolLoadProgress progress) {
     final wasLoading = isSymbolLoading;
     state.symbolLoad = progress;
+    _touchSnapshotFields(['symbolLoad']);
     signals.symbolLoad.emit();
     if (wasLoading != isSymbolLoading) signals.symbols.emit();
   }

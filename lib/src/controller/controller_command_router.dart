@@ -10,8 +10,9 @@ import '../protocol/commands.dart';
 Future<JsonObject> executeControllerCommand(
   TakeALookController controller,
   ControllerCommand command,
-  Object? arguments,
-) async {
+  Object? arguments, {
+  bool includeResultState = true,
+}) async {
   switch (command) {
     case ControllerCommand.toggleConnection:
       await controller.toggleConnection();
@@ -180,5 +181,5 @@ Future<JsonObject> executeControllerCommand(
     case ControllerCommand.setWatches:
       throw UnsupportedError('setWatches is an internal backend command');
   }
-  return controller.stateSnapshot();
+  return includeResultState ? controller.stateSnapshot() : <String, dynamic>{};
 }

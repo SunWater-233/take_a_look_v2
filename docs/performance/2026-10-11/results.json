@@ -1,0 +1,4349 @@
+{
+  "baselineCommit": "9541b207f6626fb37adc413702566dd65aed9907",
+  "afterBaseCommit": "9541b207f6626fb37adc413702566dd65aed9907",
+  "scope": [
+    "Windows release AOT. Two separate processes per side, same fixtures and Flutter SDK.",
+    "Both benchmark processes restricted to mask 255 (logical CPUs 0-7, performance-class cores on this host). Application and OS affinity settings unchanged.",
+    "CPU frequency and external system load were not locked. Ranges are two per-process results, not confidence intervals.",
+    "Repeated synchronous operations use the per-process median of calibrated blocks; pause is a single operation in each process.",
+    "Moving-window painting appends 64 frames/channel each operation. Unchanged-window painting additionally benefits from caching.",
+    "Painting measures CPU picture recording, not rasterization or displayed FPS. Live engine timings come from a hidden generated runner.",
+    "Wire comparisons use each version's production representation with identical values: legacy nested lists versus Float64 buffers and state patches.",
+    "JSON-fragment timing is cumulative CPU processing for continuously fed fragments, not a measured contiguous UI freeze.",
+    "Backend tests use a fake probe plus real disk recording. They do not establish USB/SWD/network throughput or a guaranteed 10 kHz memory polling rate.",
+    "Raw samples, duplicate timestamps, extrema, frozen histories, readback and export boundaries retain their existing semantics."
+  ],
+  "environment": {
+    "before": {
+      "audit": {
+        "flutter": {
+          "frameworkVersion": "3.44.1",
+          "channel": "stable",
+          "repositoryUrl": "https://github.com/flutter/flutter.git",
+          "frameworkRevision": "924134a44c189315be2148659913dda1671cbe99",
+          "frameworkCommitDate": "2026-05-29 12:13:22 -0400",
+          "engineRevision": "c416acfeb8126e097f758c664aaa3da929e27da0",
+          "engineCommitDate": "2026-05-27 20:19:31.000Z",
+          "engineContentHash": "39b1f7043775b9578bbb26a1676e79c4e31c8b5e",
+          "engineBuildDate": "2026-05-28 04:50:43.210",
+          "dartSdkVersion": "3.12.1",
+          "devToolsVersion": "2.57.0",
+          "flutterVersion": "3.44.1",
+          "flutterRoot": "D:\\flutter"
+        },
+        "sourceDirectory": "D:\\ProjectGarage\\take_a_look_v2\\build\\performance_review\\baseline_source",
+        "cpu": "13th Gen Intel(R) Core(TM) i5-13420H",
+        "ramGiB": 15.73,
+        "cores": 8,
+        "processorAffinity": 255,
+        "logicalProcessors": 12,
+        "sourceSha256": {
+          "lib/src/backend/backend_transport.dart": "D42B9B02A9FD015ABBC6DF78E5FD9F0F156E916E3C8836F33E18AB3EBF7D4433",
+          "lib/src/analysis/analysis_fft.dart": "D738E2BBFCE6C77180559E3BCF334E37044F50B6B1ABEDC521BDD3106EFB3027",
+          "tool/benchmarks/performance_audit.dart": "8A27989634CD2F9451EA9D4CCF3281DB4E9D5B18F9746741722261B194BBF4C6",
+          "lib/src/panels/analysis_chart_panel.dart": "6D30143B777B9C54ED7180AFD0C1B5889CBA9EDC556516F4C469886D2C19A84D",
+          "lib/src/telemetry/telemetry_store.dart": "E5531EA323D54AB0057EBD1BF51F59EC245CE5AB42C70CA74FEAFEEEA23A9F82",
+          "lib/src/models/models.dart": "0892CCBCC0DAF625FD9A09A8D9AF3F727EEE144E79BE3DEE566C703550CA1E43",
+          "lib/src/analysis/analysis.dart": "547CB310EDCE5F602FAA7D72E790FFD373B36B586AE63D4A49D5F31E08F74C11",
+          "lib/src/analysis/analysis_data.dart": "595A3E0052BEDD0B8A70B8E1B4AB58BF010C0F378739EEDEA396828FDE763A4C",
+          "lib/src/analysis/analysis_worker.dart": "80919504C8D3EFDA593F87105D20C3083CA434AF968A7F6A3428060F0D9CC573",
+          "lib/src/telemetry/sample_buffer.dart": "CA6EB7068F8124C428B24E73901BB2C476CE04253DF31950B55C6EC5C2FEE709",
+          "lib/src/chart/downsampling.dart": "9946421DD8FE70F239E434B4294D21F2E06C83DCCA334EA402385A1D4C517944",
+          "lib/src/controller/controller_telemetry.dart": "E9E45B8CD1DED34DE230CC4C4891B5A145E39E02823831FB6BDB6BC359391F61",
+          "lib/src/controller/controller.dart": "B4ABF91EC6C9237198C2D7A679463BB304AF00A3E4052C50944A478EA6ACF3F5",
+          "lib/src/chart/painter.dart": "A9F80C236152AEB23847E778B857668C5F0A94C9E85525F4533EDA7978D3DDA4",
+          "lib/src/panels/analysis_fft_panel.dart": "0DDEA4B5AEC9465296F4983BA66E1961C37324F5EA5A411453EB7FE5475687E7",
+          "tool/benchmarks/data_benchmark.dart": "CAC183D8E3BEB59F4F3A0A85A4415EFE6A0C9DB6004BE3E070E96B90ADCE7EA5"
+        }
+      },
+      "live": {
+        "flutter": {
+          "frameworkVersion": "3.44.1",
+          "channel": "stable",
+          "repositoryUrl": "https://github.com/flutter/flutter.git",
+          "frameworkRevision": "924134a44c189315be2148659913dda1671cbe99",
+          "frameworkCommitDate": "2026-05-29 12:13:22 -0400",
+          "engineRevision": "c416acfeb8126e097f758c664aaa3da929e27da0",
+          "engineCommitDate": "2026-05-27 20:19:31.000Z",
+          "engineContentHash": "39b1f7043775b9578bbb26a1676e79c4e31c8b5e",
+          "engineBuildDate": "2026-05-28 04:50:43.210",
+          "dartSdkVersion": "3.12.1",
+          "devToolsVersion": "2.57.0",
+          "flutterVersion": "3.44.1",
+          "flutterRoot": "D:\\flutter"
+        },
+        "sourceDirectory": "D:\\ProjectGarage\\take_a_look_v2\\build\\performance_review\\baseline_source",
+        "cpu": "13th Gen Intel(R) Core(TM) i5-13420H",
+        "ramGiB": 15.73,
+        "cores": 8,
+        "processorAffinity": 255,
+        "logicalProcessors": 12,
+        "sourceSha256": {
+          "lib/src/backend/backend_transport.dart": "D42B9B02A9FD015ABBC6DF78E5FD9F0F156E916E3C8836F33E18AB3EBF7D4433",
+          "lib/src/analysis/analysis_fft.dart": "D738E2BBFCE6C77180559E3BCF334E37044F50B6B1ABEDC521BDD3106EFB3027",
+          "tool/benchmarks/performance_audit.dart": "8A27989634CD2F9451EA9D4CCF3281DB4E9D5B18F9746741722261B194BBF4C6",
+          "lib/src/panels/analysis_chart_panel.dart": "6D30143B777B9C54ED7180AFD0C1B5889CBA9EDC556516F4C469886D2C19A84D",
+          "lib/src/telemetry/telemetry_store.dart": "E5531EA323D54AB0057EBD1BF51F59EC245CE5AB42C70CA74FEAFEEEA23A9F82",
+          "lib/src/models/models.dart": "0892CCBCC0DAF625FD9A09A8D9AF3F727EEE144E79BE3DEE566C703550CA1E43",
+          "lib/src/analysis/analysis.dart": "547CB310EDCE5F602FAA7D72E790FFD373B36B586AE63D4A49D5F31E08F74C11",
+          "lib/src/analysis/analysis_data.dart": "595A3E0052BEDD0B8A70B8E1B4AB58BF010C0F378739EEDEA396828FDE763A4C",
+          "lib/src/analysis/analysis_worker.dart": "80919504C8D3EFDA593F87105D20C3083CA434AF968A7F6A3428060F0D9CC573",
+          "lib/src/telemetry/sample_buffer.dart": "CA6EB7068F8124C428B24E73901BB2C476CE04253DF31950B55C6EC5C2FEE709",
+          "lib/src/chart/downsampling.dart": "9946421DD8FE70F239E434B4294D21F2E06C83DCCA334EA402385A1D4C517944",
+          "lib/src/controller/controller_telemetry.dart": "E9E45B8CD1DED34DE230CC4C4891B5A145E39E02823831FB6BDB6BC359391F61",
+          "lib/src/controller/controller.dart": "B4ABF91EC6C9237198C2D7A679463BB304AF00A3E4052C50944A478EA6ACF3F5",
+          "lib/src/chart/painter.dart": "A9F80C236152AEB23847E778B857668C5F0A94C9E85525F4533EDA7978D3DDA4",
+          "lib/src/panels/analysis_fft_panel.dart": "0DDEA4B5AEC9465296F4983BA66E1961C37324F5EA5A411453EB7FE5475687E7",
+          "tool/benchmarks/data_benchmark.dart": "CAC183D8E3BEB59F4F3A0A85A4415EFE6A0C9DB6004BE3E070E96B90ADCE7EA5"
+        }
+      }
+    },
+    "after": {
+      "audit": {
+        "logicalProcessors": 12,
+        "sourceDirectory": "D:\\ProjectGarage\\take_a_look_v2",
+        "cpu": "13th Gen Intel(R) Core(TM) i5-13420H",
+        "ramGiB": 15.73,
+        "sourceSha256": {
+          "lib/src/analysis/analysis.dart": "6CC01D73D7B5F089B73CA4F726FFE204914EE2C92A743D4CA474639B68212BB7",
+          "tool/benchmarks/data_benchmark.dart": "DEC8361C7E326F4DBB7C91DAD1A3BD6BE15E896B02D492664B6113C9B9864EDB",
+          "lib/src/backend/backend_transport.dart": "273C2FBF5CF97551991A67482F68A51EE21BDA8555619FD3562E6979E1C1221A",
+          "lib/src/controller/controller_telemetry.dart": "1E021523DA6A5D458D7C51E25C1445834A82AAE7A1DE3BE819EF2E275FEF2AC1",
+          "lib/src/chart/painter.dart": "54137701C7D328F9C37868DE826274F4E8505C8AF30CC3E30F42BA32DBC247CA",
+          "lib/src/panels/analysis_fft_panel.dart": "88AF9C9733CC3030EDC34994CE3DCC26B51F2FEFFD0534C1271A830C8059A872",
+          "lib/src/analysis/analysis_fft.dart": "D738E2BBFCE6C77180559E3BCF334E37044F50B6B1ABEDC521BDD3106EFB3027",
+          "lib/src/panels/analysis_chart_panel.dart": "BC15E20A286B913C61524C6E6AC403B09AA2A919F69FACC4EEAE85BE290A2B86",
+          "lib/src/analysis/analysis_worker.dart": "15C0DC807E751F9FF9F8209C6A70B2A2657E9723F7B363A6B5251F0BE8B2E697",
+          "lib/src/telemetry/telemetry_store.dart": "E5531EA323D54AB0057EBD1BF51F59EC245CE5AB42C70CA74FEAFEEEA23A9F82",
+          "lib/src/telemetry/sample_buffer.dart": "3B3577109AE6347740170E1CF7D6E2E1708F42AC7B0BC552C0CB2EA9790DE2E8",
+          "lib/src/models/models.dart": "0892CCBCC0DAF625FD9A09A8D9AF3F727EEE144E79BE3DEE566C703550CA1E43",
+          "lib/src/analysis/analysis_data.dart": "678EC8A460E409652BBF93E96FAFF2428C82533BFC50C4707F5D318AF20182DC",
+          "tool/benchmarks/performance_audit.dart": "8A27989634CD2F9451EA9D4CCF3281DB4E9D5B18F9746741722261B194BBF4C6",
+          "lib/src/chart/downsampling.dart": "2082ED6C20D0F895A54C3479318BFF94DFD43666B1533E5B63050E3CBA6A4426",
+          "lib/src/controller/controller.dart": "A72C194DFA731D58026474F9B357BAED9C2D2A195E72A96784E857057B5E019C"
+        },
+        "flutter": {
+          "frameworkVersion": "3.44.1",
+          "channel": "stable",
+          "repositoryUrl": "https://github.com/flutter/flutter.git",
+          "frameworkRevision": "924134a44c189315be2148659913dda1671cbe99",
+          "frameworkCommitDate": "2026-05-29 12:13:22 -0400",
+          "engineRevision": "c416acfeb8126e097f758c664aaa3da929e27da0",
+          "engineCommitDate": "2026-05-27 20:19:31.000Z",
+          "engineContentHash": "39b1f7043775b9578bbb26a1676e79c4e31c8b5e",
+          "engineBuildDate": "2026-05-28 04:50:43.210",
+          "dartSdkVersion": "3.12.1",
+          "devToolsVersion": "2.57.0",
+          "flutterVersion": "3.44.1",
+          "flutterRoot": "D:\\flutter"
+        },
+        "cores": 8,
+        "processorAffinity": 255
+      },
+      "live": {
+        "logicalProcessors": 12,
+        "sourceDirectory": "D:\\ProjectGarage\\take_a_look_v2",
+        "cpu": "13th Gen Intel(R) Core(TM) i5-13420H",
+        "ramGiB": 15.73,
+        "sourceSha256": {
+          "lib/src/analysis/analysis.dart": "6CC01D73D7B5F089B73CA4F726FFE204914EE2C92A743D4CA474639B68212BB7",
+          "tool/benchmarks/data_benchmark.dart": "DEC8361C7E326F4DBB7C91DAD1A3BD6BE15E896B02D492664B6113C9B9864EDB",
+          "lib/src/backend/backend_transport.dart": "273C2FBF5CF97551991A67482F68A51EE21BDA8555619FD3562E6979E1C1221A",
+          "lib/src/controller/controller_telemetry.dart": "1E021523DA6A5D458D7C51E25C1445834A82AAE7A1DE3BE819EF2E275FEF2AC1",
+          "lib/src/chart/painter.dart": "54137701C7D328F9C37868DE826274F4E8505C8AF30CC3E30F42BA32DBC247CA",
+          "lib/src/panels/analysis_fft_panel.dart": "88AF9C9733CC3030EDC34994CE3DCC26B51F2FEFFD0534C1271A830C8059A872",
+          "lib/src/analysis/analysis_fft.dart": "D738E2BBFCE6C77180559E3BCF334E37044F50B6B1ABEDC521BDD3106EFB3027",
+          "lib/src/panels/analysis_chart_panel.dart": "BC15E20A286B913C61524C6E6AC403B09AA2A919F69FACC4EEAE85BE290A2B86",
+          "lib/src/analysis/analysis_worker.dart": "15C0DC807E751F9FF9F8209C6A70B2A2657E9723F7B363A6B5251F0BE8B2E697",
+          "lib/src/telemetry/telemetry_store.dart": "E5531EA323D54AB0057EBD1BF51F59EC245CE5AB42C70CA74FEAFEEEA23A9F82",
+          "lib/src/telemetry/sample_buffer.dart": "3B3577109AE6347740170E1CF7D6E2E1708F42AC7B0BC552C0CB2EA9790DE2E8",
+          "lib/src/models/models.dart": "0892CCBCC0DAF625FD9A09A8D9AF3F727EEE144E79BE3DEE566C703550CA1E43",
+          "lib/src/analysis/analysis_data.dart": "678EC8A460E409652BBF93E96FAFF2428C82533BFC50C4707F5D318AF20182DC",
+          "tool/benchmarks/performance_audit.dart": "8A27989634CD2F9451EA9D4CCF3281DB4E9D5B18F9746741722261B194BBF4C6",
+          "lib/src/chart/downsampling.dart": "2082ED6C20D0F895A54C3479318BFF94DFD43666B1533E5B63050E3CBA6A4426",
+          "lib/src/controller/controller.dart": "A72C194DFA731D58026474F9B357BAED9C2D2A195E72A96784E857057B5E019C"
+        },
+        "flutter": {
+          "frameworkVersion": "3.44.1",
+          "channel": "stable",
+          "repositoryUrl": "https://github.com/flutter/flutter.git",
+          "frameworkRevision": "924134a44c189315be2148659913dda1671cbe99",
+          "frameworkCommitDate": "2026-05-29 12:13:22 -0400",
+          "engineRevision": "c416acfeb8126e097f758c664aaa3da929e27da0",
+          "engineCommitDate": "2026-05-27 20:19:31.000Z",
+          "engineContentHash": "39b1f7043775b9578bbb26a1676e79c4e31c8b5e",
+          "engineBuildDate": "2026-05-28 04:50:43.210",
+          "dartSdkVersion": "3.12.1",
+          "devToolsVersion": "2.57.0",
+          "flutterVersion": "3.44.1",
+          "flutterRoot": "D:\\flutter"
+        },
+        "cores": 8,
+        "processorAffinity": 255
+      }
+    }
+  },
+  "comparison": [
+    {
+      "name": "audit_paint_8_0.2s",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          1.859,
+          1.4215
+        ],
+        "minimum": 1.4215,
+        "maximum": 1.859,
+        "mean": 1.64025
+      },
+      "after": {
+        "runs": [
+          0.87725,
+          0.85125
+        ],
+        "minimum": 0.85125,
+        "maximum": 0.87725,
+        "mean": 0.86425
+      },
+      "beforeDividedByAfter": 1.8978883424934916
+    },
+    {
+      "name": "audit_paint_8_12.0s",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          23.994,
+          20.123
+        ],
+        "minimum": 20.123,
+        "maximum": 23.994,
+        "mean": 22.058500000000002
+      },
+      "after": {
+        "runs": [
+          0.9707142857142858,
+          0.9124285714285714
+        ],
+        "minimum": 0.9124285714285714,
+        "maximum": 0.9707142857142858,
+        "mean": 0.9415714285714285
+      },
+      "beforeDividedByAfter": 23.427325140342894
+    },
+    {
+      "name": "audit_paint_8_60.0s",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          95.248,
+          91.84
+        ],
+        "minimum": 91.84,
+        "maximum": 95.248,
+        "mean": 93.54400000000001
+      },
+      "after": {
+        "runs": [
+          0.87675,
+          0.8925
+        ],
+        "minimum": 0.87675,
+        "maximum": 0.8925,
+        "mean": 0.884625
+      },
+      "beforeDividedByAfter": 105.74424191041403
+    },
+    {
+      "name": "audit_selected_paint_8_0.2s",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          8.325,
+          8.228666666666667
+        ],
+        "minimum": 8.228666666666667,
+        "maximum": 8.325,
+        "mean": 8.276833333333332
+      },
+      "after": {
+        "runs": [
+          1.12175,
+          1.1105
+        ],
+        "minimum": 1.1105,
+        "maximum": 1.12175,
+        "mean": 1.116125
+      },
+      "beforeDividedByAfter": 7.415686713704408
+    },
+    {
+      "name": "audit_pause_8",
+      "metric": "elapsedMs",
+      "before": {
+        "runs": [
+          340.469,
+          336.268
+        ],
+        "minimum": 336.268,
+        "maximum": 340.469,
+        "mean": 338.3685
+      },
+      "after": {
+        "runs": [
+          0.215,
+          0.259
+        ],
+        "minimum": 0.215,
+        "maximum": 0.259,
+        "mean": 0.237
+      },
+      "beforeDividedByAfter": 1427.7151898734178
+    },
+    {
+      "name": "audit_paused_paint_8_0.2s",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          66.363,
+          67.626
+        ],
+        "minimum": 66.363,
+        "maximum": 67.626,
+        "mean": 66.9945
+      },
+      "after": {
+        "runs": [
+          0.9853999999999999,
+          0.9070499999999999
+        ],
+        "minimum": 0.9070499999999999,
+        "maximum": 0.9853999999999999,
+        "mean": 0.9462249999999999
+      },
+      "beforeDividedByAfter": 70.8018705910328
+    },
+    {
+      "name": "audit_paint_32_0.2s",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          6.188,
+          5.802666666666667
+        ],
+        "minimum": 5.802666666666667,
+        "maximum": 6.188,
+        "mean": 5.995333333333333
+      },
+      "after": {
+        "runs": [
+          2.7576,
+          2.8172
+        ],
+        "minimum": 2.7576,
+        "maximum": 2.8172,
+        "mean": 2.7874
+      },
+      "beforeDividedByAfter": 2.150869388438449
+    },
+    {
+      "name": "audit_paint_32_12.0s",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          98.987,
+          100.82
+        ],
+        "minimum": 98.987,
+        "maximum": 100.82,
+        "mean": 99.9035
+      },
+      "after": {
+        "runs": [
+          2.956,
+          2.8365
+        ],
+        "minimum": 2.8365,
+        "maximum": 2.956,
+        "mean": 2.89625
+      },
+      "beforeDividedByAfter": 34.49408718170047
+    },
+    {
+      "name": "audit_paint_32_60.0s",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          438.85,
+          431.183
+        ],
+        "minimum": 431.183,
+        "maximum": 438.85,
+        "mean": 435.0165
+      },
+      "after": {
+        "runs": [
+          2.78,
+          3.024
+        ],
+        "minimum": 2.78,
+        "maximum": 3.024,
+        "mean": 2.902
+      },
+      "beforeDividedByAfter": 149.90230875258442
+    },
+    {
+      "name": "audit_selected_paint_32_0.2s",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          16.184,
+          16.5925
+        ],
+        "minimum": 16.184,
+        "maximum": 16.5925,
+        "mean": 16.38825
+      },
+      "after": {
+        "runs": [
+          3.0551666666666666,
+          3.1146000000000003
+        ],
+        "minimum": 3.0551666666666666,
+        "maximum": 3.1146000000000003,
+        "mean": 3.0848833333333334
+      },
+      "beforeDividedByAfter": 5.312437531403132
+    },
+    {
+      "name": "audit_pause_32",
+      "metric": "elapsedMs",
+      "before": {
+        "runs": [
+          1595.901,
+          1569.955
+        ],
+        "minimum": 1569.955,
+        "maximum": 1595.901,
+        "mean": 1582.9279999999999
+      },
+      "after": {
+        "runs": [
+          0.808,
+          0.938
+        ],
+        "minimum": 0.808,
+        "maximum": 0.938,
+        "mean": 0.873
+      },
+      "beforeDividedByAfter": 1813.205040091638
+    },
+    {
+      "name": "audit_paused_paint_32_0.2s",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          337.728,
+          312.607
+        ],
+        "minimum": 312.607,
+        "maximum": 337.728,
+        "mean": 325.1675
+      },
+      "after": {
+        "runs": [
+          2.8015714285714286,
+          2.8776666666666664
+        ],
+        "minimum": 2.8015714285714286,
+        "maximum": 2.8776666666666664,
+        "mean": 2.8396190476190473
+      },
+      "beforeDividedByAfter": 114.51095888113767
+    },
+    {
+      "name": "audit_state_snapshot_10000_symbols",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          19.22,
+          18.676
+        ],
+        "minimum": 18.676,
+        "maximum": 19.22,
+        "mean": 18.948
+      },
+      "after": {
+        "runs": [
+          15.87,
+          13.604
+        ],
+        "minimum": 13.604,
+        "maximum": 15.87,
+        "mean": 14.736999999999998
+      },
+      "beforeDividedByAfter": 1.2857433670353533
+    },
+    {
+      "name": "audit_state_snapshot_size",
+      "metric": "bytes",
+      "before": {
+        "runs": [
+          1339073,
+          1339073
+        ],
+        "minimum": 1339073,
+        "maximum": 1339073,
+        "mean": 1339073
+      },
+      "after": {
+        "runs": [
+          1339073,
+          1339073
+        ],
+        "minimum": 1339073,
+        "maximum": 1339073,
+        "mean": 1339073
+      },
+      "beforeDividedByAfter": 1.0
+    },
+    {
+      "name": "audit_state_apply_10000_symbols",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          9.530333333333333,
+          8.352
+        ],
+        "minimum": 8.352,
+        "maximum": 9.530333333333333,
+        "mean": 8.941166666666668
+      },
+      "after": {
+        "runs": [
+          5.946666666666666,
+          6.157333333333334
+        ],
+        "minimum": 5.946666666666666,
+        "maximum": 6.157333333333334,
+        "mean": 6.052
+      },
+      "beforeDividedByAfter": 1.4773903943599915
+    },
+    {
+      "name": "audit_delta_snapshot_encode_32x800",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          10.295,
+          10.903
+        ],
+        "minimum": 10.295,
+        "maximum": 10.903,
+        "mean": 10.599
+      },
+      "after": {
+        "runs": [
+          0.5335,
+          0.4937833333333333
+        ],
+        "minimum": 0.4937833333333333,
+        "maximum": 0.5335,
+        "mean": 0.5136416666666667
+      },
+      "beforeDividedByAfter": 20.63500819313075
+    },
+    {
+      "name": "audit_delta_snapshot_size",
+      "metric": "bytes",
+      "before": {
+        "runs": [
+          822056,
+          822056
+        ],
+        "minimum": 822056,
+        "maximum": 822056,
+        "mean": 822056
+      },
+      "after": {
+        "runs": [
+          412712,
+          412712
+        ],
+        "minimum": 412712,
+        "maximum": 412712,
+        "mean": 412712
+      },
+      "beforeDividedByAfter": 1.9918393455969297
+    },
+    {
+      "name": "audit_full_snapshot_encode_8x60000",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          133.899,
+          128.101
+        ],
+        "minimum": 128.101,
+        "maximum": 133.899,
+        "mean": 131.0
+      },
+      "after": {
+        "runs": [
+          8.609333333333334,
+          8.856
+        ],
+        "minimum": 8.609333333333334,
+        "maximum": 8.856,
+        "mean": 8.732666666666667
+      },
+      "beforeDividedByAfter": 15.001145125582106
+    },
+    {
+      "name": "audit_json_framing_1048576_4096",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          75.432,
+          84.967
+        ],
+        "minimum": 75.432,
+        "maximum": 84.967,
+        "mean": 80.1995
+      },
+      "after": {
+        "runs": [
+          2.787692307692308,
+          3.0585
+        ],
+        "minimum": 2.787692307692308,
+        "maximum": 3.0585,
+        "mean": 2.9230961538461537
+      },
+      "beforeDividedByAfter": 27.436490549404283
+    },
+    {
+      "name": "audit_json_framing_1048576_65536",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          8.338666666666667,
+          6.929666666666667
+        ],
+        "minimum": 6.929666666666667,
+        "maximum": 8.338666666666667,
+        "mean": 7.634166666666667
+      },
+      "after": {
+        "runs": [
+          3.224,
+          2.732
+        ],
+        "minimum": 2.732,
+        "maximum": 3.224,
+        "mean": 2.978
+      },
+      "beforeDividedByAfter": 2.563521379001567
+    },
+    {
+      "name": "audit_json_framing_4194304_4096",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          1337.477,
+          1296.932
+        ],
+        "minimum": 1296.932,
+        "maximum": 1337.477,
+        "mean": 1317.2045
+      },
+      "after": {
+        "runs": [
+          9.440333333333333,
+          10.384
+        ],
+        "minimum": 9.440333333333333,
+        "maximum": 10.384,
+        "mean": 9.912166666666668
+      },
+      "beforeDividedByAfter": 132.88764649504816
+    },
+    {
+      "name": "audit_json_framing_4194304_65536",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          96.21,
+          93.131
+        ],
+        "minimum": 93.131,
+        "maximum": 96.21,
+        "mean": 94.6705
+      },
+      "after": {
+        "runs": [
+          9.243333333333334,
+          10.023
+        ],
+        "minimum": 9.243333333333334,
+        "maximum": 10.023,
+        "mean": 9.633166666666668
+      },
+      "beforeDividedByAfter": 9.827557570200176
+    },
+    {
+      "name": "audit_analysis_replace_sorted_8x100000",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          108.148,
+          112.989
+        ],
+        "minimum": 108.148,
+        "maximum": 112.989,
+        "mean": 110.5685
+      },
+      "after": {
+        "runs": [
+          16.507,
+          11.539
+        ],
+        "minimum": 11.539,
+        "maximum": 16.507,
+        "mean": 14.023
+      },
+      "beforeDividedByAfter": 7.884796405904585
+    },
+    {
+      "name": "audit_analysis_replace_and_bounds_8x100000",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          118.888,
+          114.059
+        ],
+        "minimum": 114.059,
+        "maximum": 118.888,
+        "mean": 116.4735
+      },
+      "after": {
+        "runs": [
+          17.5145,
+          16.635
+        ],
+        "minimum": 16.635,
+        "maximum": 17.5145,
+        "mean": 17.07475
+      },
+      "beforeDividedByAfter": 6.8213883072958605
+    },
+    {
+      "name": "audit_analysis_selection_stats_8x100000",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          3.9076,
+          3.3228333333333335
+        ],
+        "minimum": 3.3228333333333335,
+        "maximum": 3.9076,
+        "mean": 3.615216666666667
+      },
+      "after": {
+        "runs": [
+          1.470222222222222,
+          1.666642857142857
+        ],
+        "minimum": 1.470222222222222,
+        "maximum": 1.666642857142857,
+        "mean": 1.5684325396825396
+      },
+      "beforeDividedByAfter": 2.304987033359056
+    },
+    {
+      "name": "audit_background_csv_100000x8",
+      "metric": "elapsedMs",
+      "before": {
+        "runs": [
+          305.004,
+          298.605
+        ],
+        "minimum": 298.605,
+        "maximum": 305.004,
+        "mean": 301.8045
+      },
+      "after": {
+        "runs": [
+          157.135,
+          135.319
+        ],
+        "minimum": 135.319,
+        "maximum": 157.135,
+        "mean": 146.22699999999998
+      },
+      "beforeDividedByAfter": 2.063945099058314
+    },
+    {
+      "name": "audit_moving_paint_32_12.0s",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          96.069,
+          90.954
+        ],
+        "minimum": 90.954,
+        "maximum": 96.069,
+        "mean": 93.5115
+      },
+      "after": {
+        "runs": [
+          21.599,
+          22.986
+        ],
+        "minimum": 21.599,
+        "maximum": 22.986,
+        "mean": 22.2925
+      },
+      "beforeDividedByAfter": 4.1947515980711
+    },
+    {
+      "name": "audit_moving_paint_32_60.0s",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          437.89,
+          454.753
+        ],
+        "minimum": 437.89,
+        "maximum": 454.753,
+        "mean": 446.3215
+      },
+      "after": {
+        "runs": [
+          35.427,
+          39.831
+        ],
+        "minimum": 35.427,
+        "maximum": 39.831,
+        "mean": 37.629000000000005
+      },
+      "beforeDividedByAfter": 11.861104467299157
+    },
+    {
+      "name": "audit_state_sync_plot_change_10000_symbols",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          18.4565,
+          18.804
+        ],
+        "minimum": 18.4565,
+        "maximum": 18.804,
+        "mean": 18.630249999999997
+      },
+      "after": {
+        "runs": [
+          0.012757487922705315,
+          0.010239168110918545
+        ],
+        "minimum": 0.010239168110918545,
+        "maximum": 0.012757487922705315,
+        "mean": 0.011498328016811929
+      },
+      "beforeDividedByAfter": 1620.2573080851707
+    },
+    {
+      "name": "decode_8",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          0.002386,
+          0.002691
+        ],
+        "minimum": 0.002386,
+        "maximum": 0.002691,
+        "mean": 0.0025385
+      },
+      "after": {
+        "runs": [
+          0.0026345,
+          0.0025425
+        ],
+        "minimum": 0.0025425,
+        "maximum": 0.0026345,
+        "mean": 0.0025885
+      },
+      "beforeDividedByAfter": 0.9806837937029167
+    },
+    {
+      "name": "cache_current_8",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          0.0065200573065902585,
+          0.006777400169923535
+        ],
+        "minimum": 0.0065200573065902585,
+        "maximum": 0.006777400169923535,
+        "mean": 0.006648728738256896
+      },
+      "after": {
+        "runs": [
+          0.00651048951048951,
+          0.007308411214953271
+        ],
+        "minimum": 0.00651048951048951,
+        "maximum": 0.007308411214953271,
+        "mean": 0.00690945036272139
+      },
+      "beforeDividedByAfter": 0.9622659385656539
+    },
+    {
+      "name": "pipeline_current_8",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          0.011800666666666668,
+          0.010719945355191258
+        ],
+        "minimum": 0.010719945355191258,
+        "maximum": 0.011800666666666668,
+        "mean": 0.011260306010928964
+      },
+      "after": {
+        "runs": [
+          0.009789442111577683,
+          0.010094944512946978
+        ],
+        "minimum": 0.009789442111577683,
+        "maximum": 0.010094944512946978,
+        "mean": 0.00994219331226233
+      },
+      "beforeDividedByAfter": 1.1325776573908417
+    },
+    {
+      "name": "pipeline_ring_8",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          0.0061565000000000005,
+          0.0061205
+        ],
+        "minimum": 0.0061205,
+        "maximum": 0.0061565000000000005,
+        "mean": 0.0061385
+      },
+      "after": {
+        "runs": [
+          0.0054985,
+          0.005481499999999999
+        ],
+        "minimum": 0.005481499999999999,
+        "maximum": 0.0054985,
+        "mean": 0.00549
+      },
+      "beforeDividedByAfter": 1.1181238615664846
+    },
+    {
+      "name": "decode_32",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          0.010844519966015292,
+          0.010786224821312541
+        ],
+        "minimum": 0.010786224821312541,
+        "maximum": 0.010844519966015292,
+        "mean": 0.010815372393663918
+      },
+      "after": {
+        "runs": [
+          0.009107954545454546,
+          0.009115999999999999
+        ],
+        "minimum": 0.009107954545454546,
+        "maximum": 0.009115999999999999,
+        "mean": 0.009111977272727272
+      },
+      "beforeDividedByAfter": 1.1869402293215783
+    },
+    {
+      "name": "cache_current_32",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          0.032302158273381294,
+          0.028298850574712642
+        ],
+        "minimum": 0.028298850574712642,
+        "maximum": 0.032302158273381294,
+        "mean": 0.03030050442404697
+      },
+      "after": {
+        "runs": [
+          0.027990671641791046,
+          0.028414351851851854
+        ],
+        "minimum": 0.027990671641791046,
+        "maximum": 0.028414351851851854,
+        "mean": 0.02820251174682145
+      },
+      "beforeDividedByAfter": 1.0743902775773853
+    },
+    {
+      "name": "pipeline_current_32",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          0.04663636363636363,
+          0.04763992537313433
+        ],
+        "minimum": 0.04663636363636363,
+        "maximum": 0.04763992537313433,
+        "mean": 0.04713814450474898
+      },
+      "after": {
+        "runs": [
+          0.03861428571428571,
+          0.038420187793427235
+        ],
+        "minimum": 0.038420187793427235,
+        "maximum": 0.03861428571428571,
+        "mean": 0.038517236753856474
+      },
+      "beforeDividedByAfter": 1.2238194760954484
+    },
+    {
+      "name": "pipeline_ring_32",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          0.02492503748125937,
+          0.0245264
+        ],
+        "minimum": 0.0245264,
+        "maximum": 0.02492503748125937,
+        "mean": 0.024725718740629683
+      },
+      "after": {
+        "runs": [
+          0.02125406504065041,
+          0.021972
+        ],
+        "minimum": 0.02125406504065041,
+        "maximum": 0.021972,
+        "mean": 0.021613032520325204
+      },
+      "beforeDividedByAfter": 1.1440189486309829
+    },
+    {
+      "name": "decode_64",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          0.019021694214876032,
+          0.01983811475409836
+        ],
+        "minimum": 0.019021694214876032,
+        "maximum": 0.01983811475409836,
+        "mean": 0.019429904484487198
+      },
+      "after": {
+        "runs": [
+          0.015373983739837399,
+          0.0164562962962963
+        ],
+        "minimum": 0.015373983739837399,
+        "maximum": 0.0164562962962963,
+        "mean": 0.015915140018066848
+      },
+      "beforeDividedByAfter": 1.220844080694885
+    },
+    {
+      "name": "cache_current_64",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          0.057607382550335574,
+          0.052125
+        ],
+        "minimum": 0.052125,
+        "maximum": 0.057607382550335574,
+        "mean": 0.054866191275167786
+      },
+      "after": {
+        "runs": [
+          0.05820327868852459,
+          0.057976271186440685
+        ],
+        "minimum": 0.057976271186440685,
+        "maximum": 0.05820327868852459,
+        "mean": 0.05808977493748264
+      },
+      "beforeDividedByAfter": 0.9445068660399505
+    },
+    {
+      "name": "pipeline_current_64",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          0.08045112781954887,
+          0.10345736434108527
+        ],
+        "minimum": 0.08045112781954887,
+        "maximum": 0.10345736434108527,
+        "mean": 0.09195424608031708
+      },
+      "after": {
+        "runs": [
+          0.08009677419354838,
+          0.07891459074733097
+        ],
+        "minimum": 0.07891459074733097,
+        "maximum": 0.08009677419354838,
+        "mean": 0.07950568247043968
+      },
+      "beforeDividedByAfter": 1.1565745142116828
+    },
+    {
+      "name": "pipeline_ring_64",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          0.05241776315789474,
+          0.06133333333333333
+        ],
+        "minimum": 0.05241776315789474,
+        "maximum": 0.06133333333333333,
+        "mean": 0.056875548245614034
+      },
+      "after": {
+        "runs": [
+          0.0417889447236181,
+          0.04378172588832487
+        ],
+        "minimum": 0.0417889447236181,
+        "maximum": 0.04378172588832487,
+        "mean": 0.042785335305971485
+      },
+      "beforeDividedByAfter": 1.3293234197857506
+    },
+    {
+      "name": "decode_128",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          0.034810246679316884,
+          0.037247851002865325
+        ],
+        "minimum": 0.034810246679316884,
+        "maximum": 0.037247851002865325,
+        "mean": 0.03602904884109111
+      },
+      "after": {
+        "runs": [
+          0.03352738654147105,
+          0.033652694610778446
+        ],
+        "minimum": 0.03352738654147105,
+        "maximum": 0.033652694610778446,
+        "mean": 0.03359004057612475
+      },
+      "beforeDividedByAfter": 1.0726110544415348
+    },
+    {
+      "name": "cache_current_128",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          0.11043307086614174,
+          0.11843229166666668
+        ],
+        "minimum": 0.11043307086614174,
+        "maximum": 0.11843229166666668,
+        "mean": 0.11443268126640421
+      },
+      "after": {
+        "runs": [
+          0.12732631578947368,
+          0.11445390070921987
+        ],
+        "minimum": 0.11445390070921987,
+        "maximum": 0.12732631578947368,
+        "mean": 0.12089010824934678
+      },
+      "beforeDividedByAfter": 0.9465843229321663
+    },
+    {
+      "name": "pipeline_current_128",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          0.20012295081967213,
+          0.20693162393162393
+        ],
+        "minimum": 0.20012295081967213,
+        "maximum": 0.20693162393162393,
+        "mean": 0.203527287375648
+      },
+      "after": {
+        "runs": [
+          0.16867391304347826,
+          0.1804380165289256
+        ],
+        "minimum": 0.16867391304347826,
+        "maximum": 0.1804380165289256,
+        "mean": 0.17455596478620194
+      },
+      "beforeDividedByAfter": 1.165971541705438
+    },
+    {
+      "name": "pipeline_ring_128",
+      "metric": "medianMs",
+      "before": {
+        "runs": [
+          0.131747311827957,
+          0.129825
+        ],
+        "minimum": 0.129825,
+        "maximum": 0.131747311827957,
+        "mean": 0.1307861559139785
+      },
+      "after": {
+        "runs": [
+          0.09472636815920397,
+          0.09582010582010582
+        ],
+        "minimum": 0.09472636815920397,
+        "maximum": 0.09582010582010582,
+        "mean": 0.0952732369896549
+      },
+      "beforeDividedByAfter": 1.3727481089802764
+    }
+  ],
+  "liveComparison": {
+    "buildMedianMs": {
+      "before": {
+        "runs": [
+          7.623,
+          7.844
+        ],
+        "minimum": 7.623,
+        "maximum": 7.844,
+        "mean": 7.7335
+      },
+      "after": {
+        "runs": [
+          6.139,
+          6.335
+        ],
+        "minimum": 6.139,
+        "maximum": 6.335,
+        "mean": 6.237
+      }
+    },
+    "buildP95Ms": {
+      "before": {
+        "runs": [
+          11.592,
+          11.305
+        ],
+        "minimum": 11.305,
+        "maximum": 11.592,
+        "mean": 11.4485
+      },
+      "after": {
+        "runs": [
+          10.186,
+          9.963
+        ],
+        "minimum": 9.963,
+        "maximum": 10.186,
+        "mean": 10.0745
+      }
+    },
+    "rasterMedianMs": {
+      "before": {
+        "runs": [
+          33.909,
+          34.589
+        ],
+        "minimum": 33.909,
+        "maximum": 34.589,
+        "mean": 34.248999999999995
+      },
+      "after": {
+        "runs": [
+          34.897,
+          34.706
+        ],
+        "minimum": 34.706,
+        "maximum": 34.897,
+        "mean": 34.801500000000004
+      }
+    },
+    "rasterP95Ms": {
+      "before": {
+        "runs": [
+          40.822,
+          41.155
+        ],
+        "minimum": 40.822,
+        "maximum": 41.155,
+        "mean": 40.9885
+      },
+      "after": {
+        "runs": [
+          40.617,
+          40.769
+        ],
+        "minimum": 40.617,
+        "maximum": 40.769,
+        "mean": 40.693
+      }
+    },
+    "rssBytes": {
+      "before": {
+        "runs": [
+          249655296,
+          245362688
+        ],
+        "minimum": 245362688,
+        "maximum": 249655296,
+        "mean": 247508992
+      },
+      "after": {
+        "runs": [
+          233283584,
+          240619520
+        ],
+        "minimum": 233283584,
+        "maximum": 240619520,
+        "mean": 236951552
+      }
+    }
+  },
+  "backend": {
+    "before": {
+      "status": "passed",
+      "python": "3.11.7 (tags/v3.11.7:fa7a6f2, Dec  4 2023, 19:24:49) [MSC v.1937 64 bit (AMD64)]",
+      "sourceRoot": "D:\\ProjectGarage\\take_a_look_v2\\build\\performance_review\\baseline_source",
+      "processorAffinity": 255,
+      "clocks": {
+        "monotonic": {
+          "implementation": "GetTickCount64()",
+          "monotonic": true,
+          "adjustable": false,
+          "resolution": 0.015625
+        },
+        "perf_counter": {
+          "implementation": "QueryPerformanceCounter()",
+          "monotonic": true,
+          "adjustable": false,
+          "resolution": 1e-07
+        }
+      },
+      "scope": "Production memory scheduling, 32-channel sample handling, JSONL disk recording and event delivery. Fake probe, no USB/network/stdio pipe. These rates do not establish hardware throughput. CPU time includes final drain.",
+      "sourceSha256": {
+        "backend\\take_a_look_backend\\models.py": "2abf3ec23f0ef34a931c9b32cc98815e6a6c02e7a74570e9d83a7f9fa2be115b",
+        "backend\\take_a_look_backend\\protocol.py": "57c82ba6f33e03bb81e499703e9e522d7ee9df730412e6dba2e46a6f960b83b0",
+        "backend\\take_a_look_backend\\self_check.py": "e054ce878ee844d89641132d18580956b795472104a2171fdd04344e26180f9e",
+        "backend\\take_a_look_backend\\service.py": "c5a1dd529eb3d27eb8abcbaf2cde6e153c2e305dee686d8d8a78f54a8aef99e9",
+        "backend\\take_a_look_backend\\stdio.py": "b6c241d8f8f5bd60d3b1859eb27d8b3fbcdfa4cd31bfcf449781bb03884266a5",
+        "backend\\take_a_look_backend\\__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "backend\\take_a_look_backend\\backends\\ember_transport.py": "dc34f40ae5eb79597ddee759e212ef64717f13df4605da8a7eb7c8ffa8875c01",
+        "backend\\take_a_look_backend\\backends\\ember_v2.py": "8bbda88e808d9b075564de9f5d3e3739c587c4a37427e85c3df551fca10df2cd",
+        "backend\\take_a_look_backend\\backends\\gdb_mi.py": "0684061d8fe1018b3120d1d88ab0662f2a1ec5c47d46dffd575bb8bf16122ec3",
+        "backend\\take_a_look_backend\\backends\\j_scope_rtt.py": "778eb6b9c9757ac8becd8d6c1fc233a87931b4608e67dfd238fc89ad04ebbb9e",
+        "backend\\take_a_look_backend\\backends\\pyocd_memory.py": "0dfa42fa887cfc02bc5b0b81340a35ba50c36dbeed6da8d06c8304ee660bb229",
+        "backend\\take_a_look_backend\\backends\\remote_backend.py": "bf9aee607dc77cd4e8356303d758754648124f1cab11c076b44a580631db7953",
+        "backend\\take_a_look_backend\\backends\\rtt_plus.py": "c3e807e0d0204f9ad129c7eda82cebbe96d1cff6fcb2dee6fcd0bc1af76b842d",
+        "backend\\take_a_look_backend\\backends\\__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "backend\\take_a_look_backend\\services\\debug_info.py": "2ba4533f857570bbaccf45b5adbc2bc2d8119a29c9b49a906e5dd56ccc06e401",
+        "backend\\take_a_look_backend\\services\\recording.py": "8e083327ff605eeaae289e183c77e2caeb1c727b682d19a51fcf327ae68ab6a5",
+        "backend\\take_a_look_backend\\services\\sampling.py": "1979e16990035d167b72d98830429e8584c66ef6c4a23f58d1780c65fc211399",
+        "backend\\take_a_look_backend\\services\\symbols.py": "4f9222a77d4c19a70e8b710db30abe7f5eb7b368a166712ceee24270d740fbc2",
+        "backend\\take_a_look_backend\\services\\__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "results": [
+        {
+          "run": 1,
+          "requestedHz": 50,
+          "channels": 32,
+          "acquiredFrames": 49,
+          "recordedFrames": 49,
+          "deliveredFrames": 49,
+          "elapsedSeconds": 1.5003411000070628,
+          "effectiveHz": 32.65923995534705,
+          "cpuSecondsIncludingDrain": 0.0,
+          "recordingBytes": 11372
+        },
+        {
+          "run": 1,
+          "requestedHz": 1000,
+          "channels": 32,
+          "acquiredFrames": 95,
+          "recordedFrames": 95,
+          "deliveredFrames": 95,
+          "elapsedSeconds": 1.5010852999985218,
+          "effectiveHz": 63.287542686677135,
+          "cpuSecondsIncludingDrain": 0.078125,
+          "recordingBytes": 21304
+        },
+        {
+          "run": 1,
+          "requestedHz": 10000,
+          "channels": 32,
+          "acquiredFrames": 97,
+          "recordedFrames": 97,
+          "deliveredFrames": 97,
+          "elapsedSeconds": 1.5018739000079222,
+          "effectiveHz": 64.58598155243814,
+          "cpuSecondsIncludingDrain": 0.0625,
+          "recordingBytes": 21741
+        },
+        {
+          "run": 2,
+          "requestedHz": 50,
+          "channels": 32,
+          "acquiredFrames": 49,
+          "recordedFrames": 49,
+          "deliveredFrames": 49,
+          "elapsedSeconds": 1.5005205000052229,
+          "effectiveHz": 32.65533526521593,
+          "cpuSecondsIncludingDrain": 0.109375,
+          "recordingBytes": 11373
+        },
+        {
+          "run": 2,
+          "requestedHz": 1000,
+          "channels": 32,
+          "acquiredFrames": 97,
+          "recordedFrames": 97,
+          "deliveredFrames": 97,
+          "elapsedSeconds": 1.5012047000054736,
+          "effectiveHz": 64.61477238889961,
+          "cpuSecondsIncludingDrain": 0.0,
+          "recordingBytes": 21736
+        },
+        {
+          "run": 2,
+          "requestedHz": 10000,
+          "channels": 32,
+          "acquiredFrames": 97,
+          "recordedFrames": 97,
+          "deliveredFrames": 97,
+          "elapsedSeconds": 1.5006946999928914,
+          "effectiveHz": 64.63673124217702,
+          "cpuSecondsIncludingDrain": 0.25,
+          "recordingBytes": 21740
+        }
+      ]
+    },
+    "after": {
+      "status": "passed",
+      "python": "3.11.7 (tags/v3.11.7:fa7a6f2, Dec  4 2023, 19:24:49) [MSC v.1937 64 bit (AMD64)]",
+      "sourceRoot": "D:\\ProjectGarage\\take_a_look_v2",
+      "processorAffinity": 255,
+      "clocks": {
+        "monotonic": {
+          "implementation": "GetTickCount64()",
+          "monotonic": true,
+          "adjustable": false,
+          "resolution": 0.015625
+        },
+        "perf_counter": {
+          "implementation": "QueryPerformanceCounter()",
+          "monotonic": true,
+          "adjustable": false,
+          "resolution": 1e-07
+        }
+      },
+      "scope": "Production memory scheduling, 32-channel sample handling, JSONL disk recording and event delivery. Fake probe, no USB/network/stdio pipe. These rates do not establish hardware throughput. CPU time includes final drain.",
+      "sourceSha256": {
+        "backend\\take_a_look_backend\\models.py": "bcb1bb25c319f45eb567b61c666b458b60bb65c017b7607f58977bc2373e0956",
+        "backend\\take_a_look_backend\\protocol.py": "50d9eeb7d80c30a83e032fc488252b873c93f7372a666f9f6e3058adfbb889b5",
+        "backend\\take_a_look_backend\\self_check.py": "e054ce878ee844d89641132d18580956b795472104a2171fdd04344e26180f9e",
+        "backend\\take_a_look_backend\\service.py": "268b07d2e55c28436ce95447797aaa5edbf4c41982b55bf5cd27c81033a26670",
+        "backend\\take_a_look_backend\\stdio.py": "9e40613ecf5fb3d49bd1a875e468d61bd757bf7f1b8597e811b9070e83bf8a4f",
+        "backend\\take_a_look_backend\\__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "backend\\take_a_look_backend\\backends\\ember_transport.py": "dc34f40ae5eb79597ddee759e212ef64717f13df4605da8a7eb7c8ffa8875c01",
+        "backend\\take_a_look_backend\\backends\\ember_v2.py": "8bbda88e808d9b075564de9f5d3e3739c587c4a37427e85c3df551fca10df2cd",
+        "backend\\take_a_look_backend\\backends\\gdb_mi.py": "0684061d8fe1018b3120d1d88ab0662f2a1ec5c47d46dffd575bb8bf16122ec3",
+        "backend\\take_a_look_backend\\backends\\j_scope_rtt.py": "639dcc794a1e4b8d92829cc45e16147b8f6bf5b4c56cdda7afe01a4f8a6b71b1",
+        "backend\\take_a_look_backend\\backends\\pyocd_memory.py": "39a93d4a1c2f8f6071f3d4a116cf4c21b579ac0e015e2a0f6257394f63cdbb98",
+        "backend\\take_a_look_backend\\backends\\remote_backend.py": "bf9aee607dc77cd4e8356303d758754648124f1cab11c076b44a580631db7953",
+        "backend\\take_a_look_backend\\backends\\rtt_plus.py": "6be64b5af5a703a2c6eeccaee7903f816ad9c03d88df854379ce892b4bab6d58",
+        "backend\\take_a_look_backend\\backends\\__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "backend\\take_a_look_backend\\services\\debug_info.py": "ea733f5f2ec9fdd7bc233e743c0c34060b3c490751730ab5b7075108e4ae7bd7",
+        "backend\\take_a_look_backend\\services\\elf_context.py": "ff5d15e0f870bbe502c247be8089664c6426ae505e1c6b0ad0d0e99ef44a015e",
+        "backend\\take_a_look_backend\\services\\ordered_worker.py": "9fe8c41f83c8fbf081e4879057e45c5c933bbeb0bc57b0f180f099027ee92205",
+        "backend\\take_a_look_backend\\services\\recording.py": "8e083327ff605eeaae289e183c77e2caeb1c727b682d19a51fcf327ae68ab6a5",
+        "backend\\take_a_look_backend\\services\\sampling.py": "dbcaf9ebee4d635c9b4d8072dfb17c79efea6a1749a2da77d54e54bb9d13824c",
+        "backend\\take_a_look_backend\\services\\sampling_clock.py": "b71e6ab4ade2b4015959fad23a8174ed75e0e9657bc48e33f2770620297414f0",
+        "backend\\take_a_look_backend\\services\\symbols.py": "d867bba73d59be1399c103024bc19661e09a75b66a99cf22d7da1a8a6acea1e3",
+        "backend\\take_a_look_backend\\services\\__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "results": [
+        {
+          "run": 1,
+          "requestedHz": 50,
+          "channels": 32,
+          "acquiredFrames": 76,
+          "recordedFrames": 76,
+          "deliveredFrames": 76,
+          "elapsedSeconds": 1.5010146999993594,
+          "effectiveHz": 50.63241552533258,
+          "cpuSecondsIncludingDrain": 0.09375,
+          "recordingBytes": 17385
+        },
+        {
+          "run": 1,
+          "requestedHz": 1000,
+          "channels": 32,
+          "acquiredFrames": 1491,
+          "recordedFrames": 1491,
+          "deliveredFrames": 1491,
+          "elapsedSeconds": 1.500655399999232,
+          "effectiveHz": 993.5658779495699,
+          "cpuSecondsIncludingDrain": 0.21875,
+          "recordingBytes": 367184
+        },
+        {
+          "run": 1,
+          "requestedHz": 10000,
+          "channels": 32,
+          "acquiredFrames": 2398,
+          "recordedFrames": 2398,
+          "deliveredFrames": 2398,
+          "elapsedSeconds": 1.501054699998349,
+          "effectiveHz": 1597.5433806660328,
+          "cpuSecondsIncludingDrain": 0.25,
+          "recordingBytes": 609445
+        },
+        {
+          "run": 2,
+          "requestedHz": 50,
+          "channels": 32,
+          "acquiredFrames": 76,
+          "recordedFrames": 76,
+          "deliveredFrames": 76,
+          "elapsedSeconds": 1.5013724000018556,
+          "effectiveHz": 50.620352418830976,
+          "cpuSecondsIncludingDrain": 0.109375,
+          "recordingBytes": 17387
+        },
+        {
+          "run": 2,
+          "requestedHz": 1000,
+          "channels": 32,
+          "acquiredFrames": 1461,
+          "recordedFrames": 1461,
+          "deliveredFrames": 1461,
+          "elapsedSeconds": 1.500717100003385,
+          "effectiveHz": 973.534585563598,
+          "cpuSecondsIncludingDrain": 0.375,
+          "recordingBytes": 359179
+        },
+        {
+          "run": 2,
+          "requestedHz": 10000,
+          "channels": 32,
+          "acquiredFrames": 2493,
+          "recordedFrames": 2493,
+          "deliveredFrames": 2493,
+          "elapsedSeconds": 1.5005760000058217,
+          "effectiveHz": 1661.362036971355,
+          "cpuSecondsIncludingDrain": 0.4375,
+          "recordingBytes": 634779
+        }
+      ]
+    }
+  },
+  "validation": {
+    "analyze": "passed",
+    "flutterPassed": 257,
+    "flutterSkipped": 0,
+    "pythonPassed": 83,
+    "pythonSkipped": 3,
+    "pythonSubtests": 4,
+    "realArmElfOldNewResults": {
+      "passed": true,
+      "elfType": "ET_EXEC",
+      "symbols": 18,
+      "sourceFiles": [
+        "D:/ProjectGarage/take_a_look_v2/build/performance_review/symbol_fixture.c"
+      ],
+      "fixture": "D:\\ProjectGarage\\take_a_look_v2\\build\\performance_review\\symbol_fixture.elf",
+      "description": "Same compiled ARM Cortex-M7 ELF/DWARF4 parsed through old and new BackendService; complete results equal.",
+      "reproductionSource": "tool/benchmarks/symbol_fixture.c",
+      "compileFlags": "clang --target=arm-none-eabi -mcpu=cortex-m7 -mthumb -gdwarf-4 -O0 -c; ld.lld -flavor gnu -m armelf -e main -Ttext=0x08000000 -Tdata=0x20000000"
+    },
+    "packagedBackendSelfCheck": {
+      "ok": true,
+      "checks": {
+        "python": "3.11.7",
+        "elftools.elf.elffile": "ok",
+        "cmsis_pack_manager": "ok",
+        "pylink": "ok",
+        "pygdbmi.gdbmiparser": "ok",
+        "aioquic.asyncio.client": "ok",
+        "aioquic._crypto": "ok",
+        "aioquic._buffer": "ok",
+        "take_a_look_backend.backends.remote_backend": "ok",
+        "take_a_look_backend.backends.ember_v2": "ok",
+        "hid": "ok",
+        "libusb": "ok",
+        "probe_plugins": [
+          "cmsisdap",
+          "jlink",
+          "picoprobe",
+          "remote",
+          "stlink"
+        ],
+        "jlink_runtime": "available",
+        "rpc": "ok"
+      },
+      "errors": []
+    },
+    "nativeSmoke": {
+      "mode": "ui-test-synthetic",
+      "capturedAt": "2026-10-11T18:26:05.862531",
+      "scenario": "dense",
+      "frameworkErrors": [],
+      "connectionStatus": "connected",
+      "symbolCount": 512,
+      "uiScale": 1.0,
+      "samplingPaused": true,
+      "rawRecording": {
+        "path": "D:\\ProjectGarage\\take_a_look_v2\\build\\ui_test\\Release/recordings\\1791714359375884-6a739a16/samples.talraw",
+        "sampleCount": 5820,
+        "bytes": 3915281
+      },
+      "plotRetentionSeconds": 60.0,
+      "watches": [
+        {
+          "name": "iq_ref",
+          "samples": 5820,
+          "plotSamples": 1001,
+          "plotCapacity": 60001,
+          "plotFirstTime": 8.419999999999906,
+          "plotLastTime": 9.419999999999884,
+          "sampling": true
+        },
+        {
+          "name": "id_ref",
+          "samples": 5820,
+          "plotSamples": 1001,
+          "plotCapacity": 60001,
+          "plotFirstTime": 8.419999999999906,
+          "plotLastTime": 9.419999999999884,
+          "sampling": true
+        },
+        {
+          "name": "speed_rpm",
+          "samples": 5820,
+          "plotSamples": 1001,
+          "plotCapacity": 60001,
+          "plotFirstTime": 8.419999999999906,
+          "plotLastTime": 9.419999999999884,
+          "sampling": true
+        },
+        {
+          "name": "speed_pid_kp",
+          "samples": 5820,
+          "plotSamples": 1001,
+          "plotCapacity": 60001,
+          "plotFirstTime": 8.419999999999906,
+          "plotLastTime": 9.419999999999884,
+          "sampling": true
+        },
+        {
+          "name": "bus_voltage",
+          "samples": 5820,
+          "plotSamples": 1001,
+          "plotCapacity": 60001,
+          "plotFirstTime": 8.419999999999906,
+          "plotLastTime": 9.419999999999884,
+          "sampling": true
+        },
+        {
+          "name": "phase_current_a",
+          "samples": 5820,
+          "plotSamples": 1001,
+          "plotCapacity": 60001,
+          "plotFirstTime": 8.419999999999906,
+          "plotLastTime": 9.419999999999884,
+          "sampling": true
+        },
+        {
+          "name": "encoder_angle",
+          "samples": 5820,
+          "plotSamples": 1001,
+          "plotCapacity": 60001,
+          "plotFirstTime": 8.419999999999906,
+          "plotLastTime": 9.419999999999884,
+          "sampling": true
+        },
+        {
+          "name": "pwm_duty_a",
+          "samples": 5820,
+          "plotSamples": 1001,
+          "plotCapacity": 60001,
+          "plotFirstTime": 8.419999999999906,
+          "plotLastTime": 9.419999999999884,
+          "sampling": true
+        },
+        {
+          "name": "fault_code",
+          "samples": 5820,
+          "plotSamples": 1001,
+          "plotCapacity": 60001,
+          "plotFirstTime": 8.419999999999906,
+          "plotLastTime": 9.419999999999884,
+          "sampling": true
+        },
+        {
+          "name": "fault_latched",
+          "samples": 5820,
+          "plotSamples": 1001,
+          "plotCapacity": 60001,
+          "plotFirstTime": 8.419999999999906,
+          "plotLastTime": 9.419999999999884,
+          "sampling": true
+        },
+        {
+          "name": "mos_temp_c",
+          "samples": 5820,
+          "plotSamples": 1001,
+          "plotCapacity": 60001,
+          "plotFirstTime": 8.419999999999906,
+          "plotLastTime": 9.419999999999884,
+          "sampling": true
+        },
+        {
+          "name": "can_rx_count",
+          "samples": 5820,
+          "plotSamples": 1001,
+          "plotCapacity": 60001,
+          "plotFirstTime": 8.419999999999906,
+          "plotLastTime": 9.419999999999884,
+          "sampling": true
+        },
+        {
+          "name": "axis_0_position_reference_with_long_name",
+          "samples": 5820,
+          "plotSamples": 1001,
+          "plotCapacity": 60001,
+          "plotFirstTime": 8.419999999999906,
+          "plotLastTime": 9.419999999999884,
+          "sampling": true
+        },
+        {
+          "name": "axis_1_position_reference_with_long_name",
+          "samples": 5820,
+          "plotSamples": 1001,
+          "plotCapacity": 60001,
+          "plotFirstTime": 8.419999999999906,
+          "plotLastTime": 9.419999999999884,
+          "sampling": true
+        },
+        {
+          "name": "axis_2_position_reference_with_long_name",
+          "samples": 5820,
+          "plotSamples": 1001,
+          "plotCapacity": 60001,
+          "plotFirstTime": 8.419999999999906,
+          "plotLastTime": 9.419999999999884,
+          "sampling": true
+        },
+        {
+          "name": "axis_3_position_reference_with_long_name",
+          "samples": 5820,
+          "plotSamples": 1001,
+          "plotCapacity": 60001,
+          "plotFirstTime": 8.419999999999906,
+          "plotLastTime": 9.419999999999884,
+          "sampling": true
+        },
+        {
+          "name": "axis_4_position_reference_with_long_name",
+          "samples": 5820,
+          "plotSamples": 1001,
+          "plotCapacity": 60001,
+          "plotFirstTime": 8.419999999999906,
+          "plotLastTime": 9.419999999999884,
+          "sampling": true
+        },
+        {
+          "name": "axis_5_position_reference_with_long_name",
+          "samples": 5820,
+          "plotSamples": 1001,
+          "plotCapacity": 60001,
+          "plotFirstTime": 8.419999999999906,
+          "plotLastTime": 9.419999999999884,
+          "sampling": true
+        },
+        {
+          "name": "axis_6_position_reference_with_long_name",
+          "samples": 5820,
+          "plotSamples": 1001,
+          "plotCapacity": 60001,
+          "plotFirstTime": 8.419999999999906,
+          "plotLastTime": 9.419999999999884,
+          "sampling": true
+        },
+        {
+          "name": "axis_7_position_reference_with_long_name",
+          "samples": 5820,
+          "plotSamples": 1001,
+          "plotCapacity": 60001,
+          "plotFirstTime": 8.419999999999906,
+          "plotLastTime": 9.419999999999884,
+          "sampling": true
+        },
+        {
+          "name": "axis_8_position_reference_with_long_name",
+          "samples": 5820,
+          "plotSamples": 1001,
+          "plotCapacity": 60001,
+          "plotFirstTime": 8.419999999999906,
+          "plotLastTime": 9.419999999999884,
+          "sampling": true
+        },
+        {
+          "name": "axis_9_position_reference_with_long_name",
+          "samples": 5820,
+          "plotSamples": 1001,
+          "plotCapacity": 60001,
+          "plotFirstTime": 8.419999999999906,
+          "plotLastTime": 9.419999999999884,
+          "sampling": true
+        },
+        {
+          "name": "axis_10_position_reference_with_long_name",
+          "samples": 5820,
+          "plotSamples": 1001,
+          "plotCapacity": 60001,
+          "plotFirstTime": 8.419999999999906,
+          "plotLastTime": 9.419999999999884,
+          "sampling": true
+        },
+        {
+          "name": "axis_11_position_reference_with_long_name",
+          "samples": 5820,
+          "plotSamples": 1001,
+          "plotCapacity": 60001,
+          "plotFirstTime": 8.419999999999906,
+          "plotLastTime": 9.419999999999884,
+          "sampling": true
+        },
+        {
+          "name": "axis_12_position_reference_with_long_name",
+          "samples": 5820,
+          "plotSamples": 1001,
+          "plotCapacity": 60001,
+          "plotFirstTime": 8.419999999999906,
+          "plotLastTime": 9.419999999999884,
+          "sampling": true
+        },
+        {
+          "name": "axis_13_position_reference_with_long_name",
+          "samples": 5820,
+          "plotSamples": 1001,
+          "plotCapacity": 60001,
+          "plotFirstTime": 8.419999999999906,
+          "plotLastTime": 9.419999999999884,
+          "sampling": true
+        },
+        {
+          "name": "axis_14_position_reference_with_long_name",
+          "samples": 5820,
+          "plotSamples": 1001,
+          "plotCapacity": 60001,
+          "plotFirstTime": 8.419999999999906,
+          "plotLastTime": 9.419999999999884,
+          "sampling": true
+        },
+        {
+          "name": "axis_15_position_reference_with_long_name",
+          "samples": 5820,
+          "plotSamples": 1001,
+          "plotCapacity": 60001,
+          "plotFirstTime": 8.419999999999906,
+          "plotLastTime": 9.419999999999884,
+          "sampling": true
+        },
+        {
+          "name": "axis_16_position_reference_with_long_name",
+          "samples": 5820,
+          "plotSamples": 1001,
+          "plotCapacity": 60001,
+          "plotFirstTime": 8.419999999999906,
+          "plotLastTime": 9.419999999999884,
+          "sampling": true
+        },
+        {
+          "name": "axis_17_position_reference_with_long_name",
+          "samples": 5820,
+          "plotSamples": 1001,
+          "plotCapacity": 60001,
+          "plotFirstTime": 8.419999999999906,
+          "plotLastTime": 9.419999999999884,
+          "sampling": true
+        },
+        {
+          "name": "axis_18_position_reference_with_long_name",
+          "samples": 5820,
+          "plotSamples": 1001,
+          "plotCapacity": 60001,
+          "plotFirstTime": 8.419999999999906,
+          "plotLastTime": 9.419999999999884,
+          "sampling": true
+        },
+        {
+          "name": "axis_19_position_reference_with_long_name",
+          "samples": 5820,
+          "plotSamples": 1001,
+          "plotCapacity": 60001,
+          "plotFirstTime": 8.419999999999906,
+          "plotLastTime": 9.419999999999884,
+          "sampling": true
+        }
+      ],
+      "logs": [
+        {
+          "timestamp": 1791714359370,
+          "message": "已加入 32 个变量到实时调参列表。",
+          "level": "info"
+        },
+        {
+          "timestamp": 1791714359385,
+          "message": "原始采样持续保存：D:\\ProjectGarage\\take_a_look_v2\\build\\ui_test\\Release/recordings\\1791714359375884-6a739a16/samples.talraw",
+          "level": "info"
+        },
+        {
+          "timestamp": 1791714359388,
+          "message": "UI 测试版：大量变量。连接、读写及采样全部使用模拟数据。",
+          "level": "info"
+        },
+        {
+          "timestamp": 1791714359388,
+          "message": "原始采样持续保存：D:\\ProjectGarage\\take_a_look_v2\\build\\ui_test\\Release/recordings\\1791714359375884-6a739a16/samples.talraw",
+          "level": "info"
+        },
+        {
+          "timestamp": 1791714359388,
+          "message": "可测试面板拖拽、独立窗口、变量菜单、图表缩放与源码断点。",
+          "level": "info"
+        }
+      ],
+      "smokePassed": true
+    },
+    "windowsRelease": {
+      "passed": true,
+      "executable": "D:\\ProjectGarage\\take_a_look_v2\\build\\windows\\x64\\runner\\Release\\take_a_look_v2.exe",
+      "backendSelfCheck": {
+        "ok": true,
+        "checks": {
+          "python": "3.11.7",
+          "elftools.elf.elffile": "ok",
+          "cmsis_pack_manager": "ok",
+          "pylink": "ok",
+          "pygdbmi.gdbmiparser": "ok",
+          "aioquic.asyncio.client": "ok",
+          "aioquic._crypto": "ok",
+          "aioquic._buffer": "ok",
+          "take_a_look_backend.backends.remote_backend": "ok",
+          "take_a_look_backend.backends.ember_v2": "ok",
+          "hid": "ok",
+          "libusb": "ok",
+          "probe_plugins": [
+            "cmsisdap",
+            "jlink",
+            "picoprobe",
+            "remote",
+            "stlink"
+          ],
+          "jlink_runtime": "available",
+          "rpc": "ok"
+        },
+        "errors": []
+      }
+    },
+    "hardwareValidation": "not performed"
+  },
+  "afterSourceSha256": {
+    "lib/main.dart": "c0c9bcbfd8bd8a10e5d12a650bcae7177bbe9f1023e9eeaa523b3c56e8ff71b8",
+    "lib/main_ui_test.dart": "2a1e2ae2605a5c51351848ac3841d74565fcf3826c31dd186ae616bb01029de7",
+    "lib/src/analysis/analysis.dart": "6cc01d73d7b5f089b73ca4f726ffe204914ee2c92a743d4ca474639b68212bb7",
+    "lib/src/analysis/analysis_data.dart": "678ec8a460e409652bbf93e96faff2428c82533bfc50c4707f5d318af20182dc",
+    "lib/src/analysis/analysis_dataset.dart": "4c2c756685a1eb4c226a9820fbf92a76576d70076d8e9b4d678566b8d950e28f",
+    "lib/src/analysis/analysis_fft.dart": "d738e2bbfce6c77180559e3bcf334e37044f50b6b1abedc521bdd3106efb3027",
+    "lib/src/analysis/analysis_import.dart": "445f3f2d13a7f41e4786bfe18483d9591dacb023fc26698bc0c72136f3ccce5b",
+    "lib/src/analysis/analysis_worker.dart": "15c0dc807e751f9ff9f8209c6a70b2a2657e9723f7b363a6b5251f0be8b2e697",
+    "lib/src/app/app.dart": "40f24f99bc003d4ab32168fc1e323f5f092756b2e9e8d4e6f587c73b8d96215d",
+    "lib/src/app/bootstrap.dart": "7f02dab121e4b200842e24bd537160d4affd51b8d14a446fecc5e0d8a5877282",
+    "lib/src/app/file_pickers.dart": "d82f8cf39aa87c25c2f1f9b598dc43b9eab1748a7aac32f10ea28fe3ecc25aa3",
+    "lib/src/app/title_bar.dart": "9acb35b61314b61e6c078cc353e9c91e16e66bcf8abab2fb0bd4821d1aebb845",
+    "lib/src/app/workbench_feedback.dart": "c7331953a059bf2e0d1cb920e39e3f4c451b61d7f0512482b4480a1be86ab01b",
+    "lib/src/backend/backend_client.dart": "ea2878ceae9793e3c40b9c6ebd15634e22fcd55f2ef4759e90012d1508ee5db1",
+    "lib/src/backend/backend_transport.dart": "273c2fbf5cf97551991a67482f68a51ee21bda8555619fd3562e6979e1c1221a",
+    "lib/src/chart/axis_settings.dart": "571c79e4d1e27876db16516fc0b6f5e0e6546e108ac6664b5340a97779aa4cb1",
+    "lib/src/chart/cartesian_renderer.dart": "175e993e21b86fa0d9a2256f1666515c2a5c09ce6e7c9bddabcb93c509e3e8fc",
+    "lib/src/chart/chart.dart": "96dfb682df804ef1a7c2acf3e02e643a74eb47e3afa6867471e922df751f760c",
+    "lib/src/chart/desktop_axis_menu.dart": "1d8438e5722a2f21d907255eefe90ed6c62bc42abb8c99728d530565eca6bfb0",
+    "lib/src/chart/downsampling.dart": "2082ed6c20d0f895a54c3479318bff94dfd43666b1533e5b63050e3cba6a4426",
+    "lib/src/chart/hover.dart": "08fbaef2ab50cb837893aef969c1bb3033bc4137bb2896fb009279d7b02b524b",
+    "lib/src/chart/painter.dart": "54137701c7d328f9c37868de826274f4e8505c8af30cc3e30f42ba32dbc247ca",
+    "lib/src/chart/selection_painter.dart": "0d5e7bf124937722071e6e2608bc47ec27aab4117531632c1fceb0af09201429",
+    "lib/src/chart/viewport.dart": "a39091502fbb929af40d621e9e570f6bddece69b7e3b409b75a5b56f9f0b5c2e",
+    "lib/src/controller/controller.dart": "a72c194dfa731d58026474f9b357baed9c2d2a195e72a96784e857057b5e019c",
+    "lib/src/controller/controller_analysis.dart": "253cf9780dfbd8876394bdaca9360201be279c47096d4c9e2f757d0a76ad24dc",
+    "lib/src/controller/controller_command_router.dart": "64be567d1e6dbfc8c915f6a60eff9e5299f843fa863de8fb1a4bdf571bf9da57",
+    "lib/src/controller/controller_connection.dart": "deea6cdfba4e773ad51972eef09af80ee8b4c6182d3130983aa38e5b2d8e1cb9",
+    "lib/src/controller/controller_debug.dart": "dc553a269c79d8ad66ab586ca7f968b9552e948954e131bfd928cafbc6ec26be",
+    "lib/src/controller/controller_plot.dart": "22e60c4884e27a40dc2f4b40a46031e49e7742d5bd279d582fcb5d7f10eb88e2",
+    "lib/src/controller/controller_signals.dart": "2e75804ee43ed53e8ce7fae85d5f26ee979f4214cb2131d3da240149068be6e3",
+    "lib/src/controller/controller_snapshot.dart": "6afdbfec3af2166cc8b5cf7445ea54234eac712b40e68fb8a7d84733028c768d",
+    "lib/src/controller/controller_source_workspace.dart": "1a2de3a08c9f0c91055ab94a005f3256147881263ad3dbd24c7d18d8ee19c5d8",
+    "lib/src/controller/controller_state.dart": "e722a19029d5d8315a7d117e4a9dbdb01a667bcb1938e989abe0bd424775be59",
+    "lib/src/controller/controller_sync.dart": "4c7ca1cabb34032829fae4e23a9f65277b608b486f463dc7ded848e2fe25c9ec",
+    "lib/src/controller/controller_telemetry.dart": "1e021523da6a5d458d7c51e25c1445834a82aae7a1de3be819ef2e275fef2ac1",
+    "lib/src/controller/controller_watch.dart": "ae725922c71b2dba95451c83ecc7ba20abc8799739f0dfe3e847444233d7c2bb",
+    "lib/src/models/demo_data.dart": "e4808aea2f7c6d0e3a7e6b0b0aa2aae5b675abc9f8ce6cf9c86f4c9f9f30ec4a",
+    "lib/src/models/models.dart": "0892ccbcc0daf625fd9a09a8d9af3f727eee144e79be3dee566c703550ca1e43",
+    "lib/src/models/symbol_load_progress.dart": "4d8b6266ce06c8f208be618835c943c455fc33089c9fd5071468e1e867914910",
+    "lib/src/models/watch_tree.dart": "1aa0d770653abd8bb8e2dcdfaac411b733f17b23d743394c236a074e1154319b",
+    "lib/src/panels/analysis_chart_painters.dart": "81dcb06431d58f5335feb44e794d34c6d93cc168056c0e96b39122aa1f68f702",
+    "lib/src/panels/analysis_chart_panel.dart": "bc15e20a286b913c61524c6e6ac403b09aa2a919f69facc4eeae85be290a2b86",
+    "lib/src/panels/analysis_chart_table.dart": "b9194582946ae109ba90b40e2b795e64a839cde6f06f985881bf9a05585acce4",
+    "lib/src/panels/analysis_fft_panel.dart": "88af9c9733cc3030edc34994ce3dcc26b51f2feffd0534c1271a830c8059a872",
+    "lib/src/panels/connection_panel.dart": "1606f7388a23183b1a98ffbc9083408881d810cd5fa3abfa0fcc542c35904b9c",
+    "lib/src/panels/control_panels.dart": "879d09dde9ca47e9767ae3418393029013be7a987122c16d9c04c8ea866247a7",
+    "lib/src/panels/panels.dart": "9c16eefe595c9191fdcecc9b52c99395e0cf4fa7378cbcf3175d7db19ee7ea5a",
+    "lib/src/panels/panel_frame.dart": "84941bf38ec577b58435de4bb4c56350d44c623a155ba48e45553de141d1cc9b",
+    "lib/src/panels/plot_log_panels.dart": "d9590cddc6a0ee0937e8cee2beb476ee46fed8a84e54592945e6967d120f9fa9",
+    "lib/src/panels/shared_controls.dart": "b9343d7cb1e1594176aa229b4dd48097acd59e0ee0c1f23ac85982345aca27e6",
+    "lib/src/panels/source_debug_panel.dart": "c29cf8ec06c6847d60820d4ade4d5c17528759cb81f5b01deaf2db1c59fceff9",
+    "lib/src/panels/source_documents.dart": "3c03cb85f4d6139e9824068f908d461b02d9833ec9fa838df36a10bacfd32eb4",
+    "lib/src/panels/source_highlighter.dart": "26746fc475dff9570bc6ab1cc8c1037c24ca445ce9946d6b71043adb9331c7a2",
+    "lib/src/panels/source_search.dart": "4ec889361504dbce5cc906520c2792609de5803831c98f3fe08acbd91f205443",
+    "lib/src/panels/source_tab_attention.dart": "7105040229b4843d94c95a12bab6facfbb7936394466be8c6aa1ff3aaad5e21b",
+    "lib/src/panels/symbol_panel.dart": "c1030d01ad2c89ac5c53110fa9550cdaef3d03a3890bf22cadc706d098391a9b",
+    "lib/src/panels/table_layout.dart": "4ab437d8f8306eacb0f360df4802f04223d1487bd053d71e2ab271de392d111b",
+    "lib/src/panels/watch_color_dialog.dart": "23c20b065212780799efd8bb3a090c24745ebf8c6a50424a70cfc528e88fceda",
+    "lib/src/panels/watch_panel.dart": "64b92217bbc66c06170d9c05307fd0d320c8b759058a94ce403adc1251e103af",
+    "lib/src/protocol/commands.dart": "b2e228c2771fc664e9d58b84328eb9549b85697abba948a5f9f194875041c604",
+    "lib/src/protocol/events.dart": "ae7bcf7047315d05e208a4e1448527dabe99ba40130340ce2bb541d09a526049",
+    "lib/src/telemetry/raw_recording.dart": "04b0342557bba41295fee8eb52a4547d4054a7202359f0e458f71a534339d876",
+    "lib/src/telemetry/recording_storage.dart": "5103cc6ea7ae28a189e8686b996875b95cf7ce54eda04b844afc1fd388582b1f",
+    "lib/src/telemetry/sample_buffer.dart": "3b3577109ae6347740170e1cf7d6e2e1708f42ac7b0bc552c0cb2ea9790de2e8",
+    "lib/src/telemetry/telemetry_store.dart": "e5531ea323d54ab0057ebd1bf51f59ec245ce5ab42c70ca74feafeeea23a9f82",
+    "lib/src/theme/controls.dart": "e5a1bac20e2654ed8aa3113d57dc8870f1a7a63dfb14d9cbe94dc2a5dc83bb28",
+    "lib/src/theme/dropdown.dart": "ed34533dd87ab57e4600fe43619d18a740974e2c200ecab8d81a2874beb55d22",
+    "lib/src/theme/feedback.dart": "20cd373ebe5c593cff444053cd20fe143c149659f36f691ec834f93e1f7eaad3",
+    "lib/src/theme/interaction.dart": "215f5746deee23f5e3fa49c582e56ac0dc73b23f15c05cef7637e0462e0aafe5",
+    "lib/src/theme/material_theme.dart": "fc39fa761f9f3a3b1eb446a778c33d3e78de7f97f8a1596fbd53ec64166b6785",
+    "lib/src/theme/menus.dart": "68097553bde453e5011f9d9fb15dc406e0197628ef7953f3d5f8ab2d8b92979e",
+    "lib/src/theme/progress_dialog.dart": "97be871d0a27030a3943a61dde4dc9776b681a4ed8573c67bd41bad965a70851",
+    "lib/src/theme/theme.dart": "030497127aebd2d37780369e9ea76f6c49944942a83f1b3f37839011cde78409",
+    "lib/src/theme/tokens.dart": "4fa37314e76cc397ba071f5d6a317da9ae62eac0025d7e2d1f1bb126859eaf9d",
+    "lib/src/ui_test/ui_test_app.dart": "af244da628e9c3b520fb6a33940605326da21645edd44e0882fc46d04415e6b7",
+    "lib/src/ui_test/ui_test_session.dart": "89a92c1e20e57dcbe09e61d3765c84094a80c0a20de0bebfe7686846ffa086b6",
+    "lib/src/workspace/detached_window_coordinator.dart": "1b61c4d500df3d6aeb0d682bd685785ee3c6bd5f189398ca4559d845a28da6bd",
+    "lib/src/workspace/keyboard_shortcuts.dart": "b9dddef8b8234f7db6bf36dd5127ab74e32bf98467830db6303c76f2cb469b93",
+    "lib/src/workspace/panel_types.dart": "05a1adc7f301ecd140d693eb423172a0967d69e094635915fd288f7a467bbf6d",
+    "lib/src/workspace/tab_drag_preview_coordinator.dart": "16d50fd7e9d35c2d5a38d0c4c0ce874d78982408daa9bb6f78b347e89a2e9570",
+    "lib/src/workspace/window_sync.dart": "ab8afd02757f21881d3146bb04443876e7936d88a8059bb9f257b757b8acd904",
+    "lib/src/workspace/window_sync_target.dart": "3985b560bc784820c6ba3cf651b85a1643a13418018d4a0e1c14f45f4cfd51cc",
+    "lib/src/workspace/workspace.dart": "25f9d30e4c249c87dd0b1da037f601b956be0569ea884fe311d6ef38a22917e5",
+    "lib/src/workspace/workspace_geometry.dart": "cee1ecb6ff2cc109a006d70dc01ab0f2a9b2eeb4435550a8cd62d48bfae1f84b",
+    "lib/src/workspace/workspace_layout.dart": "405f7441fce5fba66e8a4cd8344d0aa946ef04bfc6ffab0135d5358dfe48a257",
+    "lib/src/workspace/workspace_session.dart": "a6a8f3b7e337004236a87f7980aaf1ce83e2bbb7a441689a5109ad9765ed0bc2",
+    "lib/src/workspace/workspace_widgets.dart": "499806f66f411a7bf82eb49d40fe63cb80c2505ffe7e9e31d18034b2a2e70505",
+    "backend/take_a_look_backend/models.py": "bcb1bb25c319f45eb567b61c666b458b60bb65c017b7607f58977bc2373e0956",
+    "backend/take_a_look_backend/protocol.py": "50d9eeb7d80c30a83e032fc488252b873c93f7372a666f9f6e3058adfbb889b5",
+    "backend/take_a_look_backend/self_check.py": "e054ce878ee844d89641132d18580956b795472104a2171fdd04344e26180f9e",
+    "backend/take_a_look_backend/service.py": "268b07d2e55c28436ce95447797aaa5edbf4c41982b55bf5cd27c81033a26670",
+    "backend/take_a_look_backend/stdio.py": "9e40613ecf5fb3d49bd1a875e468d61bd757bf7f1b8597e811b9070e83bf8a4f",
+    "backend/take_a_look_backend/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "backend/take_a_look_backend/backends/ember_transport.py": "dc34f40ae5eb79597ddee759e212ef64717f13df4605da8a7eb7c8ffa8875c01",
+    "backend/take_a_look_backend/backends/ember_v2.py": "8bbda88e808d9b075564de9f5d3e3739c587c4a37427e85c3df551fca10df2cd",
+    "backend/take_a_look_backend/backends/gdb_mi.py": "0684061d8fe1018b3120d1d88ab0662f2a1ec5c47d46dffd575bb8bf16122ec3",
+    "backend/take_a_look_backend/backends/j_scope_rtt.py": "639dcc794a1e4b8d92829cc45e16147b8f6bf5b4c56cdda7afe01a4f8a6b71b1",
+    "backend/take_a_look_backend/backends/pyocd_memory.py": "39a93d4a1c2f8f6071f3d4a116cf4c21b579ac0e015e2a0f6257394f63cdbb98",
+    "backend/take_a_look_backend/backends/remote_backend.py": "bf9aee607dc77cd4e8356303d758754648124f1cab11c076b44a580631db7953",
+    "backend/take_a_look_backend/backends/rtt_plus.py": "6be64b5af5a703a2c6eeccaee7903f816ad9c03d88df854379ce892b4bab6d58",
+    "backend/take_a_look_backend/backends/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "backend/take_a_look_backend/services/debug_info.py": "ea733f5f2ec9fdd7bc233e743c0c34060b3c490751730ab5b7075108e4ae7bd7",
+    "backend/take_a_look_backend/services/elf_context.py": "ff5d15e0f870bbe502c247be8089664c6426ae505e1c6b0ad0d0e99ef44a015e",
+    "backend/take_a_look_backend/services/ordered_worker.py": "9fe8c41f83c8fbf081e4879057e45c5c933bbeb0bc57b0f180f099027ee92205",
+    "backend/take_a_look_backend/services/recording.py": "8e083327ff605eeaae289e183c77e2caeb1c727b682d19a51fcf327ae68ab6a5",
+    "backend/take_a_look_backend/services/sampling.py": "dbcaf9ebee4d635c9b4d8072dfb17c79efea6a1749a2da77d54e54bb9d13824c",
+    "backend/take_a_look_backend/services/sampling_clock.py": "b71e6ab4ade2b4015959fad23a8174ed75e0e9657bc48e33f2770620297414f0",
+    "backend/take_a_look_backend/services/symbols.py": "d867bba73d59be1399c103024bc19661e09a75b66a99cf22d7da1a8a6acea1e3",
+    "backend/take_a_look_backend/services/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "raw": {
+    "before": {
+      "audit": [
+        {
+          "status": "passed",
+          "startedAt": "2026-10-11T17:23:52.264130",
+          "finishedAt": "2026-10-11T17:24:35.713253",
+          "mode": "Flutter Windows release AOT",
+          "suite": "audit",
+          "dartVersion": "3.12.1 (stable) (Tue May 26 01:02:21 2026 -0700) on \"windows_x64\"",
+          "os": "\"Windows 10 Pro\" 10.0 (Build 26220)",
+          "logicalProcessors": 12,
+          "maxRssBytes": 1523015680,
+          "checksum": 289596454.76748645,
+          "method": "Synthetic inputs; production functions imported from the workspace. Individual cases record what is included. Microbenchmarks exclude input generation and use three warm-ups and calibrated blocks. Live mode includes widgets and concurrent acquisition/analysis. No physical probe, OS pipe, disk recording or multi-window traffic.",
+          "results": [
+            {
+              "name": "audit_paint_8_0.2s",
+              "channels": 8,
+              "retainedPointsPerChannel": 600000,
+              "visibleSeconds": 0.2,
+              "includes": "Production painter CPU recording, automatic Y bounds; excludes raster",
+              "medianMs": 1.859,
+              "p95Ms": 2.4373333333333336,
+              "minMs": 1.7613333333333332,
+              "maxMs": 2.4373333333333336,
+              "blocks": 9,
+              "operationsPerBlock": 3
+            },
+            {
+              "name": "audit_paint_8_12.0s",
+              "channels": 8,
+              "retainedPointsPerChannel": 600000,
+              "visibleSeconds": 12.0,
+              "includes": "Production painter CPU recording, automatic Y bounds; excludes raster",
+              "medianMs": 23.994,
+              "p95Ms": 27.532,
+              "minMs": 19.808,
+              "maxMs": 27.532,
+              "blocks": 9,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_paint_8_60.0s",
+              "channels": 8,
+              "retainedPointsPerChannel": 600000,
+              "visibleSeconds": 60.0,
+              "includes": "Production painter CPU recording, automatic Y bounds; excludes raster",
+              "medianMs": 95.248,
+              "p95Ms": 101.027,
+              "minMs": 86.848,
+              "maxMs": 101.027,
+              "blocks": 9,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_selected_paint_8_0.2s",
+              "medianMs": 8.325,
+              "p95Ms": 9.339,
+              "minMs": 7.44,
+              "maxMs": 9.339,
+              "blocks": 9,
+              "operationsPerBlock": 2
+            },
+            {
+              "name": "audit_pause_8",
+              "elapsedMs": 340.469,
+              "retainedPointsPerChannel": 600000,
+              "channels": 8,
+              "rssBytes": 419295232
+            },
+            {
+              "name": "audit_paused_paint_8_0.2s",
+              "medianMs": 66.363,
+              "p95Ms": 73.016,
+              "minMs": 64.377,
+              "maxMs": 73.016,
+              "blocks": 5,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_paint_32_0.2s",
+              "channels": 32,
+              "retainedPointsPerChannel": 600000,
+              "visibleSeconds": 0.2,
+              "includes": "Production painter CPU recording, automatic Y bounds; excludes raster",
+              "medianMs": 6.188,
+              "p95Ms": 7.310666666666666,
+              "minMs": 5.525333333333333,
+              "maxMs": 7.310666666666666,
+              "blocks": 9,
+              "operationsPerBlock": 3
+            },
+            {
+              "name": "audit_paint_32_12.0s",
+              "channels": 32,
+              "retainedPointsPerChannel": 600000,
+              "visibleSeconds": 12.0,
+              "includes": "Production painter CPU recording, automatic Y bounds; excludes raster",
+              "medianMs": 98.987,
+              "p95Ms": 121.387,
+              "minMs": 92.952,
+              "maxMs": 121.387,
+              "blocks": 9,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_paint_32_60.0s",
+              "channels": 32,
+              "retainedPointsPerChannel": 600000,
+              "visibleSeconds": 60.0,
+              "includes": "Production painter CPU recording, automatic Y bounds; excludes raster",
+              "medianMs": 438.85,
+              "p95Ms": 469.557,
+              "minMs": 411.193,
+              "maxMs": 469.557,
+              "blocks": 9,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_selected_paint_32_0.2s",
+              "medianMs": 16.184,
+              "p95Ms": 20.537,
+              "minMs": 14.2345,
+              "maxMs": 20.537,
+              "blocks": 9,
+              "operationsPerBlock": 2
+            },
+            {
+              "name": "audit_pause_32",
+              "elapsedMs": 1595.901,
+              "retainedPointsPerChannel": 600000,
+              "channels": 32,
+              "rssBytes": 1424896000
+            },
+            {
+              "name": "audit_paused_paint_32_0.2s",
+              "medianMs": 337.728,
+              "p95Ms": 340.955,
+              "minMs": 301.973,
+              "maxMs": 340.955,
+              "blocks": 5,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_state_snapshot_10000_symbols",
+              "medianMs": 19.22,
+              "p95Ms": 21.9355,
+              "minMs": 15.9645,
+              "maxMs": 21.9355,
+              "blocks": 9,
+              "operationsPerBlock": 2
+            },
+            {
+              "name": "audit_state_snapshot_size",
+              "symbols": 10000,
+              "bytes": 1339073
+            },
+            {
+              "name": "audit_state_apply_10000_symbols",
+              "medianMs": 9.530333333333333,
+              "p95Ms": 10.598333333333334,
+              "minMs": 7.2956666666666665,
+              "maxMs": 10.598333333333334,
+              "blocks": 9,
+              "operationsPerBlock": 3
+            },
+            {
+              "name": "audit_delta_snapshot_encode_32x800",
+              "medianMs": 10.295,
+              "p95Ms": 12.229,
+              "minMs": 6.682,
+              "maxMs": 12.229,
+              "blocks": 9,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_delta_snapshot_size",
+              "channels": 32,
+              "frames": 800,
+              "bytes": 822056
+            },
+            {
+              "name": "audit_full_snapshot_encode_8x60000",
+              "medianMs": 133.899,
+              "p95Ms": 135.902,
+              "minMs": 130.815,
+              "maxMs": 135.902,
+              "blocks": 5,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_json_framing_1048576_4096",
+              "bytes": 1048591,
+              "chunkBytes": 4096,
+              "includes": "Framing and UTF-8 decode only",
+              "medianMs": 75.432,
+              "p95Ms": 86.121,
+              "minMs": 74.428,
+              "maxMs": 86.121,
+              "blocks": 5,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_json_framing_1048576_65536",
+              "bytes": 1048591,
+              "chunkBytes": 65536,
+              "includes": "Framing and UTF-8 decode only",
+              "medianMs": 8.338666666666667,
+              "p95Ms": 10.957,
+              "minMs": 6.698333333333333,
+              "maxMs": 10.957,
+              "blocks": 5,
+              "operationsPerBlock": 3
+            },
+            {
+              "name": "audit_json_framing_4194304_4096",
+              "bytes": 4194319,
+              "chunkBytes": 4096,
+              "includes": "Framing and UTF-8 decode only",
+              "medianMs": 1337.477,
+              "p95Ms": 1382.158,
+              "minMs": 1294.09,
+              "maxMs": 1382.158,
+              "blocks": 5,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_json_framing_4194304_65536",
+              "bytes": 4194319,
+              "chunkBytes": 65536,
+              "includes": "Framing and UTF-8 decode only",
+              "medianMs": 96.21,
+              "p95Ms": 97.869,
+              "minMs": 95.578,
+              "maxMs": 97.869,
+              "blocks": 5,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_analysis_replace_sorted_8x100000",
+              "medianMs": 108.148,
+              "p95Ms": 127.819,
+              "minMs": 97.999,
+              "maxMs": 127.819,
+              "blocks": 9,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_analysis_replace_and_bounds_8x100000",
+              "medianMs": 118.888,
+              "p95Ms": 131.774,
+              "minMs": 111.468,
+              "maxMs": 131.774,
+              "blocks": 9,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_analysis_selection_stats_8x100000",
+              "medianMs": 3.9076,
+              "p95Ms": 4.4186,
+              "minMs": 3.3842,
+              "maxMs": 4.4186,
+              "blocks": 9,
+              "operationsPerBlock": 5
+            },
+            {
+              "name": "audit_background_csv_100000x8",
+              "elapsedMs": 305.004,
+              "textBytes": 2288921
+            },
+            {
+              "name": "audit_moving_paint_32_12.0s",
+              "channels": 32,
+              "newFramesPerPaint": 64,
+              "visibleSeconds": 12.0,
+              "includes": "Fresh samples, changing viewport, exact extrema and CPU painting; excludes GPU",
+              "medianMs": 96.069,
+              "p95Ms": 103.702,
+              "minMs": 89.255,
+              "maxMs": 103.702,
+              "blocks": 9,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_moving_paint_32_60.0s",
+              "channels": 32,
+              "newFramesPerPaint": 64,
+              "visibleSeconds": 60.0,
+              "includes": "Fresh samples, changing viewport, exact extrema and CPU painting; excludes GPU",
+              "medianMs": 437.89,
+              "p95Ms": 465.054,
+              "minMs": 414.684,
+              "maxMs": 465.054,
+              "blocks": 9,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_state_sync_plot_change_10000_symbols",
+              "medianMs": 18.4565,
+              "p95Ms": 30.93,
+              "minMs": 16.069,
+              "maxMs": 30.93,
+              "blocks": 9,
+              "operationsPerBlock": 2
+            },
+            {
+              "name": "decode_8",
+              "channels": 8,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 512,
+              "payloadBytes": 4687,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.002386,
+              "p95Ms": 0.0061470000000000006,
+              "minMs": 0.002249,
+              "maxMs": 0.0061470000000000006,
+              "blocks": 15,
+              "operationsPerBlock": 2000
+            },
+            {
+              "name": "cache_current_8",
+              "channels": 8,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 512,
+              "payloadBytes": 4687,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.0065200573065902585,
+              "p95Ms": 0.007669054441260745,
+              "minMs": 0.006320200573065903,
+              "maxMs": 0.007669054441260745,
+              "blocks": 15,
+              "operationsPerBlock": 1396
+            },
+            {
+              "name": "pipeline_current_8",
+              "channels": 8,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 512,
+              "payloadBytes": 4687,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.011800666666666668,
+              "p95Ms": 0.014924,
+              "minMs": 0.009967333333333333,
+              "maxMs": 0.014924,
+              "blocks": 15,
+              "operationsPerBlock": 1500
+            },
+            {
+              "name": "pipeline_ring_8",
+              "channels": 8,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 512,
+              "payloadBytes": 4687,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.0061565000000000005,
+              "p95Ms": 0.0083865,
+              "minMs": 0.0055320000000000005,
+              "maxMs": 0.0083865,
+              "blocks": 15,
+              "operationsPerBlock": 2000
+            },
+            {
+              "name": "decode_32",
+              "channels": 32,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 2048,
+              "payloadBytes": 17167,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.010844519966015292,
+              "p95Ms": 0.013593882752761258,
+              "minMs": 0.008046728971962618,
+              "maxMs": 0.013593882752761258,
+              "blocks": 15,
+              "operationsPerBlock": 1177
+            },
+            {
+              "name": "cache_current_32",
+              "channels": 32,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 2048,
+              "payloadBytes": 17167,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.032302158273381294,
+              "p95Ms": 0.03905035971223021,
+              "minMs": 0.025151079136690648,
+              "maxMs": 0.03905035971223021,
+              "blocks": 15,
+              "operationsPerBlock": 278
+            },
+            {
+              "name": "pipeline_current_32",
+              "channels": 32,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 2048,
+              "payloadBytes": 17167,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.04663636363636363,
+              "p95Ms": 0.053049350649350645,
+              "minMs": 0.0409012987012987,
+              "maxMs": 0.053049350649350645,
+              "blocks": 15,
+              "operationsPerBlock": 385
+            },
+            {
+              "name": "pipeline_ring_32",
+              "channels": 32,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 2048,
+              "payloadBytes": 17167,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.02492503748125937,
+              "p95Ms": 0.029607196401799103,
+              "minMs": 0.022449775112443778,
+              "maxMs": 0.029607196401799103,
+              "blocks": 15,
+              "operationsPerBlock": 667
+            },
+            {
+              "name": "decode_64",
+              "channels": 64,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 4096,
+              "payloadBytes": 33807,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.019021694214876032,
+              "p95Ms": 0.021003099173553717,
+              "minMs": 0.016421487603305786,
+              "maxMs": 0.021003099173553717,
+              "blocks": 15,
+              "operationsPerBlock": 968
+            },
+            {
+              "name": "cache_current_64",
+              "channels": 64,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 4096,
+              "payloadBytes": 33807,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.057607382550335574,
+              "p95Ms": 0.07680872483221476,
+              "minMs": 0.0507751677852349,
+              "maxMs": 0.07680872483221476,
+              "blocks": 15,
+              "operationsPerBlock": 298
+            },
+            {
+              "name": "pipeline_current_64",
+              "channels": 64,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 4096,
+              "payloadBytes": 33807,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.08045112781954887,
+              "p95Ms": 0.09452631578947368,
+              "minMs": 0.07387218045112781,
+              "maxMs": 0.09452631578947368,
+              "blocks": 15,
+              "operationsPerBlock": 133
+            },
+            {
+              "name": "pipeline_ring_64",
+              "channels": 64,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 4096,
+              "payloadBytes": 33807,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.05241776315789474,
+              "p95Ms": 0.0640657894736842,
+              "minMs": 0.04467434210526316,
+              "maxMs": 0.0640657894736842,
+              "blocks": 15,
+              "operationsPerBlock": 304
+            },
+            {
+              "name": "decode_128",
+              "channels": 128,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 8192,
+              "payloadBytes": 67087,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.034810246679316884,
+              "p95Ms": 0.049161290322580646,
+              "minMs": 0.03180265654648957,
+              "maxMs": 0.049161290322580646,
+              "blocks": 15,
+              "operationsPerBlock": 527
+            },
+            {
+              "name": "cache_current_128",
+              "channels": 128,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 8192,
+              "payloadBytes": 67087,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.11043307086614174,
+              "p95Ms": 0.15088976377952756,
+              "minMs": 0.09959842519685039,
+              "maxMs": 0.15088976377952756,
+              "blocks": 15,
+              "operationsPerBlock": 127
+            },
+            {
+              "name": "pipeline_current_128",
+              "channels": 128,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 8192,
+              "payloadBytes": 67087,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.20012295081967213,
+              "p95Ms": 0.24552459016393444,
+              "minMs": 0.15065573770491802,
+              "maxMs": 0.24552459016393444,
+              "blocks": 15,
+              "operationsPerBlock": 122
+            },
+            {
+              "name": "pipeline_ring_128",
+              "channels": 128,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 8192,
+              "payloadBytes": 67087,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.131747311827957,
+              "p95Ms": 0.16349462365591397,
+              "minMs": 0.1080537634408602,
+              "maxMs": 0.16349462365591397,
+              "blocks": 15,
+              "operationsPerBlock": 186
+            }
+          ]
+        },
+        {
+          "status": "passed",
+          "startedAt": "2026-10-11T17:24:53.164125",
+          "finishedAt": "2026-10-11T17:25:36.417953",
+          "mode": "Flutter Windows release AOT",
+          "suite": "audit",
+          "dartVersion": "3.12.1 (stable) (Tue May 26 01:02:21 2026 -0700) on \"windows_x64\"",
+          "os": "\"Windows 10 Pro\" 10.0 (Build 26220)",
+          "logicalProcessors": 12,
+          "maxRssBytes": 1528082432,
+          "checksum": 289688214.5690546,
+          "method": "Synthetic inputs; production functions imported from the workspace. Individual cases record what is included. Microbenchmarks exclude input generation and use three warm-ups and calibrated blocks. Live mode includes widgets and concurrent acquisition/analysis. No physical probe, OS pipe, disk recording or multi-window traffic.",
+          "results": [
+            {
+              "name": "audit_paint_8_0.2s",
+              "channels": 8,
+              "retainedPointsPerChannel": 600000,
+              "visibleSeconds": 0.2,
+              "includes": "Production painter CPU recording, automatic Y bounds; excludes raster",
+              "medianMs": 1.4215,
+              "p95Ms": 1.55975,
+              "minMs": 1.28175,
+              "maxMs": 1.55975,
+              "blocks": 9,
+              "operationsPerBlock": 4
+            },
+            {
+              "name": "audit_paint_8_12.0s",
+              "channels": 8,
+              "retainedPointsPerChannel": 600000,
+              "visibleSeconds": 12.0,
+              "includes": "Production painter CPU recording, automatic Y bounds; excludes raster",
+              "medianMs": 20.123,
+              "p95Ms": 21.984,
+              "minMs": 18.857,
+              "maxMs": 21.984,
+              "blocks": 9,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_paint_8_60.0s",
+              "channels": 8,
+              "retainedPointsPerChannel": 600000,
+              "visibleSeconds": 60.0,
+              "includes": "Production painter CPU recording, automatic Y bounds; excludes raster",
+              "medianMs": 91.84,
+              "p95Ms": 102.84,
+              "minMs": 88.058,
+              "maxMs": 102.84,
+              "blocks": 9,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_selected_paint_8_0.2s",
+              "medianMs": 8.228666666666667,
+              "p95Ms": 8.735999999999999,
+              "minMs": 7.722333333333334,
+              "maxMs": 8.735999999999999,
+              "blocks": 9,
+              "operationsPerBlock": 3
+            },
+            {
+              "name": "audit_pause_8",
+              "elapsedMs": 336.268,
+              "retainedPointsPerChannel": 600000,
+              "channels": 8,
+              "rssBytes": 415109120
+            },
+            {
+              "name": "audit_paused_paint_8_0.2s",
+              "medianMs": 67.626,
+              "p95Ms": 70.848,
+              "minMs": 66.96,
+              "maxMs": 70.848,
+              "blocks": 5,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_paint_32_0.2s",
+              "channels": 32,
+              "retainedPointsPerChannel": 600000,
+              "visibleSeconds": 0.2,
+              "includes": "Production painter CPU recording, automatic Y bounds; excludes raster",
+              "medianMs": 5.802666666666667,
+              "p95Ms": 7.767666666666667,
+              "minMs": 5.531666666666666,
+              "maxMs": 7.767666666666667,
+              "blocks": 9,
+              "operationsPerBlock": 3
+            },
+            {
+              "name": "audit_paint_32_12.0s",
+              "channels": 32,
+              "retainedPointsPerChannel": 600000,
+              "visibleSeconds": 12.0,
+              "includes": "Production painter CPU recording, automatic Y bounds; excludes raster",
+              "medianMs": 100.82,
+              "p95Ms": 109.723,
+              "minMs": 93.059,
+              "maxMs": 109.723,
+              "blocks": 9,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_paint_32_60.0s",
+              "channels": 32,
+              "retainedPointsPerChannel": 600000,
+              "visibleSeconds": 60.0,
+              "includes": "Production painter CPU recording, automatic Y bounds; excludes raster",
+              "medianMs": 431.183,
+              "p95Ms": 458.128,
+              "minMs": 406.558,
+              "maxMs": 458.128,
+              "blocks": 9,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_selected_paint_32_0.2s",
+              "medianMs": 16.5925,
+              "p95Ms": 18.05,
+              "minMs": 14.6305,
+              "maxMs": 18.05,
+              "blocks": 9,
+              "operationsPerBlock": 2
+            },
+            {
+              "name": "audit_pause_32",
+              "elapsedMs": 1569.955,
+              "retainedPointsPerChannel": 600000,
+              "channels": 32,
+              "rssBytes": 1440575488
+            },
+            {
+              "name": "audit_paused_paint_32_0.2s",
+              "medianMs": 312.607,
+              "p95Ms": 339.749,
+              "minMs": 290.858,
+              "maxMs": 339.749,
+              "blocks": 5,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_state_snapshot_10000_symbols",
+              "medianMs": 18.676,
+              "p95Ms": 21.0255,
+              "minMs": 16.225,
+              "maxMs": 21.0255,
+              "blocks": 9,
+              "operationsPerBlock": 2
+            },
+            {
+              "name": "audit_state_snapshot_size",
+              "symbols": 10000,
+              "bytes": 1339073
+            },
+            {
+              "name": "audit_state_apply_10000_symbols",
+              "medianMs": 8.352,
+              "p95Ms": 11.506333333333332,
+              "minMs": 7.518999999999999,
+              "maxMs": 11.506333333333332,
+              "blocks": 9,
+              "operationsPerBlock": 3
+            },
+            {
+              "name": "audit_delta_snapshot_encode_32x800",
+              "medianMs": 10.903,
+              "p95Ms": 13.048,
+              "minMs": 7.771,
+              "maxMs": 13.048,
+              "blocks": 9,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_delta_snapshot_size",
+              "channels": 32,
+              "frames": 800,
+              "bytes": 822056
+            },
+            {
+              "name": "audit_full_snapshot_encode_8x60000",
+              "medianMs": 128.101,
+              "p95Ms": 151.17,
+              "minMs": 109.358,
+              "maxMs": 151.17,
+              "blocks": 5,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_json_framing_1048576_4096",
+              "bytes": 1048591,
+              "chunkBytes": 4096,
+              "includes": "Framing and UTF-8 decode only",
+              "medianMs": 84.967,
+              "p95Ms": 93.519,
+              "minMs": 78.56,
+              "maxMs": 93.519,
+              "blocks": 5,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_json_framing_1048576_65536",
+              "bytes": 1048591,
+              "chunkBytes": 65536,
+              "includes": "Framing and UTF-8 decode only",
+              "medianMs": 6.929666666666667,
+              "p95Ms": 9.512333333333332,
+              "minMs": 6.721666666666667,
+              "maxMs": 9.512333333333332,
+              "blocks": 5,
+              "operationsPerBlock": 3
+            },
+            {
+              "name": "audit_json_framing_4194304_4096",
+              "bytes": 4194319,
+              "chunkBytes": 4096,
+              "includes": "Framing and UTF-8 decode only",
+              "medianMs": 1296.932,
+              "p95Ms": 1325.453,
+              "minMs": 1284.962,
+              "maxMs": 1325.453,
+              "blocks": 5,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_json_framing_4194304_65536",
+              "bytes": 4194319,
+              "chunkBytes": 65536,
+              "includes": "Framing and UTF-8 decode only",
+              "medianMs": 93.131,
+              "p95Ms": 101.099,
+              "minMs": 86.362,
+              "maxMs": 101.099,
+              "blocks": 5,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_analysis_replace_sorted_8x100000",
+              "medianMs": 112.989,
+              "p95Ms": 125.547,
+              "minMs": 106.313,
+              "maxMs": 125.547,
+              "blocks": 9,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_analysis_replace_and_bounds_8x100000",
+              "medianMs": 114.059,
+              "p95Ms": 134.591,
+              "minMs": 105.438,
+              "maxMs": 134.591,
+              "blocks": 9,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_analysis_selection_stats_8x100000",
+              "medianMs": 3.3228333333333335,
+              "p95Ms": 3.923833333333333,
+              "minMs": 3.0625,
+              "maxMs": 3.923833333333333,
+              "blocks": 9,
+              "operationsPerBlock": 6
+            },
+            {
+              "name": "audit_background_csv_100000x8",
+              "elapsedMs": 298.605,
+              "textBytes": 2288921
+            },
+            {
+              "name": "audit_moving_paint_32_12.0s",
+              "channels": 32,
+              "newFramesPerPaint": 64,
+              "visibleSeconds": 12.0,
+              "includes": "Fresh samples, changing viewport, exact extrema and CPU painting; excludes GPU",
+              "medianMs": 90.954,
+              "p95Ms": 102.041,
+              "minMs": 86.553,
+              "maxMs": 102.041,
+              "blocks": 9,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_moving_paint_32_60.0s",
+              "channels": 32,
+              "newFramesPerPaint": 64,
+              "visibleSeconds": 60.0,
+              "includes": "Fresh samples, changing viewport, exact extrema and CPU painting; excludes GPU",
+              "medianMs": 454.753,
+              "p95Ms": 480.901,
+              "minMs": 416.478,
+              "maxMs": 480.901,
+              "blocks": 9,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_state_sync_plot_change_10000_symbols",
+              "medianMs": 18.804,
+              "p95Ms": 28.657,
+              "minMs": 16.407,
+              "maxMs": 28.657,
+              "blocks": 9,
+              "operationsPerBlock": 2
+            },
+            {
+              "name": "decode_8",
+              "channels": 8,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 512,
+              "payloadBytes": 4687,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.002691,
+              "p95Ms": 0.005299000000000001,
+              "minMs": 0.002212,
+              "maxMs": 0.005299000000000001,
+              "blocks": 15,
+              "operationsPerBlock": 2000
+            },
+            {
+              "name": "cache_current_8",
+              "channels": 8,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 512,
+              "payloadBytes": 4687,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.006777400169923535,
+              "p95Ms": 0.008142735768903992,
+              "minMs": 0.006123194562446899,
+              "maxMs": 0.008142735768903992,
+              "blocks": 15,
+              "operationsPerBlock": 1177
+            },
+            {
+              "name": "pipeline_current_8",
+              "channels": 8,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 512,
+              "payloadBytes": 4687,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.010719945355191258,
+              "p95Ms": 0.017530054644808744,
+              "minMs": 0.010163251366120219,
+              "maxMs": 0.017530054644808744,
+              "blocks": 15,
+              "operationsPerBlock": 1464
+            },
+            {
+              "name": "pipeline_ring_8",
+              "channels": 8,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 512,
+              "payloadBytes": 4687,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.0061205,
+              "p95Ms": 0.009669,
+              "minMs": 0.0059654999999999994,
+              "maxMs": 0.009669,
+              "blocks": 15,
+              "operationsPerBlock": 2000
+            },
+            {
+              "name": "decode_32",
+              "channels": 32,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 2048,
+              "payloadBytes": 17167,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.010786224821312541,
+              "p95Ms": 0.014653021442495126,
+              "minMs": 0.008441845354126057,
+              "maxMs": 0.014653021442495126,
+              "blocks": 15,
+              "operationsPerBlock": 1539
+            },
+            {
+              "name": "cache_current_32",
+              "channels": 32,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 2048,
+              "payloadBytes": 17167,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.028298850574712642,
+              "p95Ms": 0.06209770114942528,
+              "minMs": 0.02506513409961686,
+              "maxMs": 0.06209770114942528,
+              "blocks": 15,
+              "operationsPerBlock": 522
+            },
+            {
+              "name": "pipeline_current_32",
+              "channels": 32,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 2048,
+              "payloadBytes": 17167,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.04763992537313433,
+              "p95Ms": 0.05438432835820895,
+              "minMs": 0.03762313432835821,
+              "maxMs": 0.05438432835820895,
+              "blocks": 15,
+              "operationsPerBlock": 536
+            },
+            {
+              "name": "pipeline_ring_32",
+              "channels": 32,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 2048,
+              "payloadBytes": 17167,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.0245264,
+              "p95Ms": 0.0330656,
+              "minMs": 0.0224256,
+              "maxMs": 0.0330656,
+              "blocks": 15,
+              "operationsPerBlock": 625
+            },
+            {
+              "name": "decode_64",
+              "channels": 64,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 4096,
+              "payloadBytes": 33807,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.01983811475409836,
+              "p95Ms": 0.025885245901639344,
+              "minMs": 0.01642827868852459,
+              "maxMs": 0.025885245901639344,
+              "blocks": 15,
+              "operationsPerBlock": 488
+            },
+            {
+              "name": "cache_current_64",
+              "channels": 64,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 4096,
+              "payloadBytes": 33807,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.052125,
+              "p95Ms": 0.0712890625,
+              "minMs": 0.05007421875,
+              "maxMs": 0.0712890625,
+              "blocks": 15,
+              "operationsPerBlock": 256
+            },
+            {
+              "name": "pipeline_current_64",
+              "channels": 64,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 4096,
+              "payloadBytes": 33807,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.10345736434108527,
+              "p95Ms": 0.14928682170542634,
+              "minMs": 0.07415503875968993,
+              "maxMs": 0.14928682170542634,
+              "blocks": 15,
+              "operationsPerBlock": 129
+            },
+            {
+              "name": "pipeline_ring_64",
+              "channels": 64,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 4096,
+              "payloadBytes": 33807,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.06133333333333333,
+              "p95Ms": 0.08425581395348837,
+              "minMs": 0.04669767441860465,
+              "maxMs": 0.08425581395348837,
+              "blocks": 15,
+              "operationsPerBlock": 129
+            },
+            {
+              "name": "decode_128",
+              "channels": 128,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 8192,
+              "payloadBytes": 67087,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.037247851002865325,
+              "p95Ms": 0.04224355300859599,
+              "minMs": 0.03135243553008596,
+              "maxMs": 0.04224355300859599,
+              "blocks": 15,
+              "operationsPerBlock": 698
+            },
+            {
+              "name": "cache_current_128",
+              "channels": 128,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 8192,
+              "payloadBytes": 67087,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.11843229166666668,
+              "p95Ms": 0.161203125,
+              "minMs": 0.09808333333333334,
+              "maxMs": 0.161203125,
+              "blocks": 15,
+              "operationsPerBlock": 192
+            },
+            {
+              "name": "pipeline_current_128",
+              "channels": 128,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 8192,
+              "payloadBytes": 67087,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.20693162393162393,
+              "p95Ms": 0.24236752136752135,
+              "minMs": 0.14896581196581196,
+              "maxMs": 0.24236752136752135,
+              "blocks": 15,
+              "operationsPerBlock": 117
+            },
+            {
+              "name": "pipeline_ring_128",
+              "channels": 128,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 8192,
+              "payloadBytes": 67087,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.129825,
+              "p95Ms": 0.1592,
+              "minMs": 0.1056,
+              "maxMs": 0.1592,
+              "blocks": 15,
+              "operationsPerBlock": 160
+            }
+          ]
+        }
+      ],
+      "live": [
+        {
+          "status": "passed",
+          "startedAt": "2026-10-11T17:25:54.292444",
+          "finishedAt": "2026-10-11T17:26:02.426108",
+          "mode": "Flutter Windows release AOT",
+          "suite": "live",
+          "dartVersion": "3.12.1 (stable) (Tue May 26 01:02:21 2026 -0700) on \"windows_x64\"",
+          "os": "\"Windows 10 Pro\" 10.0 (Build 26220)",
+          "logicalProcessors": 12,
+          "maxRssBytes": 263909376,
+          "checksum": 0.0,
+          "method": "Synthetic inputs; production functions imported from the workspace. Individual cases record what is included. Microbenchmarks exclude input generation and use three warm-ups and calibrated blocks. Live mode includes widgets and concurrent acquisition/analysis. No physical probe, OS pipe, disk recording or multi-window traffic.",
+          "results": [
+            {
+              "name": "live_32x10000_with_fft",
+              "channels": 32,
+              "requestedHz": 10000,
+              "receivedFramesPerChannel": 80000,
+              "elapsedSeconds": 8.005819,
+              "effectiveHz": 9992.731536898347,
+              "maxSchedulingBacklogFrames": 494,
+              "telemetryNotifications": 364,
+              "fftSelectionChanges": 15,
+              "renderedFramesAfterWarmup": 185,
+              "buildMedianMs": 7.623,
+              "buildP95Ms": 11.592,
+              "rasterMedianMs": 33.909,
+              "rasterP95Ms": 40.822,
+              "rssBytes": 249655296,
+              "note": "Windows release engine with real plot/watch/analysis widgets in a hidden native window. Synthetic framed samples; no probe or OS pipe. 2 s warm-up, about 6 s measured. Frame timings measure engine work, not physical display presentation."
+            }
+          ]
+        },
+        {
+          "status": "passed",
+          "startedAt": "2026-10-11T17:26:17.640911",
+          "finishedAt": "2026-10-11T17:26:25.780714",
+          "mode": "Flutter Windows release AOT",
+          "suite": "live",
+          "dartVersion": "3.12.1 (stable) (Tue May 26 01:02:21 2026 -0700) on \"windows_x64\"",
+          "os": "\"Windows 10 Pro\" 10.0 (Build 26220)",
+          "logicalProcessors": 12,
+          "maxRssBytes": 262389760,
+          "checksum": 0.0,
+          "method": "Synthetic inputs; production functions imported from the workspace. Individual cases record what is included. Microbenchmarks exclude input generation and use three warm-ups and calibrated blocks. Live mode includes widgets and concurrent acquisition/analysis. No physical probe, OS pipe, disk recording or multi-window traffic.",
+          "results": [
+            {
+              "name": "live_32x10000_with_fft",
+              "channels": 32,
+              "requestedHz": 10000,
+              "receivedFramesPerChannel": 80064,
+              "elapsedSeconds": 8.009171,
+              "effectiveHz": 9996.540216209642,
+              "maxSchedulingBacklogFrames": 538,
+              "telemetryNotifications": 364,
+              "fftSelectionChanges": 15,
+              "renderedFramesAfterWarmup": 183,
+              "buildMedianMs": 7.844,
+              "buildP95Ms": 11.305,
+              "rasterMedianMs": 34.589,
+              "rasterP95Ms": 41.155,
+              "rssBytes": 245362688,
+              "note": "Windows release engine with real plot/watch/analysis widgets in a hidden native window. Synthetic framed samples; no probe or OS pipe. 2 s warm-up, about 6 s measured. Frame timings measure engine work, not physical display presentation."
+            }
+          ]
+        }
+      ]
+    },
+    "after": {
+      "audit": [
+        {
+          "status": "passed",
+          "startedAt": "2026-10-11T18:21:29.691209",
+          "finishedAt": "2026-10-11T18:21:38.984028",
+          "mode": "Flutter Windows release AOT",
+          "suite": "audit",
+          "dartVersion": "3.12.1 (stable) (Tue May 26 01:02:21 2026 -0700) on \"windows_x64\"",
+          "os": "\"Windows 10 Pro\" 10.0 (Build 26220)",
+          "logicalProcessors": 12,
+          "maxRssBytes": 550338560,
+          "checksum": 590688615.313703,
+          "method": "Synthetic inputs; production functions imported from the workspace. Individual cases record what is included. Microbenchmarks exclude input generation and use three warm-ups and calibrated blocks. Live mode includes widgets and concurrent acquisition/analysis. No physical probe, OS pipe, disk recording or multi-window traffic.",
+          "results": [
+            {
+              "name": "audit_paint_8_0.2s",
+              "channels": 8,
+              "retainedPointsPerChannel": 600000,
+              "visibleSeconds": 0.2,
+              "includes": "Production painter CPU recording, automatic Y bounds; excludes raster",
+              "medianMs": 0.87725,
+              "p95Ms": 1.54375,
+              "minMs": 0.79975,
+              "maxMs": 1.54375,
+              "blocks": 9,
+              "operationsPerBlock": 4
+            },
+            {
+              "name": "audit_paint_8_12.0s",
+              "channels": 8,
+              "retainedPointsPerChannel": 600000,
+              "visibleSeconds": 12.0,
+              "includes": "Production painter CPU recording, automatic Y bounds; excludes raster",
+              "medianMs": 0.9707142857142858,
+              "p95Ms": 1.4714285714285715,
+              "minMs": 0.8467142857142856,
+              "maxMs": 1.4714285714285715,
+              "blocks": 9,
+              "operationsPerBlock": 7
+            },
+            {
+              "name": "audit_paint_8_60.0s",
+              "channels": 8,
+              "retainedPointsPerChannel": 600000,
+              "visibleSeconds": 60.0,
+              "includes": "Production painter CPU recording, automatic Y bounds; excludes raster",
+              "medianMs": 0.87675,
+              "p95Ms": 1.4685,
+              "minMs": 0.812,
+              "maxMs": 1.4685,
+              "blocks": 9,
+              "operationsPerBlock": 4
+            },
+            {
+              "name": "audit_selected_paint_8_0.2s",
+              "medianMs": 1.12175,
+              "p95Ms": 1.349875,
+              "minMs": 0.92,
+              "maxMs": 1.349875,
+              "blocks": 9,
+              "operationsPerBlock": 8
+            },
+            {
+              "name": "audit_pause_8",
+              "elapsedMs": 0.215,
+              "retainedPointsPerChannel": 600000,
+              "channels": 8,
+              "rssBytes": 187260928
+            },
+            {
+              "name": "audit_paused_paint_8_0.2s",
+              "medianMs": 0.9853999999999999,
+              "p95Ms": 0.99125,
+              "minMs": 0.8534,
+              "maxMs": 0.99125,
+              "blocks": 5,
+              "operationsPerBlock": 20
+            },
+            {
+              "name": "audit_paint_32_0.2s",
+              "channels": 32,
+              "retainedPointsPerChannel": 600000,
+              "visibleSeconds": 0.2,
+              "includes": "Production painter CPU recording, automatic Y bounds; excludes raster",
+              "medianMs": 2.7576,
+              "p95Ms": 2.9786,
+              "minMs": 2.5948,
+              "maxMs": 2.9786,
+              "blocks": 9,
+              "operationsPerBlock": 5
+            },
+            {
+              "name": "audit_paint_32_12.0s",
+              "channels": 32,
+              "retainedPointsPerChannel": 600000,
+              "visibleSeconds": 12.0,
+              "includes": "Production painter CPU recording, automatic Y bounds; excludes raster",
+              "medianMs": 2.956,
+              "p95Ms": 4.354,
+              "minMs": 2.7525,
+              "maxMs": 4.354,
+              "blocks": 9,
+              "operationsPerBlock": 2
+            },
+            {
+              "name": "audit_paint_32_60.0s",
+              "channels": 32,
+              "retainedPointsPerChannel": 600000,
+              "visibleSeconds": 60.0,
+              "includes": "Production painter CPU recording, automatic Y bounds; excludes raster",
+              "medianMs": 2.78,
+              "p95Ms": 5.638,
+              "minMs": 2.674,
+              "maxMs": 5.638,
+              "blocks": 9,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_selected_paint_32_0.2s",
+              "medianMs": 3.0551666666666666,
+              "p95Ms": 3.1115,
+              "minMs": 2.654666666666667,
+              "maxMs": 3.1115,
+              "blocks": 9,
+              "operationsPerBlock": 6
+            },
+            {
+              "name": "audit_pause_32",
+              "elapsedMs": 0.808,
+              "retainedPointsPerChannel": 600000,
+              "channels": 32,
+              "rssBytes": 450015232
+            },
+            {
+              "name": "audit_paused_paint_32_0.2s",
+              "medianMs": 2.8015714285714286,
+              "p95Ms": 2.822714285714286,
+              "minMs": 2.5982857142857143,
+              "maxMs": 2.822714285714286,
+              "blocks": 5,
+              "operationsPerBlock": 7
+            },
+            {
+              "name": "audit_state_snapshot_10000_symbols",
+              "medianMs": 15.87,
+              "p95Ms": 21.881,
+              "minMs": 13.6545,
+              "maxMs": 21.881,
+              "blocks": 9,
+              "operationsPerBlock": 2
+            },
+            {
+              "name": "audit_state_snapshot_size",
+              "symbols": 10000,
+              "bytes": 1339073
+            },
+            {
+              "name": "audit_state_apply_10000_symbols",
+              "medianMs": 5.946666666666666,
+              "p95Ms": 7.114666666666667,
+              "minMs": 5.572666666666667,
+              "maxMs": 7.114666666666667,
+              "blocks": 9,
+              "operationsPerBlock": 3
+            },
+            {
+              "name": "audit_delta_snapshot_encode_32x800",
+              "medianMs": 0.5335,
+              "p95Ms": 0.5894,
+              "minMs": 0.48637499999999995,
+              "maxMs": 0.5894,
+              "blocks": 9,
+              "operationsPerBlock": 40
+            },
+            {
+              "name": "audit_delta_snapshot_size",
+              "channels": 32,
+              "frames": 800,
+              "bytes": 412712
+            },
+            {
+              "name": "audit_full_snapshot_encode_8x60000",
+              "medianMs": 8.609333333333334,
+              "p95Ms": 10.086333333333334,
+              "minMs": 6.219,
+              "maxMs": 10.086333333333334,
+              "blocks": 5,
+              "operationsPerBlock": 3
+            },
+            {
+              "name": "audit_json_framing_1048576_4096",
+              "bytes": 1048591,
+              "chunkBytes": 4096,
+              "includes": "Framing and UTF-8 decode only",
+              "medianMs": 2.787692307692308,
+              "p95Ms": 2.9707692307692306,
+              "minMs": 2.1696153846153843,
+              "maxMs": 2.9707692307692306,
+              "blocks": 5,
+              "operationsPerBlock": 13
+            },
+            {
+              "name": "audit_json_framing_1048576_65536",
+              "bytes": 1048591,
+              "chunkBytes": 65536,
+              "includes": "Framing and UTF-8 decode only",
+              "medianMs": 3.224,
+              "p95Ms": 3.289142857142857,
+              "minMs": 2.990428571428571,
+              "maxMs": 3.289142857142857,
+              "blocks": 5,
+              "operationsPerBlock": 7
+            },
+            {
+              "name": "audit_json_framing_4194304_4096",
+              "bytes": 4194319,
+              "chunkBytes": 4096,
+              "includes": "Framing and UTF-8 decode only",
+              "medianMs": 9.440333333333333,
+              "p95Ms": 11.396,
+              "minMs": 6.933666666666666,
+              "maxMs": 11.396,
+              "blocks": 5,
+              "operationsPerBlock": 3
+            },
+            {
+              "name": "audit_json_framing_4194304_65536",
+              "bytes": 4194319,
+              "chunkBytes": 65536,
+              "includes": "Framing and UTF-8 decode only",
+              "medianMs": 9.243333333333334,
+              "p95Ms": 9.343666666666666,
+              "minMs": 8.512666666666666,
+              "maxMs": 9.343666666666666,
+              "blocks": 5,
+              "operationsPerBlock": 3
+            },
+            {
+              "name": "audit_analysis_replace_sorted_8x100000",
+              "medianMs": 16.507,
+              "p95Ms": 17.6865,
+              "minMs": 10.183,
+              "maxMs": 17.6865,
+              "blocks": 9,
+              "operationsPerBlock": 2
+            },
+            {
+              "name": "audit_analysis_replace_and_bounds_8x100000",
+              "medianMs": 17.5145,
+              "p95Ms": 19.5265,
+              "minMs": 14.6695,
+              "maxMs": 19.5265,
+              "blocks": 9,
+              "operationsPerBlock": 2
+            },
+            {
+              "name": "audit_analysis_selection_stats_8x100000",
+              "medianMs": 1.470222222222222,
+              "p95Ms": 1.5266666666666666,
+              "minMs": 1.4034444444444445,
+              "maxMs": 1.5266666666666666,
+              "blocks": 9,
+              "operationsPerBlock": 9
+            },
+            {
+              "name": "audit_background_csv_100000x8",
+              "elapsedMs": 157.135,
+              "textBytes": 2288921
+            },
+            {
+              "name": "audit_moving_paint_32_12.0s",
+              "channels": 32,
+              "newFramesPerPaint": 64,
+              "visibleSeconds": 12.0,
+              "includes": "Fresh samples, changing viewport, exact extrema and CPU painting; excludes GPU",
+              "medianMs": 21.599,
+              "p95Ms": 24.189,
+              "minMs": 18.639,
+              "maxMs": 24.189,
+              "blocks": 9,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_moving_paint_32_60.0s",
+              "channels": 32,
+              "newFramesPerPaint": 64,
+              "visibleSeconds": 60.0,
+              "includes": "Fresh samples, changing viewport, exact extrema and CPU painting; excludes GPU",
+              "medianMs": 35.427,
+              "p95Ms": 46.456,
+              "minMs": 32.962,
+              "maxMs": 46.456,
+              "blocks": 9,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_state_sync_plot_change_10000_symbols",
+              "medianMs": 0.012757487922705315,
+              "p95Ms": 0.016966183574879227,
+              "minMs": 0.01011111111111111,
+              "maxMs": 0.016966183574879227,
+              "blocks": 9,
+              "operationsPerBlock": 1035
+            },
+            {
+              "name": "decode_8",
+              "channels": 8,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 512,
+              "payloadBytes": 4687,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.0026345,
+              "p95Ms": 0.003375,
+              "minMs": 0.0021665,
+              "maxMs": 0.003375,
+              "blocks": 15,
+              "operationsPerBlock": 2000
+            },
+            {
+              "name": "cache_current_8",
+              "channels": 8,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 512,
+              "payloadBytes": 4687,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.00651048951048951,
+              "p95Ms": 0.00748951048951049,
+              "minMs": 0.006103496503496503,
+              "maxMs": 0.00748951048951049,
+              "blocks": 15,
+              "operationsPerBlock": 715
+            },
+            {
+              "name": "pipeline_current_8",
+              "channels": 8,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 512,
+              "payloadBytes": 4687,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.009789442111577683,
+              "p95Ms": 0.010671865626874624,
+              "minMs": 0.009470905818836233,
+              "maxMs": 0.010671865626874624,
+              "blocks": 15,
+              "operationsPerBlock": 1667
+            },
+            {
+              "name": "pipeline_ring_8",
+              "channels": 8,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 512,
+              "payloadBytes": 4687,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.0054985,
+              "p95Ms": 0.0064535,
+              "minMs": 0.005296,
+              "maxMs": 0.0064535,
+              "blocks": 15,
+              "operationsPerBlock": 2000
+            },
+            {
+              "name": "decode_32",
+              "channels": 32,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 2048,
+              "payloadBytes": 17167,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.009107954545454546,
+              "p95Ms": 0.012940599173553719,
+              "minMs": 0.008364152892561984,
+              "maxMs": 0.012940599173553719,
+              "blocks": 15,
+              "operationsPerBlock": 1936
+            },
+            {
+              "name": "cache_current_32",
+              "channels": 32,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 2048,
+              "payloadBytes": 17167,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.027990671641791046,
+              "p95Ms": 0.030708955223880598,
+              "minMs": 0.025315298507462686,
+              "maxMs": 0.030708955223880598,
+              "blocks": 15,
+              "operationsPerBlock": 536
+            },
+            {
+              "name": "pipeline_current_32",
+              "channels": 32,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 2048,
+              "payloadBytes": 17167,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.03861428571428571,
+              "p95Ms": 0.042019047619047616,
+              "minMs": 0.03644761904761905,
+              "maxMs": 0.042019047619047616,
+              "blocks": 15,
+              "operationsPerBlock": 420
+            },
+            {
+              "name": "pipeline_ring_32",
+              "channels": 32,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 2048,
+              "payloadBytes": 17167,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.02125406504065041,
+              "p95Ms": 0.026376016260162602,
+              "minMs": 0.02030487804878049,
+              "maxMs": 0.026376016260162602,
+              "blocks": 15,
+              "operationsPerBlock": 492
+            },
+            {
+              "name": "decode_64",
+              "channels": 64,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 4096,
+              "payloadBytes": 33807,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.015373983739837399,
+              "p95Ms": 0.017204268292682925,
+              "minMs": 0.014838414634146342,
+              "maxMs": 0.017204268292682925,
+              "blocks": 15,
+              "operationsPerBlock": 984
+            },
+            {
+              "name": "cache_current_64",
+              "channels": 64,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 4096,
+              "payloadBytes": 33807,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.05820327868852459,
+              "p95Ms": 0.06466229508196722,
+              "minMs": 0.05188524590163934,
+              "maxMs": 0.06466229508196722,
+              "blocks": 15,
+              "operationsPerBlock": 305
+            },
+            {
+              "name": "pipeline_current_64",
+              "channels": 64,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 4096,
+              "payloadBytes": 33807,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.08009677419354838,
+              "p95Ms": 0.09423655913978495,
+              "minMs": 0.07415591397849462,
+              "maxMs": 0.09423655913978495,
+              "blocks": 15,
+              "operationsPerBlock": 186
+            },
+            {
+              "name": "pipeline_ring_64",
+              "channels": 64,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 4096,
+              "payloadBytes": 33807,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.0417889447236181,
+              "p95Ms": 0.045087939698492466,
+              "minMs": 0.03917587939698493,
+              "maxMs": 0.045087939698492466,
+              "blocks": 15,
+              "operationsPerBlock": 398
+            },
+            {
+              "name": "decode_128",
+              "channels": 128,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 8192,
+              "payloadBytes": 67087,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.03352738654147105,
+              "p95Ms": 0.04065414710485133,
+              "minMs": 0.030035993740219095,
+              "maxMs": 0.04065414710485133,
+              "blocks": 15,
+              "operationsPerBlock": 639
+            },
+            {
+              "name": "cache_current_128",
+              "channels": 128,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 8192,
+              "payloadBytes": 67087,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.12732631578947368,
+              "p95Ms": 0.15645263157894737,
+              "minMs": 0.10513684210526315,
+              "maxMs": 0.15645263157894737,
+              "blocks": 15,
+              "operationsPerBlock": 95
+            },
+            {
+              "name": "pipeline_current_128",
+              "channels": 128,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 8192,
+              "payloadBytes": 67087,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.16867391304347826,
+              "p95Ms": 0.22234782608695652,
+              "minMs": 0.15118478260869567,
+              "maxMs": 0.22234782608695652,
+              "blocks": 15,
+              "operationsPerBlock": 92
+            },
+            {
+              "name": "pipeline_ring_128",
+              "channels": 128,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 8192,
+              "payloadBytes": 67087,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.09472636815920397,
+              "p95Ms": 0.11033830845771145,
+              "minMs": 0.09134825870646766,
+              "maxMs": 0.11033830845771145,
+              "blocks": 15,
+              "operationsPerBlock": 201
+            }
+          ]
+        },
+        {
+          "status": "passed",
+          "startedAt": "2026-10-11T18:21:39.210493",
+          "finishedAt": "2026-10-11T18:21:49.378293",
+          "mode": "Flutter Windows release AOT",
+          "suite": "audit",
+          "dartVersion": "3.12.1 (stable) (Tue May 26 01:02:21 2026 -0700) on \"windows_x64\"",
+          "os": "\"Windows 10 Pro\" 10.0 (Build 26220)",
+          "logicalProcessors": 12,
+          "maxRssBytes": 547549184,
+          "checksum": 615787653.5214856,
+          "method": "Synthetic inputs; production functions imported from the workspace. Individual cases record what is included. Microbenchmarks exclude input generation and use three warm-ups and calibrated blocks. Live mode includes widgets and concurrent acquisition/analysis. No physical probe, OS pipe, disk recording or multi-window traffic.",
+          "results": [
+            {
+              "name": "audit_paint_8_0.2s",
+              "channels": 8,
+              "retainedPointsPerChannel": 600000,
+              "visibleSeconds": 0.2,
+              "includes": "Production painter CPU recording, automatic Y bounds; excludes raster",
+              "medianMs": 0.85125,
+              "p95Ms": 1.604,
+              "minMs": 0.7465,
+              "maxMs": 1.604,
+              "blocks": 9,
+              "operationsPerBlock": 4
+            },
+            {
+              "name": "audit_paint_8_12.0s",
+              "channels": 8,
+              "retainedPointsPerChannel": 600000,
+              "visibleSeconds": 12.0,
+              "includes": "Production painter CPU recording, automatic Y bounds; excludes raster",
+              "medianMs": 0.9124285714285714,
+              "p95Ms": 1.387857142857143,
+              "minMs": 0.865,
+              "maxMs": 1.387857142857143,
+              "blocks": 9,
+              "operationsPerBlock": 7
+            },
+            {
+              "name": "audit_paint_8_60.0s",
+              "channels": 8,
+              "retainedPointsPerChannel": 600000,
+              "visibleSeconds": 60.0,
+              "includes": "Production painter CPU recording, automatic Y bounds; excludes raster",
+              "medianMs": 0.8925,
+              "p95Ms": 1.75375,
+              "minMs": 0.8615,
+              "maxMs": 1.75375,
+              "blocks": 9,
+              "operationsPerBlock": 4
+            },
+            {
+              "name": "audit_selected_paint_8_0.2s",
+              "medianMs": 1.1105,
+              "p95Ms": 1.4543333333333335,
+              "minMs": 0.9476666666666667,
+              "maxMs": 1.4543333333333335,
+              "blocks": 9,
+              "operationsPerBlock": 6
+            },
+            {
+              "name": "audit_pause_8",
+              "elapsedMs": 0.259,
+              "retainedPointsPerChannel": 600000,
+              "channels": 8,
+              "rssBytes": 188968960
+            },
+            {
+              "name": "audit_paused_paint_8_0.2s",
+              "medianMs": 0.9070499999999999,
+              "p95Ms": 0.9723499999999999,
+              "minMs": 0.75695,
+              "maxMs": 0.9723499999999999,
+              "blocks": 5,
+              "operationsPerBlock": 20
+            },
+            {
+              "name": "audit_paint_32_0.2s",
+              "channels": 32,
+              "retainedPointsPerChannel": 600000,
+              "visibleSeconds": 0.2,
+              "includes": "Production painter CPU recording, automatic Y bounds; excludes raster",
+              "medianMs": 2.8172,
+              "p95Ms": 3.3226,
+              "minMs": 2.6176,
+              "maxMs": 3.3226,
+              "blocks": 9,
+              "operationsPerBlock": 5
+            },
+            {
+              "name": "audit_paint_32_12.0s",
+              "channels": 32,
+              "retainedPointsPerChannel": 600000,
+              "visibleSeconds": 12.0,
+              "includes": "Production painter CPU recording, automatic Y bounds; excludes raster",
+              "medianMs": 2.8365,
+              "p95Ms": 4.0135,
+              "minMs": 2.737,
+              "maxMs": 4.0135,
+              "blocks": 9,
+              "operationsPerBlock": 2
+            },
+            {
+              "name": "audit_paint_32_60.0s",
+              "channels": 32,
+              "retainedPointsPerChannel": 600000,
+              "visibleSeconds": 60.0,
+              "includes": "Production painter CPU recording, automatic Y bounds; excludes raster",
+              "medianMs": 3.024,
+              "p95Ms": 5.62,
+              "minMs": 2.721,
+              "maxMs": 5.62,
+              "blocks": 9,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_selected_paint_32_0.2s",
+              "medianMs": 3.1146000000000003,
+              "p95Ms": 3.4594,
+              "minMs": 2.7032,
+              "maxMs": 3.4594,
+              "blocks": 9,
+              "operationsPerBlock": 5
+            },
+            {
+              "name": "audit_pause_32",
+              "elapsedMs": 0.938,
+              "retainedPointsPerChannel": 600000,
+              "channels": 32,
+              "rssBytes": 451059712
+            },
+            {
+              "name": "audit_paused_paint_32_0.2s",
+              "medianMs": 2.8776666666666664,
+              "p95Ms": 3.2251666666666665,
+              "minMs": 2.676,
+              "maxMs": 3.2251666666666665,
+              "blocks": 5,
+              "operationsPerBlock": 6
+            },
+            {
+              "name": "audit_state_snapshot_10000_symbols",
+              "medianMs": 13.604,
+              "p95Ms": 18.3265,
+              "minMs": 10.9765,
+              "maxMs": 18.3265,
+              "blocks": 9,
+              "operationsPerBlock": 2
+            },
+            {
+              "name": "audit_state_snapshot_size",
+              "symbols": 10000,
+              "bytes": 1339073
+            },
+            {
+              "name": "audit_state_apply_10000_symbols",
+              "medianMs": 6.157333333333334,
+              "p95Ms": 6.509333333333333,
+              "minMs": 5.941666666666666,
+              "maxMs": 6.509333333333333,
+              "blocks": 9,
+              "operationsPerBlock": 3
+            },
+            {
+              "name": "audit_delta_snapshot_encode_32x800",
+              "medianMs": 0.4937833333333333,
+              "p95Ms": 0.63815,
+              "minMs": 0.3620333333333334,
+              "maxMs": 0.63815,
+              "blocks": 9,
+              "operationsPerBlock": 60
+            },
+            {
+              "name": "audit_delta_snapshot_size",
+              "channels": 32,
+              "frames": 800,
+              "bytes": 412712
+            },
+            {
+              "name": "audit_full_snapshot_encode_8x60000",
+              "medianMs": 8.856,
+              "p95Ms": 10.4245,
+              "minMs": 7.3325,
+              "maxMs": 10.4245,
+              "blocks": 5,
+              "operationsPerBlock": 2
+            },
+            {
+              "name": "audit_json_framing_1048576_4096",
+              "bytes": 1048591,
+              "chunkBytes": 4096,
+              "includes": "Framing and UTF-8 decode only",
+              "medianMs": 3.0585,
+              "p95Ms": 3.3338571428571426,
+              "minMs": 2.634571428571429,
+              "maxMs": 3.3338571428571426,
+              "blocks": 5,
+              "operationsPerBlock": 14
+            },
+            {
+              "name": "audit_json_framing_1048576_65536",
+              "bytes": 1048591,
+              "chunkBytes": 65536,
+              "includes": "Framing and UTF-8 decode only",
+              "medianMs": 2.732,
+              "p95Ms": 3.199,
+              "minMs": 2.4695,
+              "maxMs": 3.199,
+              "blocks": 5,
+              "operationsPerBlock": 8
+            },
+            {
+              "name": "audit_json_framing_4194304_4096",
+              "bytes": 4194319,
+              "chunkBytes": 4096,
+              "includes": "Framing and UTF-8 decode only",
+              "medianMs": 10.384,
+              "p95Ms": 10.897666666666666,
+              "minMs": 8.727333333333332,
+              "maxMs": 10.897666666666666,
+              "blocks": 5,
+              "operationsPerBlock": 3
+            },
+            {
+              "name": "audit_json_framing_4194304_65536",
+              "bytes": 4194319,
+              "chunkBytes": 65536,
+              "includes": "Framing and UTF-8 decode only",
+              "medianMs": 10.023,
+              "p95Ms": 13.032,
+              "minMs": 7.2465,
+              "maxMs": 13.032,
+              "blocks": 5,
+              "operationsPerBlock": 2
+            },
+            {
+              "name": "audit_analysis_replace_sorted_8x100000",
+              "medianMs": 11.539,
+              "p95Ms": 17.391,
+              "minMs": 10.254,
+              "maxMs": 17.391,
+              "blocks": 9,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_analysis_replace_and_bounds_8x100000",
+              "medianMs": 16.635,
+              "p95Ms": 17.6995,
+              "minMs": 15.8035,
+              "maxMs": 17.6995,
+              "blocks": 9,
+              "operationsPerBlock": 2
+            },
+            {
+              "name": "audit_analysis_selection_stats_8x100000",
+              "medianMs": 1.666642857142857,
+              "p95Ms": 1.9302142857142857,
+              "minMs": 1.4072142857142858,
+              "maxMs": 1.9302142857142857,
+              "blocks": 9,
+              "operationsPerBlock": 14
+            },
+            {
+              "name": "audit_background_csv_100000x8",
+              "elapsedMs": 135.319,
+              "textBytes": 2288921
+            },
+            {
+              "name": "audit_moving_paint_32_12.0s",
+              "channels": 32,
+              "newFramesPerPaint": 64,
+              "visibleSeconds": 12.0,
+              "includes": "Fresh samples, changing viewport, exact extrema and CPU painting; excludes GPU",
+              "medianMs": 22.986,
+              "p95Ms": 24.533,
+              "minMs": 20.611,
+              "maxMs": 24.533,
+              "blocks": 9,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_moving_paint_32_60.0s",
+              "channels": 32,
+              "newFramesPerPaint": 64,
+              "visibleSeconds": 60.0,
+              "includes": "Fresh samples, changing viewport, exact extrema and CPU painting; excludes GPU",
+              "medianMs": 39.831,
+              "p95Ms": 41.205,
+              "minMs": 37.025,
+              "maxMs": 41.205,
+              "blocks": 9,
+              "operationsPerBlock": 1
+            },
+            {
+              "name": "audit_state_sync_plot_change_10000_symbols",
+              "medianMs": 0.010239168110918545,
+              "p95Ms": 0.013041594454072792,
+              "minMs": 0.009321490467937609,
+              "maxMs": 0.013041594454072792,
+              "blocks": 9,
+              "operationsPerBlock": 1154
+            },
+            {
+              "name": "decode_8",
+              "channels": 8,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 512,
+              "payloadBytes": 4687,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.0025425,
+              "p95Ms": 0.0031604999999999997,
+              "minMs": 0.0021455000000000003,
+              "maxMs": 0.0031604999999999997,
+              "blocks": 15,
+              "operationsPerBlock": 2000
+            },
+            {
+              "name": "cache_current_8",
+              "channels": 8,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 512,
+              "payloadBytes": 4687,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.007308411214953271,
+              "p95Ms": 0.009126443100604727,
+              "minMs": 0.006313358988455195,
+              "maxMs": 0.009126443100604727,
+              "blocks": 15,
+              "operationsPerBlock": 1819
+            },
+            {
+              "name": "pipeline_current_8",
+              "channels": 8,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 512,
+              "payloadBytes": 4687,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.010094944512946978,
+              "p95Ms": 0.014628853267570902,
+              "minMs": 0.00911220715166461,
+              "maxMs": 0.014628853267570902,
+              "blocks": 15,
+              "operationsPerBlock": 1622
+            },
+            {
+              "name": "pipeline_ring_8",
+              "channels": 8,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 512,
+              "payloadBytes": 4687,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.005481499999999999,
+              "p95Ms": 0.006224,
+              "minMs": 0.005256,
+              "maxMs": 0.006224,
+              "blocks": 15,
+              "operationsPerBlock": 2000
+            },
+            {
+              "name": "decode_32",
+              "channels": 32,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 2048,
+              "payloadBytes": 17167,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.009115999999999999,
+              "p95Ms": 0.0119805,
+              "minMs": 0.0079985,
+              "maxMs": 0.0119805,
+              "blocks": 15,
+              "operationsPerBlock": 2000
+            },
+            {
+              "name": "cache_current_32",
+              "channels": 32,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 2048,
+              "payloadBytes": 17167,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.028414351851851854,
+              "p95Ms": 0.034583333333333334,
+              "minMs": 0.0256875,
+              "maxMs": 0.034583333333333334,
+              "blocks": 15,
+              "operationsPerBlock": 432
+            },
+            {
+              "name": "pipeline_current_32",
+              "channels": 32,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 2048,
+              "payloadBytes": 17167,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.038420187793427235,
+              "p95Ms": 0.045629107981220655,
+              "minMs": 0.03646948356807512,
+              "maxMs": 0.045629107981220655,
+              "blocks": 15,
+              "operationsPerBlock": 426
+            },
+            {
+              "name": "pipeline_ring_32",
+              "channels": 32,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 2048,
+              "payloadBytes": 17167,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.021972,
+              "p95Ms": 0.027761333333333336,
+              "minMs": 0.020308,
+              "maxMs": 0.027761333333333336,
+              "blocks": 15,
+              "operationsPerBlock": 750
+            },
+            {
+              "name": "decode_64",
+              "channels": 64,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 4096,
+              "payloadBytes": 33807,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.0164562962962963,
+              "p95Ms": 0.020825185185185186,
+              "minMs": 0.01527851851851852,
+              "maxMs": 0.020825185185185186,
+              "blocks": 15,
+              "operationsPerBlock": 675
+            },
+            {
+              "name": "cache_current_64",
+              "channels": 64,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 4096,
+              "payloadBytes": 33807,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.057976271186440685,
+              "p95Ms": 0.07785423728813559,
+              "minMs": 0.051376271186440677,
+              "maxMs": 0.07785423728813559,
+              "blocks": 15,
+              "operationsPerBlock": 295
+            },
+            {
+              "name": "pipeline_current_64",
+              "channels": 64,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 4096,
+              "payloadBytes": 33807,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.07891459074733097,
+              "p95Ms": 0.09647330960854093,
+              "minMs": 0.07301423487544484,
+              "maxMs": 0.09647330960854093,
+              "blocks": 15,
+              "operationsPerBlock": 281
+            },
+            {
+              "name": "pipeline_ring_64",
+              "channels": 64,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 4096,
+              "payloadBytes": 33807,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.04378172588832487,
+              "p95Ms": 0.06361928934010153,
+              "minMs": 0.03918274111675127,
+              "maxMs": 0.06361928934010153,
+              "blocks": 15,
+              "operationsPerBlock": 197
+            },
+            {
+              "name": "decode_128",
+              "channels": 128,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 8192,
+              "payloadBytes": 67087,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.033652694610778446,
+              "p95Ms": 0.041311377245508984,
+              "minMs": 0.029341317365269463,
+              "maxMs": 0.041311377245508984,
+              "blocks": 15,
+              "operationsPerBlock": 334
+            },
+            {
+              "name": "cache_current_128",
+              "channels": 128,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 8192,
+              "payloadBytes": 67087,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.11445390070921987,
+              "p95Ms": 0.1529645390070922,
+              "minMs": 0.1085531914893617,
+              "maxMs": 0.1529645390070922,
+              "blocks": 15,
+              "operationsPerBlock": 141
+            },
+            {
+              "name": "pipeline_current_128",
+              "channels": 128,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 8192,
+              "payloadBytes": 67087,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.1804380165289256,
+              "p95Ms": 0.22005785123966942,
+              "minMs": 0.15634710743801652,
+              "maxMs": 0.22005785123966942,
+              "blocks": 15,
+              "operationsPerBlock": 121
+            },
+            {
+              "name": "pipeline_ring_128",
+              "channels": 128,
+              "framesPerBatch": 64,
+              "valuesPerOperation": 8192,
+              "payloadBytes": 67087,
+              "retainedPointsPerChannel": 1800,
+              "medianMs": 0.09582010582010582,
+              "p95Ms": 0.1185026455026455,
+              "minMs": 0.09015343915343917,
+              "maxMs": 0.1185026455026455,
+              "blocks": 15,
+              "operationsPerBlock": 189
+            }
+          ]
+        }
+      ],
+      "live": [
+        {
+          "status": "passed",
+          "startedAt": "2026-10-11T18:21:52.859542",
+          "finishedAt": "2026-10-11T18:22:00.967905",
+          "mode": "Flutter Windows release AOT",
+          "suite": "live",
+          "dartVersion": "3.12.1 (stable) (Tue May 26 01:02:21 2026 -0700) on \"windows_x64\"",
+          "os": "\"Windows 10 Pro\" 10.0 (Build 26220)",
+          "logicalProcessors": 12,
+          "maxRssBytes": 252239872,
+          "checksum": 0.0,
+          "method": "Synthetic inputs; production functions imported from the workspace. Individual cases record what is included. Microbenchmarks exclude input generation and use three warm-ups and calibrated blocks. Live mode includes widgets and concurrent acquisition/analysis. No physical probe, OS pipe, disk recording or multi-window traffic.",
+          "results": [
+            {
+              "name": "live_32x10000_with_fft",
+              "channels": 32,
+              "requestedHz": 10000,
+              "receivedFramesPerChannel": 80000,
+              "elapsedSeconds": 8.001434,
+              "effectiveHz": 9998.207821248041,
+              "maxSchedulingBacklogFrames": 775,
+              "telemetryNotifications": 364,
+              "fftSelectionChanges": 15,
+              "renderedFramesAfterWarmup": 186,
+              "buildMedianMs": 6.139,
+              "buildP95Ms": 10.186,
+              "rasterMedianMs": 34.897,
+              "rasterP95Ms": 40.617,
+              "rssBytes": 233283584,
+              "note": "Windows release engine with real plot/watch/analysis widgets in a hidden native window. Synthetic framed samples; no probe or OS pipe. 2 s warm-up, about 6 s measured. Frame timings measure engine work, not physical display presentation."
+            }
+          ]
+        },
+        {
+          "status": "passed",
+          "startedAt": "2026-10-11T18:22:01.182435",
+          "finishedAt": "2026-10-11T18:22:09.293952",
+          "mode": "Flutter Windows release AOT",
+          "suite": "live",
+          "dartVersion": "3.12.1 (stable) (Tue May 26 01:02:21 2026 -0700) on \"windows_x64\"",
+          "os": "\"Windows 10 Pro\" 10.0 (Build 26220)",
+          "logicalProcessors": 12,
+          "maxRssBytes": 244789248,
+          "checksum": 0.0,
+          "method": "Synthetic inputs; production functions imported from the workspace. Individual cases record what is included. Microbenchmarks exclude input generation and use three warm-ups and calibrated blocks. Live mode includes widgets and concurrent acquisition/analysis. No physical probe, OS pipe, disk recording or multi-window traffic.",
+          "results": [
+            {
+              "name": "live_32x10000_with_fft",
+              "channels": 32,
+              "requestedHz": 10000,
+              "receivedFramesPerChannel": 80000,
+              "elapsedSeconds": 8.003942,
+              "effectiveHz": 9995.074926829804,
+              "maxSchedulingBacklogFrames": 652,
+              "telemetryNotifications": 365,
+              "fftSelectionChanges": 15,
+              "renderedFramesAfterWarmup": 183,
+              "buildMedianMs": 6.335,
+              "buildP95Ms": 9.963,
+              "rasterMedianMs": 34.706,
+              "rasterP95Ms": 40.769,
+              "rssBytes": 240619520,
+              "note": "Windows release engine with real plot/watch/analysis widgets in a hidden native window. Synthetic framed samples; no probe or OS pipe. 2 s warm-up, about 6 s measured. Frame timings measure engine work, not physical display presentation."
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

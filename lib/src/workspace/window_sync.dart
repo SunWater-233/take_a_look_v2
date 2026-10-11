@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../controller/controller.dart';
 import 'panel_types.dart';
+import 'window_sync_target.dart';
 import '../protocol/commands.dart';
 
 const _mainChannel = WindowMethodChannel(
@@ -47,13 +48,9 @@ class MainWindowSync {
   final TakeALookController controller;
   final Map<WorkspacePanelId, WindowController> _windows =
       <WorkspacePanelId, WindowController>{};
-  final Map<WorkspacePanelId, Map<String, int>> _telemetryCursors =
-      <WorkspacePanelId, Map<String, int>>{};
+  final Map<String, WindowSyncTarget> _targets = {};
   Timer? _stateBroadcastTimer;
   Timer? _telemetryBroadcastTimer;
-  Future<void> _stateDelivery = Future<void>.value();
-  bool _telemetryBroadcasting = false;
-  bool _telemetryBroadcastPending = false;
   bool _started = false;
   final StreamController<String> _detachedWindowReleases =
       StreamController<String>.broadcast(sync: true);
@@ -73,26 +70,65 @@ class MainWindowSync {
     controller.telemetrySyncChanges.addListener(_scheduleTelemetryBroadcast);
   }
 
+  WindowSyncTarget _target(WindowController window) => _targets.putIfAbsent(
+    window.windowId,
+    () => WindowSyncTarget(
+      controller,
+      (method, data) => window.invokeMethod<void>(method, data),
+    ),
+  );
+
+  Future<void> prepareWindow(
+    WindowController window,
+    Iterable<WorkspacePanelId> panels,
+  ) {
+    return _target(window).initialize(
+      includeHistory:
+          panels.contains(WorkspacePanelId.plot) ||
+          panels.contains(WorkspacePanelId.analysis),
+      includeAnalysis: panels.contains(WorkspacePanelId.analysis),
+    );
+  }
+
   void registerWindow(WorkspacePanelId panel, WindowController window) {
     _windows[panel] = window;
-    _telemetryCursors[panel] = controller.telemetryCursors();
+    _target(window).active = true;
     _scheduleStateBroadcast();
     _scheduleTelemetryBroadcast();
   }
 
   void unregisterWindow(WorkspacePanelId panel) {
-    _windows.remove(panel);
-    _telemetryCursors.remove(panel);
+    final window = _windows.remove(panel);
+    if (window != null &&
+        !_windows.values.any((w) => w.windowId == window.windowId)) {
+      _targets[window.windowId]?.deactivate();
+    }
   }
 
-  Future<void> syncAnalysisSessionTo(WindowController window) {
-    return window.invokeMethod<void>('state', {
-      'analysisSession': controller.analysisSession.toJson(includeData: true),
-    });
-  }
+  Future<void> syncAnalysisSessionTo(WindowController window) =>
+      prepareWindow(window, const [WorkspacePanelId.analysis]);
 
   Future<dynamic> _handleCall(MethodCall call) async {
-    if (call.method == 'snapshot') return controller.snapshot();
+    if (call.method == 'snapshot') {
+      // Prewarmed windows need metadata only. Assignment supplies the exact
+      // history and analysis dataset before the window becomes visible.
+      return controller.snapshot(includeSamples: false);
+    }
+    if (call.method == 'command') {
+      final envelope = Map<String, dynamic>.from(call.arguments as Map);
+      final versions = controller.snapshotVersions();
+      await controller.handleCommand(
+        ControllerCommand.parse(envelope['name'] as String),
+        envelope['arguments'],
+        includeResultState: false,
+      );
+      final target = _targets[envelope['windowId']];
+      if (target != null && target.active) {
+        await target.flushState();
+        return null;
+      }
+      return controller.stateDeltaSnapshot(versions);
+    }
     if (call.method == releaseDetachedWindowMethod) {
       final arguments = call.arguments;
       if (arguments is Map && arguments['windowId'] is String) {
@@ -128,83 +164,26 @@ class MainWindowSync {
 
   void _scheduleStateBroadcast() {
     if (_windows.isEmpty || _stateBroadcastTimer?.isActive == true) return;
-    _stateBroadcastTimer = Timer(
-      const Duration(milliseconds: 20),
-      () => _broadcast('state', controller.stateSnapshot()),
-    );
+    _stateBroadcastTimer = Timer(const Duration(milliseconds: 20), () {
+      for (final target in _targets.values) {
+        if (target.active) target.requestState();
+      }
+    });
   }
 
   void _broadcastSymbolLoad() {
-    final progress = controller.symbolLoadProgress;
-    if (progress == null || _windows.isEmpty) return;
-    // Progress ticks must not repeatedly serialize the entire symbol table.
-    // Completion carries the final symbols/source index before closing dialogs.
-    unawaited(
-      _broadcast(
-        'state',
-        progress.isLoading
-            ? {'symbolLoad': progress.toJson()}
-            : controller.stateSnapshot(),
-      ),
-    );
+    for (final target in _targets.values) {
+      if (target.active) target.requestState();
+    }
   }
 
   void _scheduleTelemetryBroadcast() {
-    if (_telemetryBroadcasting) {
-      _telemetryBroadcastPending = true;
-      return;
-    }
     if (_windows.isEmpty || _telemetryBroadcastTimer?.isActive == true) return;
-    _telemetryBroadcastTimer = Timer(
-      const Duration(milliseconds: 80),
-      _broadcastTelemetry,
-    );
-  }
-
-  Future<void> _broadcastTelemetry() async {
-    _telemetryBroadcasting = true;
-    try {
-      for (final entry in _windows.entries) {
-        final data = controller.telemetryDeltaSnapshot(
-          _telemetryCursors[entry.key] ?? const <String, int>{},
-        );
-        try {
-          await entry.value.invokeMethod<void>('telemetryDelta', data);
-          final nextCursors = <String, int>{};
-          for (final raw in data['watches'] as List? ?? const []) {
-            final watch = Map<String, dynamic>.from(raw as Map);
-            final key = watch['key'];
-            final cursor = watch['sampleCursor'];
-            if (key is String && cursor is int) nextCursors[key] = cursor;
-          }
-          _telemetryCursors[entry.key] = nextCursors;
-        } on Object {
-          // The next successful delivery resumes from the last acknowledged cursor.
-        }
-      }
-    } finally {
-      _telemetryBroadcasting = false;
-      if (_telemetryBroadcastPending) {
-        _telemetryBroadcastPending = false;
-        _scheduleTelemetryBroadcast();
-      }
-    }
-  }
-
-  Future<void> _broadcast(String method, Map<String, dynamic> state) {
-    // Keep full snapshots and progress patches in the same order for every
-    // window, even when one window acknowledges a message slowly.
-    _stateDelivery = _stateDelivery.then((_) async {
-      for (final entry in _windows.entries.toList(growable: false)) {
-        try {
-          await entry.value.invokeMethod<void>(method, state);
-        } on Object {
-          // Window lifecycle reconciliation removes closed windows. A newly
-          // created window may not have installed its handler yet.
-        }
+    _telemetryBroadcastTimer = Timer(const Duration(milliseconds: 80), () {
+      for (final target in _targets.values) {
+        if (target.active) target.requestTelemetry();
       }
     });
-    return _stateDelivery;
   }
 
   Future<void> dispose() async {
@@ -214,6 +193,10 @@ class MainWindowSync {
     controller.stateSyncChanges.removeListener(_scheduleStateBroadcast);
     controller.symbolLoadChanges.removeListener(_broadcastSymbolLoad);
     controller.telemetrySyncChanges.removeListener(_scheduleTelemetryBroadcast);
+    for (final target in _targets.values) {
+      target.dispose();
+    }
+    _targets.clear();
     _stateBroadcastTimer?.cancel();
     _telemetryBroadcastTimer?.cancel();
     if (_started) await _mainChannel.setMethodCallHandler(null);
@@ -388,10 +371,13 @@ Future<void> sendCommandToMain(
       ].join(':'),
     };
   }
-  final state = await _mainChannel.invokeMethod<Map<Object?, Object?>>(
-    command.wireName,
-    arguments,
-  );
+  final currentWindow = await WindowController.fromCurrentEngine();
+  final state = await _mainChannel
+      .invokeMethod<Map<Object?, Object?>>('command', {
+        'name': command.wireName,
+        'arguments': arguments,
+        'windowId': currentWindow.windowId,
+      });
   if (state != null) {
     controller.applySnapshot(Map<String, dynamic>.from(state));
   }

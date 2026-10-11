@@ -26,7 +26,7 @@ class _PlotPanel extends StatelessWidget {
               builder: (context, constraints) => SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: SizedBox(
-                  width: math.max(760, constraints.maxWidth),
+                  width: math.max(606, constraints.maxWidth),
                   child: Row(
                     children: [
                       Expanded(
@@ -37,20 +37,6 @@ class _PlotPanel extends StatelessWidget {
                           style: talMuted,
                         ),
                       ),
-                      SizedBox(
-                        width: 146,
-                        child: TalDropdown<double>(
-                          key: const ValueKey('plot-retention'),
-                          value: controller.plotRetentionSeconds,
-                          values: const [10, 30, 60, 120],
-                          label: (seconds) =>
-                              '历史 ${seconds.toStringAsFixed(0)} 秒',
-                          onChanged: (seconds) => controller.configurePlotView({
-                            'plotRetentionSeconds': seconds,
-                          }),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
                       TalButton(
                         onPressed: controller.togglePlotting,
                         child: Text(

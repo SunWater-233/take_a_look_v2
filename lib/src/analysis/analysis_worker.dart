@@ -221,7 +221,9 @@ class _FftRequest {
 }
 
 TransferableTypedData _transferPoints(List<AnalysisPoint> points) {
-  final packed = packAnalysisPoints(points);
+  final packed = points is PackedAnalysisPoints
+      ? points.packed
+      : packAnalysisPoints(points);
   return TransferableTypedData.fromList([packed.buffer.asUint8List()]);
 }
 

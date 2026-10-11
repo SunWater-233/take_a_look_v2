@@ -28,7 +28,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   String get _sourceViewId => identityHashCode(this).toString();
   final Map<String, GlobalKey> _tabKeys = <String, GlobalKey>{};
   final Set<String> _externalPathKeys = <String>{};
-  final Map<String, Future<SourceSearchText>> _sourceTextCache = {};
+  final SourceDocuments _sourceDocuments = SourceDocuments();
   List<String> _sourceFiles = const [];
   List<String> _searchIndexPaths = const [];
   Future<List<SourceSearchFile>>? _searchFileIndexFuture;
@@ -37,7 +37,12 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   final FocusNode _searchFocusNode = FocusNode();
   final TextEditingController _searchController = TextEditingController();
   String? _selectedPath;
-  List<_HighlightedSourceLine> _lines = const [];
+  List<HighlightedSourceLine> _lines = const [];
+  final SourceHighlighter _highlighter = SourceHighlighter();
+  int _maximumLineLength = 0;
+  Set<int> _requestedLines = const {};
+  Set<int> _executableLines = const {};
+  Map<int, DebugBreakpoint> _lineBreakpoints = const {};
   String? _loadError;
   int _loadGeneration = 0;
   int _searchGeneration = 0;
@@ -51,8 +56,8 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   _SourceTokenSelection? _sourceSelection;
   Timer? _searchDebounce;
   List<_SourceSearchResult> _searchResults = const [];
-  final Map<String, String> _resolvedSourcePaths = <String, String>{};
-  Future<Map<String, List<String>>>? _sourceRootIndexFuture;
+  Map<String, String> get _resolvedSourcePaths =>
+      _sourceDocuments.resolvedPaths;
   String _observedSourceRoot = '';
   String? _observedCurrentSource;
   int? _observedCurrentLine;
@@ -99,11 +104,11 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     _selectedPath = null;
     _tabKeys.clear();
     _externalPathKeys.clear();
-    _sourceTextCache.clear();
+    _sourceDocuments.clear();
     _sourceFiles = const [];
     _resolvedSourcePaths.clear();
     _invalidateSearchFileIndex();
-    _sourceRootIndexFuture = null;
+    _sourceDocuments.clearIndex();
     _searchDebounce?.cancel();
     _searchGeneration += 1;
     _searchController.clear();
@@ -188,8 +193,8 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     if (sourceRootChanged) {
       _observedSourceRoot = controller.debugState.sourceRoot;
       _resolvedSourcePaths.clear();
-      _sourceTextCache.clear();
-      _sourceRootIndexFuture = null;
+      _sourceDocuments.clear();
+      _sourceDocuments.clearIndex();
       _invalidateSearchFileIndex();
     }
     final currentSource = controller.debugState.currentSource;
@@ -240,10 +245,13 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     _ensureSelectedTabVisible();
     if (path == null) return;
     try {
-      final source = await _readSourceText(path);
-      final highlighted = _CppSyntaxHighlighter().highlight(source);
+      final source = await _readSourceDocument(path);
+      final highlighted = await _highlighter.prepare(source);
       if (!mounted || generation != _loadGeneration) return;
-      setState(() => _lines = highlighted);
+      setState(() {
+        _lines = highlighted.lines;
+        _maximumLineLength = highlighted.maximumLineLength;
+      });
       if (!widget.readOnlyPreview) controller.markSourceFileRead(path);
       if (revealLine != null) {
         _scrollToLine(revealLine, immediate: true);
@@ -256,20 +264,15 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     }
   }
 
-  Future<String> _readSourceText(String path) async =>
-      (await _readSourceDocument(path)).text;
-
   Future<SourceSearchText> _readSourceDocument(
     String path, {
     String? localPath,
   }) {
-    final key = _pathKey(path);
-    // Cache in-flight reads and failures as well as successful reads. Typing a
-    // new query must not re-read the same file or retry unavailable debug paths.
-    return _sourceTextCache.putIfAbsent(key, () async {
-      final sourcePath = localPath ?? await _resolveSourcePath(path);
-      return SourceSearchText(await File(sourcePath).readAsString());
-    });
+    return _sourceDocuments.read(
+      path,
+      sourceRoot: controller.debugState.sourceRoot,
+      localPath: localPath,
+    );
   }
 
   void _openSource(String path) {
@@ -370,7 +373,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
       if (path.isEmpty || !await File(path).exists()) continue;
       final key = _pathKey(path);
       _externalPathKeys.add(key);
-      _sourceTextCache.remove(key);
+      _sourceDocuments.invalidate(key);
       controller.openSourceFile(path, select: false);
       accepted.add(path);
     }
@@ -507,7 +510,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     final root = controller.debugState.sourceRoot;
     final rootIndex = root.isEmpty
         ? Future.value(const <String, List<String>>{})
-        : (_sourceRootIndexFuture ??= _indexSourceRoot(root));
+        : (_indexSourceRoot(root));
     return _searchFileIndexFuture = _buildSearchFileIndex(
       paths,
       root,
@@ -546,7 +549,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
               if (!await File(path).exists()) {
                 var bestScore = -1;
                 for (final candidate in candidates) {
-                  final score = _matchingPathSuffixLength(path, candidate);
+                  final score = sourcePathSuffixLength(path, candidate);
                   if (score > bestScore) {
                     bestScore = score;
                     localPath = candidate;
@@ -734,49 +737,6 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     unawaited(_loadSource(result.path, revealLine: result.line));
   }
 
-  Future<String> _resolveSourcePath(String debugPath) async {
-    if (await File(debugPath).exists()) return debugPath;
-    final sourceRoot = controller.debugState.sourceRoot;
-    if (sourceRoot.isEmpty) return debugPath;
-
-    final cacheKey = _pathKey(debugPath);
-    final cached = _resolvedSourcePaths[cacheKey];
-    if (cached != null && await File(cached).exists()) return cached;
-
-    final normalized = debugPath.replaceAll('\\', '/');
-    final isAbsolute =
-        normalized.startsWith('/') ||
-        RegExp(r'^[A-Za-z]:/').hasMatch(normalized);
-    if (!isAbsolute) {
-      final direct = File(
-        '$sourceRoot${Platform.pathSeparator}${normalized.replaceAll('/', Platform.pathSeparator)}',
-      );
-      if (await direct.exists()) {
-        _resolvedSourcePaths[cacheKey] = direct.path;
-        return direct.path;
-      }
-    }
-
-    final targetName = _basename(debugPath).toLowerCase();
-    File? bestMatch;
-    var bestScore = -1;
-    final index = await (_sourceRootIndexFuture ??= _indexSourceRoot(
-      sourceRoot,
-    ));
-    for (final path in index[targetName] ?? const <String>[]) {
-      final score = _matchingPathSuffixLength(debugPath, path);
-      if (score > bestScore) {
-        bestMatch = File(path);
-        bestScore = score;
-      }
-    }
-    if (bestMatch != null) {
-      _resolvedSourcePaths[cacheKey] = bestMatch.path;
-      return bestMatch.path;
-    }
-    return debugPath;
-  }
-
   List<SymbolItem> _symbolsForToken(String token, String sourcePath) {
     final candidates = controller.symbols
         .where((symbol) => _symbolNameMatchesToken(symbol.name, token))
@@ -797,7 +757,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   _SourceTokenSelection? _tokenAtOffset(
     String path,
     int lineIndex,
-    _HighlightedSourceLine line,
+    HighlightedSourceLine line,
     Offset offset,
   ) {
     if (line.rawText.isEmpty || offset.dx < 0) return null;
@@ -906,7 +866,10 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   Future<String?> _resolveIncludedSource(String sourcePath, String line) async {
     final includeName = _includeNameFromLine(line);
     if (includeName == null) return null;
-    final sourceFile = await _resolveSourcePath(sourcePath);
+    final sourceFile = await _sourceDocuments.resolve(
+      sourcePath,
+      controller.debugState.sourceRoot,
+    );
     final candidates = <String>[];
     if (await File(sourceFile).exists()) {
       final parent = File(sourceFile).parent.path;
@@ -926,15 +889,13 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
 
     final rootIndex = root.isEmpty
         ? const <String, List<String>>{}
-        : await (_sourceRootIndexFuture ??= _indexSourceRoot(root));
+        : await (_indexSourceRoot(root));
     final indexedMatches =
         rootIndex[_basename(includeName).toLowerCase()] ?? const <String>[];
     if (indexedMatches.isNotEmpty) {
       final ranked =
           indexedMatches
-              .map(
-                (path) => (path, _matchingPathSuffixLength(includeName, path)),
-              )
+              .map((path) => (path, sourcePathSuffixLength(includeName, path)))
               .toList()
             ..sort((left, right) => right.$2.compareTo(left.$2));
       if (ranked.length == 1 || ranked[0].$2 > ranked[1].$2) {
@@ -1049,22 +1010,8 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     }
   }
 
-  Future<Map<String, List<String>>> _indexSourceRoot(String sourceRoot) async {
-    final index = <String, List<String>>{};
-    try {
-      await for (final entity in Directory(
-        sourceRoot,
-      ).list(recursive: true, followLinks: false)) {
-        if (entity is! File) continue;
-        index
-            .putIfAbsent(_basename(entity.path).toLowerCase(), () => <String>[])
-            .add(entity.path);
-      }
-    } on FileSystemException {
-      return const <String, List<String>>{};
-    }
-    return index;
-  }
+  Future<Map<String, List<String>>> _indexSourceRoot(String root) =>
+      _sourceDocuments.indexRoot(root);
 
   void _scrollToCurrentLine({bool immediate = false}) {
     final currentPath = controller.debugState.currentSource;
@@ -1637,10 +1584,19 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     }
     return LayoutBuilder(
       builder: (context, constraints) {
-        final longest = _lines.fold<int>(
-          0,
-          (value, line) => math.max(value, line.textLength),
-        );
+        final path = _selectedPath!;
+        _requestedLines = controller.debugState.requestedBreakpoints.entries
+            .where((entry) => controller.sourcePathsMatch(entry.key, path))
+            .expand((entry) => entry.value)
+            .toSet();
+        _executableLines = controller.executableLinesFor(path);
+        _lineBreakpoints = {};
+        for (final item in controller.debugState.resolvedBreakpoints) {
+          if (controller.sourcePathsMatch(item.path, path)) {
+            _lineBreakpoints.putIfAbsent(item.requestedLine, () => item);
+          }
+        }
+        final longest = _maximumLineLength;
         final contentWidth = math.max(
           constraints.maxWidth,
           30 + _lineNumberWidth + 14 + longest * 8.2,
@@ -1676,20 +1632,9 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   Widget _buildSourceLine(int index) {
     final lineNumber = index + 1;
     final path = _selectedPath!;
-    final requested = controller.debugState.requestedBreakpoints.entries
-        .where((entry) => controller.sourcePathsMatch(entry.key, path))
-        .expand((entry) => entry.value)
-        .toSet();
-    final breakpoint = controller.debugState.resolvedBreakpoints
-        .where(
-          (item) =>
-              controller.sourcePathsMatch(item.path, path) &&
-              item.requestedLine == lineNumber,
-        )
-        .firstOrNull;
-    final hasBreakpoint = requested.contains(lineNumber);
-    final executableLines = controller.executableLinesFor(path);
-    final canSetBreakpoint = executableLines.contains(lineNumber);
+    final breakpoint = _lineBreakpoints[lineNumber];
+    final hasBreakpoint = _requestedLines.contains(lineNumber);
+    final canSetBreakpoint = _executableLines.contains(lineNumber);
     final isCurrent =
         controller.debugState.currentLine == lineNumber &&
         controller.debugState.currentSource != null &&
@@ -1957,24 +1902,6 @@ class _SourceDebugEmptyState extends StatelessWidget {
   }
 }
 
-enum _SourceTokenKind {
-  plain,
-  keyword,
-  type,
-  number,
-  string,
-  comment,
-  preprocessor,
-}
-
-class _HighlightedSourceLine {
-  const _HighlightedSourceLine(this.spans, this.textLength, this.rawText);
-
-  final List<TextSpan> spans;
-  final int textLength;
-  final String rawText;
-}
-
 class _SourceTokenSelection {
   const _SourceTokenSelection({
     required this.path,
@@ -2011,215 +1938,6 @@ class _SourceSearchResult {
   bool get isFile => line == null;
 }
 
-class _CppSyntaxHighlighter {
-  static const _keywords = <String>{
-    'alignas',
-    'alignof',
-    'asm',
-    'auto',
-    'break',
-    'case',
-    'catch',
-    'class',
-    'const',
-    'constexpr',
-    'continue',
-    'default',
-    'delete',
-    'do',
-    'else',
-    'enum',
-    'explicit',
-    'export',
-    'extern',
-    'for',
-    'friend',
-    'goto',
-    'if',
-    'inline',
-    'namespace',
-    'new',
-    'noexcept',
-    'operator',
-    'private',
-    'protected',
-    'public',
-    'register',
-    'return',
-    'sizeof',
-    'static',
-    'struct',
-    'switch',
-    'template',
-    'this',
-    'throw',
-    'try',
-    'typedef',
-    'typename',
-    'union',
-    'using',
-    'virtual',
-    'volatile',
-    'while',
-  };
-  static const _types = <String>{
-    'bool',
-    'char',
-    'double',
-    'float',
-    'int',
-    'long',
-    'short',
-    'signed',
-    'unsigned',
-    'void',
-    'wchar_t',
-    'size_t',
-    'int8_t',
-    'int16_t',
-    'int32_t',
-    'int64_t',
-    'uint8_t',
-    'uint16_t',
-    'uint32_t',
-    'uint64_t',
-    'true',
-    'false',
-    'nullptr',
-    'NULL',
-  };
-
-  List<_HighlightedSourceLine> highlight(String source) {
-    final rawLines = source
-        .replaceAll('\r\n', '\n')
-        .replaceAll('\r', '\n')
-        .split('\n');
-    var inBlockComment = false;
-    return [
-      for (final line in rawLines)
-        _highlightLine(
-          line,
-          () => inBlockComment,
-          (value) => inBlockComment = value,
-        ),
-    ];
-  }
-
-  _HighlightedSourceLine _highlightLine(
-    String line,
-    bool Function() isInBlockComment,
-    void Function(bool) setBlockComment,
-  ) {
-    final spans = <TextSpan>[];
-    var index = 0;
-    final firstNonSpace = line.length - line.trimLeft().length;
-    if (!isInBlockComment() &&
-        firstNonSpace < line.length &&
-        line[firstNonSpace] == '#') {
-      spans.add(
-        TextSpan(text: line, style: _style(_SourceTokenKind.preprocessor)),
-      );
-      return _HighlightedSourceLine(spans, line.length, line);
-    }
-    while (index < line.length) {
-      if (isInBlockComment()) {
-        final end = line.indexOf('*/', index);
-        if (end < 0) {
-          _add(spans, line.substring(index), _SourceTokenKind.comment);
-          index = line.length;
-        } else {
-          _add(spans, line.substring(index, end + 2), _SourceTokenKind.comment);
-          index = end + 2;
-          setBlockComment(false);
-        }
-        continue;
-      }
-      if (line.startsWith('//', index)) {
-        _add(spans, line.substring(index), _SourceTokenKind.comment);
-        break;
-      }
-      if (line.startsWith('/*', index)) {
-        final end = line.indexOf('*/', index + 2);
-        if (end < 0) {
-          _add(spans, line.substring(index), _SourceTokenKind.comment);
-          setBlockComment(true);
-          break;
-        }
-        _add(spans, line.substring(index, end + 2), _SourceTokenKind.comment);
-        index = end + 2;
-        continue;
-      }
-      final char = line[index];
-      if (char == '"' || char == "'") {
-        final quote = char;
-        var end = index + 1;
-        while (end < line.length) {
-          if (line[end] == '\\') {
-            end += 2;
-            continue;
-          }
-          if (line[end++] == quote) break;
-        }
-        end = math.min(end, line.length);
-        _add(spans, line.substring(index, end), _SourceTokenKind.string);
-        index = end;
-        continue;
-      }
-      if (_isIdentifierStart(char)) {
-        var end = index + 1;
-        while (end < line.length && _isIdentifierPart(line[end])) {
-          end += 1;
-        }
-        final word = line.substring(index, end);
-        final kind = _keywords.contains(word)
-            ? _SourceTokenKind.keyword
-            : _types.contains(word)
-            ? _SourceTokenKind.type
-            : _SourceTokenKind.plain;
-        _add(spans, word, kind);
-        index = end;
-        continue;
-      }
-      if (_isDigit(char)) {
-        var end = index + 1;
-        while (end < line.length &&
-            RegExp(r'[A-Za-z0-9_.]').hasMatch(line[end])) {
-          end += 1;
-        }
-        _add(spans, line.substring(index, end), _SourceTokenKind.number);
-        index = end;
-        continue;
-      }
-      _add(spans, char, _SourceTokenKind.plain);
-      index += 1;
-    }
-    if (line.isEmpty) spans.add(const TextSpan(text: ''));
-    return _HighlightedSourceLine(spans, line.length, line);
-  }
-
-  static void _add(List<TextSpan> spans, String text, _SourceTokenKind kind) {
-    spans.add(TextSpan(text: text, style: _style(kind)));
-  }
-
-  static TextStyle _style(_SourceTokenKind kind) => TextStyle(
-    color: switch (kind) {
-      _SourceTokenKind.plain => TalColors.text,
-      _SourceTokenKind.keyword => const Color(0xFFC586C0),
-      _SourceTokenKind.type => const Color(0xFF4EC9B0),
-      _SourceTokenKind.number => const Color(0xFFB5CEA8),
-      _SourceTokenKind.string => const Color(0xFFCE9178),
-      _SourceTokenKind.comment => const Color(0xFF6A9955),
-      _SourceTokenKind.preprocessor => const Color(0xFFC8C8C8),
-    },
-  );
-
-  static bool _isIdentifierStart(String value) =>
-      RegExp(r'[A-Za-z_]').hasMatch(value);
-  static bool _isIdentifierPart(String value) =>
-      RegExp(r'[A-Za-z0-9_]').hasMatch(value);
-  static bool _isDigit(String value) => RegExp(r'[0-9]').hasMatch(value);
-}
-
 String _pathKey(String path) => path.replaceAll('\\', '/').toLowerCase();
 
 bool _isIdentifierStart(String value) => RegExp(r'[A-Za-z_]').hasMatch(value);
@@ -2235,30 +1953,6 @@ String? _includeNameFromLine(String line) =>
 String _basename(String path) {
   final normalized = path.replaceAll('\\', '/');
   return normalized.substring(normalized.lastIndexOf('/') + 1);
-}
-
-int _matchingPathSuffixLength(String left, String right) {
-  final leftParts = left
-      .replaceAll('\\', '/')
-      .split('/')
-      .where((part) => part.isNotEmpty)
-      .map((part) => part.toLowerCase())
-      .toList();
-  final rightParts = right
-      .replaceAll('\\', '/')
-      .split('/')
-      .where((part) => part.isNotEmpty)
-      .map((part) => part.toLowerCase())
-      .toList();
-  var score = 0;
-  while (score < leftParts.length && score < rightParts.length) {
-    if (leftParts[leftParts.length - 1 - score] !=
-        rightParts[rightParts.length - 1 - score]) {
-      break;
-    }
-    score += 1;
-  }
-  return score;
 }
 
 String? _matchingPath(String candidate, List<String> paths) {

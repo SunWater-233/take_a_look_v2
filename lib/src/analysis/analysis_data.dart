@@ -36,6 +36,7 @@ class PackedAnalysisPoints extends NumericAnalysisPoints {
     if (xy.length.isOdd) throw ArgumentError('Expected interleaved x/y pairs');
   }
   final Float64List _xy;
+  Float64List get packed => _xy;
   @override
   int get length => _xy.length ~/ 2;
   @override

@@ -21,6 +21,8 @@ import '../models/models.dart';
 import '../models/watch_tree.dart';
 import '../workspace/panel_types.dart';
 import 'source_search.dart';
+import 'source_highlighter.dart';
+import 'source_documents.dart';
 import '../theme/theme.dart';
 import 'table_layout.dart';
 import 'watch_color_dialog.dart';

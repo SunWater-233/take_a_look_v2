@@ -10,11 +10,20 @@ import 'hover.dart';
 import 'viewport.dart';
 
 class TelemetryPainter extends CustomPainter {
-  TelemetryPainter(this.controller, {this.hoverPosition})
-    : super(repaint: Listenable.merge([controller.plotChanges, hoverPosition]));
+  TelemetryPainter(
+    this.controller, {
+    this.hoverPosition,
+    this.paintInspection = true,
+  }) : super(
+         repaint: Listenable.merge([
+           controller.plotChanges,
+           if (paintInspection) hoverPosition,
+         ]),
+       );
 
   final TakeALookController controller;
   final ValueListenable<Offset?>? hoverPosition;
+  final bool paintInspection;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -40,12 +49,14 @@ class TelemetryPainter extends CustomPainter {
 
     final plotted = telemetryPlotSeries(controller, viewport);
     final pointer = hoverPosition?.value;
-    final hovered = inspectTelemetrySeries(
-      plotted,
-      viewport,
-      position: pointer,
-      highlightedWatchKey: controller.plotHighlightedWatchKey,
-    );
+    final hovered = !paintInspection
+        ? null
+        : inspectTelemetrySeries(
+            plotted,
+            viewport,
+            position: pointer,
+            highlightedWatchKey: controller.plotHighlightedWatchKey,
+          );
     if (plotted.isNotEmpty) {
       canvas.save();
       canvas.clipRect(viewport.plot);
@@ -53,34 +64,23 @@ class TelemetryPainter extends CustomPainter {
         renderer.drawPolyline(series.points, series.watch.color);
       }
       if (hovered != null) {
-        final series = hovered.series;
-        renderer.drawPolyline(
-          series.points,
-          series.watch.color.withValues(alpha: 0.25),
-          strokeWidth: 7,
-        );
-        renderer.drawPolyline(
-          series.points,
-          Color.lerp(series.watch.color, Colors.white, 0.3)!,
-          strokeWidth: 3.4,
-        );
-        canvas.drawCircle(
-          hovered.position,
-          4,
-          Paint()..color = series.watch.color,
-        );
-        canvas.drawCircle(
-          hovered.position,
-          4,
-          Paint()
-            ..color = Colors.white
-            ..strokeWidth = 1.5
-            ..style = PaintingStyle.stroke,
-        );
+        _drawHighlightedSeries(canvas, renderer, hovered);
       }
       canvas.restore();
     }
 
+    if (paintInspection) _drawChrome(canvas, viewport, plotted, renderer);
+    if (hovered != null) {
+      _drawHoverTooltip(canvas, size, pointer ?? hovered.position, hovered);
+    }
+  }
+
+  void _drawChrome(
+    Canvas canvas,
+    CartesianPlotViewport viewport,
+    List<TelemetryPlotSeries> plotted,
+    CartesianChartRenderer renderer,
+  ) {
     final retained = plotted.where((series) => series.samples.isNotEmpty);
     if (retained.isNotEmpty &&
         retained.any(
@@ -117,9 +117,33 @@ class TelemetryPainter extends CustomPainter {
           ),
       ], maximumItems: 6);
     }
-    if (hovered != null) {
-      _drawHoverTooltip(canvas, size, pointer ?? hovered.position, hovered);
-    }
+  }
+
+  void _drawHighlightedSeries(
+    Canvas canvas,
+    CartesianChartRenderer renderer,
+    TelemetryHoverHit hovered,
+  ) {
+    final series = hovered.series;
+    renderer.drawPolyline(
+      series.points,
+      series.watch.color.withValues(alpha: 0.25),
+      strokeWidth: 7,
+    );
+    renderer.drawPolyline(
+      series.points,
+      Color.lerp(series.watch.color, Colors.white, 0.3)!,
+      strokeWidth: 3.4,
+    );
+    canvas.drawCircle(hovered.position, 4, Paint()..color = series.watch.color);
+    canvas.drawCircle(
+      hovered.position,
+      4,
+      Paint()
+        ..color = Colors.white
+        ..strokeWidth = 1.5
+        ..style = PaintingStyle.stroke,
+    );
   }
 
   void _drawHoverTooltip(
@@ -169,6 +193,59 @@ class TelemetryPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant TelemetryPainter oldDelegate) {
     return oldDelegate.controller != controller ||
-        oldDelegate.hoverPosition != hoverPosition;
+        oldDelegate.hoverPosition != hoverPosition ||
+        oldDelegate.paintInspection != paintInspection;
   }
+}
+
+class TelemetryInspectionPainter extends CustomPainter {
+  TelemetryInspectionPainter(this.controller, {required this.hoverPosition})
+    : super(repaint: Listenable.merge([controller.plotChanges, hoverPosition]));
+
+  final TakeALookController controller;
+  final ValueListenable<Offset?> hoverPosition;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final telemetry = telemetryViewport(controller, size);
+    final viewport = CartesianPlotViewport(
+      plot: telemetry.plot,
+      xMin: telemetry.xMin,
+      xMax: telemetry.xMax,
+      yMin: telemetry.yMin,
+      yMax: telemetry.yMax,
+      invertX: controller.plotInvertX,
+      invertY: controller.plotInvertY,
+    );
+    if (viewport.plot.width <= 1 || viewport.plot.height <= 1) return;
+    final pointer = hoverPosition.value;
+    final plotted = telemetryPlotSeries(controller, viewport);
+    final hit = inspectTelemetrySeries(
+      plotted,
+      viewport,
+      position: pointer,
+      highlightedWatchKey: controller.plotHighlightedWatchKey,
+    );
+    final renderer = CartesianChartRenderer(
+      canvas: canvas,
+      size: size,
+      viewport: viewport,
+    );
+    final delegate = TelemetryPainter(controller);
+    if (hit != null) {
+      canvas.save();
+      canvas.clipRect(viewport.plot);
+      delegate._drawHighlightedSeries(canvas, renderer, hit);
+      canvas.restore();
+    }
+    delegate._drawChrome(canvas, viewport, plotted, renderer);
+    if (hit != null) {
+      delegate._drawHoverTooltip(canvas, size, pointer ?? hit.position, hit);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant TelemetryInspectionPainter oldDelegate) =>
+      oldDelegate.controller != controller ||
+      oldDelegate.hoverPosition != hoverPosition;
 }

@@ -149,6 +149,7 @@ class BackendStreamDecoder {
   Uint8List _buffer = Uint8List(4096);
   int _start = 0;
   int _end = 0;
+  int _jsonScan = 0;
 
   void add(List<int> bytes) {
     if (bytes.isEmpty) return;
@@ -164,25 +165,29 @@ class BackendStreamDecoder {
           throw FormatException('Backend frame is too large: $length bytes');
         }
         if (_end - _start < 5 + length) break;
-        final payload = Uint8List.fromList(
-          _buffer.sublist(_start + 5, _start + 5 + length),
-        );
+        // sublist already owns its bytes; consumers may retain the payload.
+        final payload = _buffer.sublist(_start + 5, _start + 5 + length);
         _start += 5 + length;
+        _jsonScan = _start;
         onSamplePayload(payload);
         continue;
       }
 
-      var newline = _start;
+      var newline = _jsonScan < _start ? _start : _jsonScan;
       while (newline < _end && _buffer[newline] != 0x0A) {
         newline += 1;
       }
-      if (newline == _end) break;
+      if (newline == _end) {
+        _jsonScan = newline;
+        break;
+      }
       var lineEnd = newline;
       if (lineEnd > _start && _buffer[lineEnd - 1] == 0x0D) {
         lineEnd -= 1;
       }
-      final line = utf8.decode(_buffer.sublist(_start, lineEnd));
+      final line = utf8.decode(Uint8List.sublistView(_buffer, _start, lineEnd));
       _start = newline + 1;
+      _jsonScan = _start;
       if (line.trim().isNotEmpty) onJsonLine(line);
     }
     _compactIfNeeded();
@@ -191,6 +196,7 @@ class BackendStreamDecoder {
   void reset() {
     _start = 0;
     _end = 0;
+    _jsonScan = 0;
   }
 
   int _uint32At(int offset) {
@@ -206,6 +212,7 @@ class BackendStreamDecoder {
     if (_start > 0) {
       _buffer.setRange(0, _end - _start, _buffer, _start);
       _end -= _start;
+      _jsonScan -= _start;
       _start = 0;
     }
     if (_end + additionalBytes <= _buffer.length) return;
@@ -223,6 +230,7 @@ class BackendStreamDecoder {
     } else if (_start > _buffer.length ~/ 2) {
       _buffer.setRange(0, _end - _start, _buffer, _start);
       _end -= _start;
+      _jsonScan -= _start;
       _start = 0;
     }
   }

@@ -116,7 +116,7 @@ stdio.main()
                 {"frames": [{"elapsed": 0.25, "values": {"speed": 12.5}}]},
             )
         finally:
-            server._service.close()
+            server.close()
 
         raw = output.getvalue()
         marker_offset = raw.index(b"\x00")

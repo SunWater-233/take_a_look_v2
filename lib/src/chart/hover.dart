@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../controller/controller.dart';
 import '../models/models.dart';
 import '../models/watch_tree.dart';
+import '../telemetry/sample_buffer.dart';
 import 'cartesian_renderer.dart';
 import 'downsampling.dart';
 
@@ -20,15 +21,27 @@ class TelemetryPlotSeries {
   final List<Offset> points;
 }
 
+final _watchOrders = Expando<({int revision, List<WatchItem> watches})>();
+
 List<TelemetryPlotSeries> telemetryPlotSeries(
   TakeALookController controller,
   CartesianPlotViewport viewport,
 ) {
+  var order = _watchOrders[controller];
+  if (order == null || order.revision != controller.watchRevision) {
+    order = (
+      revision: controller.watchRevision,
+      watches: [
+        for (final root in buildWatchTree(controller.watches))
+          ...root.watchesInDisplayOrder,
+      ],
+    );
+    _watchOrders[controller] = order;
+  }
   return [
-    for (final root in buildWatchTree(controller.watches))
-      for (final watch in root.watchesInDisplayOrder)
-        if (watch.plotted)
-          _seriesFor(watch, controller.plotSamplesFor(watch), viewport),
+    for (final watch in order.watches)
+      if (watch.plotted)
+        _seriesFor(watch, controller.plotSamplesFor(watch), viewport),
   ];
 }
 
@@ -145,7 +158,28 @@ TelemetryHoverHit? _nearestTelemetrySample(
   Offset? sample;
   Offset? samplePosition;
   var sampleDistance = double.infinity;
-  for (final point in selected.samples) {
+  final samples = selected.samples;
+  Iterable<Offset> candidates = samples;
+  if (samples is SampleBuffer && samples.isOrdered) {
+    final (start, end) = samples.rangeIndices(viewport.xMin, viewport.xMax);
+    if (start >= end) return null;
+    if (horizontalOnly) {
+      final time = viewport.unmapX(position.dx);
+      final next = samples.lowerBound(time).clamp(start, end);
+      final indices = <int>{
+        if (next > start)
+          samples.lowerBound(samples.timeAt(next - 1)).clamp(start, end - 1),
+        if (next < end) next,
+      }.toList()..sort();
+      candidates = indices.map((index) => samples[index]);
+    } else {
+      candidates = Iterable.generate(
+        end - start,
+        (index) => samples[start + index],
+      );
+    }
+  }
+  for (final point in candidates) {
     if (!point.isFinite ||
         point.dx < viewport.xMin ||
         point.dx > viewport.xMax) {

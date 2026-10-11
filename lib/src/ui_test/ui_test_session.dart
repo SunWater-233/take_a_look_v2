@@ -37,6 +37,7 @@ class UiTestSession extends ChangeNotifier {
       symbolFilePicker: () async => 'ui_test_fixture.axf',
       sourceRootPicker: pickSourceRootDirectory,
       csvImportContentsPicker: pickCsvImportContents,
+      csvImportPathPicker: pickCsvImportPath,
       csvExportPathPicker: pickCsvExportPath,
     );
     reset(UiTestScenario.live);

@@ -4,6 +4,17 @@ import 'package:flutter/material.dart';
 
 import '../telemetry/sample_buffer.dart';
 
+final _sampleReductions =
+    Expando<
+      ({
+        int revision,
+        double xMin,
+        double xMax,
+        double width,
+        List<Offset> points,
+      })
+    >();
+
 List<Offset> downsampleTelemetrySamples(
   Iterable<Offset> samples, {
   required double xMin,
@@ -11,7 +22,25 @@ List<Offset> downsampleTelemetrySamples(
   required double pixelWidth,
 }) {
   if (samples is SampleBuffer) {
-    return _downsampleBuffer(samples, xMin, xMax, pixelWidth);
+    final cached = _sampleReductions[samples];
+    if (cached != null &&
+        cached.revision == samples.revision &&
+        cached.xMin == xMin &&
+        cached.xMax == xMax &&
+        cached.width == pixelWidth) {
+      return cached.points;
+    }
+    final points = List<Offset>.unmodifiable(
+      _downsampleBuffer(samples, xMin, xMax, pixelWidth),
+    );
+    _sampleReductions[samples] = (
+      revision: samples.revision,
+      xMin: xMin,
+      xMax: xMax,
+      width: pixelWidth,
+      points: points,
+    );
+    return points;
   }
   final visible = [
     for (final point in samples)
@@ -78,6 +107,67 @@ List<Offset> _downsampleBuffer(
 ) {
   final bucketCount = math.max(1, pixelWidth.floor());
   final (start, end) = samples.rangeIndices(xMin, xMax);
+  if (samples.isOrdered) {
+    if (end <= start) return const [];
+    if (end - start <= bucketCount * 2 || xMax <= xMin) {
+      return [for (var i = start; i < end; i++) samples[i]];
+    }
+    int bucketAt(int index) =>
+        (((samples.timeAt(index) - xMin) / (xMax - xMin)) * bucketCount)
+            .floor()
+            .clamp(0, bucketCount - 1);
+    if (end - start <= bucketCount * 24) {
+      return samples.reduceTimeBuckets(start, end, xMin, xMax, bucketCount);
+    }
+    final result = <Offset>[];
+    _appendDistinctPoint(result, samples[start]);
+    var index = start;
+    while (index < end) {
+      final bucket = bucketAt(index);
+      var guess = (index + ((end - index) / (bucketCount - bucket)).ceil())
+          .clamp(index + 1, end);
+      var low = index + 1, high = end;
+      if (guess == end && bucketAt(end - 1) == bucket) {
+        low = high = end;
+      } else {
+        guess = math.min(guess, end - 1);
+        var step = 1;
+        if (bucketAt(guess) <= bucket) {
+          low = guess + 1;
+          high = math.min(end, low + step);
+          while (high < end && bucketAt(high) <= bucket) {
+            low = high + 1;
+            step *= 2;
+            high = math.min(end, high + step);
+          }
+        } else {
+          high = guess;
+          low = math.max(index + 1, high - step);
+          while (low > index + 1 && bucketAt(low) > bucket) {
+            high = low;
+            step *= 2;
+            low = math.max(index + 1, low - step);
+          }
+          if (bucketAt(low) <= bucket) low++;
+        }
+      }
+      // Match the original pixel expression, including floating-point rounding.
+      while (low < high) {
+        final middle = (low + high) ~/ 2;
+        if (bucketAt(middle) <= bucket) {
+          low = middle + 1;
+        } else {
+          high = middle;
+        }
+      }
+      final (minimum, maximum) = samples.extremaIndices(index, low);
+      _appendDistinctPoint(result, samples[math.min(minimum, maximum)]);
+      _appendDistinctPoint(result, samples[math.max(minimum, maximum)]);
+      index = low;
+    }
+    _appendDistinctPoint(result, samples[end - 1]);
+    return result;
+  }
   var visibleCount = 0;
   var firstVisible = -1;
   var lastVisible = -1;

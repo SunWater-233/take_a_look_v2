@@ -34,6 +34,7 @@ class _TelemetryChartState extends State<TelemetryChart> {
   Offset? _rightZoomAnchorFraction;
   Rect? _zoomSelection;
   bool _dragging = false;
+  int _panButton = kPrimaryMouseButton;
   bool _rightZoomDragging = false;
   bool _pointerMoved = false;
   bool _horizontalPanStarted = false;
@@ -152,7 +153,9 @@ class _TelemetryChartState extends State<TelemetryChart> {
     if (_lastPointerKind != PointerDeviceKind.mouse) {
       return SystemMouseCursors.basic;
     }
-    if (_rightZoomDragging) return SystemMouseCursors.grabbing;
+    if (_rightZoomDragging || (_dragging && _panButton == kMiddleMouseButton)) {
+      return SystemMouseCursors.grabbing;
+    }
     if (_desktopMouseMode == _DesktopMouseMode.rect) {
       return SystemMouseCursors.precise;
     }
@@ -201,12 +204,21 @@ class _TelemetryChartState extends State<TelemetryChart> {
       }
       return;
     }
-    if (event.buttons & kPrimaryMouseButton == 0 ||
+    final middlePan =
+        event.kind == PointerDeviceKind.mouse &&
+        event.buttons & kMiddleMouseButton != 0;
+    final panButton = middlePan ? kMiddleMouseButton : kPrimaryMouseButton;
+    if (event.buttons & panButton == 0 ||
         !telemetryPlotRect(_size).contains(event.localPosition) ||
-        (!controller.plotMouseXEnabled && !controller.plotMouseYEnabled)) {
+        (middlePan
+            ? !controller.plotMouseXEnabled
+            : !controller.plotMouseXEnabled && !controller.plotMouseYEnabled)) {
       return;
     }
-    setState(() => _dragging = true);
+    setState(() {
+      _panButton = panButton;
+      _dragging = true;
+    });
   }
 
   void _openDesktopMenu(Offset position) {
@@ -238,14 +250,13 @@ class _TelemetryChartState extends State<TelemetryChart> {
       return;
     }
     final previous = _lastDragPosition;
-    if (!_dragging ||
-        previous == null ||
-        event.buttons & kPrimaryMouseButton == 0) {
+    if (!_dragging || previous == null || event.buttons & _panButton == 0) {
       return;
     }
     final plot = telemetryPlotRect(_size);
     if (plot.width <= 1 || plot.height <= 1) return;
-    if (_lastPointerKind == PointerDeviceKind.mouse &&
+    if (_panButton == kPrimaryMouseButton &&
+        _lastPointerKind == PointerDeviceKind.mouse &&
         _desktopMouseMode == _DesktopMouseMode.rect) {
       final start = _dragStartPosition;
       if (start == null) return;
@@ -260,6 +271,8 @@ class _TelemetryChartState extends State<TelemetryChart> {
     }
     final viewport = telemetryViewport(controller, _size);
     final delta = event.localPosition - previous;
+    final panY =
+        _panButton == kPrimaryMouseButton && controller.plotMouseYEnabled;
     _lastDragPosition = event.localPosition;
     var horizontalDelta = 0.0;
     if (controller.plotMouseXEnabled) {
@@ -297,7 +310,7 @@ class _TelemetryChartState extends State<TelemetryChart> {
         xMax = latest;
       }
     }
-    if (controller.plotMouseYEnabled) {
+    if (panY) {
       final direction = controller.plotInvertY ? -1.0 : 1.0;
       final shift = delta.dy / plot.height * viewport.ySpan * direction;
       yMin += shift;
@@ -306,8 +319,7 @@ class _TelemetryChartState extends State<TelemetryChart> {
     final timeWindowChanged =
         (xMin - viewport.xMin).abs() > 1e-9 ||
         (xMax - viewport.xMax).abs() > 1e-9;
-    if (!timeWindowChanged &&
-        (!controller.plotMouseYEnabled || delta.dy == 0)) {
+    if (!timeWindowChanged && (!panY || delta.dy == 0)) {
       return;
     }
     if (controller.followLatest && !timeWindowChanged) {
@@ -345,7 +357,7 @@ class _TelemetryChartState extends State<TelemetryChart> {
       if (openMenu) _openDesktopMenu(event.localPosition);
       return;
     }
-    if (event.buttons & kPrimaryMouseButton != 0) return;
+    if (event.buttons & _panButton != 0) return;
     if (_zoomSelection case final selection?) {
       _applyZoomSelection(selection);
     }
@@ -366,6 +378,7 @@ class _TelemetryChartState extends State<TelemetryChart> {
     _rightZoomAnchorFraction = null;
     _pointerMoved = false;
     _horizontalPanStarted = false;
+    _panButton = kPrimaryMouseButton;
     if ((_dragging || _rightZoomDragging || _zoomSelection != null) &&
         mounted) {
       setState(() {
@@ -616,7 +629,7 @@ class _TelemetryChartState extends State<TelemetryChart> {
         ),
         const PopupMenuItem<_PlotMenuAction>(
           enabled: false,
-          child: Text('鼠标模式：左键平移 · 右键拖动分轴缩放 · 滚轮缩放'),
+          child: Text('左键平移 · 中键横移 · 右键分轴缩放 · 滚轮缩放'),
         ),
         const PopupMenuDivider(),
         const PopupMenuItem(

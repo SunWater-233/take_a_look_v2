@@ -68,6 +68,106 @@ void main() {
 
   for (final inverted in [false, true]) {
     testWidgets(
+      'middle drag pans only the time axis in both directions (inverted X: $inverted)',
+      (tester) async {
+        final controller = await pumpChart(tester);
+        try {
+          controller.configurePlotView({'plotInvertX': inverted});
+          final key = controller.watches.single.symbol.key;
+          controller.setPlotHighlightedWatch(key);
+          final interaction = find.byKey(
+            const ValueKey('telemetry-chart-interaction'),
+          );
+          final size = tester.getSize(interaction);
+          final before = telemetryViewport(controller, size);
+          final direction = inverted ? -1.0 : 1.0;
+          final drag = await tester.startGesture(
+            tester.getCenter(interaction),
+            kind: PointerDeviceKind.mouse,
+            buttons: kMiddleMouseButton,
+          );
+          await drag.moveBy(Offset(80 * direction, 40));
+          await tester.pump();
+          final history = telemetryViewport(controller, size);
+          expect(controller.followLatest, isFalse);
+          expect(history.xMax, lessThan(before.xMax));
+          expect(history.xSpan, closeTo(before.xSpan, 1e-9));
+          expect(history.yMin, before.yMin);
+          expect(history.yMax, before.yMax);
+          expect(controller.plotHighlightedWatchKey, key);
+
+          await drag.moveBy(Offset(-40 * direction, -20));
+          await drag.up();
+          await tester.pump();
+          final recent = telemetryViewport(controller, size);
+          expect(recent.xMax, greaterThan(history.xMax));
+          expect(recent.xMax, lessThan(before.xMax));
+          expect(recent.xSpan, closeTo(before.xSpan, 1e-9));
+          expect(recent.yMin, before.yMin);
+          expect(recent.yMax, before.yMax);
+          expect(controller.plotHighlightedWatchKey, key);
+          controller.applyTelemetrySnapshot({'elapsedSeconds': 22});
+          await tester.pump();
+          expect(controller.plotWindowEndSeconds, recent.xMax);
+        } finally {
+          controller.dispose();
+        }
+      },
+    );
+  }
+
+  testWidgets(
+    'middle drag ignores vertical movement, the live boundary and disabled X',
+    (tester) async {
+      final controller = await pumpChart(tester);
+      try {
+        final interaction = find.byKey(
+          const ValueKey('telemetry-chart-interaction'),
+        );
+        final size = tester.getSize(interaction);
+        final before = telemetryViewport(controller, size);
+        final drag = await tester.startGesture(
+          tester.getCenter(interaction),
+          kind: PointerDeviceKind.mouse,
+          buttons: kMiddleMouseButton,
+        );
+        await drag.moveBy(const Offset(0, 40));
+        await tester.pump();
+        expect(controller.followLatest, isTrue);
+        expect(controller.plotAutoY, isTrue);
+        expect(telemetryViewport(controller, size).yMin, before.yMin);
+        await drag.moveBy(const Offset(-60, 20));
+        await drag.up();
+        await tester.pump();
+        expect(controller.followLatest, isTrue);
+        expect(controller.plotAutoY, isTrue);
+        expect(controller.plotWindowEndSeconds, before.xMax);
+        expect(telemetryViewport(controller, size).yMax, before.yMax);
+
+        controller.configurePlotView({'plotMouseXEnabled': false});
+        final disabled = await tester.startGesture(
+          tester.getCenter(interaction),
+          kind: PointerDeviceKind.mouse,
+          buttons: kMiddleMouseButton,
+        );
+        await disabled.moveBy(const Offset(80, 40));
+        await disabled.up();
+        await tester.pump();
+        final after = telemetryViewport(controller, size);
+        expect(controller.followLatest, isTrue);
+        expect(controller.plotAutoY, isTrue);
+        expect(after.xMin, before.xMin);
+        expect(after.xMax, before.xMax);
+        expect(after.yMin, before.yMin);
+        expect(after.yMax, before.yMax);
+      } finally {
+        controller.dispose();
+      }
+    },
+  );
+
+  for (final inverted in [false, true]) {
+    testWidgets(
       'vertical panning keeps following live data (inverted Y: $inverted)',
       (tester) async {
         final controller = await pumpChart(tester);
@@ -672,6 +772,24 @@ void main() {
     expect(afterRightDrag.xSpan, lessThan(after.xSpan));
     expect(afterRightDrag.ySpan, lessThan(after.ySpan));
     expect(find.text('View All'), findsNothing);
+
+    final middleDrag = await tester.startGesture(
+      center,
+      kind: PointerDeviceKind.mouse,
+      buttons: kMiddleMouseButton,
+    );
+    await middleDrag.moveBy(const Offset(80, 40));
+    await middleDrag.up();
+    await tester.pump();
+    final afterMiddleDrag = telemetryViewport(
+      controller,
+      tester.getSize(interaction),
+    );
+    expect(afterMiddleDrag.xMax, lessThan(afterRightDrag.xMax));
+    expect(afterMiddleDrag.xSpan, closeTo(afterRightDrag.xSpan, 1e-9));
+    expect(afterMiddleDrag.yMin, afterRightDrag.yMin);
+    expect(afterMiddleDrag.yMax, afterRightDrag.yMax);
+    expect(controller.followLatest, isFalse);
     controller.dispose();
   });
 

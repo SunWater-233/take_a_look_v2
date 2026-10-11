@@ -398,6 +398,9 @@ builds in an isolated source copy, bundles the backend runtime, runs tests, and
 creates an installer, offline self-check, ABI manifest and SHA-256 checksum under
 `build/releases/`. See [Linux installation and packaging](docs/linux-install.md)
 for dependency installation, USB permissions, WSL builds and compatibility limits.
+Run the extracted `./install.sh` to install or upgrade an existing installation.
+Upgrades keep acquisition recordings and replace obsolete application libraries;
+uninstalling saves recordings outside the removed application directory.
 
 Create a standalone backend before the Flutter release build:
 

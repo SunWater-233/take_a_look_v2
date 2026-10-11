@@ -48,10 +48,15 @@ void main() {
         RecordingStorage().directory.path,
         RawSampleRecording.defaultDirectory.path,
       );
-      expect(
-        RawSampleRecording.defaultDirectory.parent.absolute.path,
-        File(Platform.resolvedExecutable).parent.absolute.path,
-      );
+      final configured = Platform.environment['TAL_RECORDINGS_DIR'];
+      if (configured != null && configured.isNotEmpty) {
+        expect(RawSampleRecording.defaultDirectory.path, configured);
+      } else {
+        expect(
+          RawSampleRecording.defaultDirectory.parent.absolute.path,
+          File(Platform.resolvedExecutable).parent.absolute.path,
+        );
+      }
     },
   );
 

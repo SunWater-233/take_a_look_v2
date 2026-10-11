@@ -2,24 +2,48 @@
 set -euo pipefail
 app_root="$(dirname "$(readlink -f -- "${BASH_SOURCE[0]}")")"
 prefix="${HOME}/.local"
+explicit_prefix=0
 install_deps=1
 install_udev=0
 while (( $# )); do
   case "$1" in
-    --prefix) [[ $# -ge 2 ]] || exit 2; prefix="$2"; shift 2 ;;
-    --system) prefix=/usr/local; shift ;;
+    --prefix) [[ $# -ge 2 ]] || exit 2; prefix="$2"; explicit_prefix=1; shift 2 ;;
+    --system) prefix=/usr/local; explicit_prefix=1; shift ;;
     --no-deps) install_deps=0; shift ;;
     --udev) install_udev=1; shift ;;
     --help|-h)
       echo 'Usage: ./install.sh [--prefix DIR | --system] [--no-deps] [--udev]'
       echo 'Default: install for the current user in ~/.local; install missing OS dependencies.'
+      echo 'An existing marked installation on PATH, in ~/.local or /usr/local is upgraded in place.'
       exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
+if (( ! explicit_prefix )); then
+  existing_command="$(command -v take-a-look || true)"
+  for candidate in "$existing_command" "$HOME/.local/bin/take-a-look" /usr/local/bin/take-a-look; do
+    [[ -n "$candidate" && -e "$candidate" ]] || continue
+    existing_root="$(dirname "$(readlink -f -- "$candidate")")"
+    existing_prefix="$(dirname "$(dirname "$existing_root")")"
+    if [[ "$existing_root" == "$existing_prefix/lib/take-a-look" &&
+          -f "$existing_root/.take-a-look-package" ]]; then
+      prefix="$existing_prefix"
+      break
+    fi
+  done
+fi
 prefix="$(realpath -m -- "$prefix")"
 destination="$prefix/lib/take-a-look"
 desktop_dir="$prefix/share/applications"
+action=Installed
+if [[ -f "$destination/.take-a-look-package" ]]; then
+  action=Upgraded
+  if [[ ! -w "$destination" || ! -w "$prefix/lib" ]]; then
+    printf 'Existing installation requires administrator access: %s\n' "$destination" >&2
+    printf 'Run: sudo bash %q --prefix %q --no-deps\n' "$app_root/install.sh" "$prefix" >&2
+    exit 1
+  fi
+fi
 
 "$app_root/take-a-look" --check-platform
 if ! "$app_root/take-a-look" --check-libs; then
@@ -42,6 +66,14 @@ if [[ "$app_root" != "$destination" ]]; then
   stage="$(mktemp -d "$prefix/lib/.take-a-look-install.XXXXXX")"
   trap '[[ -z "${stage:-}" ]] || rm -rf -- "$stage"' EXIT
   cp -a "$app_root/." "$stage/"
+  # Older packages store recordings beside the UI or frozen backend. Keep
+  # these journals while replacing application libraries, including obsolete ones.
+  for recordings in recordings backend/runtime/take_a_look_backend/recordings; do
+    if [[ -d "$destination/$recordings" ]]; then
+      mkdir -p "$stage/$recordings"
+      cp -a "$destination/$recordings/." "$stage/$recordings/"
+    fi
+  done
   # Only replace this application's marked installation, after the copy succeeds.
   if [[ -e "$destination" ]]; then
     backup="$(mktemp -d "$prefix/lib/.take-a-look-backup.XXXXXX")"
@@ -84,5 +116,5 @@ if command -v update-desktop-database >/dev/null 2>&1; then
   update-desktop-database "$desktop_dir" || true
 fi
 if (( install_udev )); then "$destination/install-udev.sh"; fi
-printf '\nInstalled: %s\nLaunch from the application menu or run: %s\n' "$destination" "$prefix/bin/take-a-look"
+printf '\n%s: %s\nLaunch from the application menu or run: %s\n' "$action" "$destination" "$prefix/bin/take-a-look"
 printf 'Uninstall: %s/uninstall.sh\n' "$destination"

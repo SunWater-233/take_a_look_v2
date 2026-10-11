@@ -33,6 +33,7 @@ source_root="$work_root/source"
 mkdir "$source_root"
 rsync -a --exclude=.git --exclude=.dart_tool --exclude=.venv --exclude=build \
   --exclude=.flutter-plugins-dependencies --exclude=ephemeral --exclude=__pycache__ \
+  --exclude=recordings --exclude='*.egg-info' \
   --exclude='backend/runtime/take_a_look_backend' --exclude='*.pyc' \
   "$project_root/" "$source_root/"
 # Git on Windows can otherwise leave CRLF in shell scripts from older checkouts.
@@ -47,6 +48,10 @@ backend_python="$source_root/backend/.venv/bin/python"
 "$backend_python" -m pytest -q backend
 "$flutter" analyze
 "$flutter" test --reporter expanded
+read -ra gtk_flags <<< "$(pkg-config --cflags --libs gtk+-3.0)"
+clang++ -std=c++17 -Wall -Wextra tool/tests/linux_gpu_preference_test.cc \
+  linux/runner/gpu_preference.cc "${gtk_flags[@]}" -o "$work_root/gpu-preference-test"
+"$work_root/gpu-preference-test"
 PYTHON="$backend_python" bash tool/build_backend.sh
 "$flutter" build linux --release --target-platform "linux-$flutter_arch"
 
@@ -75,7 +80,13 @@ SOURCE_REVISION="$source_revision" \
 "$backend_python" -m pip freeze --exclude-editable > "$package_root/PYTHON-PACKAGES.txt"
 cp pubspec.lock "$package_root/FLUTTER-PACKAGES.lock"
 archive="$output_dir/$package_name.tar.gz"
-tar --sort=name --owner=0 --group=0 --numeric-owner -czf "$archive" -C "$work_root" "$package_name"
+temporary_archive="$work_root/$package_name.tar.gz"
+tar --sort=name --owner=0 --group=0 --numeric-owner -czf "$temporary_archive" -C "$work_root" "$package_name"
+"$backend_python" "$source_root/tool/verify_linux_package.py" "$temporary_archive"
+# Publish only after the delivered archive passes its installation checks.
+cp "$temporary_archive" "$archive.partial"
+mv -f "$archive.partial" "$archive"
 (cd "$output_dir" && sha256sum "$package_name.tar.gz" > "$package_name.tar.gz.sha256")
-"$backend_python" "$project_root/tool/verify_linux_package.py" "$archive"
+cp "$package_root/INSTALL.md" "$output_dir/INSTALL.md"
+cp "$package_root/BUILD-INFO.json" "$output_dir/$package_name.BUILD-INFO.json"
 echo "Release archive: $archive"

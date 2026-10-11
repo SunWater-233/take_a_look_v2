@@ -10,9 +10,17 @@ class RawSampleRecording {
   RawSampleRecording(this.directory);
 
   /// Portable recordings live beside the application, independent of its
-  /// working directory, user profile, or the backend Python installation.
-  static Directory get defaultDirectory =>
-      Directory('${File(Platform.resolvedExecutable).parent.path}/recordings');
+  /// working directory or Python installation. System installers can select a
+  /// writable per-user location through TAL_RECORDINGS_DIR.
+  static Directory get defaultDirectory {
+    final configured = Platform.environment['TAL_RECORDINGS_DIR'];
+    if (configured != null && configured.isNotEmpty) {
+      return Directory(configured);
+    }
+    return Directory(
+      '${File(Platform.resolvedExecutable).parent.path}/recordings',
+    );
+  }
 
   final Directory directory;
   RandomAccessFile? _file;

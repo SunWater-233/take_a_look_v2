@@ -28,7 +28,7 @@ with tempfile.TemporaryDirectory(prefix="tal package test ") as temporary:
     home = root / "empty home"
     home.mkdir()
     environment = {**os.environ, "HOME": str(home)}
-    for name in ("PYTHONPATH", "PYTHONHOME", "LD_LIBRARY_PATH", "TAKE_A_LOOK_BACKEND_DIR", "TAKE_A_LOOK_PYTHON"):
+    for name in ("PYTHONPATH", "PYTHONHOME", "LD_LIBRARY_PATH", "TAKE_A_LOOK_BACKEND_DIR", "TAKE_A_LOOK_PYTHON", "TAL_RECORDINGS_DIR"):
         environment.pop(name, None)
     launcher = str(app / "take-a-look")
     print(command(launcher, "--doctor", env=environment, cwd=root), end="")
@@ -54,8 +54,20 @@ with tempfile.TemporaryDirectory(prefix="tal package test ") as temporary:
     command(str(prefix / "bin/take-a-look"), "--doctor", env=environment, cwd=root)
     # A stale library from an old release must disappear on upgrade.
     (installed / "obsolete.so").touch()
-    command(str(app / "install.sh"), "--no-deps", "--prefix", str(prefix), env=environment, cwd=root)
+    recording_paths = ("recordings/session/samples.talraw",
+                       "backend/runtime/take_a_look_backend/recordings/session/samples.talraw")
+    for name in recording_paths:
+        journal = installed / name
+        journal.parent.mkdir(parents=True)
+        journal.write_bytes(b"existing acquisition data\n")
+    # Discover a custom prefix through PATH without asking the user to repeat it.
+    upgrade_environment = {**environment, "PATH": str(prefix / "bin") + os.pathsep + os.environ["PATH"]}
+    output = command(str(app / "install.sh"), "--no-deps", env=upgrade_environment, cwd=root)
+    assert "Upgraded:" in output, output
     assert not (installed / "obsolete.so").exists()
+    for name in recording_paths:
+        assert (installed / name).read_bytes() == b"existing acquisition data\n"
+    assert not (home / ".local/lib/take-a-look").exists(), "Upgrade created a duplicate installation"
     # Verify the guard against deleting a directory that is not this installation.
     marker = installed / ".take-a-look-package"
     marker.unlink()
@@ -66,4 +78,7 @@ with tempfile.TemporaryDirectory(prefix="tal package test ") as temporary:
     assert not installed.exists()
     assert not (prefix / "bin/take-a-look").is_symlink()
     assert not desktop.exists()
-print("Archive verified: relocation, offline backend, RPC, install, upgrade, guarded uninstall.")
+    (saved,) = (prefix / "share/take-a-look").glob("saved-recordings.*")
+    for name in recording_paths:
+        assert (saved / name).read_bytes() == b"existing acquisition data\n"
+print("Archive verified: relocation, offline backend, RPC, install, automatic upgrade, recordings preserved, guarded uninstall.")

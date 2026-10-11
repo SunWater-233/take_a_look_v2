@@ -3,6 +3,13 @@ set -euo pipefail
 
 app_root="$(dirname "$(readlink -f -- "${BASH_SOURCE[0]}")")"
 backend="$app_root/backend/runtime/take_a_look_backend/take_a_look_backend"
+# System installations are read-only to desktop users. Both the UI and direct
+# backend launches must write journals to the same per-user writable location.
+if [[ -z "${TAL_RECORDINGS_DIR:-}" && ! -w "$app_root" ]]; then
+  data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
+  [[ "$data_home" == /* ]] || data_home="$HOME/.local/share"
+  export TAL_RECORDINGS_DIR="$data_home/take-a-look/recordings"
+fi
 
 check_platform() {
   local expected_arch minimum_glibc actual_glibc

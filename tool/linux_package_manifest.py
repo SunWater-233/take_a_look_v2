@@ -1,6 +1,7 @@
 """Record the actual ABI floor and redistributable dependency notices."""
 
 import importlib.metadata
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -40,6 +41,7 @@ if maximum and tuple(map(int, minimum.split("."))) > tuple(map(int, maximum.spli
 flutter_info = json.loads(subprocess.check_output([flutter, "--version", "--machine"], text=True))
 manifest = {
     "version": version,
+    "built_at_utc": datetime.now(timezone.utc).isoformat(),
     "architecture": platform.machine(),
     "glibc_minimum": minimum,
     "build_os": platform.freedesktop_os_release().get("PRETTY_NAME", "Linux"),

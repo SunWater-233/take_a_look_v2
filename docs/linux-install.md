@@ -9,9 +9,9 @@ ELF/DWARF 解析库、libusb 和安装脚本；使用者不需要安装 Flutter�
 把压缩包和校验文件放在同一目录，然后执行（把文件名换成实际下载的版本）：
 
 ```bash
-sha256sum -c take-a-look-v2-0.1.0+1-git.36f066f-linux-x86_64.tar.gz.sha256
-tar -xzf take-a-look-v2-0.1.0+1-git.36f066f-linux-x86_64.tar.gz
-cd take-a-look-v2-0.1.0+1-git.36f066f-linux-x86_64
+sha256sum -c take-a-look-v2-0.1.0+1-git.fd48238-linux-x86_64.tar.gz.sha256
+tar -xzf take-a-look-v2-0.1.0+1-git.fd48238-linux-x86_64.tar.gz
+cd take-a-look-v2-0.1.0+1-git.fd48238-linux-x86_64
 ./install.sh --udev
 ```
 
@@ -103,7 +103,7 @@ WSL 可以编译并通过 WSLg 启动界面；使用真实 USB 调试器还需�
 
 ## 远程 GDB 与 EmberMobile
 
-`36f066f` 版本包含远程 GDB、EmberMobile v1/v2 和 ELF 读取进度功能；
+本包包含远程 GDB、EmberMobile v1/v2、ELF 读取进度和当前源码调试界面；
 包内带有 `pygdbmi`、`aioquic` 及相应运行库。GDB 可执行文件按上游设计由系统提供：
 ARM/Cortex-M 目标使用 `arm-none-eabi-gdb` 或 `gdb-multiarch`，并在连接设置的 GDB 路径中指定。
 不使用 GDB 模式时无需安装 GDB；EmberMobile 私有协议模式不依赖 GDB。
@@ -116,17 +116,32 @@ ARM/Cortex-M 目标使用 `arm-none-eabi-gdb` 或 `gdb-multiarch`，并在连接
 ./take-a-look --backend --self-test    # 只检查包内后端，不需要图形会话/探针
 ```
 
-升级时关闭程序，解压新版本，再运行 `./install.sh`，安装器会整体替换原程序目录。
+升级时先关闭主窗口和所有独立窗口，解压新版本，再运行相同的 `./install.sh`。
+无需卸载旧版本。安装器按 PATH 中的 `take-a-look`、`~/.local/bin/take-a-look`、
+`/usr/local/bin/take-a-look` 的顺序识别本应用的已有安装，在原位置完成升级，
+并输出 `Upgraded`。有多个安装时用 `--prefix` 或 `--system` 明确选择要升级的版本。
+系统目录需要管理员权限时，安装器会显示对应的 sudo 命令。
+
+安装器先完成新包自检和临时目录复制，再替换程序；旧库会被清理，原有 `recordings/`
+及旧后端目录内的采样记录会被保留，用户配置目录中的布局不会被改动。
+同一版本重复运行安装器也可修复安装。升级过程中请勿运行程序或同时运行多个安装器。
+
 自定义安装位置可用 `./install.sh --prefix "$HOME/apps/tal"`；程序会放在该前缀的
 `lib/take-a-look`，命令在 `bin/take-a-look`，菜单项在 `share/applications`。
 自定义前缀可能不在桌面的 XDG 搜索路径中，这时直接运行该前缀下的命令即可。
 系统安装可运行 `sudo ./install.sh --system --no-deps`，先由管理员安装依赖。
+从应用菜单或 `take-a-look` 启动系统安装时，若程序目录不可写，采样记录自动写入
+`${XDG_DATA_HOME:-$HOME/.local/share}/take-a-look/recordings`。也可设置
+`TAL_RECORDINGS_DIR=/绝对路径` 指定采样目录，前端和后端会使用同一位置。
+默认的用户安装与可写的便携目录仍在程序旁的 `recordings/` 保存记录。
 
 ```bash
 ~/.local/lib/take-a-look/uninstall.sh
 ```
 
-卸载保留工作区数据及可被其他调试软件使用的 udev 规则。要移除本应用安装的规则：
+卸载会先将程序目录中的采样记录复制到安装前缀的
+`share/take-a-look/saved-recordings.*`，并打印具体位置；用户数据目录中的记录、
+工作区布局及可被其他调试软件使用的 udev 规则也会保留。要移除本应用安装的规则：
 
 ```bash
 sudo rm /etc/udev/rules.d/60-take-a-look-probes.rules
@@ -135,14 +150,14 @@ sudo udevadm control --reload-rules
 
 ## 从源码重建（Linux / WSL）
 
-本次发布采用 **Flutter 3.44.9 / Dart 3.12.2**，重建时建议使用相同版本。
+本次发布采用 **Flutter 3.44.1 / Dart 3.12.1**，与当前 Windows 开发 SDK 一致。
 需要 Linux 版 Flutter、Python 3.11+、Clang、CMake、
 Ninja、pkg-config、GTK 3 开发库、libusb 开发库、rsync 和 binutils。
 建议在 Debian 11 / glibc 2.31 构建环境中使用独立安装的 Python 3.11，扩大发行版覆盖。
 可以用 WSL 内的 chroot/容器提供旧构建环境，而不替换主系统库。
 
 ```bash
-export FLUTTER=/path/to/flutter-3.44.9/bin/flutter
+export FLUTTER=/path/to/flutter-3.44.1/bin/flutter
 export PYTHON=/path/to/python3.11
 export TAL_MAX_GLIBC=2.31
 bash tool/package_linux.sh
@@ -151,11 +166,11 @@ bash tool/package_linux.sh
 从 Windows 调用已经配置好的 WSL 构建环境时：
 
 ```powershell
-wsl -d Ubuntu-24.04 -- bash /mnt/e/ProjectGarage/take_a_look_V2/take_a_look_v2/tool/package_linux.sh
+wsl -d Ubuntu -- bash /mnt/d/ProjectGarage/take_a_look_v2/tool/package_linux.sh
 ```
 
 确保 WSL 的 PATH 指向 Linux Flutter/Python，不要使用挂载的 Windows Flutter 缓存。
-上面直接在 Ubuntu 24.04 运行的命令会使用主机工具链；若要求 glibc 2.31 下限，
+上面直接在 Ubuntu 中运行的命令会使用主机工具链；若要求 glibc 2.31 下限，
 必须在旧版 chroot/容器内运行，并设置 `TAL_MAX_GLIBC=2.31` 作为发布门槛。
 未设置这个变量时，脚本按实际检测的 glibc 要求写入清单，不宣称旧系统兼容。
 

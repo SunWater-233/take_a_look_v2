@@ -87,15 +87,14 @@ void main() {
         ]),
         validityBytesPerFrame: 1,
       );
-      final end = TelemetryStore().applyBinaryBatch(
-        batch,
-        watches,
-        currentElapsed: 0,
-      );
+      final store = TelemetryStore()
+        ..retentionSeconds = 1
+        ..sampleRateHz = 1000;
+      final end = store.applyBinaryBatch(batch, watches, currentElapsed: 0);
       expect(end, 2.004);
       expect(watches[0].totalSampleCount, frames);
-      expect(watches[0].samples, hasLength(1800));
-      expect(watches[0].samples.first, const Offset(0.205, 615));
+      expect(watches[0].samples, hasLength(1001));
+      expect(watches[0].samples.first, const Offset(1.004, 3012));
       expect(watches[0].samples.last, const Offset(2.004, 6012));
       expect(watches[1].totalSampleCount, 1003);
       expect(watches[1].samples.last.dy, 6013);
@@ -104,6 +103,45 @@ void main() {
       expect(watches[2].value, 6014);
     },
   );
+
+  test('time retention grows at high rates and survives a rate decrease', () {
+    final buffer = SampleBuffer(capacity: 3)
+      ..configureRetention(seconds: 2, rateHz: 1000);
+    expect(buffer.capacity, 2001);
+    for (var i = 0; i <= 3000; i++) {
+      buffer.addXY(i / 1000, i.toDouble());
+    }
+    expect(buffer.length, 2001);
+    expect(buffer.first.dx, 1);
+    buffer.configureRetention(seconds: 2, rateHz: 50);
+    expect(buffer.length, 2001);
+    expect(buffer.first.dx, 1);
+    buffer.addXY(3.02, 3020);
+    expect(buffer.first.dx, closeTo(1.02, 1e-9));
+    expect(buffer.last.dx, 3.02);
+    buffer.configureRetention(seconds: 1, rateHz: 50);
+    expect(buffer.first.dx, closeTo(2.02, 1e-9));
+    buffer.clear();
+    expect(buffer.capacity, 51);
+    // An actual RTT stream can exceed its configured polling rate.
+    for (var i = 0; i <= 1000; i++) {
+      buffer.addXY(i / 1000, i.toDouble());
+    }
+    expect(buffer.length, 1001);
+    expect(buffer.first.dx, 0);
+    expect(buffer.capacity, greaterThanOrEqualTo(1001));
+  });
+
+  test('visible range lookup supports ring wrap and overlapping batches', () {
+    final buffer = SampleBuffer(capacity: 10);
+    for (var i = 0; i < 30; i++) {
+      buffer.addXY(i.toDouble(), i.toDouble());
+    }
+    expect(buffer.rangeIndices(22, 25), (2, 6));
+    expect(buffer.valueBounds(22, 25), (22, 25));
+    buffer.addXY(23.5, -10);
+    expect(buffer.valueBounds(22, 25), (-10, 25));
+  });
 }
 
 WatchItem _watch(String key) => WatchItem(

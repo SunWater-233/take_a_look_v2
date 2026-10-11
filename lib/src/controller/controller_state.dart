@@ -12,7 +12,55 @@ class ControllerState {
   final PlotState plot = PlotState();
   final AnalysisSession analysis = AnalysisSession();
   final DebugState debug = DebugState();
+  final SourceWorkspaceState sourceWorkspace = SourceWorkspaceState();
   SymbolLoadProgress? symbolLoad;
+}
+
+/// Presentation state is separate from the target's stopped source location.
+class SourceWorkspaceState {
+  final List<String> openPaths = <String>[];
+  final Set<String> unreadPaths = <String>{};
+  String? selectedPath;
+  int viewedStopRevision = -1;
+  int additionRevision = 0;
+  int attentionStartedAtMs = 0;
+  int attentionUntilMs = 0;
+
+  Map<String, Object?> toJson() => {
+    'openPaths': List<String>.of(openPaths),
+    'unreadPaths': unreadPaths.toList(),
+    'selectedPath': selectedPath,
+    'viewedStopRevision': viewedStopRevision,
+    'additionRevision': additionRevision,
+    'attentionStartedAtMs': attentionStartedAtMs,
+    'attentionUntilMs': attentionUntilMs,
+  };
+
+  void applyJson(Map<String, dynamic> data) {
+    openPaths
+      ..clear()
+      ..addAll(
+        (data['openPaths'] as List? ?? const [])
+            .whereType<String>()
+            .where((path) => path.isNotEmpty)
+            .toSet(),
+      );
+    unreadPaths
+      ..clear()
+      ..addAll(
+        (data['unreadPaths'] as List? ?? const []).whereType<String>().where(
+          openPaths.contains,
+        ),
+      );
+    final selected = data['selectedPath'];
+    selectedPath = selected is String && openPaths.contains(selected)
+        ? selected
+        : null;
+    viewedStopRevision = (data['viewedStopRevision'] as int?) ?? -1;
+    additionRevision = (data['additionRevision'] as int?) ?? 0;
+    attentionStartedAtMs = (data['attentionStartedAtMs'] as int?) ?? 0;
+    attentionUntilMs = (data['attentionUntilMs'] as int?) ?? 0;
+  }
 }
 
 class DebugState {
@@ -25,6 +73,7 @@ class DebugState {
   String? currentSource;
   int? currentLine;
   int? programCounter;
+  int stopRevision = 0;
   String sourceRoot = '';
 }
 
@@ -50,6 +99,7 @@ class ConnectionState {
 }
 
 class AcquisitionState {
+  Map<String, dynamic> rawRecording = <String, dynamic>{};
   double sampleRateHz = 50;
   double rttSampleRateHz = 1000;
   String displayRefreshMode = 'standard';
@@ -61,9 +111,12 @@ class AcquisitionState {
 }
 
 class PlotState {
+  String? highlightedWatchKey;
+  int watchSelectionRevision = 0;
   bool plottingPaused = false;
   bool followLatest = true;
   double visibleWindowSeconds = 12;
+  double retentionSeconds = 60;
   bool autoY = true;
   double? yMin;
   double? yMax;

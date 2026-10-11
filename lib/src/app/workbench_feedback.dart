@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../controller/controller.dart';
 import '../models/models.dart';
+import '../telemetry/recording_storage.dart';
 import '../theme/theme.dart';
 
 /// Orders load progress and error feedback in both main and detached windows.
@@ -12,18 +13,23 @@ class WorkbenchFeedback extends StatefulWidget {
   const WorkbenchFeedback({
     required this.controller,
     required this.child,
+    this.recordingStorage,
     super.key,
   });
 
   final TakeALookController controller;
   final Widget child;
 
+  /// Supplied only by the main window, so detached engines never rescan or
+  /// repeat the startup housekeeping notice.
+  final RecordingStorage? recordingStorage;
+
   @override
   State<WorkbenchFeedback> createState() => _WorkbenchFeedbackState();
 }
 
 class _WorkbenchFeedbackState extends State<WorkbenchFeedback> {
-  final _feedback = TalFeedbackController();
+  late final _feedback = TalFeedbackController(onNoticeDismissed: _changed);
   Map<String, dynamic>? _lastError;
   Map<String, dynamic>? _pendingError;
   SymbolLoadProgress? _pendingLoad;
@@ -33,11 +39,62 @@ class _WorkbenchFeedbackState extends State<WorkbenchFeedback> {
   bool _scheduled = false;
   bool _showingError = false;
   bool _finishing = false;
+  int? _pendingRecordingBytes;
 
   @override
   void initState() {
     super.initState();
     _listen();
+    unawaited(_checkRecordingStorage());
+  }
+
+  Future<void> _checkRecordingStorage() async {
+    final storage = widget.recordingStorage;
+    if (storage == null) return;
+    try {
+      final bytes = await storage.totalBytes();
+      if (!mounted || bytes <= RecordingStorage.warningThresholdBytes) return;
+      _pendingRecordingBytes = bytes;
+      _changed();
+    } catch (error) {
+      if (!mounted) return;
+      widget.controller.addLog('检查记录文件夹大小失败：$error', level: LogLevel.warning);
+    }
+  }
+
+  void _showRecordingNotice() {
+    final bytes = _pendingRecordingBytes;
+    final storage = widget.recordingStorage;
+    if (bytes == null ||
+        storage == null ||
+        _loadRoute != null ||
+        widget.controller.isSymbolLoading ||
+        _pendingError != null ||
+        _feedback.isShowingNotice) {
+      return;
+    }
+    _pendingRecordingBytes = null;
+    final megabytes = (bytes / RecordingStorage.bytesPerMb).toStringAsFixed(1);
+    _feedback.showActionNotice(
+      context: context,
+      title: '采样记录占用较多空间',
+      message: '已保存的记录共 $megabytes MB，超过 500 MB。可打开记录文件夹，删除不再需要的历史记录。',
+      actionLabel: '打开记录文件夹',
+      onAction: () async {
+        try {
+          await storage.openDirectory();
+        } catch (error) {
+          if (!mounted) return;
+          widget.controller.addLog('打开记录文件夹失败：$error', level: LogLevel.warning);
+          await _feedback.showError(
+            context: context,
+            title: '无法打开记录文件夹',
+            message: '请手动打开：${storage.directory.path}',
+            details: error.toString(),
+          );
+        }
+      },
+    );
   }
 
   void _listen() {
@@ -174,6 +231,7 @@ class _WorkbenchFeedbackState extends State<WorkbenchFeedback> {
       }
     } finally {
       _showingError = false;
+      if (mounted) _showRecordingNotice();
     }
   }
 

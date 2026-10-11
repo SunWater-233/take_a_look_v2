@@ -29,6 +29,8 @@ class TalPanelTabSurface extends StatelessWidget {
     required this.selected,
     this.width,
     this.surfaceKey,
+    this.attention = 0,
+    this.unread = false,
     super.key,
   });
 
@@ -36,6 +38,8 @@ class TalPanelTabSurface extends StatelessWidget {
   final bool selected;
   final double? width;
   final Key? surfaceKey;
+  final double attention;
+  final bool unread;
 
   @override
   Widget build(BuildContext context) {
@@ -51,11 +55,18 @@ class TalPanelTabSurface extends StatelessWidget {
       height: TalUiTheme.of(context).panelTabHeight,
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
-        color: selected ? TalColors.surface : TalColors.surfaceAlt,
+        color: Color.alphaBlend(
+          _sourceAttentionColor.withValues(alpha: attention * 0.13),
+          selected ? TalColors.surface : TalColors.surfaceAlt,
+        ),
         border: Border(
           top: BorderSide(
-            color: selected ? TalColors.accent : TalColors.border,
-            width: selected ? 2 : 1,
+            color: Color.lerp(
+              selected ? TalColors.accent : TalColors.border,
+              _sourceAttentionColor,
+              attention,
+            )!,
+            width: selected || tab == WorkspacePanelId.sourceDebug ? 2 : 1,
           ),
           right: const BorderSide(color: TalColors.border),
           bottom: BorderSide(
@@ -63,14 +74,28 @@ class TalPanelTabSurface extends StatelessWidget {
           ),
         ),
       ),
-      child: Center(
-        child: Text(
-          tab.title,
-          maxLines: 1,
-          softWrap: false,
-          overflow: TextOverflow.clip,
-          style: talBody,
-        ),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Center(
+            child: Text(
+              tab.title,
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.clip,
+              style: talBody,
+            ),
+          ),
+          if (unread)
+            const Positioned(
+              right: -8,
+              top: 0,
+              bottom: 0,
+              child: Center(
+                child: _SourceUnreadDot(key: ValueKey('source-panel-unread')),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -81,12 +106,14 @@ class TalPanelFrame extends StatefulWidget {
     required this.panel,
     required this.child,
     this.chrome,
+    this.controller,
     super.key,
   });
 
   final WorkspacePanelId panel;
   final Widget child;
   final PanelChrome? chrome;
+  final TakeALookController? controller;
 
   @override
   State<TalPanelFrame> createState() => _TalPanelFrameState();
@@ -167,12 +194,42 @@ class _TalPanelFrameState extends State<TalPanelFrame> {
                         ),
                       ),
                       Expanded(
-                        child: Text(
-                          title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: talStrong,
-                        ),
+                        child:
+                            (tabs.length == 1 || collapsed) &&
+                                tabs.contains(WorkspacePanelId.sourceDebug) &&
+                                widget.controller != null
+                            ? _SourceTabAttention(
+                                controller: widget.controller!,
+                                builder: (attention, unread) => Container(
+                                  color: _sourceAttentionColor.withValues(
+                                    alpha: attention * 0.13,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Flexible(
+                                        child: Text(
+                                          title,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: talStrong,
+                                        ),
+                                      ),
+                                      if (unread) ...[
+                                        const SizedBox(width: 6),
+                                        const _SourceUnreadDot(
+                                          key: ValueKey('source-panel-unread'),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                              )
+                            : Text(
+                                title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: talStrong,
+                              ),
                       ),
                       if (chrome != null && chrome.showActions)
                         TalIconButton(
@@ -201,6 +258,7 @@ class _TalPanelFrameState extends State<TalPanelFrame> {
             ),
             if (!collapsed && tabs.length > 1)
               _PanelTabs(
+                controller: widget.controller,
                 tabs: tabs,
                 selected: chrome!.activePanel,
                 onSelected: chrome.onSelect,
@@ -221,6 +279,7 @@ class _TalPanelFrameState extends State<TalPanelFrame> {
 
 class _PanelTabs extends StatefulWidget {
   const _PanelTabs({
+    this.controller,
     required this.tabs,
     required this.selected,
     required this.onSelected,
@@ -233,6 +292,7 @@ class _PanelTabs extends StatefulWidget {
   });
 
   final List<WorkspacePanelId> tabs;
+  final TakeALookController? controller;
   final WorkspacePanelId selected;
   final ValueChanged<WorkspacePanelId> onSelected;
   final String? groupId;
@@ -435,12 +495,18 @@ class _PanelTabsState extends State<_PanelTabs> {
   }
 
   Widget _tabSurface(WorkspacePanelId tab) {
-    return TalPanelTabSurface(
+    Widget surface(double attention, bool unread) => TalPanelTabSurface(
       tab: tab,
       selected: tab == widget.selected,
       width: _tabWidth(tab),
       surfaceKey: ValueKey<String>('panel-tab-${tab.name}'),
+      attention: attention,
+      unread: unread,
     );
+    final controller = widget.controller;
+    return tab == WorkspacePanelId.sourceDebug && controller != null
+        ? _SourceTabAttention(controller: controller, builder: surface)
+        : surface(0, false);
   }
 }
 

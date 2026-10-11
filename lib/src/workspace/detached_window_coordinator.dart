@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
 
+import '../controller/controller.dart';
 import 'panel_types.dart';
 import 'window_sync.dart';
 
@@ -307,6 +308,7 @@ class DetachedWindowCoordinator {
   }
 
   void _clearAssignment(_PooledDetachedWindow entry) {
+    windowSync.controller.removeSourceViewsForWindow(entry.controller.windowId);
     _assign(entry, activePanel: null, panels: const <WorkspacePanelId>[]);
   }
 

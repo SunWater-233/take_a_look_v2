@@ -9,6 +9,7 @@ class _SymbolTreeNode {
   final String label;
   final _SymbolTreeNodeKind kind;
   SymbolItem? symbol;
+  String? sourcePath;
   final List<_SymbolTreeNode> children = <_SymbolTreeNode>[];
   final Set<String> symbolKeys = <String>{};
 
@@ -67,6 +68,7 @@ class _SymbolPanelState extends State<_SymbolPanel> {
   Set<String> _selectedSymbols = const <String>{};
   int _treeRevision = -1;
   String _treeQuery = '';
+  final Set<String> _collapsedSearchNodes = <String>{};
   String? _lastTappedNodeKey;
   DateTime? _lastTapAt;
 
@@ -122,6 +124,9 @@ class _SymbolPanelState extends State<_SymbolPanel> {
         );
       }
 
+      if (source.trim().isNotEmpty && source != '未知来源') {
+        parent!.sourcePath = source;
+      }
       final nameParts = _splitSymbolPath(symbol.name);
       var symbolKey = '${parent!.key}/symbol';
       for (var index = 0; index < nameParts.length; index += 1) {
@@ -183,7 +188,9 @@ class _SymbolPanelState extends State<_SymbolPanel> {
     final result = <_VisibleSymbolNode>[];
     void visit(_SymbolTreeNode node, int depth) {
       result.add(_VisibleSymbolNode(node, depth));
-      if (expandAll || widget.controller.isSymbolTreeNodeExpanded(node.key)) {
+      if (expandAll
+          ? !_collapsedSearchNodes.contains(node.key)
+          : widget.controller.isSymbolTreeNodeExpanded(node.key)) {
         for (final child in node.children) {
           visit(child, depth + 1);
         }
@@ -198,9 +205,81 @@ class _SymbolPanelState extends State<_SymbolPanel> {
 
   void _toggleNode(_SymbolTreeNode node) {
     setState(() {
-      widget.controller.toggleSymbolTreeNodeExpansion(node.key);
+      if (_treeQuery.trim().isNotEmpty) {
+        if (!_collapsedSearchNodes.add(node.key)) {
+          _collapsedSearchNodes.remove(node.key);
+        }
+      } else {
+        widget.controller.toggleSymbolTreeNodeExpansion(node.key);
+      }
       _rebuildVisibleRows();
     });
+  }
+
+  bool _isExpanded(_SymbolTreeNode node) => _treeQuery.trim().isNotEmpty
+      ? !_collapsedSearchNodes.contains(node.key)
+      : widget.controller.isSymbolTreeNodeExpanded(node.key);
+
+  Future<void> _showFileContextMenu(
+    _SymbolTreeNode node,
+    Offset globalPosition,
+  ) async {
+    if (node.kind != _SymbolTreeNodeKind.sourceFile) return;
+    final overlay =
+        Overlay.of(context).context.findRenderObject()! as RenderBox;
+    final position = overlay.globalToLocal(globalPosition);
+    final path = node.sourcePath;
+    final added = path != null && widget.controller.isSourceFileOpen(path);
+    final expanded = _isExpanded(node);
+    final ui = TalUiTheme.of(context);
+    PopupMenuItem<String> item(
+      String value,
+      String label,
+      IconData icon, {
+      bool enabled = true,
+    }) => PopupMenuItem<String>(
+      value: value,
+      enabled: enabled,
+      height: ui.menuItemHeight,
+      child: Row(
+        children: [
+          Icon(
+            icon,
+            size: 16,
+            color: enabled ? TalColors.text : TalColors.muted,
+          ),
+          const SizedBox(width: 8),
+          Text(label),
+        ],
+      ),
+    );
+    final action = await showTalContextMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(
+        Rect.fromLTWH(position.dx, position.dy, 0, 0),
+        Offset.zero & overlay.size,
+      ),
+      items: [
+        item(
+          'expand',
+          expanded ? '收起' : '展开',
+          expanded ? Icons.unfold_less : Icons.unfold_more,
+        ),
+        const PopupMenuDivider(),
+        item(
+          'add',
+          added ? '已添加到源码调试' : '添加到源码调试',
+          added ? Icons.check : Icons.code,
+          enabled: path != null && !added,
+        ),
+      ],
+    );
+    if (!mounted) return;
+    if (action == 'expand') {
+      _toggleNode(node);
+    } else if (action == 'add' && path != null) {
+      widget.controller.addSourceFileFromSymbols(path);
+    }
   }
 
   void _resizeColumn(int index, double delta) {
@@ -223,6 +302,7 @@ class _SymbolPanelState extends State<_SymbolPanel> {
         _treeQuery == query) {
       return;
     }
+    if (_treeQuery != query) _collapsedSearchNodes.clear();
     if (query.isEmpty) {
       final cache = _symbolTreeCaches[widget.controller] ??= _SymbolTreeCache();
       if (cache.revision != widget.controller.symbolRevision) {
@@ -440,13 +520,10 @@ class _SymbolPanelState extends State<_SymbolPanel> {
                               rowHeight: _rowHeight,
                               selected:
                                   _selectedNodes[rows[index].node.key] ?? false,
-                              expanded:
-                                  _treeQuery.trim().isNotEmpty ||
-                                  widget.controller.isSymbolTreeNodeExpanded(
-                                    rows[index].node.key,
-                                  ),
+                              expanded: _isExpanded(rows[index].node),
                               onToggleNode: _toggleNode,
                               onSelectNode: _selectNode,
+                              onFileContextMenu: _showFileContextMenu,
                             ),
                           ),
                   ),
@@ -563,6 +640,7 @@ class _SymbolTreeRow extends StatelessWidget {
     required this.expanded,
     required this.onToggleNode,
     required this.onSelectNode,
+    required this.onFileContextMenu,
   });
 
   final _VisibleSymbolNode entry;
@@ -576,6 +654,7 @@ class _SymbolTreeRow extends StatelessWidget {
   final bool expanded;
   final ValueChanged<_SymbolTreeNode> onToggleNode;
   final ValueChanged<_SymbolTreeNode> onSelectNode;
+  final void Function(_SymbolTreeNode, Offset) onFileContextMenu;
 
   @override
   Widget build(BuildContext context) {
@@ -607,6 +686,18 @@ class _SymbolTreeRow extends StatelessWidget {
       color: rowColor,
       child: InkWell(
         onTap: () => onSelectNode(node),
+        onSecondaryTapDown: node.kind == _SymbolTreeNodeKind.sourceFile
+            ? (details) => onFileContextMenu(node, details.globalPosition)
+            : null,
+        onLongPress: node.kind == _SymbolTreeNodeKind.sourceFile
+            ? () {
+                final box = context.findRenderObject()! as RenderBox;
+                onFileContextMenu(
+                  node,
+                  box.localToGlobal(Offset(24, rowHeight)),
+                );
+              }
+            : null,
         child: SizedBox(
           height: rowHeight,
           child: Row(

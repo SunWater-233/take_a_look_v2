@@ -9,7 +9,7 @@ from unittest.mock import patch
 from pathlib import Path
 
 from take_a_look_backend.backends.pyocd_memory import PyOcdConnectionConfig
-from take_a_look_backend.models import SymbolInfo
+from take_a_look_backend.models import SymbolInfo, WatchedVariable
 from take_a_look_backend.protocol import EventName, ProtocolError, RpcMethod
 from take_a_look_backend.service import BackendService
 from take_a_look_backend.services.debug_info import DebugInfoIndex, SourceLocation
@@ -87,12 +87,14 @@ class BackendServiceTests(unittest.TestCase):
         self.events: list[tuple[EventName, object]] = []
         self.events_lock = threading.Lock()
         self.memory = _FakeMemory()
+        self.recording_directory = tempfile.TemporaryDirectory(prefix="tal_recording_")
         self.symbols = [
             SymbolInfo("counter", 0x20000000, 4, "uint32_t", ".data", "main.c"),
             SymbolInfo("readonly", 0x08000000, 4, "uint32_t", ".rodata", "main.c"),
         ]
         self.service = BackendService(
             self._event,
+            recording_directory=Path(self.recording_directory.name),
             memory_backend=self.memory,  # type: ignore[arg-type]
             normal_rtt_backend=_FakeRtt(),  # type: ignore[arg-type]
             plus_rtt_backend=_FakeRtt(),  # type: ignore[arg-type]
@@ -107,6 +109,50 @@ class BackendServiceTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.service.close()
+        self.recording_directory.cleanup()
+
+    def test_pending_recording_survives_watch_removal_and_clear(self) -> None:
+        key = self.symbols[0].key
+        with self.service._lock:
+            self.service._watches[key] = WatchedVariable(self.symbols[0], "#00ff00")
+            self.service._queue_samples_locked([(1.0, {key: 41}), (1.1, {key: 42})])
+            self.service._watches.clear()
+            self.service._flush_pending_samples_locked()
+            old_path = self.service._recording.path
+            self.assertEqual(self.service._recording.sample_count, 2)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "complete.csv"
+            self.service.handle(RpcMethod.EXPORT_CSV, {"path": str(path)})
+            with path.open(encoding="utf-8-sig", newline="") as stream:
+                self.assertEqual(list(csv.reader(stream)), [
+                    ["elapsed_seconds", "counter"], ["1.000000000", "41"], ["1.100000000", "42"]])
+        self.service.handle(RpcMethod.CLEAR_SAMPLES, {})
+        self.assertTrue(old_path.exists())
+        self.assertEqual(self.service._recording.sample_count, 0)
+
+    def test_recording_failure_pauses_acquisition_and_blocks_resume(self) -> None:
+        key = self.symbols[0].key
+        with self.service._lock:
+            self.service._watches[key] = WatchedVariable(self.symbols[0], "#00ff00")
+            self.service._queue_samples_locked([(1.0, {key: 41})])
+            with patch.object(self.service._recording, "append", side_effect=OSError("disk full")):
+                self.service._flush_pending_samples_locked()
+            self.assertTrue(self.service._sampling_paused)
+            self.assertEqual(self.service._recording.sample_count, 0)
+        with self.assertRaises(ProtocolError):
+            self.service.handle(RpcMethod.SET_SAMPLING_PAUSED, {"paused": False})
+        self.assertTrue(any(event == EventName.ERROR and value["code"] == "raw_recording_failed"
+                            for event, value in self.events))
+
+    def test_connect_starts_a_new_time_axis_and_preserves_the_old_journal(self) -> None:
+        with self.service._lock:
+            self.service._recording.append([(70.0, {"old": 12})], {"old": "previous"})
+            previous = self.service._recording.path
+        self.service.handle(RpcMethod.CONNECT, {})
+        self.assertTrue(previous.exists())
+        self.assertNotEqual(self.service._recording.path, previous)
+        self.assertEqual(self.service._recording.sample_count, 0)
+        self.assertTrue(any(event == EventName.SAMPLES_CLEARED for event, _ in self.events))
 
     def _event(self, name: EventName, params: object) -> None:
         with self.events_lock:

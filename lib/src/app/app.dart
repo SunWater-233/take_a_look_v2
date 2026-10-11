@@ -10,6 +10,7 @@ import 'title_bar.dart';
 import 'workbench_feedback.dart';
 import '../backend/backend_client.dart';
 import '../controller/controller.dart';
+import '../telemetry/recording_storage.dart';
 import '../workspace/keyboard_shortcuts.dart';
 import '../workspace/panel_types.dart';
 import '../panels/panels.dart';
@@ -25,13 +26,23 @@ class TakeALookApp extends StatefulWidget {
     this.detachedPanels,
     this.secondaryWindowRole = SecondaryWindowRole.detachedPanel,
     this.enableBackend = false,
+    this.controller,
+    this.workbenchToolbar,
+    this.layoutFile,
+    this.inputModeOverride,
     super.key,
-  });
+  }) : assert(controller == null || (!enableBackend && detachedPanel == null));
 
   final WorkspacePanelId? detachedPanel;
   final List<WorkspacePanelId>? detachedPanels;
   final SecondaryWindowRole secondaryWindowRole;
   final bool enableBackend;
+
+  /// An injected controller is owned and disposed by its caller.
+  final TakeALookController? controller;
+  final Widget? workbenchToolbar;
+  final File? layoutFile;
+  final TalInputMode? inputModeOverride;
 
   @override
   State<TakeALookApp> createState() => _TakeALookAppState();
@@ -39,6 +50,7 @@ class TakeALookApp extends StatefulWidget {
 
 class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
   late final TakeALookController controller;
+  final _recordingStorage = RecordingStorage();
   MainWindowSync? windowSync;
   BackendClient? backendClient;
   WorkspacePanelId? detachedPanel;
@@ -53,7 +65,9 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
   void initState() {
     super.initState();
     if (widget.detachedPanel == null) {
-      if (widget.enableBackend) {
+      if (widget.controller != null) {
+        controller = widget.controller!;
+      } else if (widget.enableBackend) {
         final client = BackendClient();
         controller = TakeALookController(
           backendCommand: client.command,
@@ -244,7 +258,7 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
     unawaited(windowSync?.dispose());
     backendClient?.eventHandler = null;
     unawaited(backendClient?.close());
-    controller.dispose();
+    if (widget.controller == null) controller.dispose();
     super.dispose();
   }
 
@@ -254,7 +268,7 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
       builder: (context, inputMode) => MaterialApp(
         debugShowCheckedModeBanner: false,
         title: 'Take A Look',
-        theme: buildTalTheme(inputMode: inputMode),
+        theme: buildTalTheme(inputMode: widget.inputModeOverride ?? inputMode),
         themeAnimationDuration: Duration.zero,
         builder: (context, child) {
           return ValueListenableBuilder<double>(
@@ -265,7 +279,13 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
           );
         },
         home: widget.detachedPanel == null
-            ? MainWorkbench(controller: controller, windowSync: windowSync!)
+            ? MainWorkbench(
+                controller: controller,
+                windowSync: windowSync!,
+                layoutFile: widget.layoutFile,
+                toolbar: widget.workbenchToolbar,
+                recordingStorage: _recordingStorage,
+              )
             : widget.secondaryWindowRole == SecondaryWindowRole.dragPreview
             ? TabContentDragPreviewWindow(
                 controller: controller,
@@ -277,6 +297,7 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
                   controller: controller,
                   panel: detachedPanel!,
                   panels: detachedPanels,
+                  assigned: detachedWindowAssigned,
                 ),
               ),
       ),
@@ -319,7 +340,11 @@ class TabContentDragPreviewWindow extends StatelessWidget {
                   border: Border.all(color: TalColors.panelBorder),
                 ),
                 clipBehavior: Clip.hardEdge,
-                child: buildWorkspacePanelBody(panel, controller),
+                child: buildWorkspacePanelBody(
+                  panel,
+                  controller,
+                  sourcePreview: true,
+                ),
               ),
             ),
           ],
@@ -382,12 +407,16 @@ class MainWorkbench extends StatefulWidget {
     required this.controller,
     required this.windowSync,
     this.layoutFile,
+    this.toolbar,
+    this.recordingStorage,
     super.key,
   });
 
   final TakeALookController controller;
   final MainWindowSync windowSync;
   final File? layoutFile;
+  final Widget? toolbar;
+  final RecordingStorage? recordingStorage;
 
   @override
   State<MainWorkbench> createState() => _MainWorkbenchState();
@@ -416,6 +445,7 @@ class _MainWorkbenchState extends State<MainWorkbench> {
   Widget build(BuildContext context) {
     return WorkbenchFeedback(
       controller: widget.controller,
+      recordingStorage: widget.recordingStorage,
       child: WorkspaceKeyboardShortcuts(
         onKeyEvent: _handleWorkbenchShortcut,
         child: Scaffold(
@@ -425,6 +455,7 @@ class _MainWorkbenchState extends State<MainWorkbench> {
                 controller: widget.controller,
                 workspaceKey: workspaceKey,
               ),
+              if (widget.toolbar != null) widget.toolbar!,
               Expanded(
                 child: DockingWorkspace(
                   key: workspaceKey,
@@ -449,12 +480,14 @@ class DetachedPanelWindow extends StatefulWidget {
     required this.controller,
     required this.panel,
     this.panels = const <WorkspacePanelId>[],
+    this.assigned = true,
     super.key,
   });
 
   final TakeALookController controller;
   final WorkspacePanelId panel;
   final List<WorkspacePanelId> panels;
+  final bool assigned;
 
   @override
   State<DetachedPanelWindow> createState() => _DetachedPanelWindowState();
@@ -535,6 +568,7 @@ class _DetachedPanelWindowState extends State<DetachedPanelWindow> {
                     activePanel,
                     widget.controller,
                     chrome: chrome,
+                    sourcePreview: !widget.assigned,
                   ),
                 ),
               ),

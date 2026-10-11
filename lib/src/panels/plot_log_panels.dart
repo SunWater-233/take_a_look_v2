@@ -22,31 +22,55 @@ class _PlotPanel extends StatelessWidget {
               color: TalColors.surface,
               border: Border(bottom: BorderSide(color: TalColors.border)),
             ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    controller.watches.isEmpty
-                        ? '从符号列表加入变量并勾选绘制后显示曲线'
-                        : '${controller.watches.where((item) => item.plotted).length} 条曲线 · ${controller.sampleRateLabel}',
-                    style: talMuted,
+            child: LayoutBuilder(
+              builder: (context, constraints) => SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: SizedBox(
+                  width: math.max(760, constraints.maxWidth),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          controller.watches.isEmpty
+                              ? '从符号列表加入变量并勾选绘制后显示曲线'
+                              : '${controller.watches.where((item) => item.plotted).length} 条曲线 · ${controller.sampleRateLabel}',
+                          style: talMuted,
+                        ),
+                      ),
+                      SizedBox(
+                        width: 146,
+                        child: TalDropdown<double>(
+                          key: const ValueKey('plot-retention'),
+                          value: controller.plotRetentionSeconds,
+                          values: const [10, 30, 60, 120],
+                          label: (seconds) =>
+                              '历史 ${seconds.toStringAsFixed(0)} 秒',
+                          onChanged: (seconds) => controller.configurePlotView({
+                            'plotRetentionSeconds': seconds,
+                          }),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      TalButton(
+                        onPressed: controller.togglePlotting,
+                        child: Text(
+                          controller.plottingPaused ? '继续绘图' : '暂停绘图',
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      TalButton(
+                        onPressed: controller.toggleFollowLatest,
+                        child: Text(controller.followLatest ? '停止跟随' : '跟随最新'),
+                      ),
+                      const SizedBox(width: 8),
+                      TalButton(
+                        onPressed: controller.exportCsv,
+                        child: const Text('导出原始CSV'),
+                      ),
+                    ],
                   ),
                 ),
-                TalButton(
-                  onPressed: controller.togglePlotting,
-                  child: Text(controller.plottingPaused ? '继续绘图' : '暂停绘图'),
-                ),
-                const SizedBox(width: 8),
-                TalButton(
-                  onPressed: controller.toggleFollowLatest,
-                  child: Text(controller.followLatest ? '停止跟随' : '跟随最新'),
-                ),
-                const SizedBox(width: 8),
-                TalButton(
-                  onPressed: controller.exportCsv,
-                  child: const Text('导出原始CSV'),
-                ),
-              ],
+              ),
             ),
           ),
         ),

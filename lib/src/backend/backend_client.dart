@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'backend_transport.dart';
 import '../protocol/commands.dart';
 import '../protocol/events.dart';
+import '../telemetry/raw_recording.dart';
 
 export 'backend_transport.dart';
 export '../app/file_pickers.dart';
@@ -70,6 +71,8 @@ class BackendClient {
                   ...Platform.environment,
                   'PYTHONPATH': backendDirectory.path,
                   'PYTHONUTF8': '1',
+                  'TAL_RECORDINGS_DIR':
+                      RawSampleRecording.defaultDirectory.path,
                 },
                 runInShell: launch.runInShell,
               ));

@@ -278,7 +278,9 @@ void main() {
     await mouse.down(tester.getTopLeft(chart) + local);
     await tester.pump();
     expect(curvePaints(recordPainter(painter, render.size)), hasLength(1));
+    await mouse.moveTo(tester.getTopLeft(chart) + local + const Offset(10, 0));
     await mouse.up();
+    expect(controller.plotHighlightedWatchKey, isNull);
     await mouse.moveTo(tester.getTopLeft(chart) + local + const Offset(1, 0));
     await tester.pump();
     expect(curvePaints(recordPainter(painter, render.size)), hasLength(3));

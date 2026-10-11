@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import csv
 import math
 import threading
 import time
-from collections import deque
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
@@ -16,6 +14,7 @@ from take_a_look_backend.backends.ember_transport import EmberError
 from take_a_look_backend.models import SymbolInfo, WatchedVariable, json_value
 from take_a_look_backend.protocol import EventName, PROTOCOL_VERSION, ProtocolError, RpcMethod
 from take_a_look_backend.services.sampling import SamplingServiceMixin
+from take_a_look_backend.services.recording import RawRecording, export_recording_csv
 from take_a_look_backend.services.debug_info import DebugInfoIndex, load_debug_info_from_elf
 from take_a_look_backend.services.symbols import load_symbols_from_elf
 
@@ -43,6 +42,7 @@ class BackendService(SamplingServiceMixin):
         symbol_loader: SymbolLoader = load_symbols_from_elf,
         debug_info_loader: DebugInfoLoader = load_debug_info_from_elf,
         remote_backend_factory: Callable[..., RemoteMemoryBackend] = RemoteMemoryBackend,
+        recording_directory: Path | None = None,
     ) -> None:
         self._emit_event = event_sink
         self._memory = memory_backend or PyOcdMemoryBackend()
@@ -74,7 +74,10 @@ class BackendService(SamplingServiceMixin):
         self._connection_started_at: float | None = None
         self._symbols: dict[str, SymbolInfo] = {}
         self._watches: dict[str, WatchedVariable] = {}
-        self._samples: deque[tuple[float, dict[str, object]]] = deque(maxlen=600_000)
+        self._recording = RawRecording(recording_directory)
+        self._pending_frames: list[tuple[float, dict[str, object]]] = []
+        self._pending_recording_frames: list[tuple[float, dict[str, object]]] = []
+        self._pending_recording_labels: dict[str, str] = {}
         self._sample_count_since_perf = 0
         self._perf_window_started_at = time.monotonic()
         self._last_perf_at = self._perf_window_started_at
@@ -94,10 +97,14 @@ class BackendService(SamplingServiceMixin):
         self._wake.set()
         self._sampler.join(timeout=2.0)
         with self._lock:
-            self._stop_rtt_locked()
-            self._remove_all_breakpoints_locked()
-            self._memory.disconnect()
-            self._connection_status = "disconnected"
+            try:
+                self._flush_pending_samples_locked()
+                self._recording.close()
+            finally:
+                self._stop_rtt_locked()
+                self._remove_all_breakpoints_locked()
+                self._memory.disconnect()
+                self._connection_status = "disconnected"
 
     def handle(self, method: RpcMethod, params: Mapping[str, object]) -> dict[str, object]:
         if method is RpcMethod.HANDSHAKE:
@@ -187,7 +194,8 @@ class BackendService(SamplingServiceMixin):
             "rttControlBlockAddress": self._rtt_control_block_address,
             "symbolFile": self._symbol_file,
             "elapsedSeconds": self._elapsed_locked(),
-            "sampleCount": len(self._samples),
+            "sampleCount": self._recording.sample_count,
+            "rawRecording": self._recording.status(),
             "debug": self._debug_state_locked(),
         }
 
@@ -210,6 +218,9 @@ class BackendService(SamplingServiceMixin):
             )
             self._memory.connect(config)
             initial_execution_state = self._memory.debug_state()
+            # A successful reconnect restarts the time axis. Keep the previous
+            # journal on disk and start a fresh plot/recording epoch together.
+            self._clear_samples()
             with self._lock:
                 self._target_execution_state = initial_execution_state
                 self._refresh_debug_state_locked(force=True)
@@ -243,6 +254,7 @@ class BackendService(SamplingServiceMixin):
 
     def _disconnect(self) -> dict[str, object]:
         with self._lock:
+            self._flush_pending_samples_locked()
             self._stop_rtt_locked()
             self._remove_all_breakpoints_locked()
             self._memory.disconnect()
@@ -598,6 +610,9 @@ class BackendService(SamplingServiceMixin):
         if not isinstance(paused, bool):
             raise ProtocolError("invalid_request", "paused must be a boolean.")
         with self._lock:
+            if not paused and self._recording.failure is not None:
+                self._emit(EventName.STATE, {"samplingPaused": True})
+                raise ProtocolError("raw_recording_failed", "请解决记录写入错误后清空采样，开启新记录。")
             self._sampling_paused = paused
             state = {
                 "samplingPaused": self._sampling_paused,
@@ -632,10 +647,14 @@ class BackendService(SamplingServiceMixin):
 
     def _clear_samples(self) -> dict[str, object]:
         with self._lock:
-            self._samples.clear()
+            self._flush_pending_samples_locked()
+            self._pending_frames.clear()
+            self._pending_recording_frames.clear()
+            self._pending_recording_labels.clear()
+            self._recording.rotate()
             self._connection_started_at = time.monotonic() if self._connection_status == "connected" else None
             self._sample_count_since_perf = 0
-            state = {"elapsedSeconds": 0.0, "sampleCount": 0}
+            state = {"elapsedSeconds": 0.0, "sampleCount": 0, "rawRecording": self._recording.status()}
         self._emit(EventName.SAMPLES_CLEARED, {})
         self._emit(EventName.STATE, state)
         return {"state": state}
@@ -663,20 +682,15 @@ class BackendService(SamplingServiceMixin):
         if path.suffix.lower() != ".csv":
             path = path.with_suffix(".csv")
         with self._lock:
-            frames = list(self._samples)
-            symbols = dict(self._symbols)
-        if not frames:
-            raise ProtocolError("no_samples", "There are no samples to export.")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        keys = sorted({key for _elapsed, values in frames for key in values})
-        labels = [symbols.get(key).name if key in symbols else key for key in keys]
-        with path.open("w", newline="", encoding="utf-8-sig") as handle:
-            writer = csv.writer(handle)
-            writer.writerow(["elapsed_seconds", *labels])
-            for elapsed, values in frames:
-                writer.writerow([f"{elapsed:.9f}", *[_csv_value(values.get(key)) for key in keys]])
-        self._emit(EventName.LOG, {"level": "info", "message": f"已导出 {len(frames)} 帧原始采样 CSV：{path}"})
-        return {"path": str(path), "sampleCount": len(frames)}
+            self._flush_pending_samples_locked()
+            if self._recording.sample_count == 0:
+                raise ProtocolError("no_samples", "There are no samples to export.")
+            source, boundary, expected_count = self._recording.snapshot()
+        count = export_recording_csv(source, path, boundary)
+        if count != expected_count:
+            raise ProtocolError("recording_incomplete", "Raw recording row count mismatch.")
+        self._emit(EventName.LOG, {"level": "info", "message": f"已导出 {count} 帧完整原始采样 CSV：{path}"})
+        return {"path": str(path), "sampleCount": count}
 
     def _apply_config_locked(self, params: Mapping[str, object]) -> None:
         kind = params.get("connectionKind", self._connection_kind)
@@ -805,7 +819,3 @@ def _parse_frequency_hz(text: str) -> int:
                 raise ProtocolError("invalid_request", "swdClock must be between 1 kHz and 100 MHz.")
             return int(round(value))
     raise ProtocolError("invalid_request", "swdClock must include Hz, kHz, or MHz.")
-
-
-def _csv_value(value: object | None) -> object:
-    return "" if value is None else value

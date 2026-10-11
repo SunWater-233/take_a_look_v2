@@ -15,7 +15,7 @@ EmberMobile gateway / remote GDB Server; it does not expose a network listener.
 - EmberMobile v2 QUIC binary push (with v1 compatibility), remote RTT-Normal/RTT-Plus, and GDB/MI remote debugging
 - DWARF source browsing with C/C++ syntax highlighting, source-line breakpoints,
   halt/resume/instruction-step controls, current-PC highlighting, and registers
-- In-memory raw sample cache, pause/resume, clear and UTF-8 CSV export
+- Append-only raw recordings on disk, time-based plot history, pause/resume and streaming UTF-8 CSV export
 - Versioned JSON-lines RPC with state, sample, log and performance events
 - One hardware backend owned by the main window; detached Flutter windows use the existing main-window channel
 
@@ -242,6 +242,72 @@ Focused text inputs retain their editing shortcuts, and modal dialogs take
 priority over commands in the workspace behind them.
 
 ## Test
+
+### 独立 UI 测试版（Windows）
+
+无需连接探针或启动 Python，即可使用正式工作台检查界面和交互：
+
+```powershell
+.\tool\build_ui_test.ps1 -Run
+```
+
+默认编译 Debug 版，保留 Flutter 布局溢出等诊断；输出为
+`build/ui_test/Debug/take_a_look_ui_test.exe`。分发时复制整个 `Debug` 目录。
+脚本在 `build/ui_test/source/` 中构建，共用正式版的 Dart 组件、字体和
+Windows 多窗口/GPU 代码，正式版的构建目录不受影响。
+需要测试发布模式表现时使用 `-Configuration Release`。
+
+顶部工具栏提供实时波形、512 个符号/32 路采样的大量变量、空白和断开状态，
+以及加载进度、加载失败、连接中断和恢复场景。键鼠/触屏预览用于检查两种
+控件尺寸和错误反馈；选择“自动输入模式”恢复实际输入设备检测。
+预览模式只作用于主窗口，独立窗口仍自动识别自己的输入方式。
+
+连接、采样、变量写入、RTT 开关和源码暂停/单步/断点均由内存模拟器响应。
+“读取 ELF/AXF”会加载内置符号，不解析真实固件；源码示例也随测试版生成。
+可以检查变量选择、右键菜单、拖拽拆窗、绘图缩放、分析/FFT 和快捷键。
+CSV 导入仍可选择本地文件，导出读取当前采集记录中的全部原始帧，包含已经离开绘图缓存的数据。
+实时图表的“历史”选项支持 10 / 30 / 60 / 120 秒，默认 60 秒；缓存按时长和采样率分配，
+采样率降低时保留尚未过期的高密度数据，实际输入更快时自动扩容。绘制仅扫描可见时间段，
+按像素保留最小值、最大值和首尾点。主窗口和独立窗口同步完整的保留历史。
+
+原始数据独立追加到 `samples.talraw`，不受绘图时长、暂停绘图、隐藏曲线、移除变量或像素抽稀影响。
+每批数据直接写入操作系统，导出、清空或关闭时执行刷新；记录写入失败会明确报错并暂停采样。
+清空采样、重新连接正式后端或切换模拟场景会开启新记录，旧记录文件仍保留；CSV 导出使用点击时的完整记录快照。
+测试版和正式版均自动在软件可执行文件旁创建 `recordings/` 保存原始数据，
+例如 `build/ui_test/Release/recordings/`；工作目录、布局目录或 Python 安装位置不会改变此位置。
+目录不可写时会报错并暂停采样，不会回退到 C 盘或系统临时目录。
+重新运行测试版打包脚本会保留已有的 `recordings/`。
+每次启动时，主窗口会异步统计 `recordings/` 及其子目录的文件总大小。
+超过 500 MB（500 × 1024 × 1024 字节）时，右下角滑入一次清理提示；
+点击提示或“打开记录文件夹”会在文件管理器中打开该目录，供用户手动删除不需要的历史记录。
+关闭提示后本次运行不再重复提醒，独立面板窗口不会重复检查。
+正式前端启动后端时通过 `TAL_RECORDINGS_DIR` 传入该目录；单独运行后端时也可显式指定，
+未指定则使用后端可执行文件所在目录（源码启动时为 `backend/recordings/`）。
+记录文件自带变量键和名称，采用版本 1 的 UTF-8 JSON Lines：`channels` 定义列 ID，
+`frames` 保存 `[时间, 列ID, 原始值, ...]`，重复时间戳与稀疏变量不会合并。
+需要在应用退出后恢复 CSV 时，可在 `backend` 目录执行：
+
+```powershell
+.\.venv\Scripts\python.exe -m take_a_look_backend.services.recording "记录文件.talraw" "输出.csv"
+```
+模拟采样率用于产生 UI 负载，不代表硬件吞吐或真实定时精度。
+
+布局和诊断保存在 `%APPDATA%/TakeALookUiTest/`，与正式布局分开。
+点击“导出诊断”会保存主窗口 PNG 截图和 JSON（场景、样本计数、日志、
+主窗口 Flutter 异常），保存路径显示在事件日志中。
+也可通过 `TAL_UI_TEST_DATA_DIR` 指定测试数据目录。
+
+```powershell
+# 控件交互、模拟命令与既有回归测试
+flutter test
+# 编译后启动真实 Windows 引擎，检查采样、暂停、单步、加载成功/失败并留图
+.\tool\build_ui_test.ps1 -SmokeTest
+```
+
+原生自检结束后自动退出，结果和截图位于 `build/ui_test/smoke/`。
+该自检不替代人工拖拽、触摸设备或真实硬件验证。开发时可使用
+`flutter run -d windows -t lib/main_ui_test.dart` 热重载；需要保持正式构建
+产物独立时，使用上面的构建脚本。
 
 Realtime samples are stored in bounded numeric ring buffers (1,800 points per
 watch); writing new samples does not shift the retained history. Sampling updates

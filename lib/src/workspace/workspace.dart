@@ -54,6 +54,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   Offset? _lastTabDragPreviewPosition;
   String? _detachedDragSourceWindowId;
   WorkspacePanelId? _detachedDraggedPanel;
+  int _sourceAdditionRevision = 0;
 
   @visibleForTesting
   String? get debugTabMergeCandidate => _tabMergeCandidate;
@@ -64,6 +65,9 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     detachedWindows = DetachedWindowCoordinator(widget.windowSync);
     tabDragPreview = TabDragPreviewCoordinator();
     _applyDefaultLayout();
+    _sourceAdditionRevision =
+        widget.controller.sourceWorkspace.additionRevision;
+    widget.controller.sourceWorkspaceChanges.addListener(_handleSourceAddition);
     windowSubscription = detachedWindows.changes.listen(
       (_) => _syncExternalWindows(),
     );
@@ -84,12 +88,46 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
 
   @override
   void dispose() {
+    widget.controller.sourceWorkspaceChanges.removeListener(
+      _handleSourceAddition,
+    );
     windowSubscription?.cancel();
     detachedTabDragSubscription?.cancel();
     _tabMergeTimer?.cancel();
     unawaited(tabDragPreview.dispose());
     unawaited(detachedWindows.dispose());
     super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant DockingWorkspace oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.sourceWorkspaceChanges.removeListener(
+        _handleSourceAddition,
+      );
+      widget.controller.sourceWorkspaceChanges.addListener(
+        _handleSourceAddition,
+      );
+      _sourceAdditionRevision =
+          widget.controller.sourceWorkspace.additionRevision;
+    }
+  }
+
+  void _handleSourceAddition() {
+    final revision = widget.controller.sourceWorkspace.additionRevision;
+    if (!mounted || revision == _sourceAdditionRevision) return;
+    _sourceAdditionRevision = revision;
+    if (isPanelVisible(WorkspacePanelId.sourceDebug)) return;
+    final plotGroup = _session.groups
+        .where((group) => group.panels.contains(WorkspacePanelId.plot))
+        .firstOrNull;
+    if (plotGroup != null) {
+      setState(() => plotGroup.panels.add(WorkspacePanelId.sourceDebug));
+      widget.onPanelVisibilityChanged?.call();
+    } else {
+      unawaited(showPanel(WorkspacePanelId.sourceDebug));
+    }
   }
 
   @override

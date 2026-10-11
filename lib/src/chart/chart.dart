@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'axis_settings.dart';
 import 'cartesian_renderer.dart';
 import 'desktop_axis_menu.dart';
+import 'hover.dart';
 import 'painter.dart';
 import 'selection_painter.dart';
 import 'viewport.dart';
@@ -34,7 +35,8 @@ class _TelemetryChartState extends State<TelemetryChart> {
   Rect? _zoomSelection;
   bool _dragging = false;
   bool _rightZoomDragging = false;
-  bool _rightZoomMoved = false;
+  bool _pointerMoved = false;
+  bool _horizontalPanStarted = false;
   Size _size = Size.zero;
   PointerDeviceKind _lastPointerKind = PointerDeviceKind.mouse;
   _DesktopMouseMode _desktopMouseMode = _DesktopMouseMode.pan;
@@ -162,12 +164,19 @@ class _TelemetryChartState extends State<TelemetryChart> {
     _hoverPosition.value = null;
     if (_dragPointer != null) return;
     _rememberPointerKind(event.kind);
+    if (_desktopMenuController.isOpen &&
+        event.buttons & kSecondaryMouseButton == 0) {
+      _desktopMenuController.close();
+      return;
+    }
+    // Track clicks even on the axes or when mouse navigation is disabled.
+    _dragPointer = event.pointer;
+    _lastDragPosition = event.localPosition;
+    _dragStartPosition = event.localPosition;
+    _pointerMoved = false;
     if (event.buttons & kSecondaryMouseButton != 0) {
       if (event.kind == PointerDeviceKind.mouse) {
         _desktopMenuController.close();
-        _dragPointer = event.pointer;
-        _lastDragPosition = event.localPosition;
-        _dragStartPosition = event.localPosition;
         if (telemetryPlotRect(_size).contains(event.localPosition)) {
           final mapping = _mappingFor(telemetryViewport(controller, _size));
           _rightZoomAnchorFraction = Offset(
@@ -181,18 +190,11 @@ class _TelemetryChartState extends State<TelemetryChart> {
       }
       return;
     }
-    if (_desktopMenuController.isOpen) {
-      _desktopMenuController.close();
-      return;
-    }
     if (event.buttons & kPrimaryMouseButton == 0 ||
         !telemetryPlotRect(_size).contains(event.localPosition) ||
         (!controller.plotMouseXEnabled && !controller.plotMouseYEnabled)) {
       return;
     }
-    _dragPointer = event.pointer;
-    _lastDragPosition = event.localPosition;
-    _dragStartPosition = event.localPosition;
     setState(() => _dragging = true);
   }
 
@@ -214,19 +216,13 @@ class _TelemetryChartState extends State<TelemetryChart> {
 
   void _handlePointerMove(PointerMoveEvent event) {
     if (event.pointer != _dragPointer) return;
+    _trackPointerMovement(event.localPosition);
     if (_rightZoomDragging) {
       if (event.buttons & kSecondaryMouseButton == 0) {
         _endDrag();
         return;
       }
-      final start = _dragStartPosition;
-      if (!_rightZoomMoved) {
-        if (start == null ||
-            (event.localPosition - start).distanceSquared <= 9) {
-          return;
-        }
-        _rightZoomMoved = true;
-      }
+      if (!_pointerMoved) return;
       _updateRightButtonZoom(event.localPosition);
       return;
     }
@@ -254,13 +250,30 @@ class _TelemetryChartState extends State<TelemetryChart> {
     final viewport = telemetryViewport(controller, _size);
     final delta = event.localPosition - previous;
     _lastDragPosition = event.localPosition;
+    var horizontalDelta = 0.0;
+    if (controller.plotMouseXEnabled) {
+      if (_horizontalPanStarted) {
+        horizontalDelta = delta.dx;
+      } else {
+        final start = _dragStartPosition;
+        final displacement = start == null
+            ? 0.0
+            : event.localPosition.dx - start.dx;
+        // Ignore small sideways jitter during a vertical pan, but accumulate
+        // slow horizontal movement until it becomes an intentional time pan.
+        if (displacement.abs() > 3) {
+          _horizontalPanStarted = true;
+          horizontalDelta = displacement;
+        }
+      }
+    }
     var xMin = viewport.xMin;
     var xMax = viewport.xMax;
     var yMin = viewport.yMin;
     var yMax = viewport.yMax;
-    if (controller.plotMouseXEnabled) {
+    if (horizontalDelta != 0) {
       final direction = controller.plotInvertX ? -1.0 : 1.0;
-      final shift = -delta.dx / plot.width * viewport.xSpan * direction;
+      final shift = -horizontalDelta / plot.width * viewport.xSpan * direction;
       xMin += shift;
       xMax += shift;
       if (xMin < 0) {
@@ -279,18 +292,44 @@ class _TelemetryChartState extends State<TelemetryChart> {
       yMin += shift;
       yMax += shift;
     }
+    final timeWindowChanged =
+        (xMin - viewport.xMin).abs() > 1e-9 ||
+        (xMax - viewport.xMax).abs() > 1e-9;
+    if (!timeWindowChanged &&
+        (!controller.plotMouseYEnabled || delta.dy == 0)) {
+      return;
+    }
+    if (controller.followLatest && !timeWindowChanged) {
+      // Keep the configured duration during startup and while following live data.
+      xMin = xMax - controller.plotVisibleWindowSeconds;
+    }
     controller.setPlotViewport(
-      xMin: math.max(0, xMin),
+      xMin: xMin,
       xMax: math.max(xMin + 0.001, xMax),
       yMin: controller.plotMouseYEnabled ? yMin : null,
       yMax: controller.plotMouseYEnabled ? yMax : null,
+      preserveFollowLatest: !timeWindowChanged,
     );
   }
 
   void _handlePointerUp(PointerUpEvent event) {
     if (event.pointer != _dragPointer) return;
+    _trackPointerMovement(event.localPosition);
+    if (!_pointerMoved && (Offset.zero & _size).contains(event.localPosition)) {
+      final mapping = _mappingFor(telemetryViewport(controller, _size));
+      final hit = hitTestTelemetrySeries(
+        telemetryPlotSeries(controller, mapping),
+        mapping,
+        event.localPosition,
+      );
+      controller.setPlotHighlightedWatch(
+        hit?.series.watch.symbol.key,
+        selectWatchRow: true,
+      );
+      _hoverPosition.value = hit == null ? null : event.localPosition;
+    }
     if (_rightZoomDragging) {
-      final openMenu = !_rightZoomMoved;
+      final openMenu = !_pointerMoved;
       _endDrag();
       if (openMenu) _openDesktopMenu(event.localPosition);
       return;
@@ -302,12 +341,20 @@ class _TelemetryChartState extends State<TelemetryChart> {
     _endDrag();
   }
 
+  void _trackPointerMovement(Offset position) {
+    final start = _dragStartPosition;
+    if (start != null && (position - start).distanceSquared > 9) {
+      _pointerMoved = true;
+    }
+  }
+
   void _endDrag() {
     _dragPointer = null;
     _lastDragPosition = null;
     _dragStartPosition = null;
     _rightZoomAnchorFraction = null;
-    _rightZoomMoved = false;
+    _pointerMoved = false;
+    _horizontalPanStarted = false;
     if ((_dragging || _rightZoomDragging || _zoomSelection != null) &&
         mounted) {
       setState(() {
@@ -360,24 +407,33 @@ class _TelemetryChartState extends State<TelemetryChart> {
     required double yScale,
   }) {
     final viewport = telemetryViewport(controller, _size);
-    var xMin = viewport.xMin;
+    final following = controller.followLatest;
+    // Use the configured duration even before the first full window is sampled.
+    final currentXSpan = following
+        ? controller.plotVisibleWindowSeconds
+        : viewport.xSpan;
+    var xMin = following ? viewport.xMax - currentXSpan : viewport.xMin;
     var xMax = viewport.xMax;
     var yMin = viewport.yMin;
     var yMax = viewport.yMax;
     if (controller.plotMouseXEnabled) {
-      final fraction = anchorFraction.dx;
-      final anchor = viewport.xMin + viewport.xSpan * fraction;
-      final span = (viewport.xSpan * xScale).clamp(0.2, 120).toDouble();
-      xMin = anchor - span * fraction;
-      xMax = xMin + span;
-      if (xMin < 0) {
-        xMax -= xMin;
-        xMin = 0;
-      }
-      final latest = math.max(controller.elapsedSeconds, span);
-      if (xMax > latest) {
-        xMin -= xMax - latest;
-        xMax = latest;
+      final span = (currentXSpan * xScale).clamp(0.2, 120).toDouble();
+      if (following) {
+        xMin = xMax - span;
+      } else {
+        final fraction = anchorFraction.dx;
+        final anchor = viewport.xMin + viewport.xSpan * fraction;
+        xMin = anchor - span * fraction;
+        xMax = xMin + span;
+        if (xMin < 0) {
+          xMax -= xMin;
+          xMin = 0;
+        }
+        final latest = math.max(controller.elapsedSeconds, span);
+        if (xMax > latest) {
+          xMin -= xMax - latest;
+          xMax = latest;
+        }
       }
     }
     if (controller.plotMouseYEnabled) {
@@ -388,10 +444,11 @@ class _TelemetryChartState extends State<TelemetryChart> {
       yMax = yMin + span;
     }
     controller.setPlotViewport(
-      xMin: math.max(0, xMin),
+      xMin: xMin,
       xMax: math.max(xMin + 0.001, xMax),
       yMin: controller.plotMouseYEnabled ? yMin : null,
       yMax: controller.plotMouseYEnabled ? yMax : null,
+      preserveFollowLatest: true,
     );
   }
 
@@ -407,11 +464,15 @@ class _TelemetryChartState extends State<TelemetryChart> {
     final xMax = math.max(firstX, secondX);
     final yMin = math.min(firstY, secondY);
     final yMax = math.max(firstY, secondY);
+    final currentXMin = controller.followLatest
+        ? viewport.xMax - controller.plotVisibleWindowSeconds
+        : viewport.xMin;
     controller.setPlotViewport(
-      xMin: controller.plotMouseXEnabled ? xMin : viewport.xMin,
+      xMin: controller.plotMouseXEnabled ? xMin : currentXMin,
       xMax: controller.plotMouseXEnabled ? xMax : viewport.xMax,
       yMin: controller.plotMouseYEnabled ? yMin : null,
       yMax: controller.plotMouseYEnabled ? yMax : null,
+      preserveFollowLatest: true,
     );
   }
 

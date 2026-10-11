@@ -111,11 +111,12 @@ class SymbolItem {
 }
 
 class WatchItem {
-  WatchItem({required this.symbol, required this.color});
+  WatchItem({required this.symbol, required this.color, SampleBuffer? samples})
+    : samples = samples ?? SampleBuffer();
 
   final SymbolItem symbol;
   Color color;
-  final SampleBuffer samples = SampleBuffer();
+  final SampleBuffer samples;
   int totalSampleCount = 0;
   bool samplingEnabled = true;
   bool plotted = true;

@@ -120,6 +120,7 @@ class MainWindowSync {
   }
 
   void reportDetachedWindowReleased(String windowId) {
+    controller.removeSourceViewsForWindow(windowId);
     if (!_detachedWindowReleases.isClosed) {
       _detachedWindowReleases.add(windowId);
     }
@@ -207,6 +208,9 @@ class MainWindowSync {
   }
 
   Future<void> dispose() async {
+    for (final window in _windows.values) {
+      controller.removeSourceViewsForWindow(window.windowId);
+    }
     controller.stateSyncChanges.removeListener(_scheduleStateBroadcast);
     controller.symbolLoadChanges.removeListener(_broadcastSymbolLoad);
     controller.telemetrySyncChanges.removeListener(_scheduleTelemetryBroadcast);
@@ -373,6 +377,17 @@ Future<void> sendCommandToMain(
   ControllerCommand command,
   Object? arguments,
 ) async {
+  if (command == ControllerCommand.setSourceViewVisible && arguments is Map) {
+    final currentWindow = await WindowController.fromCurrentEngine();
+    arguments = {
+      ...Map<String, Object?>.from(arguments),
+      'viewId': [
+        'window',
+        currentWindow.windowId,
+        arguments['viewId'],
+      ].join(':'),
+    };
+  }
   final state = await _mainChannel.invokeMethod<Map<Object?, Object?>>(
     command.wireName,
     arguments,

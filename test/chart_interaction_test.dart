@@ -41,29 +41,182 @@ void main() {
     return controller;
   }
 
-  testWidgets('left drag pans the plot and exits follow-latest mode', (
-    tester,
-  ) async {
-    final controller = await pumpChart(tester);
-    final interaction = find.byKey(
-      const ValueKey('telemetry-chart-interaction'),
-    );
-    final before = telemetryViewport(controller, tester.getSize(interaction));
-    final gesture = await tester.startGesture(
-      tester.getCenter(interaction),
-      kind: PointerDeviceKind.mouse,
-    );
-    await gesture.moveBy(const Offset(80, 24));
-    await gesture.up();
-    await tester.pump();
+  testWidgets(
+    'horizontal left drag pans into history and exits follow-latest mode',
+    (tester) async {
+      final controller = await pumpChart(tester);
+      final interaction = find.byKey(
+        const ValueKey('telemetry-chart-interaction'),
+      );
+      final before = telemetryViewport(controller, tester.getSize(interaction));
+      final gesture = await tester.startGesture(
+        tester.getCenter(interaction),
+        kind: PointerDeviceKind.mouse,
+      );
+      await gesture.moveBy(const Offset(80, 24));
+      await gesture.up();
+      await tester.pump();
 
-    final after = telemetryViewport(controller, tester.getSize(interaction));
-    expect(controller.followLatest, isFalse);
-    expect(controller.plotAutoY, isFalse);
-    expect(after.xMax, lessThan(before.xMax));
-    expect(after.yMin, greaterThan(before.yMin));
-    controller.dispose();
-  });
+      final after = telemetryViewport(controller, tester.getSize(interaction));
+      expect(controller.followLatest, isFalse);
+      expect(controller.plotAutoY, isFalse);
+      expect(after.xMax, lessThan(before.xMax));
+      expect(after.yMin, greaterThan(before.yMin));
+      controller.dispose();
+    },
+  );
+
+  for (final inverted in [false, true]) {
+    testWidgets(
+      'vertical panning keeps following live data (inverted Y: $inverted)',
+      (tester) async {
+        final controller = await pumpChart(tester);
+        try {
+          controller.configurePlotView({'plotInvertY': inverted});
+          final interaction = find.byKey(
+            const ValueKey('telemetry-chart-interaction'),
+          );
+          final size = tester.getSize(interaction);
+          final before = telemetryViewport(controller, size);
+          final drag = await tester.startGesture(
+            tester.getCenter(interaction),
+            kind: PointerDeviceKind.mouse,
+          );
+          await drag.moveBy(const Offset(0, 40));
+          await tester.pump();
+          final after = telemetryViewport(controller, size);
+          expect(controller.followLatest, isTrue);
+          expect(after.xMin, before.xMin);
+          expect(after.xMax, before.xMax);
+          expect(after.ySpan, closeTo(before.ySpan, 1e-9));
+          expect(
+            after.yMin,
+            inverted ? lessThan(before.yMin) : greaterThan(before.yMin),
+          );
+
+          controller.applyTelemetrySnapshot({'elapsedSeconds': 22});
+          await drag.moveBy(const Offset(0, -60));
+          await tester.pump();
+          expect(controller.followLatest, isTrue);
+          expect(telemetryViewport(controller, size).xMax, 22);
+          await drag.up();
+          controller.applyTelemetrySnapshot({'elapsedSeconds': 24});
+          await tester.pump();
+          final latest = telemetryViewport(controller, size);
+          expect(controller.followLatest, isTrue);
+          expect(latest.xMax, 24);
+          expect(latest.xSpan, before.xSpan);
+          expect(latest.ySpan, closeTo(before.ySpan, 1e-9));
+        } finally {
+          controller.dispose();
+        }
+      },
+    );
+  }
+
+  testWidgets(
+    'sideways jitter preserves follow until an intentional horizontal pan',
+    (tester) async {
+      final controller = await pumpChart(tester);
+      try {
+        final interaction = find.byKey(
+          const ValueKey('telemetry-chart-interaction'),
+        );
+        final drag = await tester.startGesture(
+          tester.getCenter(interaction),
+          kind: PointerDeviceKind.mouse,
+        );
+        await drag.moveBy(const Offset(1, 30));
+        await tester.pump();
+        expect(controller.followLatest, isTrue);
+        expect(controller.plotWindowEndSeconds, 20);
+        await drag.moveBy(const Offset(1, -15));
+        await tester.pump();
+        expect(controller.followLatest, isTrue);
+        controller.applyTelemetrySnapshot({'elapsedSeconds': 22});
+        await drag.moveBy(const Offset(2, 0));
+        await tester.pump();
+        expect(controller.followLatest, isFalse);
+        final historyEnd = controller.plotWindowEndSeconds;
+        expect(historyEnd, lessThan(22));
+        await drag.moveBy(const Offset(0, 30));
+        await drag.up();
+        controller.applyTelemetrySnapshot({'elapsedSeconds': 24});
+        await tester.pump();
+        expect(controller.followLatest, isFalse);
+        expect(controller.plotWindowEndSeconds, closeTo(historyEnd, 1e-9));
+      } finally {
+        controller.dispose();
+      }
+    },
+  );
+
+  testWidgets(
+    'panning with X disabled preserves follow and the startup window',
+    (tester) async {
+      final controller = await pumpChart(tester);
+      try {
+        controller.applyTelemetrySnapshot({'elapsedSeconds': 1});
+        controller.configurePlotView({'plotMouseXEnabled': false});
+        final initialWindow = controller.plotVisibleWindowSeconds;
+        final interaction = find.byKey(
+          const ValueKey('telemetry-chart-interaction'),
+        );
+        final drag = await tester.startGesture(
+          tester.getCenter(interaction),
+          kind: PointerDeviceKind.mouse,
+        );
+        await drag.moveBy(const Offset(80, 40));
+        await drag.up();
+        await tester.pump();
+        expect(controller.followLatest, isTrue);
+        expect(controller.plotWindowEndSeconds, 1);
+        expect(controller.plotVisibleWindowSeconds, initialWindow);
+        controller.applyTelemetrySnapshot({'elapsedSeconds': 24});
+        await tester.pump();
+        expect(controller.plotWindowEndSeconds, 24);
+        expect(controller.plotVisibleWindowSeconds, initialWindow);
+      } finally {
+        controller.dispose();
+      }
+    },
+  );
+
+  for (final inverted in [false, true]) {
+    testWidgets(
+      'horizontal pan at the live boundary only stops follow when history moves (inverted X: $inverted)',
+      (tester) async {
+        final controller = await pumpChart(tester);
+        try {
+          controller.configurePlotView({'plotInvertX': inverted});
+          final interaction = find.byKey(
+            const ValueKey('telemetry-chart-interaction'),
+          );
+          final futureDirection = inverted ? 1.0 : -1.0;
+          final drag = await tester.startGesture(
+            tester.getCenter(interaction),
+            kind: PointerDeviceKind.mouse,
+          );
+          await drag.moveBy(Offset(40 * futureDirection, 0));
+          await tester.pump();
+          expect(controller.followLatest, isTrue);
+          expect(controller.plotWindowEndSeconds, 20);
+          controller.applyTelemetrySnapshot({'elapsedSeconds': 22});
+          await drag.moveBy(Offset(-80 * futureDirection, 0));
+          await drag.up();
+          await tester.pump();
+          expect(controller.followLatest, isFalse);
+          final historyEnd = controller.plotWindowEndSeconds;
+          expect(historyEnd, lessThan(22));
+          controller.applyTelemetrySnapshot({'elapsedSeconds': 24});
+          await tester.pump();
+          expect(controller.plotWindowEndSeconds, closeTo(historyEnd, 1e-9));
+        } finally {
+          controller.dispose();
+        }
+      },
+    );
+  }
 
   testWidgets('mouse right click uses the compact PyQtGraph-style menu', (
     tester,
@@ -152,11 +305,12 @@ void main() {
   for (final inverted in [false, true]) {
     for (final vertical in [false, true]) {
       testWidgets(
-        'right drag zooms only the ${vertical ? 'Y' : 'X'} axis around its '
+        'manual right drag zooms only the ${vertical ? 'Y' : 'X'} axis around its '
         'starting point (inverted: $inverted)',
         (tester) async {
           final controller = await pumpChart(tester);
           controller.configurePlotView({
+            'followLatest': false,
             'plotInvertX': inverted,
             'plotInvertY': inverted,
           });
@@ -226,6 +380,121 @@ void main() {
       );
     }
   }
+
+  for (final delta in [
+    const Offset(40, 0),
+    const Offset(0, -40),
+    const Offset(40, -40),
+  ]) {
+    testWidgets('right drag keeps following live samples for $delta', (
+      tester,
+    ) async {
+      final controller = await pumpChart(tester);
+      try {
+        final interaction = find.byKey(
+          const ValueKey('telemetry-chart-interaction'),
+        );
+        final size = tester.getSize(interaction);
+        final initialWindow = controller.plotVisibleWindowSeconds;
+        final drag = await tester.startGesture(
+          tester.getCenter(interaction),
+          kind: PointerDeviceKind.mouse,
+          buttons: kSecondaryMouseButton,
+        );
+        await drag.moveBy(delta);
+        await tester.pump();
+        expect(controller.followLatest, isTrue);
+        expect(telemetryViewport(controller, size).xMax, 20);
+        final zoomedWindow = controller.plotVisibleWindowSeconds;
+        if (delta.dx == 0) {
+          expect(zoomedWindow, initialWindow);
+        } else {
+          expect(zoomedWindow, lessThan(initialWindow));
+        }
+        controller.applyTelemetrySnapshot({'elapsedSeconds': 22});
+        await tester.pump();
+        expect(controller.followLatest, isTrue);
+        expect(telemetryViewport(controller, size).xMax, 22);
+        expect(
+          telemetryViewport(controller, size).xMin,
+          closeTo(22 - zoomedWindow, 1e-9),
+        );
+        await drag.up();
+        controller.applyTelemetrySnapshot({'elapsedSeconds': 24});
+        await tester.pump();
+        expect(controller.followLatest, isTrue);
+        expect(telemetryViewport(controller, size).xMax, 24);
+        expect(controller.plotVisibleWindowSeconds, zoomedWindow);
+      } finally {
+        controller.dispose();
+      }
+    });
+  }
+
+  testWidgets(
+    'vertical zoom during startup retains the full configured time window',
+    (tester) async {
+      final controller = await pumpChart(tester);
+      try {
+        controller.applyTelemetrySnapshot({'elapsedSeconds': 1});
+        final initialWindow = controller.plotVisibleWindowSeconds;
+        final interaction = find.byKey(
+          const ValueKey('telemetry-chart-interaction'),
+        );
+        final drag = await tester.startGesture(
+          tester.getCenter(interaction),
+          kind: PointerDeviceKind.mouse,
+          buttons: kSecondaryMouseButton,
+        );
+        await drag.moveBy(const Offset(0, -40));
+        await drag.up();
+        await tester.pump();
+        expect(controller.followLatest, isTrue);
+        expect(controller.plotVisibleWindowSeconds, initialWindow);
+        controller.applyTelemetrySnapshot({'elapsedSeconds': 30});
+        await tester.pump();
+        final viewport = telemetryViewport(
+          controller,
+          tester.getSize(interaction),
+        );
+        expect(viewport.xMax, 30);
+        expect(viewport.xSpan, initialWindow);
+      } finally {
+        controller.dispose();
+      }
+    },
+  );
+
+  testWidgets(
+    'zoom preserves the paused frame and resumes following on unpause',
+    (tester) async {
+      final controller = await pumpChart(tester);
+      try {
+        controller.togglePlotting();
+        controller.applyTelemetrySnapshot({'elapsedSeconds': 24});
+        final interaction = find.byKey(
+          const ValueKey('telemetry-chart-interaction'),
+        );
+        final drag = await tester.startGesture(
+          tester.getCenter(interaction),
+          kind: PointerDeviceKind.mouse,
+          buttons: kSecondaryMouseButton,
+        );
+        await drag.moveBy(const Offset(40, -40));
+        await drag.up();
+        await tester.pump();
+        expect(controller.followLatest, isTrue);
+        expect(controller.plottingPaused, isTrue);
+        expect(controller.plotWindowEndSeconds, 20);
+        controller.togglePlotting();
+        await tester.pump();
+        expect(controller.followLatest, isTrue);
+        expect(controller.plotWindowEndSeconds, 24);
+      } finally {
+        controller.dispose();
+      }
+    },
+  );
 
   for (final enabled in [(true, false), (false, true), (false, false)]) {
     testWidgets(
@@ -304,7 +573,9 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('wheel zoom still scales both axes', (tester) async {
+  testWidgets('wheel zoom scales both axes and keeps following latest', (
+    tester,
+  ) async {
     final controller = await pumpChart(tester);
     final interaction = find.byKey(
       const ValueKey('telemetry-chart-interaction'),
@@ -321,6 +592,10 @@ void main() {
     final after = telemetryViewport(controller, size);
     expect(after.xSpan, lessThan(before.xSpan));
     expect(after.ySpan, lessThan(before.ySpan));
+    expect(controller.followLatest, isTrue);
+    controller.applyTelemetrySnapshot({'elapsedSeconds': 22});
+    await tester.pump();
+    expect(telemetryViewport(controller, size).xMax, 22);
     controller.dispose();
   });
 
@@ -377,7 +652,8 @@ void main() {
     await tester.pump();
     final after = telemetryViewport(controller, tester.getSize(interaction));
 
-    expect(controller.followLatest, isFalse);
+    expect(controller.followLatest, isTrue);
+    expect(after.xMax, 20);
     expect(after.xSpan, lessThan(before.xSpan));
     expect(after.ySpan, lessThan(before.ySpan));
 

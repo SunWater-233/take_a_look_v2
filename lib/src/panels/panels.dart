@@ -38,27 +38,35 @@ part 'analysis_chart_painters.dart';
 part 'analysis_fft_panel.dart';
 part 'analysis_chart_table.dart';
 part 'source_debug_panel.dart';
+part 'source_tab_attention.dart';
 part 'shared_controls.dart';
 
 Widget buildWorkspacePanel(
   WorkspacePanelId panel,
   TakeALookController controller, {
   PanelChrome? chrome,
+  bool sourcePreview = false,
 }) {
   return PanelKeyboardScope(
     panel: panel,
     child: TalPanelFrame(
       panel: panel,
       chrome: chrome,
-      child: buildWorkspacePanelBody(panel, controller),
+      controller: controller,
+      child: buildWorkspacePanelBody(
+        panel,
+        controller,
+        sourcePreview: sourcePreview,
+      ),
     ),
   );
 }
 
 Widget buildWorkspacePanelBody(
   WorkspacePanelId panel,
-  TakeALookController controller,
-) {
+  TakeALookController controller, {
+  bool sourcePreview = false,
+}) {
   return switch (panel) {
     WorkspacePanelId.header => _HeaderPanel(controller: controller),
     WorkspacePanelId.runControl => _RunControlPanel(controller: controller),
@@ -68,7 +76,10 @@ Widget buildWorkspacePanelBody(
     WorkspacePanelId.connection => _ConnectionPanel(controller: controller),
     WorkspacePanelId.plot => _PlotPanel(controller: controller),
     WorkspacePanelId.analysis => _AnalysisChartPanel(controller: controller),
-    WorkspacePanelId.sourceDebug => _SourceDebugPanel(controller: controller),
+    WorkspacePanelId.sourceDebug => _SourceDebugPanel(
+      controller: controller,
+      readOnlyPreview: sourcePreview,
+    ),
     WorkspacePanelId.log => _LogPanel(controller: controller),
   };
 }

@@ -62,6 +62,34 @@ class TelemetryHoverHit {
       't = ${_formatValue(sample.dx)} s\n采样值 = ${_formatValue(sample.dy)}';
 }
 
+/// A table selection takes precedence over proximity to any other curve.
+/// Without a pointer, inspect the selected curve's latest visible sample.
+TelemetryHoverHit? inspectTelemetrySeries(
+  List<TelemetryPlotSeries> series,
+  CartesianPlotViewport viewport, {
+  Offset? position,
+  String? highlightedWatchKey,
+}) {
+  if (highlightedWatchKey == null) {
+    return position == null
+        ? null
+        : hitTestTelemetrySeries(series, viewport, position);
+  }
+  for (final candidate in series) {
+    if (candidate.watch.symbol.key != highlightedWatchKey) continue;
+    final target = position != null && viewport.plot.contains(position)
+        ? position
+        : Offset(viewport.mapX(viewport.xMax), viewport.plot.center.dy);
+    return _nearestTelemetrySample(
+      candidate,
+      viewport,
+      target,
+      horizontalOnly: true,
+    );
+  }
+  return null;
+}
+
 /// Hit-test the displayed polyline, then report a real, unmodified sample.
 /// Equal-distance hits keep the first series in watch-table order.
 TelemetryHoverHit? hitTestTelemetrySeries(
@@ -105,7 +133,15 @@ TelemetryHoverHit? hitTestTelemetrySeries(
     }
   }
   if (selected == null) return null;
+  return _nearestTelemetrySample(selected, viewport, position);
+}
 
+TelemetryHoverHit? _nearestTelemetrySample(
+  TelemetryPlotSeries selected,
+  CartesianPlotViewport viewport,
+  Offset position, {
+  bool horizontalOnly = false,
+}) {
   Offset? sample;
   Offset? samplePosition;
   var sampleDistance = double.infinity;
@@ -116,7 +152,9 @@ TelemetryHoverHit? hitTestTelemetrySeries(
       continue;
     }
     final pixel = Offset(viewport.mapX(point.dx), viewport.mapY(point.dy));
-    final distance = (pixel - position).distanceSquared;
+    final distance = horizontalOnly
+        ? (pixel.dx - position.dx).abs()
+        : (pixel - position).distanceSquared;
     if (distance < sampleDistance) {
       sample = point;
       samplePosition = pixel;

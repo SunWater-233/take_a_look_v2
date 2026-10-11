@@ -21,6 +21,7 @@ List<Offset> downsampleTelemetrySamples(
   if (visible.length <= bucketCount * 2 || xMax <= xMin) return visible;
 
   final result = <Offset>[];
+  _appendDistinctPoint(result, visible.first);
   var currentBucket = -1;
   Offset? minimum;
   Offset? maximum;
@@ -76,22 +77,26 @@ List<Offset> _downsampleBuffer(
   double pixelWidth,
 ) {
   final bucketCount = math.max(1, pixelWidth.floor());
+  final (start, end) = samples.rangeIndices(xMin, xMax);
   var visibleCount = 0;
+  var firstVisible = -1;
   var lastVisible = -1;
-  for (var i = 0; i < samples.length; i++) {
+  for (var i = start; i < end; i++) {
     final time = samples.timeAt(i);
     if (time >= xMin && time <= xMax) {
       visibleCount++;
+      if (firstVisible < 0) firstVisible = i;
       lastVisible = i;
     }
   }
   if (visibleCount <= bucketCount * 2 || xMax <= xMin) {
     return [
-      for (var i = 0; i < samples.length; i++)
+      for (var i = start; i < end; i++)
         if (samples.timeAt(i) >= xMin && samples.timeAt(i) <= xMax) samples[i],
     ];
   }
   final result = <Offset>[];
+  _appendDistinctPoint(result, samples[firstVisible]);
   var currentBucket = -1;
   var minimumIndex = -1;
   var maximumIndex = -1;
@@ -105,7 +110,7 @@ List<Offset> _downsampleBuffer(
     _appendDistinctPoint(result, samples[last]);
   }
 
-  for (var i = 0; i < samples.length; i++) {
+  for (var i = start; i < end; i++) {
     final time = samples.timeAt(i);
     if (time < xMin || time > xMax) continue;
     final value = samples.valueAt(i);

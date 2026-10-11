@@ -1,9 +1,13 @@
 part of 'panels.dart';
 
 class _SourceDebugPanel extends StatefulWidget {
-  const _SourceDebugPanel({required this.controller});
+  const _SourceDebugPanel({
+    required this.controller,
+    this.readOnlyPreview = false,
+  });
 
   final TakeALookController controller;
+  final bool readOnlyPreview;
 
   @override
   State<_SourceDebugPanel> createState() => _SourceDebugPanelState();
@@ -20,7 +24,8 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   final ScrollController _searchResultsController = ScrollController(
     keepScrollOffset: false,
   );
-  final List<String> _openPaths = <String>[];
+  List<String> get _openPaths => controller.sourceWorkspace.openPaths;
+  String get _sourceViewId => identityHashCode(this).toString();
   final Map<String, GlobalKey> _tabKeys = <String, GlobalKey>{};
   final Set<String> _externalPathKeys = <String>{};
   final Map<String, Future<SourceSearchText>> _sourceTextCache = {};
@@ -51,6 +56,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   String _observedSourceRoot = '';
   String? _observedCurrentSource;
   int? _observedCurrentLine;
+  int _observedStopRevision = -1;
 
   TakeALookController get controller => widget.controller;
 
@@ -63,19 +69,34 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     _tabController.addListener(_updateTabOverflow);
     controller.debugChanges.addListener(_handleDebugChange);
     controller.symbolChanges.addListener(_handleDebugChange);
+    controller.sourceWorkspaceChanges.addListener(_handleSourceWorkspaceChange);
+    if (!widget.readOnlyPreview) {
+      controller.setSourceViewVisible(_sourceViewId, true);
+    }
+    _restoreSourceWorkspace();
     _handleDebugChange();
   }
 
   @override
   void didUpdateWidget(covariant _SourceDebugPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.controller == controller) return;
+    if (oldWidget.controller == controller &&
+        oldWidget.readOnlyPreview == widget.readOnlyPreview) {
+      return;
+    }
     oldWidget.controller.debugChanges.removeListener(_handleDebugChange);
     oldWidget.controller.symbolChanges.removeListener(_handleDebugChange);
+    oldWidget.controller.sourceWorkspaceChanges.removeListener(
+      _handleSourceWorkspaceChange,
+    );
+    oldWidget.controller.setSourceViewVisible(_sourceViewId, false);
     controller.debugChanges.addListener(_handleDebugChange);
     controller.symbolChanges.addListener(_handleDebugChange);
+    controller.sourceWorkspaceChanges.addListener(_handleSourceWorkspaceChange);
+    if (!widget.readOnlyPreview) {
+      controller.setSourceViewVisible(_sourceViewId, true);
+    }
     _selectedPath = null;
-    _openPaths.clear();
     _tabKeys.clear();
     _externalPathKeys.clear();
     _sourceTextCache.clear();
@@ -93,6 +114,8 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     _activeSearchIndex = -1;
     _observedCurrentSource = null;
     _observedCurrentLine = null;
+    _observedStopRevision = -1;
+    _restoreSourceWorkspace();
     _handleDebugChange();
   }
 
@@ -100,6 +123,10 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   void dispose() {
     controller.debugChanges.removeListener(_handleDebugChange);
     controller.symbolChanges.removeListener(_handleDebugChange);
+    controller.sourceWorkspaceChanges.removeListener(
+      _handleSourceWorkspaceChange,
+    );
+    controller.setSourceViewVisible(_sourceViewId, false);
     _verticalController.dispose();
     _horizontalController.dispose();
     _searchResultsController.dispose();
@@ -124,6 +151,36 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
       ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
   }
 
+  void _restoreSourceWorkspace() {
+    // Reopening the panel must retain a user's file choice instead of treating
+    // the same stopped PC as a new debugger stop.
+    if (controller.sourceWorkspace.selectedPath != null &&
+        controller.sourceWorkspace.viewedStopRevision ==
+            controller.debugState.stopRevision) {
+      _observedCurrentSource = controller.debugState.currentSource;
+      _observedCurrentLine = controller.debugState.currentLine;
+      _observedStopRevision = controller.debugState.stopRevision;
+    }
+    for (final path in _openPaths) {
+      _externalPathKeys.add(_pathKey(path));
+    }
+    if (!widget.readOnlyPreview) controller.dismissSourceAttention();
+  }
+
+  void _handleSourceWorkspaceChange() {
+    if (!mounted) return;
+    final nextPath =
+        controller.sourceWorkspace.selectedPath ??
+        (widget.readOnlyPreview ? _openPaths.firstOrNull : null);
+    if (nextPath != _selectedPath) {
+      unawaited(_loadSource(nextPath));
+      _restorePanelFocus();
+    } else {
+      setState(() {});
+      _scheduleTabOverflowUpdate();
+    }
+  }
+
   void _handleDebugChange() {
     if (!mounted) return;
     final sourceRootChanged =
@@ -138,26 +195,22 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     final currentSource = controller.debugState.currentSource;
     final currentLine = controller.debugState.currentLine;
     final locationChanged =
+        _observedStopRevision != controller.debugState.stopRevision ||
         currentSource != _observedCurrentSource ||
         currentLine != _observedCurrentLine;
     _observedCurrentSource = currentSource;
     _observedCurrentLine = currentLine;
+    _observedStopRevision = controller.debugState.stopRevision;
     final files = _collectSourceFiles();
     final sourceFilesChanged = !listEquals(files, _sourceFiles);
     _sourceFiles = files;
-    String? nextPath = _selectedPath;
+    String? nextPath = controller.sourceWorkspace.selectedPath;
     if (locationChanged && currentSource != null && currentSource.isNotEmpty) {
       nextPath = _matchingPath(currentSource, files) ?? currentSource;
     } else if (nextPath == null ||
         (!_externalPathKeys.contains(_pathKey(nextPath)) &&
             _matchingPath(nextPath, files) == null)) {
       nextPath = _openPaths.firstOrNull;
-    }
-    if (nextPath != null &&
-        !_openPaths.any(
-          (path) => controller.sourcePathsMatch(path, nextPath!),
-        )) {
-      _openPaths.add(nextPath);
     }
     if (nextPath != _selectedPath || sourceRootChanged) {
       unawaited(_loadSource(nextPath));
@@ -173,16 +226,14 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   }
 
   Future<void> _loadSource(String? path, {int? revealLine}) async {
+    if (path != null && !widget.readOnlyPreview) {
+      controller.openSourceFile(path);
+      path = controller.openSourcePathFor(path) ?? path;
+    }
     final generation = ++_loadGeneration;
     setState(() {
       _selectedPath = path;
       _revealedSearchLine = revealLine;
-      if (path != null &&
-          !_openPaths.any(
-            (openPath) => controller.sourcePathsMatch(openPath, path),
-          )) {
-        _openPaths.add(path);
-      }
       _lines = const [];
       _loadError = null;
     });
@@ -193,6 +244,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
       final highlighted = _CppSyntaxHighlighter().highlight(source);
       if (!mounted || generation != _loadGeneration) return;
       setState(() => _lines = highlighted);
+      if (!widget.readOnlyPreview) controller.markSourceFileRead(path);
       if (revealLine != null) {
         _scrollToLine(revealLine, immediate: true);
       } else {
@@ -248,12 +300,12 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
         _selectedPath != null &&
         controller.sourcePathsMatch(_selectedPath!, openPath);
     setState(() {
-      _openPaths.removeAt(index);
       _tabKeys.remove(_pathKey(openPath));
       if (_matchingPath(openPath, _sourceFiles) == null) {
         _externalPathKeys.remove(_pathKey(openPath));
       }
     });
+    controller.closeSourceFile(openPath);
     if (_searchVisible && _searchController.text.isNotEmpty) {
       _queueSearch(_searchController.text, immediate: true);
     }
@@ -261,9 +313,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
       _scheduleTabOverflowUpdate();
       return;
     }
-    final nextPath = _openPaths.isEmpty
-        ? null
-        : _openPaths[math.min(index, _openPaths.length - 1)];
+    final nextPath = controller.sourceWorkspace.selectedPath;
     unawaited(_loadSource(nextPath));
   }
 
@@ -321,9 +371,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
       final key = _pathKey(path);
       _externalPathKeys.add(key);
       _sourceTextCache.remove(key);
-      if (!_openPaths.any((item) => _pathKey(item) == key)) {
-        _openPaths.add(path);
-      }
+      controller.openSourceFile(path, select: false);
       accepted.add(path);
     }
     if (!mounted) return;
@@ -1493,6 +1541,16 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
                   ),
                 ),
                 const SizedBox(width: 3),
+                SizedBox(
+                  width: 10,
+                  child: controller.isSourceFileUnread(path)
+                      ? Center(
+                          child: _SourceUnreadDot(
+                            key: ValueKey('source-file-unread-$path'),
+                          ),
+                        )
+                      : null,
+                ),
                 TalIconButton(
                   key: ValueKey('source-tab-close-$path'),
                   tooltip: '关闭 ${_basename(path)}',

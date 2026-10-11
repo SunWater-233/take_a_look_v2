@@ -43,11 +43,16 @@ class TalDialog extends StatelessWidget {
   }
 }
 
-/// Owns at most one desktop notice. New errors replace that notice; complete
-/// history remains in the event log. Touch errors keep the confirmation route.
+/// Owns at most one notice. New errors replace that notice; complete history
+/// remains in the event log. Touch errors keep the confirmation route.
 class TalFeedbackController {
+  TalFeedbackController({this.onNoticeDismissed});
+
+  final VoidCallback? onNoticeDismissed;
   OverlayEntry? _entry;
   Widget? _notice;
+
+  bool get isShowingNotice => _entry != null;
 
   Future<void> showError({
     required BuildContext context,
@@ -78,12 +83,49 @@ class TalFeedbackController {
       );
       return;
     }
+    _presentNotice(
+      context: context,
+      title: title,
+      message: message,
+      details: details,
+      isError: true,
+    );
+  }
+
+  /// Optional housekeeping actions stay non-modal for every input mode.
+  void showActionNotice({
+    required BuildContext context,
+    required String title,
+    required String message,
+    required String actionLabel,
+    required Future<void> Function() onAction,
+  }) => _presentNotice(
+    context: context,
+    title: title,
+    message: message,
+    isError: false,
+    actionLabel: actionLabel,
+    onAction: onAction,
+  );
+
+  void _presentNotice({
+    required BuildContext context,
+    required String title,
+    required String message,
+    required bool isError,
+    String? details,
+    String? actionLabel,
+    Future<void> Function()? onAction,
+  }) {
     final noticeKey = UniqueKey();
-    _notice = _DesktopErrorNotice(
+    _notice = _DesktopNotice(
       key: noticeKey,
       title: title,
       message: message,
       details: details,
+      isError: isError,
+      actionLabel: actionLabel,
+      onAction: onAction,
       onClose: () {
         if (_notice?.key == noticeKey) dismiss();
       },
@@ -96,22 +138,27 @@ class TalFeedbackController {
     Overlay.of(context).insert(_entry!);
   }
 
-  void dismiss() {
+  void dismiss({bool notify = true}) {
+    final wasShowing = isShowingNotice;
     _entry?.remove();
     _entry?.dispose();
     _entry = null;
     _notice = null;
+    if (wasShowing && notify) onNoticeDismissed?.call();
   }
 
-  void dispose() => dismiss();
+  void dispose() => dismiss(notify: false);
 }
 
-class _DesktopErrorNotice extends StatefulWidget {
-  const _DesktopErrorNotice({
+class _DesktopNotice extends StatefulWidget {
+  const _DesktopNotice({
     required this.title,
     required this.message,
     required this.details,
     required this.onClose,
+    required this.isError,
+    this.actionLabel,
+    this.onAction,
     super.key,
   });
 
@@ -119,12 +166,15 @@ class _DesktopErrorNotice extends StatefulWidget {
   final String message;
   final String? details;
   final VoidCallback onClose;
+  final bool isError;
+  final String? actionLabel;
+  final Future<void> Function()? onAction;
 
   @override
-  State<_DesktopErrorNotice> createState() => _DesktopErrorNoticeState();
+  State<_DesktopNotice> createState() => _DesktopNoticeState();
 }
 
-class _DesktopErrorNoticeState extends State<_DesktopErrorNotice>
+class _DesktopNoticeState extends State<_DesktopNotice>
     with TickerProviderStateMixin {
   late final AnimationController _entranceController;
   late final AnimationController _dismissController;
@@ -133,6 +183,7 @@ class _DesktopErrorNoticeState extends State<_DesktopErrorNotice>
   late final Animation<double> _dismissOpacity;
   bool _expanded = false;
   bool _closing = false;
+  bool _acting = false;
 
   @override
   void initState() {
@@ -185,6 +236,17 @@ class _DesktopErrorNoticeState extends State<_DesktopErrorNotice>
     if (mounted) widget.onClose();
   }
 
+  Future<void> _runAction() async {
+    if (_acting || _closing || widget.onAction == null) return;
+    setState(() => _acting = true);
+    try {
+      await widget.onAction!();
+      if (mounted) await _close();
+    } finally {
+      if (mounted) setState(() => _acting = false);
+    }
+  }
+
   @override
   void dispose() {
     _entranceController.dispose();
@@ -235,67 +297,87 @@ class _DesktopErrorNoticeState extends State<_DesktopErrorNotice>
     final ui = TalUiTheme.of(context);
     final size = MediaQuery.sizeOf(context);
     final hasDetails = widget.details?.isNotEmpty == true;
+    final color = widget.isError
+        ? Theme.of(context).colorScheme.error
+        : TalColors.amber;
     return Semantics(
       container: true,
       liveRegion: true,
       child: Material(
-        key: const ValueKey('tal-error-popup'),
+        key: ValueKey(widget.isError ? 'tal-error-popup' : 'tal-notice-popup'),
         color: TalColors.surfaceAlt,
         elevation: 12,
         shadowColor: Colors.black,
         shape: RoundedRectangleBorder(
           borderRadius: ui.menuRadius,
-          side: BorderSide(color: Theme.of(context).colorScheme.error),
+          side: BorderSide(color: color),
         ),
         clipBehavior: Clip.antiAlias,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxHeight:
-                (size.height -
-                        ui.overlayMargin * 2 -
-                        MediaQuery.viewInsetsOf(context).bottom)
-                    .clamp(0.0, ui.notificationMaxHeight),
-          ),
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    Icon(
-                      Icons.error_outline,
-                      size: 20,
-                      color: Theme.of(context).colorScheme.error,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(child: Text(widget.title, style: talStrong)),
-                    TalIconButton(
-                      tooltip: '关闭提示',
-                      onPressed: _close,
-                      icon: const Icon(Icons.close, size: 18),
+        child: InkWell(
+          onTap: widget.onAction == null || _acting ? null : _runAction,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight:
+                  (size.height -
+                          ui.overlayMargin * 2 -
+                          MediaQuery.viewInsetsOf(context).bottom)
+                      .clamp(0.0, ui.notificationMaxHeight),
+            ),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        widget.isError
+                            ? Icons.error_outline
+                            : Icons.folder_open,
+                        size: 20,
+                        color: color,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text(widget.title, style: talStrong)),
+                      TalIconButton(
+                        tooltip: '关闭提示',
+                        onPressed: _close,
+                        icon: const Icon(Icons.close, size: 18),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  if (widget.onAction == null)
+                    SelectableText(widget.message, style: talBody)
+                  else ...[
+                    Text(widget.message, style: talBody),
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TalButton(
+                        onPressed: _acting ? null : _runAction,
+                        child: Text(_acting ? '正在打开…' : widget.actionLabel!),
+                      ),
                     ),
                   ],
-                ),
-                const SizedBox(height: 6),
-                SelectableText(widget.message, style: talBody),
-                if (hasDetails) ...[
-                  const SizedBox(height: 8),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TalButton(
-                      variant: TalButtonVariant.text,
-                      onPressed: () => setState(() => _expanded = !_expanded),
-                      child: Text(_expanded ? '收起详情' : '查看详情'),
-                    ),
-                  ),
-                  if (_expanded) ...[
+                  if (hasDetails) ...[
                     const SizedBox(height: 8),
-                    SelectableText(widget.details!, style: talMono),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TalButton(
+                        variant: TalButtonVariant.text,
+                        onPressed: () => setState(() => _expanded = !_expanded),
+                        child: Text(_expanded ? '收起详情' : '查看详情'),
+                      ),
+                    ),
+                    if (_expanded) ...[
+                      const SizedBox(height: 8),
+                      SelectableText(widget.details!, style: talMono),
+                    ],
                   ],
                 ],
-              ],
+              ),
             ),
           ),
         ),

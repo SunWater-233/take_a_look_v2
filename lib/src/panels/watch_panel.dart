@@ -33,11 +33,13 @@ class _WatchPanelState extends State<_WatchPanel> {
   );
   final FocusNode _tableFocus = FocusNode(debugLabel: 'watch-table');
   final ScrollController _horizontalScrollController = ScrollController();
+  final ScrollController _verticalScrollController = ScrollController();
   final Set<String> _selectedWatchKeys = <String>{};
   final Set<String> _expandedWatchKeys = <String>{};
   final Set<int> _selectedColumns = <int>{};
   final Set<int> _hiddenColumns = <int>{};
   String? _selectionAnchorKey;
+  int _appliedPlotWatchSelectionRevision = -1;
 
   TakeALookController get controller => widget.controller;
   List<double> get _columnWidths {
@@ -56,8 +58,17 @@ class _WatchPanelState extends State<_WatchPanel> {
       .fold(0, (sum, entry) => sum + entry.$2);
 
   @override
+  void didUpdateWidget(covariant _WatchPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != controller) {
+      _appliedPlotWatchSelectionRevision = -1;
+    }
+  }
+
+  @override
   void dispose() {
     _horizontalScrollController.dispose();
+    _verticalScrollController.dispose();
     _tableFocus.dispose();
     super.dispose();
   }
@@ -73,6 +84,74 @@ class _WatchPanelState extends State<_WatchPanel> {
     _selectedWatchKeys.removeWhere((key) => !available.contains(key));
     _expandedWatchKeys.removeWhere((key) => !available.contains(key));
     if (!available.contains(_selectionAnchorKey)) _selectionAnchorKey = null;
+  }
+
+  void _applyPlotSelection(List<WatchTreeNode> roots) {
+    final revision = controller.plotWatchSelectionRevision;
+    if (_appliedPlotWatchSelectionRevision == revision) return;
+    _appliedPlotWatchSelectionRevision = revision;
+    final key = controller.plotHighlightedWatchKey;
+    _selectedWatchKeys
+      ..clear()
+      ..addAll(key == null ? const <String>[] : [key]);
+    _selectedColumns.clear();
+    _selectionAnchorKey = key;
+    if (key == null) return;
+
+    bool expandAncestors(WatchTreeNode node) {
+      if (node.watch.symbol.key == key) return true;
+      for (final child in node.children) {
+        if (expandAncestors(child)) {
+          _expandedWatchKeys.add(node.watch.symbol.key);
+          return true;
+        }
+      }
+      return false;
+    }
+
+    Iterable<WatchItem> visibleWatches(WatchTreeNode node) sync* {
+      yield node.watch;
+      if (_expandedWatchKeys.contains(node.watch.symbol.key)) {
+        for (final child in node.children) {
+          yield* visibleWatches(child);
+        }
+      }
+    }
+
+    for (final root in roots) {
+      if (expandAncestors(root)) break;
+    }
+    final index = roots
+        .expand(visibleWatches)
+        .toList()
+        .indexWhere((watch) => watch.symbol.key == key);
+    if (index < 0) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          controller.plotWatchSelectionRevision != revision ||
+          controller.plotHighlightedWatchKey != key ||
+          !_verticalScrollController.hasClients) {
+        return;
+      }
+      final position = _verticalScrollController.position;
+      final top = index * _rowHeight;
+      final bottom = top + _rowHeight;
+      final target = top < position.pixels
+          ? top
+          : bottom > position.pixels + position.viewportDimension
+          ? bottom - position.viewportDimension
+          : position.pixels;
+      final offset = target.clamp(
+        position.minScrollExtent,
+        position.maxScrollExtent,
+      );
+      if ((offset - position.pixels).abs() < 0.5) return;
+      _verticalScrollController.animateTo(
+        offset,
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+      );
+    });
   }
 
   void _toggleWatchTreeNode(String key) {
@@ -154,6 +233,9 @@ class _WatchPanelState extends State<_WatchPanel> {
         _selectionAnchorKey = key;
       }
     });
+    if (_selectedWatchKeys.contains(key)) {
+      controller.setPlotHighlightedWatch(key);
+    }
     _tableFocus.requestFocus();
   }
 
@@ -192,6 +274,7 @@ class _WatchPanelState extends State<_WatchPanel> {
         _selectionAnchorKey = clickedKey;
       });
     }
+    controller.setPlotHighlightedWatch(clickedKey);
     _tableFocus.requestFocus();
     return [
       for (final watch in controller.watches)
@@ -414,6 +497,7 @@ class _WatchPanelState extends State<_WatchPanel> {
       builder: (context, _) {
         _normalizeSelection();
         final treeRoots = buildWatchTree(controller.watches);
+        _applyPlotSelection(treeRoots);
         return Padding(
           padding: const EdgeInsets.all(10),
           child: Column(
@@ -454,6 +538,7 @@ class _WatchPanelState extends State<_WatchPanel> {
                         body: treeRoots.isEmpty
                             ? const SizedBox.expand()
                             : ReorderableListView.builder(
+                                scrollController: _verticalScrollController,
                                 buildDefaultDragHandles: false,
                                 proxyDecorator: (child, index, animation) {
                                   final horizontalOffset =
@@ -666,6 +751,7 @@ class _WatchRowState extends State<_WatchRow> {
         }
       },
       child: Container(
+        key: ValueKey('watch-row-${watch.symbol.key}'),
         height: math.max(
           widget.rowHeight,
           TalUiTheme.of(context).controlHeight,

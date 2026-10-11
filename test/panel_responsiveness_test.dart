@@ -215,11 +215,14 @@ void main() {
     await tester.tap(
       find.byKey(ValueKey('watch-color-preset-${TalColors.blue.toARGB32()}')),
     );
+    // Opening the picker may also highlight its watch row. Count the color
+    // commit separately from that independent plot-selection notification.
+    final eventsBeforeConfirm = plotEvents;
     await tester.tap(find.byKey(const ValueKey('watch-color-confirm')));
     await tester.pumpAndSettle();
 
     expect(controller.watches.single.color, TalColors.blue);
-    expect(plotEvents, 1);
+    expect(plotEvents - eventsBeforeConfirm, 1);
 
     controller.dispose();
     await tester.pumpWidget(const SizedBox.shrink());

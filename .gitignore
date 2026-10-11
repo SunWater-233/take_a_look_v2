@@ -36,6 +36,9 @@ migrate_working_dir/
 /backend/runtime/take_a_look_backend/
 /build/backend_pyinstaller/
 
+# Persistent raw samples beside portable executables or the source backend.
+recordings/
+
 # Symbolication related
 app.*.symbols
 

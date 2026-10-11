@@ -24,6 +24,7 @@ part 'controller_plot.dart';
 part 'controller_analysis.dart';
 part 'controller_watch.dart';
 part 'controller_debug.dart';
+part 'controller_source_workspace.dart';
 
 typedef RemoteCommand =
     Future<void> Function(ControllerCommand command, Object? arguments);
@@ -80,6 +81,8 @@ class TakeALookController extends ChangeNotifier {
   DateTime? _lastPerformanceLogAt;
   final ValueNotifier<double> _uiScale = ValueNotifier<double>(1);
   final ControllerSignals signals = ControllerSignals();
+  final Set<String> _visibleSourceViews = <String>{};
+  bool _sourceWorkspaceNotificationPending = false;
 
   final ControllerState state = ControllerState();
   final TelemetryStore telemetryStore = TelemetryStore();
@@ -107,10 +110,19 @@ class TakeALookController extends ChangeNotifier {
       state.connection.lastError = value;
 
   double get sampleRateHz => state.acquisition.sampleRateHz;
-  set sampleRateHz(double value) => state.acquisition.sampleRateHz = value;
+  set sampleRateHz(double value) {
+    if (!value.isFinite || value <= 0) return;
+    state.acquisition.sampleRateHz = value;
+    _configurePlotRetention();
+  }
+
   double get rttSampleRateHz => state.acquisition.rttSampleRateHz;
-  set rttSampleRateHz(double value) =>
-      state.acquisition.rttSampleRateHz = value;
+  set rttSampleRateHz(double value) {
+    if (!value.isFinite || value <= 0) return;
+    state.acquisition.rttSampleRateHz = value;
+    _configurePlotRetention();
+  }
+
   String get displayRefreshMode => state.acquisition.displayRefreshMode;
   set displayRefreshMode(String value) =>
       state.acquisition.displayRefreshMode = value;
@@ -119,19 +131,31 @@ class TakeALookController extends ChangeNotifier {
   bool get samplingPaused => state.acquisition.samplingPaused;
   set samplingPaused(bool value) => state.acquisition.samplingPaused = value;
   bool get rttEnabled => state.acquisition.rttEnabled;
-  set rttEnabled(bool value) => state.acquisition.rttEnabled = value;
+  set rttEnabled(bool value) {
+    state.acquisition.rttEnabled = value;
+    _configurePlotRetention();
+  }
+
   String get rttProtocol => state.acquisition.rttProtocol;
-  set rttProtocol(String value) => state.acquisition.rttProtocol = value;
+  set rttProtocol(String value) {
+    state.acquisition.rttProtocol = value;
+    _configurePlotRetention();
+  }
+
   Map<String, dynamic> get performanceStats =>
       state.acquisition.performanceStats;
   set performanceStats(Map<String, dynamic> value) =>
       state.acquisition.performanceStats = value;
 
+  String? get plotHighlightedWatchKey => state.plot.highlightedWatchKey;
+  int get plotWatchSelectionRevision => state.plot.watchSelectionRevision;
   bool get plottingPaused => state.plot.plottingPaused;
   set plottingPaused(bool value) => state.plot.plottingPaused = value;
   bool get followLatest => state.plot.followLatest;
   set followLatest(bool value) => state.plot.followLatest = value;
   double get plotVisibleWindowSeconds => state.plot.visibleWindowSeconds;
+  double get plotRetentionSeconds => state.plot.retentionSeconds;
+  Map<String, dynamic> get rawRecording => state.acquisition.rawRecording;
   set plotVisibleWindowSeconds(double value) =>
       state.plot.visibleWindowSeconds = value;
   bool get plotAutoY => state.plot.autoY;
@@ -177,6 +201,7 @@ class TakeALookController extends ChangeNotifier {
   Listenable get clockChanges => signals.clock;
   Listenable get logChanges => signals.logs;
   Listenable get debugChanges => signals.debug;
+  Listenable get sourceWorkspaceChanges => signals.sourceWorkspace;
   Listenable get stateSyncChanges => signals.stateSync;
   Listenable get telemetrySyncChanges => signals.telemetrySync;
   double get plotWindowEndSeconds => plottingPaused || !followLatest
@@ -185,6 +210,18 @@ class TakeALookController extends ChangeNotifier {
   Iterable<Offset> plotSamplesFor(WatchItem watch) {
     if (!plottingPaused) return watch.samples;
     return _frozenPlotSamples[watch.symbol.key] ?? watch.samples;
+  }
+
+  void _configurePlotRetention() {
+    telemetryStore
+      ..retentionSeconds = plotRetentionSeconds
+      ..sampleRateHz = sampleRateHz
+      ..rttSampleRateHz = rttSampleRateHz
+      ..rttEnabled = rttEnabled
+      ..rttProtocol = rttProtocol;
+    for (final watch in _watches) {
+      telemetryStore.configureWatch(watch);
+    }
   }
 
   void toggleSymbolTreeNodeExpansion(String key) {

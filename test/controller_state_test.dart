@@ -331,6 +331,8 @@ void main() {
       source.toggleSymbol(demoSymbols.first.key);
       source.addSelectedToWatch();
       final key = source.watches.single.symbol.key;
+      source.configurePlotView({'plotRetentionSeconds': 1});
+      source.setSampleRate(1000);
       source.applyBackendEvent(BackendEventType.samples, {
         'frames': [
           {
@@ -379,9 +381,9 @@ void main() {
       final recovered = source.telemetryDeltaSnapshot({key: 0});
       final recoveredWatch = (recovered['watches'] as List).single as Map;
       expect(recoveredWatch['reset'], isTrue);
-      expect(recoveredWatch['samples'], hasLength(1800));
+      expect(recoveredWatch['samples'], hasLength(1001));
       target.applyTelemetryDelta(recovered);
-      expect(target.watches.single.samples, hasLength(1800));
+      expect(target.watches.single.samples, hasLength(1001));
       expect(target.watches.single.totalSampleCount, 1801);
 
       source.dispose();

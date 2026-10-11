@@ -13,7 +13,6 @@ class SamplingServiceMixin:
     def _sampling_loop(self) -> None:
         next_memory_at = time.monotonic()
         next_rtt_at = time.monotonic()
-        pending_frames: list[tuple[float, dict[str, object]]] = []
         last_emit_at = time.monotonic()
         while not self._shutdown.is_set():
             now = time.monotonic()
@@ -35,10 +34,10 @@ class SamplingServiceMixin:
                     if connected and not paused and not target_halted and has_watches and now >= next_memory_at:
                         values = self._read_memory_locked(rtt_enabled, rtt_protocol)
                         if values:
-                            pending_frames.append((elapsed, values))
+                            self._queue_samples_locked([(elapsed, values)])
                         next_memory_at = now + memory_period
                     if connected and not paused and not target_halted and rtt_enabled and now >= next_rtt_at:
-                        pending_frames.extend(self._read_rtt_locked(elapsed, now))
+                        self._queue_samples_locked(self._read_rtt_locked(elapsed, now))
                         next_rtt_at = now + max(rtt_period, 0.002)
             except Exception as error:
                 with self._lock:
@@ -47,10 +46,10 @@ class SamplingServiceMixin:
                 next_memory_at = time.monotonic() + 0.25
 
             now = time.monotonic()
-            if pending_frames and (len(pending_frames) >= 64 or now - last_emit_at >= 0.006):
-                self._publish_samples(pending_frames)
-                pending_frames = []
-                last_emit_at = now
+            with self._lock:
+                if self._pending_frames and (len(self._pending_frames) >= 64 or now - last_emit_at >= 0.006):
+                    self._flush_pending_samples_locked()
+                    last_emit_at = now
             if now - self._last_perf_at >= 1.0:
                 self._publish_perf(now)
             wait_s = min(max(next_memory_at - now, 0.001), max(next_rtt_at - now, 0.001), 0.05)
@@ -122,29 +121,43 @@ class SamplingServiceMixin:
                     self._watches[key].value = value
         return frames
 
-    def _publish_samples(self, frames: list[tuple[float, dict[str, object]]]) -> None:
-        with self._lock:
-            normalized = [
-                {"elapsed": elapsed, "values": {key: json_value(value) for key, value in values.items()}}
-                for elapsed, values in frames
-            ]
-            sampled_keys = {
-                key for key, watch in self._watches.items() if watch.sampling_enabled
-            }
-            self._samples.extend(
-                (
-                    frame["elapsed"],
-                    {
-                        key: value
-                        for key, value in frame["values"].items()
-                        if key in sampled_keys
-                    },
-                )
-                for frame in normalized
-                if any(key in sampled_keys for key in frame["values"])
-            )
-            self._sample_count_since_perf += len(normalized)
-        self._emit(EventName.SAMPLES, {"frames": normalized})
+    def _queue_samples_locked(self, frames: list[tuple[float, dict[str, object]]]) -> None:
+        # Capture the sampling switches/labels at acquisition, before a watch
+        # can be disabled or removed while this batch waits for publication.
+        for elapsed, values in frames:
+            normalized = {key: json_value(value) for key, value in values.items()}
+            self._pending_frames.append((elapsed, normalized))
+            recorded = {}
+            for key, value in normalized.items():
+                watch = self._watches.get(key)
+                if watch and watch.sampling_enabled:
+                    recorded[key] = value
+                    self._pending_recording_labels[key] = watch.symbol.name
+            if recorded:
+                self._pending_recording_frames.append((elapsed, recorded))
+
+    def _flush_pending_samples_locked(self) -> None:
+        if not self._pending_frames or self._recording.failure is not None:
+            return
+        previous_path = self._recording.path
+        try:
+            self._recording.append(self._pending_recording_frames, self._pending_recording_labels)
+        except Exception as error:
+            self._recording.failure = error
+            self._sampling_paused = True
+            self._emit(EventName.ERROR, {"code": "raw_recording_failed",
+                       "message": "原始记录写入失败，已暂停采样。", "details": str(error)})
+            self._emit(EventName.STATE, self._runtime_state_locked())
+            return
+        frames = [{"elapsed": elapsed, "values": values} for elapsed, values in self._pending_frames]
+        self._sample_count_since_perf += len(frames)
+        self._pending_frames.clear()
+        self._pending_recording_frames.clear()
+        self._pending_recording_labels.clear()
+        if self._recording.path != previous_path:
+            self._emit(EventName.LOG, {"level": "info", "message": f"原始采样持续保存：{self._recording.path}"})
+            self._emit(EventName.STATE, {"rawRecording": self._recording.status()})
+        self._emit(EventName.SAMPLES, {"frames": frames})
 
     def _publish_perf(self, now: float) -> None:
         with self._lock:

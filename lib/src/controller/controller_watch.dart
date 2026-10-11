@@ -119,6 +119,7 @@ extension TakeALookControllerWatches on TakeALookController {
       );
     }
     _selectedSymbols.clear();
+    _configurePlotRetention();
     _syncWatchesBackend();
     _appendLog('已加入 ${selected.length} 个变量到实时调参列表。');
     _emitState([signals.symbols, signals.watches, signals.plot, signals.logs]);
@@ -140,6 +141,9 @@ extension TakeALookControllerWatches on TakeALookController {
     final previousLength = _watches.length;
     _watches.removeWhere((item) => removedKeys.contains(item.symbol.key));
     if (_watches.length == previousLength) return;
+    if (removedKeys.contains(plotHighlightedWatchKey)) {
+      state.plot.highlightedWatchKey = null;
+    }
     _syncWatchesBackend();
     _emitState([signals.watches, signals.plot]);
   }
@@ -166,6 +170,7 @@ extension TakeALookControllerWatches on TakeALookController {
       return;
     }
     _watches.clear();
+    state.plot.highlightedWatchKey = null;
     _syncWatchesBackend();
     _appendLog('已清空实时调参列表。');
     _emitState([signals.watches, signals.plot, signals.logs]);

@@ -3,13 +3,28 @@ import 'dart:ui';
 
 import '../backend/backend_transport.dart';
 import '../models/models.dart';
-import 'sample_buffer.dart';
 
 /// Owns mutation and retention rules for high-frequency watch samples.
 class TelemetryStore {
-  static const int retainedSamplesPerWatch = SampleBuffer.defaultCapacity;
+  static const double defaultRetentionSeconds = 60;
+  double retentionSeconds = defaultRetentionSeconds;
+  double sampleRateHz = 50;
+  double rttSampleRateHz = 1000;
+  bool rttEnabled = false;
+  String rttProtocol = 'normal';
+
+  void configureWatch(WatchItem watch) {
+    final useRtt =
+        watch.symbol.dataSource == 'rtt' ||
+        (rttEnabled && rttProtocol == 'plus');
+    watch.samples.configureRetention(
+      seconds: retentionSeconds,
+      rateHz: useRtt ? rttSampleRateHz : sampleRateHz,
+    );
+  }
 
   void append(WatchItem watch, Offset point) {
+    configureWatch(watch);
     watch.samples.add(point);
     watch.totalSampleCount += 1;
   }
@@ -27,6 +42,9 @@ class TelemetryStore {
     required double currentElapsed,
   }) {
     final watchesByKey = {for (final watch in watches) watch.symbol.key: watch};
+    for (final watch in watchesByKey.values) {
+      configureWatch(watch);
+    }
     var elapsedSeconds = currentElapsed;
     for (final rawFrame in payload['frames'] as List? ?? const []) {
       if (rawFrame is! Map) continue;
@@ -55,6 +73,9 @@ class TelemetryStore {
   }) {
     final watchesByKey = {for (final watch in watches) watch.symbol.key: watch};
     final schemaWatches = [for (final key in batch.keys) watchesByKey[key]];
+    for (final watch in watchesByKey.values) {
+      configureWatch(watch);
+    }
     var elapsedSeconds = currentElapsed;
     for (final elapsed in batch.elapsedSeconds) {
       elapsedSeconds = math.max(elapsedSeconds, elapsed);

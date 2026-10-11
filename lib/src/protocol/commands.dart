@@ -31,6 +31,12 @@ enum ControllerCommand {
   clearLogs,
   resetTarget,
   setSourceRoot,
+  addSourceFile,
+  openSourceFile,
+  closeSourceFile,
+  markSourceFileRead,
+  dismissSourceAttention,
+  setSourceViewVisible,
   setBreakpoints,
   debugControl,
   exportCsv,
@@ -187,6 +193,12 @@ class BackendCommandMapper {
       case ControllerCommand.setDisplayRefreshMode:
       case ControllerCommand.setUiScale:
       case ControllerCommand.setSourceRoot:
+      case ControllerCommand.addSourceFile:
+      case ControllerCommand.openSourceFile:
+      case ControllerCommand.closeSourceFile:
+      case ControllerCommand.markSourceFileRead:
+      case ControllerCommand.dismissSourceAttention:
+      case ControllerCommand.setSourceViewVisible:
       case ControllerCommand.togglePlotting:
       case ControllerCommand.toggleFollowLatest:
       case ControllerCommand.setPlotViewport:

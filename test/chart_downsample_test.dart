@@ -24,7 +24,9 @@ void main() {
         pixelWidth: 50,
       );
 
-      expect(reduced.length, lessThanOrEqualTo(101));
+      expect(reduced.length, lessThanOrEqualTo(102));
+      expect(reduced.first.dx, 2);
+      expect(reduced.last.dx, 8);
       expect(reduced.every((point) => point.dx >= 2 && point.dx <= 8), isTrue);
       expect(reduced.map((point) => point.dy), containsAll([100, -100]));
       for (var index = 1; index < reduced.length; index += 1) {

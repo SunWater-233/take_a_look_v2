@@ -98,6 +98,10 @@ extension TakeALookControllerDebug on TakeALookController {
   }
 
   void applyDebugState(Map<String, dynamic> data, {bool emit = true}) {
+    final previousExecution = debugState.executionState;
+    final previousSource = debugState.currentSource;
+    final previousLine = debugState.currentLine;
+    final previousPc = debugState.programCounter;
     final execution = data['executionState'] as String?;
     debugState.executionState = DebugExecutionState.values.firstWhere(
       (candidate) => candidate.name == execution,
@@ -179,6 +183,15 @@ extension TakeALookControllerDebug on TakeALookController {
       debugState.currentSource = null;
       debugState.currentLine = null;
       debugState.programCounter = null;
+    }
+    if (data['stopRevision'] case final int revision) {
+      debugState.stopRevision = revision;
+    } else if (debugState.executionState == DebugExecutionState.halted &&
+        (previousExecution != DebugExecutionState.halted ||
+            previousSource != debugState.currentSource ||
+            previousLine != debugState.currentLine ||
+            previousPc != debugState.programCounter)) {
+      debugState.stopRevision++;
     }
     if (emit) _emitState([signals.debug]);
   }

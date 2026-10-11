@@ -42,11 +42,15 @@ extension TakeALookControllerSnapshot on TakeALookController {
       'samplingElapsedSeconds': samplingElapsedSeconds,
       'elapsedSeconds': elapsedSeconds,
       'samplingPaused': samplingPaused,
+      'rawRecording': rawRecording,
       'plottingPaused': plottingPaused,
+      'plotHighlightedWatchKey': plotHighlightedWatchKey,
+      'plotWatchSelectionRevision': plotWatchSelectionRevision,
       'rttEnabled': rttEnabled,
       'rttProtocol': rttProtocol,
       'followLatest': followLatest,
       'plotVisibleWindowSeconds': plotVisibleWindowSeconds,
+      'plotRetentionSeconds': plotRetentionSeconds,
       'plotAutoY': plotAutoY,
       'plotYMin': plotYMin,
       'plotYMax': plotYMax,
@@ -72,16 +76,15 @@ extension TakeALookControllerSnapshot on TakeALookController {
             'sampleCursor': watch.totalSampleCount,
             if (includeSamples)
               'samples': [
-                for (final point in watch.samples.skip(
-                  math.max(0, watch.samples.length - 600),
-                ))
-                  [point.dx, point.dy],
+                for (final point in watch.samples) [point.dx, point.dy],
               ],
           },
       ],
       'logs': [for (final entry in _logs) entry.toJson()],
       'analysisSession': analysisSession.toJson(includeData: includeSamples),
+      'sourceWorkspace': sourceWorkspace.toJson(),
       'debug': {
+        'stopRevision': debugState.stopRevision,
         'executionState': debugState.executionState.name,
         'sourceFiles': debugState.sourceFiles,
         'sourceRoot': debugState.sourceRoot,
@@ -123,10 +126,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
             'value': watch.value,
             'sampleCursor': watch.totalSampleCount,
             'samples': [
-              for (final point in watch.samples.skip(
-                math.max(0, watch.samples.length - 600),
-              ))
-                [point.dx, point.dy],
+              for (final point in watch.samples) [point.dx, point.dy],
             ],
           },
       ],
@@ -186,9 +186,14 @@ extension TakeALookControllerSnapshot on TakeALookController {
     final hasSymbolState =
         data.containsKey('selectedSymbols') || data.containsKey('symbols');
     final hasWatchState = data.containsKey('watches');
+    final hasPlotHighlightState = data.containsKey('plotHighlightedWatchKey');
+    final hasPlotWatchSelection = data.containsKey(
+      'plotWatchSelectionRevision',
+    );
     final hasElapsedState = data.containsKey('elapsedSeconds');
     final hasAnalysisState = data.containsKey('analysisSession');
     final hasDebugState = data.containsKey('debug');
+    final hasSourceWorkspace = data['sourceWorkspace'] is Map;
     final hasPlotState =
         hasWatchState ||
         hasElapsedState ||
@@ -197,6 +202,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
           'plottingPaused',
           'followLatest',
           'plotVisibleWindowSeconds',
+          'plotRetentionSeconds',
           'plotAutoY',
           'plotYMin',
           'plotYMax',
@@ -263,6 +269,16 @@ extension TakeALookControllerSnapshot on TakeALookController {
     plotVisibleWindowSeconds =
         (data['plotVisibleWindowSeconds'] as num?)?.toDouble() ??
         plotVisibleWindowSeconds;
+    final retention = (data['plotRetentionSeconds'] as num?)?.toDouble();
+    if (retention != null && retention.isFinite && retention > 0) {
+      state.plot.retentionSeconds = retention.clamp(1, 120).toDouble();
+      _configurePlotRetention();
+    }
+    if (data['rawRecording'] is Map) {
+      state.acquisition.rawRecording = Map<String, dynamic>.from(
+        data['rawRecording'] as Map,
+      );
+    }
     if (data.containsKey('plotAutoY')) {
       plotAutoY = data['plotAutoY'] != false;
     }
@@ -337,17 +353,19 @@ extension TakeALookControllerSnapshot on TakeALookController {
             final item = Map<String, dynamic>.from(raw as Map);
             final symbol = symbolsByKey[item['key'] as String];
             if (symbol == null) return null;
+            final samples = item['samples'] as List?;
             final watch =
-                WatchItem(symbol: symbol, color: _colorFromValue(item['color']))
+                WatchItem(
+                    symbol: symbol,
+                    color: _colorFromValue(item['color']),
+                    samples: samples == null
+                        ? previousWatches[symbol.key]?.samples
+                        : null,
+                  )
                   ..samplingEnabled = item['sampling'] != false
                   ..plotted = item['plotted'] == true
                   ..value = _numericValue(item['value']);
-            final samples = item['samples'] as List?;
-            if (samples == null) {
-              watch.samples.addAll(
-                previousWatches[watch.symbol.key]?.samples ?? [],
-              );
-            }
+            telemetryStore.configureWatch(watch);
             for (final rawPoint in samples ?? const []) {
               final point = rawPoint as List;
               watch.samples.add(
@@ -363,6 +381,19 @@ extension TakeALookControllerSnapshot on TakeALookController {
             return watch;
           }).whereType<WatchItem>(),
         );
+    }
+
+    if (hasPlotHighlightState) {
+      state.plot.highlightedWatchKey =
+          data['plotHighlightedWatchKey'] as String?;
+    }
+    if (hasPlotWatchSelection) {
+      state.plot.watchSelectionRevision =
+          data['plotWatchSelectionRevision'] as int;
+    }
+    if ((hasWatchState || hasPlotHighlightState) &&
+        _watchByKey(plotHighlightedWatchKey ?? '') == null) {
+      state.plot.highlightedWatchKey = null;
     }
 
     if (data.containsKey('logs')) {
@@ -383,6 +414,11 @@ extension TakeALookControllerSnapshot on TakeALookController {
       applyDebugState(
         Map<String, dynamic>.from(data['debug'] as Map),
         emit: false,
+      );
+    }
+    if (hasSourceWorkspace) {
+      sourceWorkspace.applyJson(
+        Map<String, dynamic>.from(data['sourceWorkspace'] as Map),
       );
     }
     // Apply after symbol/source data so a detached window cannot finish early.
@@ -407,13 +443,17 @@ extension TakeALookControllerSnapshot on TakeALookController {
       if (hasConnectionState) signals.connection,
       if (hasSamplingState) signals.sampling,
       if (hasSymbolState) signals.symbols,
-      if (hasWatchState || data.containsKey('connectionKind')) signals.watches,
+      if (hasWatchState ||
+          hasPlotWatchSelection ||
+          data.containsKey('connectionKind'))
+        signals.watches,
       if (hasWatchState || hasElapsedState) signals.telemetry,
-      if (hasPlotState) signals.plot,
+      if (hasPlotState || hasPlotHighlightState) signals.plot,
       if (hasPlotState) signals.plotControls,
       if (data.containsKey('logs')) signals.logs,
       if (hasAnalysisState) signals.analysis,
       if (hasDebugState) signals.debug,
+      if (hasSourceWorkspace) signals.sourceWorkspace,
     ], sync: false);
   }
 }

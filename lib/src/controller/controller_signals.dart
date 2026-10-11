@@ -18,6 +18,7 @@ class ControllerSignals {
   final ControllerSignal clock = ControllerSignal();
   final ControllerSignal logs = ControllerSignal();
   final ControllerSignal debug = ControllerSignal();
+  final ControllerSignal sourceWorkspace = ControllerSignal();
   final ControllerSignal stateSync = ControllerSignal();
   final ControllerSignal telemetrySync = ControllerSignal();
 
@@ -34,6 +35,7 @@ class ControllerSignals {
     clock.dispose();
     logs.dispose();
     debug.dispose();
+    sourceWorkspace.dispose();
     stateSync.dispose();
     telemetrySync.dispose();
   }

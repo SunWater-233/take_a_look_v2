@@ -1,6 +1,7 @@
 #include "flutter_window.h"
 
 #include <optional>
+#include <string>
 
 #include "desktop_multi_window/desktop_multi_window_plugin.h"
 #include "flutter/generated_plugin_registrant.h"
@@ -59,6 +60,23 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  if (message == WM_CLOSE) {
+    // desktop_multi_window owns prewarmed and detached engines in a static
+    // manager. Destroy their native windows while the main engine and platform
+    // loop are still alive, before main-window teardown unloads Flutter/IME
+    // state. Hiding them through WM_CLOSE would leave those engines running.
+    EnumThreadWindows(
+        GetCurrentThreadId(),
+        [](HWND window, LPARAM) -> BOOL {
+          wchar_t window_class[128] = {};
+          GetClassNameW(window, window_class, 128);
+          if (std::wstring(window_class) == L"FLUTTER_MULTI_WINDOW_WIN32_WINDOW") {
+            DestroyWindow(window);
+          }
+          return TRUE;
+        },
+        0);
+  }
   // Give Flutter, including plugins, an opportunity to handle window messages.
   if (flutter_controller_) {
     std::optional<LRESULT> result =

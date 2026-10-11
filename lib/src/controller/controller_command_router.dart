@@ -62,6 +62,7 @@ Future<JsonObject> executeControllerCommand(
         xMax: (values['xMax'] as num).toDouble(),
         yMin: (values['yMin'] as num?)?.toDouble(),
         yMax: (values['yMax'] as num?)?.toDouble(),
+        preserveFollowLatest: values['preserveFollowLatest'] == true,
       );
     case ControllerCommand.configurePlotView:
       controller.configurePlotView(
@@ -83,6 +84,26 @@ Future<JsonObject> executeControllerCommand(
       } else {
         await controller.chooseSourceRoot();
       }
+    case ControllerCommand.addSourceFile:
+      controller.addSourceFileFromSymbols(arguments as String);
+    case ControllerCommand.openSourceFile:
+      final values = Map<String, Object?>.from(arguments! as Map);
+      controller.openSourceFile(
+        values['path'] as String,
+        select: values['select'] != false,
+      );
+    case ControllerCommand.closeSourceFile:
+      controller.closeSourceFile(arguments as String);
+    case ControllerCommand.markSourceFileRead:
+      controller.markSourceFileRead(arguments as String);
+    case ControllerCommand.dismissSourceAttention:
+      controller.dismissSourceAttention();
+    case ControllerCommand.setSourceViewVisible:
+      final values = Map<String, Object?>.from(arguments! as Map);
+      controller.setSourceViewVisible(
+        values['viewId'] as String,
+        values['visible'] == true,
+      );
     case ControllerCommand.setBreakpoints:
       final values = Map<String, Object?>.from(arguments! as Map);
       final path = values['path'] as String;

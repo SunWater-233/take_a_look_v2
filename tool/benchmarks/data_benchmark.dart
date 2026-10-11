@@ -22,6 +22,15 @@ import 'package:take_a_look_v2/src/panels/panels.dart';
 import 'package:take_a_look_v2/src/telemetry/telemetry_store.dart';
 import 'package:take_a_look_v2/src/theme/theme.dart';
 
+// Preserve the historical fixed-count microbenchmark for numeric storage
+// comparisons. The live controller benchmark uses production time retention.
+const _fixedFixturePoints = 1800;
+
+class _FixedFixtureStore extends TelemetryStore {
+  @override
+  void configureWatch(WatchItem watch) {}
+}
+
 double _checksum = 0;
 final _results = <Map<String, Object?>>[];
 late File _progress;
@@ -282,7 +291,7 @@ Future<void> _liveWindowBenchmark() async {
       controller.watches.any(
         (watch) =>
             watch.totalSampleCount != sentFrames ||
-            watch.samples.length != 1800,
+            watch.samples.length != sentFrames,
       )) {
     throw StateError('Live sampling lost data or exceeded the retention limit');
   }
@@ -414,10 +423,10 @@ List<WatchItem> _watches(int channels) => [
         color: Color(0xFF0080FF + channel * 1000),
       )
       ..samples.addAll([
-        for (var i = 0; i < TelemetryStore.retainedSamplesPerWatch; i++)
+        for (var i = 0; i < _fixedFixturePoints; i++)
           Offset(i / 10000, math.sin(i / 20 + channel) + channel / 8),
       ])
-      ..totalSampleCount = TelemetryStore.retainedSamplesPerWatch,
+      ..totalSampleCount = _fixedFixturePoints,
 ];
 
 // Benchmark-only control, not a proposed drop-in production replacement.
@@ -425,8 +434,8 @@ List<WatchItem> _watches(int channels) => [
 class _RingWatch {
   _RingWatch(WatchItem watch)
     : key = watch.symbol.key,
-      times = Float64List(TelemetryStore.retainedSamplesPerWatch),
-      values = Float64List(TelemetryStore.retainedSamplesPerWatch) {
+      times = Float64List(_fixedFixturePoints),
+      values = Float64List(_fixedFixturePoints) {
     for (var i = 0; i < watch.samples.length; i++) {
       times[i] = watch.samples[i].dx;
       values[i] = watch.samples[i].dy;
@@ -436,7 +445,7 @@ class _RingWatch {
   final Float64List times;
   final Float64List values;
   int cursor = 0;
-  int total = TelemetryStore.retainedSamplesPerWatch;
+  int total = _fixedFixturePoints;
   double value = 0;
 }
 
@@ -462,7 +471,7 @@ void _checkFixtures() {
   final watches = _watches(8);
   final rings = watches.map(_RingWatch.new).toList();
   final batch = decodeBackendSamplePayload(_payload(8, 64), _keys(8));
-  final store = TelemetryStore();
+  final store = _FixedFixtureStore();
   for (var pass = 0; pass < 40; pass++) {
     store.applyBinaryBatch(batch, watches, currentElapsed: 0);
     _applyRing(batch, rings);
@@ -498,13 +507,13 @@ Future<void> _acquisitionBenchmarks() async {
     final batch = decodeBackendSamplePayload(payload, keys);
     final watches = _watches(channels);
     final rings = watches.map(_RingWatch.new).toList();
-    final store = TelemetryStore();
+    final store = _FixedFixtureStore();
     final details = <String, Object?>{
       'channels': channels,
       'framesPerBatch': frames,
       'valuesPerOperation': channels * frames,
       'payloadBytes': payload.length,
-      'retainedPointsPerChannel': TelemetryStore.retainedSamplesPerWatch,
+      'retainedPointsPerChannel': _fixedFixturePoints,
     };
     await _measure('decode_$channels', () {
       final decoded = decodeBackendSamplePayload(payload, keys);

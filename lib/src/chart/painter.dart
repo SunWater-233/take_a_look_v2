@@ -40,9 +40,12 @@ class TelemetryPainter extends CustomPainter {
 
     final plotted = telemetryPlotSeries(controller, viewport);
     final pointer = hoverPosition?.value;
-    final hovered = pointer == null
-        ? null
-        : hitTestTelemetrySeries(plotted, viewport, pointer);
+    final hovered = inspectTelemetrySeries(
+      plotted,
+      viewport,
+      position: pointer,
+      highlightedWatchKey: controller.plotHighlightedWatchKey,
+    );
     if (plotted.isNotEmpty) {
       canvas.save();
       canvas.clipRect(viewport.plot);
@@ -78,6 +81,32 @@ class TelemetryPainter extends CustomPainter {
       canvas.restore();
     }
 
+    final retained = plotted.where((series) => series.samples.isNotEmpty);
+    if (retained.isNotEmpty &&
+        retained.any(
+          (series) => series.watch.totalSampleCount > series.samples.length,
+        )) {
+      final earliest = retained
+          .map((series) => series.samples.first.dx)
+          .reduce(math.min);
+      if (viewport.xMin < earliest - 0.001) {
+        final notice = TextPainter(
+          text: TextSpan(
+            text: '绘图历史从 ${earliest.toStringAsFixed(2)} s 开始；更早记录请导出原始 CSV',
+            style: const TextStyle(color: Color(0xFFAAAAAA), fontSize: 12),
+          ),
+          textDirection: TextDirection.ltr,
+          maxLines: 1,
+          ellipsis: '…',
+        )..layout(maxWidth: math.max(1, viewport.plot.width - 16));
+        notice.paint(
+          canvas,
+          Offset(viewport.plot.left + 8, viewport.plot.bottom - 22),
+        );
+        notice.dispose();
+      }
+    }
+
     renderer.drawAxisLabels(yLabelOffset: 42);
     if (controller.plotShowLegend) {
       renderer.drawLegend([
@@ -88,7 +117,9 @@ class TelemetryPainter extends CustomPainter {
           ),
       ], maximumItems: 6);
     }
-    if (hovered != null) _drawHoverTooltip(canvas, size, pointer!, hovered);
+    if (hovered != null) {
+      _drawHoverTooltip(canvas, size, pointer ?? hovered.position, hovered);
+    }
   }
 
   void _drawHoverTooltip(

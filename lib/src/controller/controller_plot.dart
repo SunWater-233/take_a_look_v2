@@ -1,6 +1,15 @@
 part of 'controller.dart';
 
 extension TakeALookControllerPlot on TakeALookController {
+  void setPlotHighlightedWatch(String? key, {bool selectWatchRow = false}) {
+    if (key == plotHighlightedWatchKey && !selectWatchRow) return;
+    if (key != null && _watchByKey(key) == null) return;
+    configurePlotView({
+      'plotHighlightedWatchKey': key,
+      if (selectWatchRow) 'selectWatchRow': true,
+    });
+  }
+
   void togglePlotting() {
     if (_dispatchRemote(ControllerCommand.togglePlotting)) return;
     plottingPaused = !plottingPaused;
@@ -48,12 +57,14 @@ extension TakeALookControllerPlot on TakeALookController {
     required double xMax,
     double? yMin,
     double? yMax,
+    bool preserveFollowLatest = false,
   }) {
-    final arguments = <String, double>{
+    final arguments = <String, Object?>{
       'xMin': xMin,
       'xMax': xMax,
       'yMin': ?yMin,
       'yMax': ?yMax,
+      if (preserveFollowLatest) 'preserveFollowLatest': true,
     };
     if (_isDetachedRemote &&
         _dispatchRemote(ControllerCommand.setPlotViewport, arguments)) {
@@ -64,13 +75,21 @@ extension TakeALookControllerPlot on TakeALookController {
       normalizedXMin + 0.001,
       math.max(xMin, xMax),
     );
-    final span = (normalizedXMax - normalizedXMin).clamp(0.2, 120).toDouble();
+    final keepFollowing = preserveFollowLatest && followLatest;
+    final span =
+        (keepFollowing ? (xMax - xMin).abs() : normalizedXMax - normalizedXMin)
+            .clamp(0.2, 120)
+            .toDouble();
     final latest = math.max(elapsedSeconds, span);
     final end = normalizedXMax.clamp(span, latest).toDouble();
-    if (followLatest) _freezePlotViewportIfNeeded();
-    followLatest = false;
     plotVisibleWindowSeconds = span;
-    _frozenPlotEndSeconds = end;
+    if (keepFollowing) {
+      if (!plottingPaused) _clearFrozenPlot();
+    } else {
+      if (followLatest) _freezePlotViewportIfNeeded();
+      followLatest = false;
+      _frozenPlotEndSeconds = end;
+    }
     if (yMin != null &&
         yMax != null &&
         yMin.isFinite &&
@@ -88,6 +107,19 @@ extension TakeALookControllerPlot on TakeALookController {
         _dispatchRemote(ControllerCommand.configurePlotView, values)) {
       return;
     }
+    final retention = (values['plotRetentionSeconds'] as num?)?.toDouble();
+    if (retention != null && retention.isFinite && retention > 0) {
+      state.plot.retentionSeconds = retention.clamp(1, 120).toDouble();
+      _configurePlotRetention();
+    }
+    if (values.containsKey('plotHighlightedWatchKey')) {
+      final key = values['plotHighlightedWatchKey'] as String?;
+      state.plot.highlightedWatchKey = key != null && _watchByKey(key) != null
+          ? key
+          : null;
+    }
+    final selectWatchRow = values['selectWatchRow'] == true;
+    if (selectWatchRow) state.plot.watchSelectionRevision += 1;
     if (values.containsKey('followLatest')) {
       final nextFollowLatest = values['followLatest'] == true;
       if (nextFollowLatest != followLatest) {
@@ -132,7 +164,11 @@ extension TakeALookControllerPlot on TakeALookController {
     if (values.containsKey('plotInvertY')) {
       plotInvertY = values['plotInvertY'] == true;
     }
-    _emitState([signals.plot, signals.plotControls]);
+    _emitState([
+      signals.plot,
+      signals.plotControls,
+      if (selectWatchRow) signals.watches,
+    ]);
   }
 
   void showAllPlotSamples() {

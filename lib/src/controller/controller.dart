@@ -11,6 +11,7 @@ import 'controller_signals.dart';
 import 'controller_state.dart';
 import '../models/demo_data.dart';
 import '../models/models.dart';
+import '../models/source_tools.dart';
 import '../protocol/commands.dart';
 import '../protocol/events.dart';
 import '../telemetry/telemetry_store.dart';
@@ -27,6 +28,7 @@ part 'controller_analysis.dart';
 part 'controller_watch.dart';
 part 'controller_debug.dart';
 part 'controller_source_workspace.dart';
+part 'controller_source_tools.dart';
 
 typedef RemoteCommand =
     Future<void> Function(ControllerCommand command, Object? arguments);
@@ -211,6 +213,7 @@ class TakeALookController extends ChangeNotifier {
   Listenable get logChanges => signals.logs;
   Listenable get debugChanges => signals.debug;
   Listenable get sourceWorkspaceChanges => signals.sourceWorkspace;
+  Listenable get sourceToolsChanges => signals.sourceTools;
   Listenable get stateSyncChanges => signals.stateSync;
   Listenable get telemetrySyncChanges => signals.telemetrySync;
   double get plotWindowEndSeconds => plottingPaused || !followLatest

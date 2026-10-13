@@ -71,6 +71,10 @@ class BackendClient {
                   ...Platform.environment,
                   'PYTHONPATH': backendDirectory.path,
                   'PYTHONUTF8': '1',
+                  'TAL_HOST_PYTHONPATH':
+                      Platform.environment['PYTHONPATH'] ?? '',
+                  'TAL_HOST_PYTHONUTF8':
+                      Platform.environment['PYTHONUTF8'] ?? '',
                   'TAL_RECORDINGS_DIR':
                       RawSampleRecording.defaultDirectory.path,
                 },
@@ -125,7 +129,14 @@ class BackendClient {
       await request(call.method, call.params);
     } catch (error) {
       // Loading owns its lifecycle in the controller, including error feedback.
-      if (command == ControllerCommand.loadSymbols) rethrow;
+      if (const {
+        ControllerCommand.loadSymbols,
+        ControllerCommand.setSourceProject,
+        ControllerCommand.startSourceTask,
+        ControllerCommand.cancelSourceTask,
+      }.contains(command)) {
+        rethrow;
+      }
       if (error is BackendException) {
         eventHandler?.call(BackendEventType.error, {
           'code': error.code,

@@ -18,7 +18,10 @@
     "setBreakpoints",
     "debugControl",
     "exportCsv",
-    "shutdown"
+    "shutdown",
+    "setSourceProject",
+    "startSourceTask",
+    "cancelSourceTask"
   ],
   "events": [
     "state",
@@ -29,6 +32,7 @@
     "error",
     "perf",
     "debug",
-    "symbolLoadProgress"
+    "symbolLoadProgress",
+    "sourceTask"
   ]
 }

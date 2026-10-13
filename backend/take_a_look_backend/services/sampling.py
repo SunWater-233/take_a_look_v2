@@ -19,7 +19,7 @@ class SamplingServiceMixin:
             deadlines = [now + 0.05]
             try:
                 with self._lock:
-                    connected = self._connection_status == "connected"
+                    connected = self._connection_status == "connected" and not self._firmware_busy
                     if connected and now >= self._next_debug_poll_at:
                         self._poll_debug_state_locked()
                         self._next_debug_poll_at = now + 0.05

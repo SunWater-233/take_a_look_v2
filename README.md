@@ -220,6 +220,33 @@ build-machine paths recorded in the ELF are then
 matched to local files automatically. **定位本地源码** remains available as a
 per-file fallback.
 
+The source debugger also provides **工程设置**, **编译**, **下载**, and
+**编译并下载**, with a collapsible output panel along the bottom. Set an existing
+project source directory before running a command: it is always the subprocess
+working directory. Building does not require a connected board or an existing
+ELF. Commands, firmware paths, shell selection, extra toolchain directories and
+output encoding are saved per project and operating system in the app's local
+`source-projects.json` configuration file.
+
+Windows defaults to PowerShell (`pwsh.exe`, falling back to Windows PowerShell);
+CMD is optional. macOS defaults to zsh and Linux to Bash, using an available
+POSIX shell when the default is absent. An explicitly selected missing shell is
+reported instead of silently changing command syntax. Commands run without an
+interactive shell profile; add toolchain directories in **高级设置** when needed.
+Use the chosen shell's syntax, and make multi-step build scripts return a nonzero
+exit code on failure. Output defaults to UTF-8, with a system-encoding option for
+older tools. **停止编译** terminates the compiler process tree. Errors in common
+`file:line:column` and `file(line,column)` formats can be clicked to open source.
+
+Downloading currently requires a connected local pyOCD probe and an ELF/AXF file
+(relative paths resolve from the source root). Remote GDB/Ember connections do
+not yet provide this operation. A failed or cancelled build never starts a
+download. During flashing, sampling, RTT, and competing probe operations pause;
+the downloaded image supplies the new symbols, relocated watches and breakpoints
+before the selected reset/halt or reset/run action takes effect. Building alone
+keeps the existing target symbols. Flash failures leave acquisition paused, and
+flash operations cannot be forcibly cancelled from the output panel.
+
 ## Keyboard shortcuts
 
 Panel commands follow the active panel. When the source debugger is visible,

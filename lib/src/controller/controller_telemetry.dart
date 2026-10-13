@@ -118,6 +118,9 @@ extension TakeALookControllerTelemetry on TakeALookController {
       case BackendEventType.symbolLoadProgress:
         final payload = _asMap(params);
         if (payload != null) applySymbolLoadProgress(payload);
+      case BackendEventType.sourceTask:
+        final payload = _asMap(params);
+        if (payload != null) applySourceTask(payload);
     }
   }
 

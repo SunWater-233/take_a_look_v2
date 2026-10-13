@@ -6,7 +6,8 @@ enum BackendEventType {
   error,
   perf,
   debug,
-  symbolLoadProgress;
+  symbolLoadProgress,
+  sourceTask;
 
   String get wireName => name;
 

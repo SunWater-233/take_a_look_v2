@@ -14,6 +14,14 @@ Future<JsonObject> executeControllerCommand(
   bool includeResultState = true,
 }) async {
   switch (command) {
+    case ControllerCommand.setSourceProject:
+      await controller.saveSourceProject(Map<String, dynamic>.from(arguments! as Map));
+    case ControllerCommand.startSourceTask:
+      await controller.startSourceTask((arguments! as Map)['kind'] as String);
+    case ControllerCommand.cancelSourceTask:
+      await controller.cancelSourceTask();
+    case ControllerCommand.clearSourceOutput:
+      controller.clearSourceOutput();
     case ControllerCommand.toggleConnection:
       await controller.toggleConnection();
     case ControllerCommand.loadSymbols:

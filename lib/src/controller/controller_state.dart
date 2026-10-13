@@ -1,5 +1,6 @@
 import '../models/models.dart';
 import '../analysis/analysis.dart';
+import '../models/source_tools.dart';
 
 /// Aggregate state owned by the application controller.
 ///
@@ -13,6 +14,8 @@ class ControllerState {
   final AnalysisSession analysis = AnalysisSession();
   final DebugState debug = DebugState();
   final SourceWorkspaceState sourceWorkspace = SourceWorkspaceState();
+  final SourceProjectConfig sourceProject = SourceProjectConfig();
+  final SourceTaskState sourceTask = SourceTaskState();
   SymbolLoadProgress? symbolLoad;
 }
 

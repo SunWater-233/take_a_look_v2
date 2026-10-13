@@ -16,6 +16,7 @@ import '../analysis/analysis.dart';
 import '../analysis/analysis_fft.dart';
 import '../analysis/analysis_worker.dart';
 import '../controller/controller.dart';
+import '../app/file_pickers.dart';
 import '../workspace/keyboard_shortcuts.dart';
 import '../models/models.dart';
 import '../models/watch_tree.dart';
@@ -40,6 +41,7 @@ part 'analysis_chart_painters.dart';
 part 'analysis_fft_panel.dart';
 part 'analysis_chart_table.dart';
 part 'source_debug_panel.dart';
+part 'source_build_tools.dart';
 part 'source_tab_attention.dart';
 part 'shared_controls.dart';
 

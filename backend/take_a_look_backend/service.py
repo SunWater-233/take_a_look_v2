@@ -20,6 +20,8 @@ from take_a_look_backend.services.recording import RawRecording, export_recordin
 from take_a_look_backend.services.debug_info import DebugInfoIndex, load_debug_info_from_elf
 from take_a_look_backend.services.symbols import load_symbols_from_elf
 from take_a_look_backend.services.elf_context import ElfLoadContext
+from take_a_look_backend.services.source_project import SourceProjects
+from take_a_look_backend.services.source_tasks import SourceTasks
 
 
 EventSink = Callable[[EventName, object], None]
@@ -46,6 +48,7 @@ class BackendService(SamplingServiceMixin):
         debug_info_loader: DebugInfoLoader = load_debug_info_from_elf,
         remote_backend_factory: Callable[..., RemoteMemoryBackend] = RemoteMemoryBackend,
         recording_directory: Path | None = None,
+        source_settings_file: Path | None = None,
     ) -> None:
         self._emit_event = event_sink
         self._memory = memory_backend or PyOcdMemoryBackend()
@@ -98,12 +101,16 @@ class BackendService(SamplingServiceMixin):
         self._stopped_location: dict[str, object] | None = None
         self._registers: dict[str, int] = {}
         self._next_debug_poll_at = 0.0
+        self._firmware_busy = False
+        self._source_projects = SourceProjects(source_settings_file)
+        self._source_tasks = SourceTasks(lambda payload: self._emit(EventName.SOURCE_TASK, payload), self._download_firmware)
         self._sampler.start()
 
     def close(self) -> None:
         if self._closed:
             return
         self._closed = True
+        self._source_tasks.close()
         self._shutdown.set()
         self._wake.set()
         self._sampler.join(timeout=2.0)
@@ -122,6 +129,32 @@ class BackendService(SamplingServiceMixin):
             self._recording_worker.close()
 
     def handle(self, method: RpcMethod, params: Mapping[str, object]) -> dict[str, object]:
+        if method is RpcMethod.CANCEL_SOURCE_TASK:
+            result = self._source_tasks.cancel()
+            self._emit(EventName.SOURCE_TASK, result)
+            return {"sourceTask": result}
+        if method is RpcMethod.SET_SOURCE_PROJECT:
+            if self._source_tasks.running:
+                raise ProtocolError("source_task_busy", "任务执行期间不能更换工程配置。")
+            project = self._source_projects.select(dict(params))
+            self._emit(EventName.STATE, {"sourceProject": project})
+            return {"state": {"sourceProject": project}}
+        if method is RpcMethod.START_SOURCE_TASK:
+            kind = _required_string(params, "kind")
+            if kind != "build":
+                if self._connection_kind != "local":
+                    raise ProtocolError("download_unsupported", "当前连接不支持固件下载，请使用本地 pyOCD 连接。")
+                if self._connection_status != "connected":
+                    raise ProtocolError("not_connected", "请先连接本地调试探针。")
+            return {"sourceTask": self._source_tasks.start(kind, self._source_projects.current)}
+        if self._source_tasks.running:
+            if method is RpcMethod.LOAD_SYMBOLS or (self._source_tasks.reserves_probe and method in {
+                RpcMethod.CONNECT, RpcMethod.DISCONNECT, RpcMethod.TOGGLE_CONNECTION, RpcMethod.SET_CONFIG,
+            }) or (self._firmware_busy and method in {
+                RpcMethod.WRITE_WATCH, RpcMethod.SET_WATCHES, RpcMethod.DEBUG_CONTROL, RpcMethod.SET_BREAKPOINTS,
+                RpcMethod.SET_RTT, RpcMethod.SET_SAMPLING_PAUSED, RpcMethod.RESET_TARGET, RpcMethod.CLEAR_SAMPLES,
+            }):
+                raise ProtocolError("source_task_busy", "编译或下载任务执行中，请等待任务完成。")
         if method is RpcMethod.HANDSHAKE:
             return {
                 "protocolVersion": PROTOCOL_VERSION,
@@ -138,6 +171,8 @@ class BackendService(SamplingServiceMixin):
                     "runControl",
                     "emberMobile",
                     "remoteGdb",
+                    "sourceBuild",
+                    "firmwareDownload",
                 ],
                 "state": self.state_snapshot(),
             }
@@ -184,6 +219,8 @@ class BackendService(SamplingServiceMixin):
                 **self._runtime_state_locked(),
                 "symbols": [self._symbol_json(symbol) for symbol in self._symbols.values()],
                 "watches": [self._watch_json(watch) for watch in self._watches.values()],
+                "sourceProject": self._source_projects.snapshot(),
+                "sourceTask": self._source_tasks.snapshot(),
             }
 
     def _runtime_state_locked(self) -> dict[str, object]:
@@ -200,6 +237,7 @@ class BackendService(SamplingServiceMixin):
                 "memorySampling": self._connection_kind in {"local", "ember"},
                 "memoryWrite": self._connection_kind != "ember",
                 "rtt": self._connection_kind != "gdb",
+                "firmwareDownload": self._connection_kind == "local",
             },
             "sampleRateHz": self._sample_rate_hz,
             "rttSampleRateHz": self._rtt_sample_rate_hz,
@@ -285,7 +323,7 @@ class BackendService(SamplingServiceMixin):
         self._emit(EventName.STATE, state)
         return {"state": state}
 
-    def _load_symbols(self, params: Mapping[str, object]) -> dict[str, object]:
+    def _load_symbols(self, params: Mapping[str, object], *, display_path: Path | None = None) -> dict[str, object]:
         path_text = _required_string(params, "path")
         load_id = params.get("loadId")
         deadline = time.perf_counter() + SYMBOL_LOAD_TIMEOUT_SECONDS
@@ -335,18 +373,78 @@ class BackendService(SamplingServiceMixin):
             report_progress("ui")
             self._remove_all_breakpoints_locked()
             self._symbols = {symbol.key: symbol for symbol in symbols}
-            self._symbol_file = str(path)
+            self._symbol_file = str(display_path or path)
             self._debug_info = debug_info
             # Watches are only valid for symbols in the current file. RTT symbols
             # are recreated after a connection is established.
-            self._watches = {
-                key: watch for key, watch in self._watches.items() if key in self._symbols
-            }
+            self._watches = self._rebind_watches(self._watches, symbols)
             self._apply_all_breakpoints_locked()
         self._emit(EventName.LOG, {"level": "info", "message": f"已读取符号文件：{path.name}，变量 {len(symbols)} 个。"})
         state = self.state_snapshot()
         self._emit(EventName.STATE, state)
         return {"state": state, "symbolFile": str(path)}
+
+    @staticmethod
+    def _rebind_watches(previous: dict[str, WatchedVariable], symbols: list[SymbolInfo]) -> dict[str, WatchedVariable]:
+        # Addresses change after a rebuild. Match by source/name only when unambiguous.
+        result = {}
+        for watch in previous.values():
+            candidates = [symbol for symbol in symbols if not symbol.is_rtt and
+                          symbol.name == watch.symbol.name and symbol.source_file == watch.symbol.source_file]
+            if len(candidates) == 1:
+                symbol = candidates[0]
+                result[symbol.key] = WatchedVariable(symbol, watch.color, watch.plot_enabled, watch.sampling_enabled)
+        return result
+
+    def _download_firmware(self, staged: Path, original: Path, config: dict[str, object], task: SourceTasks) -> None:
+        successful = False
+        with self._lock:
+            self._firmware_busy = True
+            was_paused, was_rtt = self._sampling_paused, self._rtt_enabled
+            self._sampling_paused, self._rtt_enabled = True, False
+        self._emit(EventName.STATE, {"samplingPaused": True, "rttEnabled": False})
+        try:
+            with self._lock:
+                self._flush_pending_samples_locked()
+                self._stop_rtt_locked()
+                self._memory.halt()
+                self._remove_all_breakpoints_locked()
+            task.log(f"下载文件：{original}")
+            last_progress = 0.0
+            def progress(value: float) -> None:
+                nonlocal last_progress
+                now = time.monotonic()
+                if now - last_progress >= 0.1 or value >= 1:
+                    last_progress = now
+                    task.phase("download", f"正在写入固件 {value * 100:.0f}%", max(0.0, min(1.0, value)))
+            # The sampler and RPC guards reserve the session without holding the
+            # service lock throughout flash; getState and shutdown stay responsive.
+            self._memory.program_firmware(str(staged), progress)
+            self._memory.reset(halt=True)
+            task.phase("symbols", "正在加载新符号与断点…")
+            self._load_symbols({"path": str(staged)}, display_path=original)
+            with self._lock:
+                self._symbol_file = str(original)
+                self._clear_samples()
+                self._stopped_location, self._registers = None, {}
+                self._rtt_control_block_address = None
+                self._next_rtt_retry_at = 0.0
+                if config["afterDownload"] == "run":
+                    self._memory.resume()
+                self._refresh_debug_state_locked(force=True)
+                self._sampling_paused, self._rtt_enabled = was_paused, was_rtt
+                successful = True
+        finally:
+            with self._lock:
+                if not successful:
+                    self._sampling_paused, self._rtt_enabled = True, False
+                    self._target_execution_state = "unknown"
+                    self._stopped_location, self._registers = None, {}
+                    self._mark_breakpoints_pending_locked()
+                self._firmware_busy = False
+                state = self.state_snapshot()
+            self._emit(EventName.STATE, state)
+            self._wake.set()
 
     def _get_debug_info(self) -> dict[str, object]:
         with self._lock:
@@ -779,7 +877,8 @@ class BackendService(SamplingServiceMixin):
         }
 
     def _emit(self, name: EventName, params: object) -> None:
-        self._emit_event(name, params)
+        if not self._closed:
+            self._emit_event(name, params)
 
 
 def _required_string(values: Mapping[str, object], name: str) -> str:

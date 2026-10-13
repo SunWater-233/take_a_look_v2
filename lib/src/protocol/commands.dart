@@ -5,6 +5,10 @@ typedef JsonObject = Map<String, Object?>;
 /// Detached windows still cross a platform-channel boundary as strings, but
 /// strings are converted to this closed set immediately at the boundary.
 enum ControllerCommand {
+  setSourceProject,
+  startSourceTask,
+  cancelSourceTask,
+  clearSourceOutput,
   toggleConnection,
   loadSymbols,
   setSampleRate,
@@ -71,6 +75,9 @@ enum ControllerCommand {
 
 /// Commands implemented by the Python hardware process.
 enum BackendMethod {
+  setSourceProject,
+  startSourceTask,
+  cancelSourceTask,
   handshake,
   getState,
   connect,
@@ -110,6 +117,20 @@ class BackendCommandMapper {
     JsonObject backendState,
   ) {
     switch (command) {
+      case ControllerCommand.setSourceProject:
+        return BackendCall(
+          BackendMethod.setSourceProject,
+          Map<String, Object?>.from(arguments! as Map),
+        );
+      case ControllerCommand.startSourceTask:
+        return BackendCall(
+          BackendMethod.startSourceTask,
+          Map<String, Object?>.from(arguments! as Map),
+        );
+      case ControllerCommand.cancelSourceTask:
+        return const BackendCall(BackendMethod.cancelSourceTask);
+      case ControllerCommand.clearSourceOutput:
+        return null;
       case ControllerCommand.toggleConnection:
         return const BackendCall(BackendMethod.toggleConnection);
       case ControllerCommand.loadSymbols:

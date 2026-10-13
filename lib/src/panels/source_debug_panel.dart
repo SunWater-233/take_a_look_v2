@@ -62,6 +62,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   String? _observedCurrentSource;
   int? _observedCurrentLine;
   int _observedStopRevision = -1;
+  String _refreshedFirmwareTask = '';
 
   TakeALookController get controller => widget.controller;
 
@@ -75,6 +76,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     controller.debugChanges.addListener(_handleDebugChange);
     controller.symbolChanges.addListener(_handleDebugChange);
     controller.sourceWorkspaceChanges.addListener(_handleSourceWorkspaceChange);
+    controller.sourceToolsChanges.addListener(_handleFirmwareTask);
     if (!widget.readOnlyPreview) {
       controller.setSourceViewVisible(_sourceViewId, true);
     }
@@ -91,12 +93,14 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     }
     oldWidget.controller.debugChanges.removeListener(_handleDebugChange);
     oldWidget.controller.symbolChanges.removeListener(_handleDebugChange);
+    oldWidget.controller.sourceToolsChanges.removeListener(_handleFirmwareTask);
     oldWidget.controller.sourceWorkspaceChanges.removeListener(
       _handleSourceWorkspaceChange,
     );
     oldWidget.controller.setSourceViewVisible(_sourceViewId, false);
     controller.debugChanges.addListener(_handleDebugChange);
     controller.symbolChanges.addListener(_handleDebugChange);
+    controller.sourceToolsChanges.addListener(_handleFirmwareTask);
     controller.sourceWorkspaceChanges.addListener(_handleSourceWorkspaceChange);
     if (!widget.readOnlyPreview) {
       controller.setSourceViewVisible(_sourceViewId, true);
@@ -128,6 +132,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   void dispose() {
     controller.debugChanges.removeListener(_handleDebugChange);
     controller.symbolChanges.removeListener(_handleDebugChange);
+    controller.sourceToolsChanges.removeListener(_handleFirmwareTask);
     controller.sourceWorkspaceChanges.removeListener(
       _handleSourceWorkspaceChange,
     );
@@ -226,6 +231,23 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     if ((sourceRootChanged || sourceFilesChanged) &&
         _searchVisible &&
         _searchController.text.isNotEmpty) {
+      _queueSearch(_searchController.text, immediate: true);
+    }
+  }
+
+  void _handleFirmwareTask() {
+    final task = controller.sourceTask;
+    if (!mounted ||
+        task.status != 'succeeded' ||
+        task.details['kind'] == 'build' ||
+        task.id == _refreshedFirmwareTask) {
+      return;
+    }
+    _refreshedFirmwareTask = task.id;
+    _sourceDocuments.clear();
+    _invalidateSearchFileIndex();
+    if (_selectedPath != null) unawaited(_loadSource(_selectedPath));
+    if (_searchVisible && _searchController.text.isNotEmpty) {
       _queueSearch(_searchController.text, immediate: true);
     }
   }
@@ -1069,15 +1091,35 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
           ),
           child: Stack(
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _buildToolbar(),
-                  if (_searchVisible) _buildSearchArea(),
-                  const Divider(height: 1, color: TalColors.borderSoft),
-                  Expanded(child: _buildBody()),
-                  _buildRegisterStrip(),
-                ],
+              LayoutBuilder(
+                builder: (context, constraints) => Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _SourceBuildToolbar(
+                      controller: controller,
+                      compact: constraints.maxHeight < 260,
+                    ),
+                    AnimatedBuilder(
+                      animation: controller.sourceToolsChanges,
+                      builder: (context, _) => _buildToolbar(),
+                    ),
+                    if (_searchVisible) _buildSearchArea(),
+                    const Divider(height: 1, color: TalColors.borderSoft),
+                    Expanded(child: _buildBody()),
+                    _buildRegisterStrip(),
+                    _SourceTaskOutput(
+                      controller: controller,
+                      maxHeight: constraints.maxHeight < 240
+                          ? 34
+                          : (constraints.maxHeight * .32).clamp(85.0, 264.0),
+                      onOpenLocation: (path, line) {
+                        _sourceDocuments.invalidate(path);
+                        _openSource(path);
+                        unawaited(_loadSource(path, revealLine: line));
+                      },
+                    ),
+                  ],
+                ),
               ),
               if (_draggingFiles)
                 Positioned.fill(
@@ -1281,7 +1323,9 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
 
   Widget _buildToolbar() {
     final state = controller.debugState.executionState;
-    final connected = controller.connectionStatus == ConnectionStatus.connected;
+    final connected =
+        controller.connectionStatus == ConnectionStatus.connected &&
+        !controller.sourceTask.blocksProbe;
     final isRunning = state == DebugExecutionState.running;
     return SizedBox(
       height: TalUiTheme.of(context).targetExtent(42),
@@ -1320,7 +1364,9 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
             icon: controller.debugState.sourceRoot.isEmpty
                 ? Icons.folder_open_outlined
                 : Icons.folder_special_outlined,
-            onPressed: controller.chooseSourceRoot,
+            onPressed: controller.sourceTask.running
+                ? null
+                : controller.chooseSourceRoot,
           ),
           const SizedBox(width: 8),
         ],
@@ -1872,7 +1918,7 @@ class _SourceDebugEmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,

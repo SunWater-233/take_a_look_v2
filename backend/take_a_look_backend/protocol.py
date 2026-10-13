@@ -32,6 +32,9 @@ class RpcMethod(StrEnum):
     DEBUG_CONTROL = "debugControl"
     EXPORT_CSV = "exportCsv"
     SHUTDOWN = "shutdown"
+    SET_SOURCE_PROJECT = "setSourceProject"
+    START_SOURCE_TASK = "startSourceTask"
+    CANCEL_SOURCE_TASK = "cancelSourceTask"
 
 
 class EventName(StrEnum):
@@ -44,6 +47,7 @@ class EventName(StrEnum):
     PERF = "perf"
     DEBUG = "debug"
     SYMBOL_LOAD_PROGRESS = "symbolLoadProgress"
+    SOURCE_TASK = "sourceTask"
 
 
 @dataclass(frozen=True)

@@ -121,6 +121,8 @@ extension TakeALookControllerSnapshot on TakeALookController {
           packed: packedSamples,
         ),
       if (wants('sourceWorkspace')) 'sourceWorkspace': sourceWorkspace.toJson(),
+      if (wants('sourceProject')) 'sourceProject': sourceProject.toJson(),
+      if (wants('sourceTask')) 'sourceTask': sourceTask.toJson(),
       if (wants('debug'))
         'debug': {
           'stopRevision': debugState.stopRevision,
@@ -252,6 +254,8 @@ extension TakeALookControllerSnapshot on TakeALookController {
     final hasAnalysisState = data.containsKey('analysisSession');
     final hasDebugState = data.containsKey('debug');
     final hasSourceWorkspace = data['sourceWorkspace'] is Map;
+    final hasSourceTools =
+        data['sourceProject'] is Map || data['sourceTask'] is Map;
     final hasPlotState =
         hasWatchState ||
         hasElapsedState ||
@@ -481,6 +485,13 @@ extension TakeALookControllerSnapshot on TakeALookController {
         Map<String, dynamic>.from(data['sourceWorkspace'] as Map),
       );
     }
+    if (data['sourceProject'] case final Map project) {
+      sourceProject.applyJson(Map<String, dynamic>.from(project));
+      debugState.sourceRoot = sourceProject.sourceRoot;
+    }
+    if (data['sourceTask'] case final Map task) {
+      sourceTask.applyJson(Map<String, dynamic>.from(task));
+    }
     // Apply after symbol/source data so a detached window cannot finish early.
     if (data['symbolLoad'] is Map) {
       applySymbolLoadSnapshot(
@@ -513,6 +524,8 @@ extension TakeALookControllerSnapshot on TakeALookController {
       if (data.containsKey('logs')) signals.logs,
       if (hasAnalysisState) signals.analysis,
       if (hasDebugState) signals.debug,
+      if (data['sourceProject'] is Map && !hasDebugState) signals.debug,
+      if (hasSourceTools) signals.sourceTools,
       if (hasSourceWorkspace) signals.sourceWorkspace,
     ], sync: false);
   }

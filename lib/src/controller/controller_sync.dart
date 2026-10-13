@@ -44,6 +44,8 @@ const _snapshotFields = <String>{
   'logs',
   'analysisSession',
   'sourceWorkspace',
+  'sourceProject',
+  'sourceTask',
   'debug',
 };
 
@@ -128,6 +130,10 @@ extension TakeALookControllerSync on TakeALookController {
       if (changes.contains(signals.analysis)) 'analysisSession',
       if (changes.contains(signals.debug)) 'debug',
       if (changes.contains(signals.sourceWorkspace)) 'sourceWorkspace',
+      if (changes.contains(signals.sourceTools)) ...{
+        'sourceProject',
+        'sourceTask',
+      },
     });
   }
 

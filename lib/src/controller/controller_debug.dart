@@ -16,6 +16,7 @@ extension TakeALookControllerDebug on TakeALookController {
   }
 
   void setSourceRoot(String path) {
+    if (sourceTask.running) return;
     final normalized = path.trim();
     if (_isDetachedRemote &&
         _dispatchRemote(ControllerCommand.setSourceRoot, normalized)) {
@@ -23,6 +24,19 @@ extension TakeALookControllerDebug on TakeALookController {
     }
     if (debugState.sourceRoot == normalized) return;
     debugState.sourceRoot = normalized;
+    sourceProject.sourceRoot = normalized;
+    if (backendCommand != null) {
+      unawaited(
+        saveSourceProject({'sourceRoot': normalized}).catchError((
+          Object error,
+        ) {
+          applyBackendEvent(BackendEventType.error, {
+            'code': 'source_project_failed',
+            'message': error.toString(),
+          });
+        }),
+      );
+    }
     _emitState([signals.debug]);
   }
 

@@ -147,6 +147,13 @@ class PyOcdMemoryBackend:
         else:
             target.reset()
 
+    def program_firmware(self, path: str, progress) -> None:
+        from pyocd.flash.file_programmer import FileProgrammer
+        self._require_target()
+        FileProgrammer(self.session, progress=progress, chip_erase="sector", trust_crc=False).program(path, file_format="elf")
+        self._read_plan_signature = None
+        self._read_plan = ()
+
     def halt(self) -> None:
         self._require_target().halt()
 

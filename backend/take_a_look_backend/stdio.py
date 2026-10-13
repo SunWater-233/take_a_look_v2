@@ -20,6 +20,7 @@ from take_a_look_backend.protocol import (
 )
 from take_a_look_backend.service import BackendService
 from take_a_look_backend.services.ordered_worker import OrderedWorker
+from take_a_look_backend.services.source_project import default_settings_file
 
 
 class StdioServer:
@@ -34,7 +35,7 @@ class StdioServer:
         self._sample_schema_id = 0
         self._sample_keys: list[str] = []
         self._sample_sequence = 0
-        self._service = BackendService(self._send_event)
+        self._service = BackendService(self._send_event, source_settings_file=default_settings_file())
 
     def run(self) -> int:
         try:

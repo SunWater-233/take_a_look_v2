@@ -9,9 +9,9 @@ ELF/DWARF 解析库、libusb 和安装脚本；使用者不需要安装 Flutter�
 把压缩包和校验文件放在同一目录，然后执行（把文件名换成实际下载的版本）：
 
 ```bash
-sha256sum -c take-a-look-v2-0.1.0+1-git.fd48238-linux-x86_64.tar.gz.sha256
-tar -xzf take-a-look-v2-0.1.0+1-git.fd48238-linux-x86_64.tar.gz
-cd take-a-look-v2-0.1.0+1-git.fd48238-linux-x86_64
+sha256sum -c take-a-look-v2-0.1.0+1-git.868f1c3-linux-x86_64.tar.gz.sha256
+tar -xzf take-a-look-v2-0.1.0+1-git.868f1c3-linux-x86_64.tar.gz
+cd take-a-look-v2-0.1.0+1-git.868f1c3-linux-x86_64
 ./install.sh --udev
 ```
 
@@ -121,9 +121,12 @@ ARM/Cortex-M 目标使用 `arm-none-eabi-gdb` 或 `gdb-multiarch`，并在连接
 `/usr/local/bin/take-a-look` 的顺序识别本应用的已有安装，在原位置完成升级，
 并输出 `Upgraded`。有多个安装时用 `--prefix` 或 `--system` 明确选择要升级的版本。
 系统目录需要管理员权限时，安装器会显示对应的 sudo 命令。
+这里的升级是重新运行新包的安装脚本；应用不会自行下载或安装在线更新。
 
 安装器先完成新包自检和临时目录复制，再替换程序；旧库会被清理，原有 `recordings/`
 及旧后端目录内的采样记录会被保留，用户配置目录中的布局不会被改动。
+源码工程的编译命令、解释器及固件路径保存在
+`${XDG_CONFIG_HOME:-$HOME/.config}/TakeALook/source-projects.json`，升级时同样保留。
 同一版本重复运行安装器也可修复安装。升级过程中请勿运行程序或同时运行多个安装器。
 
 自定义安装位置可用 `./install.sh --prefix "$HOME/apps/tal"`；程序会放在该前缀的
@@ -150,14 +153,15 @@ sudo udevadm control --reload-rules
 
 ## 从源码重建（Linux / WSL）
 
-本次发布采用 **Flutter 3.44.1 / Dart 3.12.1**，与当前 Windows 开发 SDK 一致。
+实际 Flutter、Dart、Python 版本以包内 `BUILD-INFO.json` 为准。
+Linux Flutter SDK 与 Windows 开发 SDK 使用独立缓存；必须检查所选 Linux 引擎的 glibc 要求。
 需要 Linux 版 Flutter、Python 3.11+、Clang、CMake、
 Ninja、pkg-config、GTK 3 开发库、libusb 开发库、rsync 和 binutils。
 建议在 Debian 11 / glibc 2.31 构建环境中使用独立安装的 Python 3.11，扩大发行版覆盖。
 可以用 WSL 内的 chroot/容器提供旧构建环境，而不替换主系统库。
 
 ```bash
-export FLUTTER=/path/to/flutter-3.44.1/bin/flutter
+export FLUTTER=/path/to/linux/flutter/bin/flutter
 export PYTHON=/path/to/python3.11
 export TAL_MAX_GLIBC=2.31
 bash tool/package_linux.sh
@@ -166,7 +170,7 @@ bash tool/package_linux.sh
 从 Windows 调用已经配置好的 WSL 构建环境时：
 
 ```powershell
-wsl -d Ubuntu -- bash /mnt/d/ProjectGarage/take_a_look_v2/tool/package_linux.sh
+wsl -d Ubuntu-24.04 -- env FLUTTER=/path/to/linux/flutter/bin/flutter bash /mnt/e/ProjectGarage/take_a_look_V2/take_a_look_v2/tool/package_linux.sh
 ```
 
 确保 WSL 的 PATH 指向 Linux Flutter/Python，不要使用挂载的 Windows Flutter 缓存。

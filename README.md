@@ -419,14 +419,31 @@ The recorded baseline and refactor comparison are in
 
 ## Package
 
+Windows x64 MSI 一键打包：
+
+```powershell
+.\tool\build_release_windows.ps1
+```
+
+也可以双击 `tool/build_release_windows.cmd`。脚本自动打包 Python 后端、编译 Flutter Release、
+附带 Visual C++ 运行库并生成中文 MSI，输出到 `build/releases/`，日志在 `build/logs/`。
+首次运行自动下载项目内固定版本的 WiX；需要 Flutter、Visual Studio C++ 桌面开发工具、
+Git、Python 3.11+ 和 .NET SDK 8+。构建在独立目录进行，不包含本地采样记录。
+MSI 按当前用户安装，可在向导中自定义安装路径，创建开始菜单和桌面快捷方式；
+升级默认沿用上次选择的目录，升级和卸载保留采样记录。
+详见 [Windows MSI 构建与安装说明](docs/windows-install.md)。
+
 在项目根目录的 Windows PowerShell 中运行 `tool` 下的脚本，即可通过 WSL 编译 Linux Release 安装包：
 
 ```powershell
 .\tool\build_release_wsl.ps1
+.\tool\build_release_wsl.ps1 -Version 1.2.3  # 指定本次发布版本
 ```
 
 双击 `tool/build_release_wsl.cmd` 也会调用同一个 PowerShell 脚本并在结束后保留窗口。
 WSL 内可直接执行 `bash tool/build_release_wsl.sh`。
+PowerShell/CMD 用 `-Version 1.2.3`，Bash 用 `--version 1.2.3` 指定版本，也支持
+`1.2.3+4` 形式的构建号；省略时读取 `pubspec.yaml`，指定版本不会改写工作区文件。
 默认复用已配置的 Debian 11 / Flutter 3.44.9 构建环境，产物在 `build/releases/`，
 日志在 `build/logs/`。脚本编译当前工作区（包含未提交改动），并运行完整打包验证。
 首次使用可加 `-Check` 检查环境，`-Distribution Ubuntu-24.04` 可选择发行版。

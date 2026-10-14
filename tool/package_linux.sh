@@ -1,7 +1,39 @@
 #!/usr/bin/env bash
 # Build from an isolated source copy, safe to invoke from a Windows checkout in WSL.
 set -euo pipefail
+
+usage() {
+  cat <<'HELP'
+Usage: bash tool/package_linux.sh [--version <version>]
+
+  --version  Override major.minor.patch[+build] for this build only.
+             Defaults to pubspec.yaml; the source checkout is not changed.
+  --help     Show this help.
+HELP
+}
+
+die() { echo "ERROR: $*" >&2; exit 1; }
+version=""
+while (( $# )); do
+  case "$1" in
+    --version)
+      (( $# >= 2 )) || die '--version requires major.minor.patch[+build].'
+      [[ "$2" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\+[0-9]+)?$ ]] || die 'Invalid version; expected major.minor.patch[+build].'
+      version=$2
+      shift
+      ;;
+    --help|-h) usage; exit 0 ;;
+    *) usage >&2; die "Unknown argument: $1" ;;
+  esac
+  shift
+done
+
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ -z "$version" ]]; then
+  version="$(awk '/^version:/ {print $2; exit}' "$project_root/pubspec.yaml" | tr -d '\r')"
+fi
+[[ "$version" =~ ^[0-9A-Za-z.+-]+$ ]] || die 'Invalid package version in pubspec.yaml.'
+echo "Release version: $version"
 flutter="${FLUTTER:-flutter}"
 python="${PYTHON:-python3}"
 output_dir="${TAL_OUTPUT_DIR:-$project_root/build/releases}"
@@ -39,6 +71,9 @@ rsync -a --exclude=.git --exclude=.dart_tool --exclude=.venv --exclude=build \
 # Git on Windows can otherwise leave CRLF in shell scripts from older checkouts.
 find "$source_root/tool" "$source_root/packaging" -type f -name '*.sh' -exec sed -i 's/\r$//' {} +
 cd "$source_root"
+# Keep Flutter's embedded version and the archive manifest in sync. Only this
+# temporary source copy is changed, before pub get and the application build.
+sed -i "s/^version:.*/version: $version/" pubspec.yaml
 "$python" -m venv backend/.venv
 backend_python="$source_root/backend/.venv/bin/python"
 "$backend_python" -m pip install --disable-pip-version-check -e './backend[dev]'
@@ -55,8 +90,6 @@ clang++ -std=c++17 -Wall -Wextra tool/tests/linux_gpu_preference_test.cc \
 PYTHON="$backend_python" bash tool/build_backend.sh
 "$flutter" build linux --release --target-platform "linux-$flutter_arch"
 
-version="$(awk '/^version:/ {print $2; exit}' pubspec.yaml | tr -d '\r')"
-[[ "$version" =~ ^[0-9A-Za-z.+-]+$ ]] || { echo 'Invalid package version.' >&2; exit 1; }
 revision_tag=""
 if [[ "$source_revision" != unknown ]]; then
   revision_tag="-git.${source_revision:0:7}"

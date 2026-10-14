@@ -4,9 +4,11 @@ set -euo pipefail
 
 usage() {
   cat <<'HELP'
-Usage: bash tool/build_release_wsl.sh [--check] [--native] [--keep-build]
+Usage: bash tool/build_release_wsl.sh [--version <version>] [--check] [--native] [--keep-build]
 
 Default: reuse the prepared Debian 11 chroot and Linux Flutter 3.44.9 SDK.
+  --version     Override major.minor.patch[+build] for this build only.
+                Defaults to pubspec.yaml; the source checkout is not changed.
   --check       Check the build environment without compiling.
   --native      Build with the current Linux system instead of the chroot.
   --keep-build  Keep the isolated source/build directory after success.
@@ -22,7 +24,7 @@ Optional Linux environment variables:
   TAL_MAX_GLIBC          ABI limit (default: 2.31 in chroot; unset in native mode)
   FLUTTER, PYTHON        Tool overrides for --native; see docs/linux-install.md
 
-Windows: run .\tool\build_release_wsl.ps1 [-Distribution <name>] [-Check] [-KeepBuild]
+Windows: run .\tool\build_release_wsl.ps1 [-Version <version>] [-Distribution <name>] [-Check] [-KeepBuild]
 or double-click tool/build_release_wsl.cmd, which launches the PowerShell script.
 TAL_NO_PAUSE=1 disables the CMD launcher's final pause.
 HELP
@@ -31,14 +33,22 @@ HELP
 die() { echo "ERROR: $*" >&2; exit 1; }
 check_only=0
 native=0
-for argument in "$@"; do
-  case "$argument" in
+package_arguments=()
+while (( $# )); do
+  case "$1" in
+    --version)
+      (( $# >= 2 )) || die '--version requires major.minor.patch[+build].'
+      [[ "$2" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\+[0-9]+)?$ ]] || die 'Invalid version; expected major.minor.patch[+build].'
+      package_arguments=(--version "$2")
+      shift
+      ;;
     --check) check_only=1 ;;
     --native) native=1 ;;
     --keep-build) export TAL_KEEP_BUILD=1 ;;
     --help|-h) usage; exit 0 ;;
-    *) usage >&2; die "Unknown argument: $argument" ;;
+    *) usage >&2; die "Unknown argument: $1" ;;
   esac
+  shift
 done
 
 [[ "$(uname -s)" == Linux ]] || die 'Run this script in Linux/WSL, or use tool/build_release_wsl.cmd on Windows.'
@@ -72,7 +82,7 @@ run_build() {
     if (( check_only )); then
       echo 'Build environment check passed.'
     else
-      FLUTTER="$flutter_path" bash "$project_root/tool/package_linux.sh"
+      FLUTTER="$flutter_path" bash "$project_root/tool/package_linux.sh" "${package_arguments[@]}"
     fi
     return
   fi
@@ -95,12 +105,13 @@ run_build() {
 
   # All mounts belong to this child namespace, including when compilation fails
   # or is interrupted. No persistent host mounts or unmount cleanup are needed.
-  unshare --mount --propagation private bash -s -- "$project_root" "$rootfs" "$sdk_root" "$check_only" <<'CHROOT'
+  unshare --mount --propagation private bash -s -- "$project_root" "$rootfs" "$sdk_root" "$check_only" "${package_arguments[@]}" <<'CHROOT'
 set -euo pipefail
 project_root=$1
 rootfs=$2
 sdk_root=$3
 check_only=$4
+shift 4
 mkdir -p "$rootfs"/{proc,dev,sys,opt/flutter,workspace}
 mount --bind /proc "$rootfs/proc"
 mount --rbind /dev "$rootfs/dev"
@@ -118,8 +129,10 @@ chroot "$rootfs" /usr/bin/env \
   PATH=/opt/flutter/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
   FLUTTER=/opt/flutter/bin/flutter PYTHON="$backend_python" \
   TAL_MAX_GLIBC="${TAL_MAX_GLIBC:-2.31}" TAL_OUTPUT_DIR=/workspace/build/releases \
-  bash -s -- "$check_only" <<'BUILD'
+  bash -s -- "$check_only" "$@" <<'BUILD'
 set -euo pipefail
+check_only=$1
+shift
 cd /workspace
 for command in "$FLUTTER" "$PYTHON" rsync cmake ninja clang++ pkg-config readelf git tar gzip sha256sum; do
   command -v "$command" >/dev/null || { echo "Missing build tool: $command" >&2; exit 1; }
@@ -127,10 +140,10 @@ done
 "$PYTHON" -c 'import sys, venv; assert sys.version_info >= (3, 11), "Python 3.11+ required"'
 pkg-config --exists gtk+-3.0 libusb-1.0
 "$FLUTTER" --version
-if [[ "$1" == 1 ]]; then
+if [[ "$check_only" == 1 ]]; then
   echo 'Build environment check passed.'
 else
-  exec bash tool/package_linux.sh
+  exec bash tool/package_linux.sh "$@"
 fi
 BUILD
 CHROOT

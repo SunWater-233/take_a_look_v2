@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <!-- Keep UpgradeCode stable across all releases. -->
+  <Package Name="Take A Look V2" Manufacturer="Take A Look"
+           Version="$(var.ProductVersion)" Language="2052" Codepage="936"
+           UpgradeCode="0A9CF9B8-3C51-4D96-9CB7-A306F0FE9806" Scope="perUser">
+    <SummaryInformation Description="Take A Look V2 Windows x64 installer" />
+    <MajorUpgrade AllowSameVersionUpgrades="yes" Schedule="afterInstallInitialize"
+                  DowngradeErrorMessage="已安装更新版本的 Take A Look V2。请先卸载更新版本。" />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+    <Launch Condition="Installed OR VersionNT64"
+            Message="Take A Look V2 需要 64 位 Windows。" />
+    <Icon Id="AppIcon" SourceFile="$(var.AppIcon)" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+    <SetProperty Id="ARPINSTALLLOCATION" Value="[INSTALLFOLDER]" Before="InstallFinalize" Sequence="execute" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+    <Property Id="INSTALLFOLDER" Secure="yes" />
+    <Property Id="PREVIOUSINSTALLFOLDER">
+      <RegistrySearch Id="PreviousInstallDirectory" Root="HKCU"
+                      Key="Software\Take A Look V2" Name="InstallDirectory" Type="raw" />
+    </Property>
+    <!-- Restore the previous location only when UI/command line has not chosen one. -->
+    <SetProperty Id="INSTALLFOLDER" Value="[PREVIOUSINSTALLFOLDER]" After="AppSearch" Sequence="both"
+                 Condition="NOT INSTALLFOLDER AND PREVIOUSINSTALLFOLDER" />
+
+    <!-- Recordings are written beside the EXE, so use a writable per-user path. -->
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="UserProgramsFolder" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="Take A Look V2" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationMenuFolder" Name="Take A Look V2">
+        <Component Id="ApplicationShortcuts" Guid="*">
+          <Shortcut Id="StartMenuShortcut" Name="Take A Look V2"
+                    Target="[INSTALLFOLDER]take_a_look_v2.exe" WorkingDirectory="INSTALLFOLDER"
+                    Icon="AppIcon" />
+          <RemoveFolder Id="RemoveApplicationMenu" On="uninstall" />
+          <RegistryValue Root="HKCU" Key="Software\Take A Look V2" Name="InstallDirectory"
+                         Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="DesktopFolder">
+      <Component Id="DesktopShortcut" Guid="*">
+        <Shortcut Id="DesktopAppShortcut" Name="Take A Look V2"
+                  Target="[INSTALLFOLDER]take_a_look_v2.exe" WorkingDirectory="INSTALLFOLDER"
+                  Icon="AppIcon" />
+        <RegistryValue Root="HKCU" Key="Software\Take A Look V2\Installer"
+                       Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+    <Feature Id="Application" Title="Take A Look V2" Level="1">
+      <ComponentGroupRef Id="ApplicationFiles" />
+      <ComponentRef Id="ApplicationShortcuts" />
+      <ComponentRef Id="DesktopShortcut" />
+    </Feature>
+    <UIRef Id="TakeALookUI" />
+  </Package>
+</Wix>

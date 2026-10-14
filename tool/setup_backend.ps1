@@ -13,8 +13,12 @@ $BackendPython = if ($IsWindows -or $env:OS -eq "Windows_NT") {
 }
 
 & $Python -m venv $VirtualEnv
+if ($LASTEXITCODE -ne 0) { throw 'Unable to create the backend Python environment.' }
 & $BackendPython -m pip install --upgrade pip
+if ($LASTEXITCODE -ne 0) { throw 'Unable to update pip.' }
 & $BackendPython -m pip install -e "$BackendRoot[dev]"
+if ($LASTEXITCODE -ne 0) { throw 'Unable to install backend dependencies.' }
 & $BackendPython -m pytest -q $BackendRoot
+if ($LASTEXITCODE -ne 0) { throw 'Backend tests failed.' }
 
 Write-Host "Backend environment ready: $BackendPython"

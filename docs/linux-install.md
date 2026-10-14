@@ -159,6 +159,8 @@ Windows 主入口是 **`tool/build_release_wsl.ps1`**，在项目根目录的 Po
 
 ```powershell
 .\tool\build_release_wsl.ps1
+.\tool\build_release_wsl.ps1 -Version 1.2.3  # 指定本次发布版本
+.\tool\build_release_wsl.ps1 -Version '1.2.3+4'  # 可附带构建号
 .\tool\build_release_wsl.ps1 -Check  # 只检查环境
 .\tool\build_release_wsl.ps1 -Distribution Ubuntu-24.04
 .\tool\build_release_wsl.ps1 -KeepBuild  # 成功后也保留中间目录
@@ -167,13 +169,19 @@ Windows 主入口是 **`tool/build_release_wsl.ps1`**，在项目根目录的 Po
 脚本自动定位工程，默认调用 WSL 的默认发行版；也可从其他工作目录使用脚本的完整
 路径调用。双击 `tool/build_release_wsl.cmd` 会启动同一个 PowerShell 脚本并在结束后
 暂停，便于查看结果；它只负责启动，不包含构建逻辑。CMD 入口接受相同的 PowerShell
-参数，例如 `.\tool\build_release_wsl.cmd -Check`。
+参数，例如 `.\tool\build_release_wsl.cmd -Version 1.2.3`。
 
 WSL 内直接运行：
 
 ```bash
 bash tool/build_release_wsl.sh
+bash tool/build_release_wsl.sh --version 1.2.3
 ```
+
+`-Version` / `--version` 接受 `主版本.次版本.修订号`，可附加 `+构建号`。
+省略时读取 `pubspec.yaml`。指定版本仅写入临时源码副本，用于 Flutter 应用构建、
+压缩包名称及 `BUILD-INFO.json`；不会修改工作区的 `pubspec.yaml`。
+例如 `1.2.3` 会生成 `take-a-look-v2-1.2.3-git.<提交>-linux-<架构>.tar.gz`。
 
 默认复用此前配置的 `~/.cache/take-a-look-linux/bullseye` Debian 11 chroot 和
 `~/.cache/take-a-look-linux/flutter-3.44.9` Linux SDK；chroot 内的
@@ -225,6 +233,8 @@ export FLUTTER=/path/to/linux/flutter/bin/flutter
 export PYTHON=/path/to/python3.11
 export TAL_MAX_GLIBC=2.31
 bash tool/package_linux.sh
+# 指定版本（省略时读取 pubspec.yaml）：
+bash tool/package_linux.sh --version 1.2.3
 ```
 
 从 Windows 调用已经配置好的 WSL 构建环境时：

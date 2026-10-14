@@ -110,7 +110,7 @@ class BackendClient {
       }
       eventHandler?.call(BackendEventType.log, {
         'level': 'info',
-        'message': '本机硬件后端已启动，协议版本 $protocolVersion。',
+        'message': '本机硬件后端已启动，协议版本 $protocolVersion',
       });
     } catch (error) {
       await close(force: true);

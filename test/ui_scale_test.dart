@@ -53,4 +53,26 @@ void main() {
     await tester.tap(find.byType(TextButton));
     expect(tapped, isTrue);
   });
+
+  testWidgets('changing scale through 100% preserves child state', (
+    tester,
+  ) async {
+    Future<void> pumpScale(double scale) => tester.pumpWidget(
+      MaterialApp(
+        home: TalUiScaleViewport(
+          scale: scale,
+          child: const Scaffold(body: TextField()),
+        ),
+      ),
+    );
+
+    await pumpScale(1);
+    final initialState = tester.state(find.byType(TextField));
+    await tester.enterText(find.byType(TextField), 'preserved');
+    for (final scale in [1.25, 1.0, 0.85, 1.0]) {
+      await pumpScale(scale);
+      expect(tester.state(find.byType(TextField)), same(initialState));
+      expect(find.text('preserved'), findsOneWidget);
+    }
+  });
 }

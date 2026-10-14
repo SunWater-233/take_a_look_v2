@@ -419,6 +419,20 @@ The recorded baseline and refactor comparison are in
 
 ## Package
 
+在项目根目录的 Windows PowerShell 中运行 `tool` 下的脚本，即可通过 WSL 编译 Linux Release 安装包：
+
+```powershell
+.\tool\build_release_wsl.ps1
+```
+
+双击 `tool/build_release_wsl.cmd` 也会调用同一个 PowerShell 脚本并在结束后保留窗口。
+WSL 内可直接执行 `bash tool/build_release_wsl.sh`。
+默认复用已配置的 Debian 11 / Flutter 3.44.9 构建环境，产物在 `build/releases/`，
+日志在 `build/logs/`。脚本编译当前工作区（包含未提交改动），并运行完整打包验证。
+首次使用可加 `-Check` 检查环境，`-Distribution Ubuntu-24.04` 可选择发行版。
+环境路径和原生构建方式见
+[Linux 一键构建说明](docs/linux-install.md#一键构建wsl)。
+
 For a standalone Linux tar.gz (Arch Linux and other glibc distributions), run
 `bash tool/package_linux.sh` with a Linux Flutter SDK and Python 3.11+. The script
 builds in an isolated source copy, bundles the backend runtime, runs tests, and

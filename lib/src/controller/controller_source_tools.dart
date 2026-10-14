@@ -16,6 +16,33 @@ extension TakeALookControllerSourceTools on TakeALookController {
     }
   }
 
+  Future<void> loadSourceProjectSymbols() async {
+    if (_disposed || kIsWeb) return;
+    var path = sourceProject.firmwarePath.trim();
+    if (path.isEmpty) return;
+    if (path.startsWith('~/') || path.startsWith(r'~\')) {
+      final homeDirectory =
+          Platform.environment[Platform.isWindows ? 'USERPROFILE' : 'HOME'];
+      if (homeDirectory != null) path = '$homeDirectory${path.substring(1)}';
+    }
+    final file = File.fromUri(
+      Directory(
+        sourceProject.sourceRoot,
+      ).absolute.uri.resolveUri(File(path).uri).normalizePath(),
+    );
+    String pathKey(String value) {
+      final normalized = File(value).absolute.uri.normalizePath().toFilePath();
+      return Platform.isWindows ? normalized.toLowerCase() : normalized;
+    }
+
+    if (symbolFile.isNotEmpty && pathKey(symbolFile) == pathKey(file.path)) {
+      return;
+    }
+    // A build output may not exist yet; keep that configuration usable.
+    if (!await file.exists() || _disposed) return;
+    await loadSymbolsFromPath(file.path);
+  }
+
   Future<void> startSourceTask(String kind) async {
     if (sourceTask.running) return;
     try {

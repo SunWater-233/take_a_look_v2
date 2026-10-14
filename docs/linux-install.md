@@ -153,6 +153,66 @@ sudo udevadm control --reload-rules
 
 ## 从源码重建（Linux / WSL）
 
+### 一键构建（WSL）
+
+Windows 主入口是 **`tool/build_release_wsl.ps1`**，在项目根目录的 PowerShell 中运行：
+
+```powershell
+.\tool\build_release_wsl.ps1
+.\tool\build_release_wsl.ps1 -Check  # 只检查环境
+.\tool\build_release_wsl.ps1 -Distribution Ubuntu-24.04
+.\tool\build_release_wsl.ps1 -KeepBuild  # 成功后也保留中间目录
+```
+
+脚本自动定位工程，默认调用 WSL 的默认发行版；也可从其他工作目录使用脚本的完整
+路径调用。双击 `tool/build_release_wsl.cmd` 会启动同一个 PowerShell 脚本并在结束后
+暂停，便于查看结果；它只负责启动，不包含构建逻辑。CMD 入口接受相同的 PowerShell
+参数，例如 `.\tool\build_release_wsl.cmd -Check`。
+
+WSL 内直接运行：
+
+```bash
+bash tool/build_release_wsl.sh
+```
+
+默认复用此前配置的 `~/.cache/take-a-look-linux/bullseye` Debian 11 chroot 和
+`~/.cache/take-a-look-linux/flutter-3.44.9` Linux SDK；chroot 内的
+`/opt/tal-python-path` 保存 Python 3.11+ 可执行文件路径。本机的这些缓存位于 WSL
+root 用户下，因此使用该环境需要以 WSL root 用户运行；Linux 普通用户可使用
+`sudo -E bash tool/build_release_wsl.sh`，并通过下面的变量指定实际缓存位置。
+脚本会检查缓存，不会自动下载或安装系统环境。
+
+可以用 Linux 环境变量 `TAL_LINUX_CACHE`、`TAL_LINUX_ROOTFS`、
+`TAL_LINUX_FLUTTER_ROOT` 覆盖缓存、chroot 和 SDK 路径。默认以 `TAL_MAX_GLIBC=2.31`
+检查发布包；临时挂载位于独立挂载命名空间，成功、失败或中断后均自动释放。
+同一个工程或 chroot 同时只允许一个一键构建任务。
+
+也可以通过环境变量选择 WSL 发行版；`-Distribution` 参数优先。
+从终端或自动化中调用 CMD 双击入口时，可取消结束暂停：
+
+```powershell
+$env:TAL_WSL_DISTRO = 'Ubuntu-24.04'
+$env:TAL_NO_PAUSE = '1'
+.\tool\build_release_wsl.cmd
+```
+
+在已经配置 Linux Flutter SDK 和下文所列开发依赖的其他 Linux/WSL 主机上，可跳过
+chroot，使用当前系统直接构建；此时 glibc 要求按实际工具链记录：
+
+```bash
+FLUTTER=/path/to/linux/flutter/bin/flutter PYTHON=python3 \
+  bash tool/build_release_wsl.sh --native
+```
+
+构建使用当前工作区（包括未提交修改），在 Linux 临时目录编译，不改写 Windows
+开发缓存。产物为 `build/releases/` 下的 `.tar.gz`、`.sha256`、`.BUILD-INFO.json`
+和 `INSTALL.md`；完整日志为 `build/logs/linux-release-<时间>-<进程号>.log`。
+任何检查或构建失败都会返回非零退出码，压缩包验证成功后才发布产物。
+PowerShell 加 `-KeepBuild`、Bash 加 `--keep-build` 可保留成功构建的中间目录；
+失败时中间目录始终保留。PowerShell 的 `-Native` 对应 Bash 的 `--native`。
+
+### 手动配置与打包
+
 实际 Flutter、Dart、Python 版本以包内 `BUILD-INFO.json` 为准。
 Linux Flutter SDK 与 Windows 开发 SDK 使用独立缓存；必须检查所选 Linux 引擎的 glibc 要求。
 需要 Linux 版 Flutter、Python 3.11+、Clang、CMake、

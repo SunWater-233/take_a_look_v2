@@ -87,6 +87,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_captureMainWindowOrigin());
     });
+    unawaited(_restoreLayout(reportMissing: false));
   }
 
   @override
@@ -365,11 +366,14 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     }
   }
 
-  Future<void> restoreLayout() async {
+  Future<void> restoreLayout() => _restoreLayout();
+
+  Future<void> _restoreLayout({bool reportMissing = true}) async {
     try {
       final layout = await _layoutRepository.load();
+      if (!mounted) return;
       if (layout == null) {
-        widget.controller.report('尚未保存过工作区布局。');
+        if (reportMissing) widget.controller.report('尚未保存过工作区布局。');
         return;
       }
       final restored = <WorkspaceGroup>[];
@@ -389,7 +393,6 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
             : _clampRect(group.rect);
         restored.add(group);
       }
-      if (!mounted) return;
       setState(() {
         _session.groups
           ..clear()
@@ -401,9 +404,9 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
       });
       widget.onPanelVisibilityChanged?.call();
       widget.controller.setUiScale(layout.uiScale);
-      widget.controller.report('已恢复保存的工作区布局。');
+      widget.controller.report('已恢复保存的工作区布局');
     } on Object catch (error) {
-      widget.controller.report('恢复布局失败：$error');
+      if (mounted) widget.controller.report('恢复布局失败：$error');
     }
   }
 

@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:take_a_look_v2/src/workspace/panel_types.dart';
 import 'package:take_a_look_v2/src/workspace/workspace_geometry.dart';
 import 'package:take_a_look_v2/src/workspace/workspace_layout.dart';
+import 'package:take_a_look_v2/src/workspace/workspace_session.dart';
 
 void main() {
   test('workspace layout repository round-trips a validated layout', () async {
@@ -50,6 +51,23 @@ void main() {
       }),
       throwsFormatException,
     );
+  });
+
+  test('new group IDs do not collide with restored groups', () {
+    final session = WorkspaceSession();
+    session.groups.addAll([
+      for (var index = 100; index <= 101; index++)
+        WorkspaceGroup(
+          id: 'separated_$index',
+          panels: const [WorkspacePanelId.analysis],
+          activePanel: WorkspacePanelId.analysis,
+          rect: const Rect.fromLTWH(0, 0, 0.5, 0.5),
+          z: index,
+        ),
+    ]);
+
+    expect(session.nextGroupId('separated'), 'separated_102');
+    expect(session.nextGroupId('separated'), 'separated_103');
   });
 
   test('workspace geometry finds and moves a complete shared boundary', () {

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -51,8 +52,8 @@ class TakeALookController extends ChangeNotifier {
     this.csvImportContentsPicker,
     this.csvImportPathPicker,
   }) {
-    _logs.add(LogEntry('UI 已从 .ui 文件加载，pyOCD 内存读写后端已就绪。'));
-    _logs.add(LogEntry('读取 .elf / .axf 后，可从符号层级中加入变量到实时调参列表。'));
+    _logs.add(LogEntry('UI 已从 .ui 文件加载，pyOCD 内存读写后端已就绪'));
+    _logs.add(LogEntry('读取 .elf / .axf 后，可从符号层级中加入变量到实时调参列表'));
     if (remoteCommand == null && backendCommand == null) {
       _ticker = Timer.periodic(const Duration(milliseconds: 33), _tick);
     }

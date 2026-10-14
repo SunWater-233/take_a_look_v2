@@ -197,7 +197,11 @@ class _SourceProjectDialogState extends State<_SourceProjectDialog> {
     final project = widget.controller.sourceProject;
     _root = TextEditingController(text: project.sourceRoot);
     _command = TextEditingController(text: project.buildCommand);
-    _firmware = TextEditingController(text: project.firmwarePath);
+    _firmware = TextEditingController(
+      text: project.firmwarePath.trim().isNotEmpty
+          ? project.firmwarePath
+          : widget.controller.symbolFile,
+    );
     _extraPath = TextEditingController(text: project.extraPath);
     _shell = project.shell;
     _after = project.afterDownload;
@@ -215,12 +219,13 @@ class _SourceProjectDialogState extends State<_SourceProjectDialog> {
 
   Future<void> _save() async {
     if (!_form.currentState!.validate()) return;
+    final controller = widget.controller;
     setState(() {
       _saving = true;
       _error = null;
     });
     try {
-      await widget.controller.saveSourceProject({
+      await controller.saveSourceProject({
         'sourceRoot': _root.text.trim(),
         'buildCommand': _command.text.trim(),
         'firmwarePath': _firmware.text.trim(),
@@ -230,6 +235,7 @@ class _SourceProjectDialogState extends State<_SourceProjectDialog> {
         'outputEncoding': _encoding,
       });
       if (mounted) Navigator.of(context).pop();
+      await controller.loadSourceProjectSymbols();
     } on Object catch (error) {
       if (mounted) {
         setState(() {
@@ -267,6 +273,14 @@ class _SourceProjectDialogState extends State<_SourceProjectDialog> {
                 'available': true,
               },
           ];
+    // Material scales floating labels to 75%; keep these at the body text size.
+    final fieldLabelStyle = talBody.copyWith(
+      color: TalColors.muted,
+      fontSize: talBody.fontSize! / .75,
+    );
+    final fieldPadding = TalUiTheme.of(
+      context,
+    ).fieldPadding.add(const EdgeInsets.symmetric(vertical: 6));
     InputDecoration decoration(String label, {String? helper}) =>
         InputDecoration(
           labelText: label,
@@ -318,13 +332,13 @@ class _SourceProjectDialogState extends State<_SourceProjectDialog> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Expanded(
-          child: TextFormField(
+          child: _SourcePathFormField(
             key: ValueKey(key),
             controller: value,
             enabled: !_saving,
-            decoration: decoration(
-              label,
-              helper: root ? '编译命令在此目录执行。' : 'ELF / AXF；相对路径基于源码根目录，下载时必填。',
+            decoration: decoration(label).copyWith(
+              floatingLabelStyle: fieldLabelStyle,
+              contentPadding: fieldPadding,
             ),
             validator: root
                 ? (text) =>
@@ -333,10 +347,13 @@ class _SourceProjectDialogState extends State<_SourceProjectDialog> {
           ),
         ),
         const SizedBox(width: 8),
-        TalIconButton(
-          tooltip: root ? '浏览源码目录' : '浏览固件文件',
-          onPressed: _saving ? null : () => _pick(root),
-          icon: Icon(root ? Icons.folder_open : Icons.file_open_outlined),
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: TalIconButton(
+            tooltip: root ? '浏览源码目录' : '浏览固件文件',
+            onPressed: _saving ? null : () => _pick(root),
+            icon: Icon(root ? Icons.folder_open : Icons.file_open_outlined),
+          ),
         ),
       ],
     );
@@ -380,13 +397,25 @@ class _SourceProjectDialogState extends State<_SourceProjectDialog> {
                     key: const ValueKey('source-project-command'),
                     controller: _command,
                     enabled: !_saving,
-                    minLines: 2,
-                    maxLines: 5,
+                    minLines: 6,
+                    maxLines: 6,
+                    keyboardType: TextInputType.multiline,
+                    textInputAction: TextInputAction.newline,
+                    textAlignVertical: TextAlignVertical.top,
                     style: talMono,
-                    decoration: decoration(
-                      '编译命令',
-                      helper: '例如：cmake --build build。使用所选解释器的语法；仅下载时可留空。',
+                    decoration: decoration('编译命令').copyWith(
+                      floatingLabelStyle: fieldLabelStyle,
+                      contentPadding: fieldPadding,
+                      alignLabelWithHint: true,
+                      floatingLabelBehavior: FloatingLabelBehavior.always,
+                      hintText: '例如：cmake --build build',
                     ),
+                  ),
+                  const SizedBox(height: 7),
+                  const Text(
+                    '支持多行，Enter 换行。使用所选解释器的语法；仅下载时可留空。',
+                    style: talMuted,
+                    textAlign: TextAlign.left,
                   ),
                   const SizedBox(height: 16),
                   fileField(
@@ -394,6 +423,12 @@ class _SourceProjectDialogState extends State<_SourceProjectDialog> {
                     '固件文件',
                     _firmware,
                     false,
+                  ),
+                  const SizedBox(height: 7),
+                  const Text(
+                    'ELF / AXF；相对路径基于源码根目录，下载时必填。',
+                    style: talMuted,
+                    textAlign: TextAlign.left,
                   ),
                   const SizedBox(height: 16),
                   selector(
@@ -484,6 +519,125 @@ class _SourceProjectDialogState extends State<_SourceProjectDialog> {
       ),
     );
   }
+}
+
+class _SourcePathFormField extends FormField<String> {
+  _SourcePathFormField({
+    required this.controller,
+    required this.decoration,
+    required super.enabled,
+    super.key,
+    super.validator,
+  }) : super(
+         initialValue: controller.text,
+         builder: (field) => (field as _SourcePathFormFieldState)._buildField(),
+       );
+
+  final TextEditingController controller;
+  final InputDecoration decoration;
+
+  @override
+  FormFieldState<String> createState() => _SourcePathFormFieldState();
+}
+
+class _SourcePathFormFieldState extends FormFieldState<String> {
+  final _focus = FocusNode();
+  final _scroll = ScrollController();
+
+  @override
+  _SourcePathFormField get widget => super.widget as _SourcePathFormField;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_syncValue);
+  }
+
+  @override
+  void didUpdateWidget(covariant _SourcePathFormField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_syncValue);
+      widget.controller.addListener(_syncValue);
+      setValue(widget.controller.text);
+    }
+  }
+
+  void _syncValue() {
+    if (value != widget.controller.text) didChange(widget.controller.text);
+  }
+
+  @override
+  void reset() {
+    widget.controller.text = widget.initialValue ?? '';
+    super.reset();
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_syncValue);
+    _focus.dispose();
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  Widget _buildField() => AnimatedBuilder(
+    animation: _focus,
+    builder: (context, _) => GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onTap: widget.enabled ? _focus.requestFocus : null,
+      child: InputDecorator(
+        decoration: widget.decoration
+            .applyDefaults(InputDecorationTheme.of(context))
+            .copyWith(enabled: widget.enabled, errorText: errorText),
+        baseStyle: talBody,
+        isFocused: _focus.hasFocus,
+        isEmpty: widget.controller.text.isEmpty,
+        child: NotificationListener<ScrollMetricsNotification>(
+          onNotification: (_) {
+            setState(() {});
+            return false;
+          },
+          child: AnimatedBuilder(
+            animation: _scroll,
+            builder: (context, child) => ShaderMask(
+              blendMode: BlendMode.dstIn,
+              shaderCallback: (bounds) {
+                final position = _scroll.hasClients ? _scroll.position : null;
+                final hasMetrics = position?.hasContentDimensions ?? false;
+                final fadeLeft = hasMetrics && position!.extentBefore > 0.5;
+                final fadeRight = hasMetrics && position!.extentAfter > 0.5;
+                final fade = bounds.width > 0
+                    ? math.min(24 / bounds.width, 0.5)
+                    : 0.0;
+                return LinearGradient(
+                  colors: [
+                    fadeLeft ? Colors.transparent : Colors.white,
+                    Colors.white,
+                    Colors.white,
+                    fadeRight ? Colors.transparent : Colors.white,
+                  ],
+                  stops: [0, fade, 1 - fade, 1],
+                ).createShader(bounds);
+              },
+              child: child,
+            ),
+            // Mask only the editable content; keep the border, label and helper
+            // fully visible. Scroll metrics also update after picking or resizing.
+            child: TextField(
+              controller: widget.controller,
+              focusNode: _focus,
+              scrollController: _scroll,
+              enabled: widget.enabled,
+              style: talBody,
+              textDirection: TextDirection.ltr,
+              decoration: null,
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 class _SourceTaskOutput extends StatefulWidget {

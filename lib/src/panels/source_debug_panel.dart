@@ -1613,7 +1613,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
         title: hasSourceFiles ? '选择要查看的源码' : '没有可显示的源码',
         detail: hasSourceFiles
             ? '点击右上角 + 或按 Ctrl+F 查找并打开源码文件。'
-            : '请加载带 DWARF 调试信息的 ELF / AXF 文件。',
+            : '请加载带 DWARF 调试信息的 ELF / AXF 文件',
         actions: _buildSourceSetupActions(),
       );
     }

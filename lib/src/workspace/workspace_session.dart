@@ -18,7 +18,13 @@ class WorkspaceSession {
       [...groups]..sort((a, b) => a.z.compareTo(b.z));
 
   int nextZ() => ++zCursor;
-  String nextGroupId(String prefix) => '${prefix}_${idCursor++}';
+  String nextGroupId(String prefix) {
+    String id;
+    do {
+      id = '${prefix}_${idCursor++}';
+    } while (groups.any((group) => group.id == id));
+    return id;
+  }
 
   void resetDrag() {
     dragRemainder = Offset.zero;

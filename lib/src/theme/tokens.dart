@@ -31,6 +31,12 @@ abstract final class TalColors {
 
 const talControlBorder = BorderSide(color: TalColors.border);
 
+/// Panel tabs paint over this baseline so the active tab joins its content.
+const talPanelTabStripDecoration = BoxDecoration(
+  color: TalColors.surface,
+  border: Border(bottom: talControlBorder),
+);
+
 const talBody = TextStyle(
   color: TalColors.text,
   fontSize: 13,

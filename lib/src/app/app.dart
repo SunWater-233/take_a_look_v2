@@ -382,7 +382,7 @@ class TalUiScaleViewport extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if ((scale - 1).abs() < 0.001) return child;
+    // Keep the same subtree at 100% so scaling does not recreate the workspace.
     return LayoutBuilder(
       builder: (context, constraints) {
         if (!constraints.hasBoundedWidth || !constraints.hasBoundedHeight) {

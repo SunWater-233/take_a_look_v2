@@ -68,10 +68,10 @@ class TalPanelTabSurface extends StatelessWidget {
             )!,
             width: selected || tab == WorkspacePanelId.sourceDebug ? 2 : 1,
           ),
-          right: const BorderSide(color: TalColors.border),
-          bottom: BorderSide(
-            color: selected ? TalColors.surface : TalColors.border,
-          ),
+          right: talControlBorder,
+          bottom: selected
+              ? talControlBorder.copyWith(color: TalColors.surface)
+              : talControlBorder,
         ),
       ),
       child: Stack(
@@ -387,12 +387,14 @@ class _PanelTabsState extends State<_PanelTabs> {
   }
 
   Widget _tabStrip(Widget child) {
-    return Container(
+    return SizedBox(
       key: _tabStripKey,
       height: TalUiTheme.of(context).panelTabStripHeight,
-      color: TalColors.surface,
-      alignment: Alignment.bottomLeft,
-      child: child,
+      // Paint behind the tabs without adding a border inset to their layout.
+      child: DecoratedBox(
+        decoration: talPanelTabStripDecoration,
+        child: Align(alignment: Alignment.bottomLeft, child: child),
+      ),
     );
   }
 

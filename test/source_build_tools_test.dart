@@ -1,11 +1,15 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:take_a_look_v2/src/app/workbench_feedback.dart';
+import 'package:take_a_look_v2/src/backend/backend_client.dart';
 import 'package:take_a_look_v2/src/controller/controller.dart';
 import 'package:take_a_look_v2/src/models/source_tools.dart';
 import 'package:take_a_look_v2/src/panels/panels.dart';
 import 'package:take_a_look_v2/src/protocol/commands.dart';
 import 'package:take_a_look_v2/src/protocol/events.dart';
+import 'package:take_a_look_v2/src/theme/theme.dart';
 import 'package:take_a_look_v2/src/workspace/panel_types.dart';
 
 void main() {
@@ -87,6 +91,211 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('saving a picked firmware loads symbols into both panels', (
+    tester,
+  ) async {
+    final directory = Directory.systemTemp.createTempSync(
+      'tal-project-symbols-',
+    );
+    addTearDown(() => directory.deleteSync(recursive: true));
+    final firmware = File('${directory.path}/motor.axf')
+      ..writeAsStringSync('fixture');
+    final loaded = Completer<void>();
+    final requests = <String>[];
+    late final TakeALookController controller;
+    controller = TakeALookController(
+      symbolFilePicker: () async => firmware.path,
+      backendCommand: (command, arguments) async {
+        if (command == ControllerCommand.setSourceProject) {
+          controller.applyBackendEvent(BackendEventType.state, {
+            'sourceProject': arguments,
+          });
+        } else if (command == ControllerCommand.loadSymbols) {
+          final path = (arguments! as Map)['path'] as String;
+          requests.add(path);
+          await loaded.future;
+          controller.applyBackendEvent(BackendEventType.state, {
+            'symbolFile': path,
+            'symbols': [_projectSymbol],
+            'debug': {
+              'sourceRoot': directory.path,
+              'sourceFiles': ['${directory.path}/motor.c'],
+            },
+          });
+        }
+      },
+    );
+    addTearDown(controller.dispose);
+    controller.sourceProject.sourceRoot = directory.path;
+    tester.view.physicalSize = const Size(1100, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(_projectSettingsHarness(controller));
+    await tester.tap(find.byKey(const ValueKey('source-project-settings')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('浏览固件文件'));
+    await tester.pumpAndSettle();
+    expect(requests, isEmpty);
+
+    await tester.tap(find.byKey(const ValueKey('source-project-save')));
+    for (var attempt = 0; attempt < 20 && requests.isEmpty; attempt++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await tester.pump();
+    }
+    expect(requests, hasLength(1));
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(File(requests.single).absolute.uri, firmware.absolute.uri);
+    expect(controller.isSymbolLoading, isTrue);
+    expect(find.byKey(const ValueKey('source-project-save')), findsNothing);
+    expect(find.text('正在加载 ELF'), findsOneWidget);
+    expect(find.text('打开符号文件'), findsOneWidget);
+    expect(find.text('符号文件已打开'), findsNothing);
+
+    await tester.runAsync(() async {
+      loaded.complete();
+      await Future<void>.delayed(Duration.zero);
+    });
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.pumpAndSettle();
+    expect(controller.isSymbolLoading, isFalse);
+    expect(find.text('正在加载 ELF'), findsNothing);
+    expect(controller.symbols.single.name, 'counter');
+    expect(controller.debugState.sourceFiles, ['${directory.path}/motor.c']);
+    expect(find.text('符号文件已打开'), findsOneWidget);
+    expect(find.text('尚未读取 .elf / .axf'), findsNothing);
+    expect(find.text(requests.single), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  test(
+    'project symbols resolve relative paths and skip loaded or missing files',
+    () async {
+      final directory = Directory.systemTemp.createTempSync(
+        'tal-project-relative-',
+      );
+      addTearDown(() => directory.deleteSync(recursive: true));
+      final firmware = File('${directory.path}/build/motor.axf');
+      firmware.parent.createSync();
+      firmware.writeAsStringSync('fixture');
+      final requests = <String>[];
+      late final TakeALookController controller;
+      controller = TakeALookController(
+        backendCommand: (command, arguments) async {
+          expect(command, ControllerCommand.loadSymbols);
+          final path = (arguments! as Map)['path'] as String;
+          requests.add(path);
+          controller.applyBackendEvent(BackendEventType.state, {
+            'symbolFile': path,
+          });
+        },
+      );
+      addTearDown(controller.dispose);
+      controller.sourceProject.applyJson({
+        'sourceRoot': directory.path,
+        'firmwarePath': 'build/../build/motor.axf',
+      });
+      await controller.loadSourceProjectSymbols();
+      expect(File(requests.single).absolute.uri, firmware.absolute.uri);
+
+      controller.sourceProject.firmwarePath = firmware.absolute.path;
+      await controller.loadSourceProjectSymbols();
+      controller.sourceProject.firmwarePath = 'build/not-built-yet.axf';
+      await controller.loadSourceProjectSymbols();
+      controller.sourceProject.firmwarePath = '';
+      await controller.loadSourceProjectSymbols();
+      expect(requests, hasLength(1));
+      expect(controller.symbolFile, requests.single);
+    },
+  );
+
+  test(
+    'failed project symbol loading preserves the previously loaded file',
+    () async {
+      final directory = Directory.systemTemp.createTempSync(
+        'tal-project-invalid-',
+      );
+      addTearDown(() => directory.deleteSync(recursive: true));
+      final firmware = File('${directory.path}/invalid.axf')
+        ..writeAsStringSync('fixture');
+      final controller = TakeALookController(
+        backendCommand: (_, _) async =>
+            throw const BackendException('symbol_load_failed', '无法解析符号文件'),
+      );
+      addTearDown(controller.dispose);
+      controller.applySnapshot({
+        'symbolFile': '${directory.path}/previous.axf',
+        'symbols': [_projectSymbol],
+        'sourceProject': {
+          'sourceRoot': directory.path,
+          'firmwarePath': firmware.path,
+        },
+      });
+      await controller.loadSourceProjectSymbols();
+      expect(controller.symbolFile, '${directory.path}/previous.axf');
+      expect(controller.symbols.single.name, 'counter');
+      expect(controller.lastBackendError?['code'], 'symbol_load_failed');
+      expect(controller.isSymbolLoading, isFalse);
+    },
+  );
+
+  for (final failSave in [false, true]) {
+    testWidgets(
+      '${failSave ? 'failed' : 'cancelled'} settings do not load firmware',
+      (tester) async {
+        final directory = Directory.systemTemp.createTempSync(
+          'tal-project-cancel-',
+        );
+        addTearDown(() => directory.deleteSync(recursive: true));
+        final firmware = File('${directory.path}/motor.axf')
+          ..writeAsStringSync('fixture');
+        final commands = <ControllerCommand>[];
+        final controller = TakeALookController(
+          symbolFilePicker: () async => firmware.path,
+          backendCommand: (command, _) async {
+            commands.add(command);
+            if (command == ControllerCommand.setSourceProject) {
+              throw const BackendException('save_failed', '无法保存工程设置');
+            }
+          },
+        );
+        addTearDown(controller.dispose);
+        controller.sourceProject.sourceRoot = directory.path;
+        tester.view.physicalSize = const Size(1100, 900);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        await tester.pumpWidget(_projectSettingsHarness(controller));
+        await tester.tap(find.byKey(const ValueKey('source-project-settings')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('浏览固件文件'));
+        await tester.pumpAndSettle();
+        await tester.tap(
+          failSave
+              ? find.byKey(const ValueKey('source-project-save'))
+              : find.text('取消'),
+        );
+        await tester.pumpAndSettle();
+        expect(commands, isNot(contains(ControllerCommand.loadSymbols)));
+        expect(controller.symbolFile, isEmpty);
+        expect(controller.isSymbolLoading, isFalse);
+        if (failSave) {
+          expect(commands, [ControllerCommand.setSourceProject]);
+          expect(find.textContaining('无法保存工程设置'), findsOneWidget);
+        } else {
+          expect(
+            find.byKey(const ValueKey('source-project-save')),
+            findsNothing,
+          );
+        }
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
+  }
+
   for (final size in [const Size(320, 420), const Size(300, 180)]) {
     testWidgets('source build tools fit ${size.width} x ${size.height}', (
       tester,
@@ -127,3 +336,38 @@ void main() {
     });
   }
 }
+
+Widget _projectSettingsHarness(TakeALookController controller) => MaterialApp(
+  theme: buildTalTheme(),
+  home: Scaffold(
+    body: WorkbenchFeedback(
+      controller: controller,
+      child: Row(
+        children: [
+          SizedBox(
+            width: 320,
+            child: buildWorkspacePanelBody(
+              WorkspacePanelId.symbols,
+              controller,
+            ),
+          ),
+          Expanded(
+            child: buildWorkspacePanelBody(
+              WorkspacePanelId.sourceDebug,
+              controller,
+            ),
+          ),
+        ],
+      ),
+    ),
+  ),
+);
+
+const _projectSymbol = {
+  'key': '20000000:counter',
+  'source': 'motor.c',
+  'name': 'counter',
+  'address': 0x20000000,
+  'type': 'uint32_t',
+  'size': 4,
+};

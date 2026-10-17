@@ -50,6 +50,35 @@ void receive(
 }
 
 void main() {
+  test(
+    'undo restores full remote data when only deletion metadata was delivered',
+    () async {
+      final controller = source();
+      final replica = TakeALookController(remoteCommand: (_, _) async {});
+      final target = WindowSyncTarget(
+        controller,
+        (method, data) async => receive(replica, method, data),
+      );
+      addTearDown(controller.dispose);
+      addTearDown(replica.dispose);
+      addTearDown(target.dispose);
+      append(controller, [1, 2]);
+      await target.initialize(includeHistory: true, includeAnalysis: false);
+      controller.removeWatch('a');
+      await target.flushState();
+      expect(replica.watches, isEmpty);
+      append(controller, [3]);
+      controller.undoWatchDeletion();
+      target.requestTelemetry();
+      await target.settled;
+      expect(replica.watches.single.samples.map((point) => point.dx), [
+        1,
+        2,
+        3,
+      ]);
+    },
+  );
+
   test('state patches omit unchanged symbols and source indexes', () {
     final controller = source();
     final replica = TakeALookController(remoteCommand: (_, _) async {});

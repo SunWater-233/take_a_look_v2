@@ -421,7 +421,7 @@ void motor_control_tick(void)
 
   void _appendFrames(int count, double rate) {
     final start = controller.elapsedSeconds;
-    final watches = controller.watches
+    final watches = controller.acquisitionWatches
         .where((watch) => watch.samplingEnabled)
         .toList();
     if (watches.isEmpty) return;
@@ -442,7 +442,7 @@ void motor_control_tick(void)
 
   void _publishFrames(List<Map<String, Object>> frames) {
     final labels = {
-      for (final watch in controller.watches)
+      for (final watch in controller.acquisitionWatches)
         if (watch.samplingEnabled) watch.symbol.key: watch.symbol.name,
     };
     final recorded = [

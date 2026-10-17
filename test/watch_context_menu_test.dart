@@ -76,6 +76,36 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('watch table Delete and Ctrl+Z restore row selection and data', (
+    tester,
+  ) async {
+    final controller = await pumpWatchTable(tester);
+    final key = controller.watches.first.symbol.key;
+    controller.applyBackendSamples({
+      'frames': [
+        {
+          'elapsed': 1.0,
+          'values': {key: 12.0},
+        },
+      ],
+    });
+    await tester.tap(find.text('iq_ref'));
+    await tester.sendKeyEvent(LogicalKeyboardKey.delete);
+    await tester.pump();
+    expect(find.text('iq_ref'), findsNothing);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+    expect(find.text('iq_ref'), findsOneWidget);
+    expect(controller.watches.first.samples.single.dy, 12);
+    await tester.sendKeyEvent(LogicalKeyboardKey.delete);
+    await tester.pump();
+    expect(find.text('iq_ref'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+  });
+
   testWidgets('watch header menu uses larger touch targets on long press', (
     tester,
   ) async {

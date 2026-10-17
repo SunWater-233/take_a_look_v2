@@ -33,6 +33,7 @@ class TelemetryStore {
     for (final watch in watches) {
       watch.samples.clear();
       watch.totalSampleCount = 0;
+      watch.historyStartSeconds = 0;
     }
   }
 
@@ -64,7 +65,7 @@ class TelemetryStore {
       elapsedSeconds = math.max(elapsedSeconds, elapsed);
       for (final entry in rawValues.entries) {
         final watch = watchesByKey[entry.key];
-        if (watch == null) continue;
+        if (watch == null || elapsed < watch.historyStartSeconds) continue;
         final value = numericValue(entry.value, fallback: watch.value);
         if (freshKeys.contains(watch.symbol.key)) {
           watch.value = value;
@@ -100,7 +101,10 @@ class TelemetryStore {
       var latest = watch.value;
       var received = false;
       for (var frame = 0; frame < batch.frameCount; frame++) {
-        if (!batch.hasValue(frame, variable)) continue;
+        if (!batch.hasValue(frame, variable) ||
+            batch.elapsedSeconds[frame] < watch.historyStartSeconds) {
+          continue;
+        }
         received = true;
         latest = batch.valueAt(frame, variable);
         if (batch.captureOnly || watch.samplingEnabled) {

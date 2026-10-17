@@ -42,7 +42,39 @@ class _CompactWatchPanel extends StatefulWidget {
 
 class _CompactWatchPanelState extends State<_CompactWatchPanel> {
   int _plotSelectionRevision = -1;
+  final FocusNode _panelFocus = FocusNode(debugLabel: 'compact-watch-list');
   TakeALookController get controller => widget.controller;
+
+  @override
+  void dispose() {
+    _panelFocus.dispose();
+    super.dispose();
+  }
+
+  KeyEventResult _handleShortcut(KeyEvent event) {
+    if (ModalRoute.of(context)?.isCurrent == false ||
+        FocusManager.instance.primaryFocus?.context
+                ?.findAncestorWidgetOfExactType<EditableText>() !=
+            null) {
+      return KeyEventResult.ignored;
+    }
+    if (WorkspaceShortcut.undoWatchDeletion.matches(event) &&
+        controller.canUndoWatchDeletion) {
+      controller.undoWatchDeletion();
+      return KeyEventResult.handled;
+    }
+    if (event is KeyDownEvent &&
+        !event.synthesized &&
+        event.logicalKey == LogicalKeyboardKey.delete &&
+        !HardwareKeyboard.instance.isControlPressed &&
+        !HardwareKeyboard.instance.isMetaPressed &&
+        !HardwareKeyboard.instance.isAltPressed &&
+        controller.compactWatchSelection != null) {
+      controller.removeWatch(controller.compactWatchSelection!);
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
 
   void _select(String key) {
     setState(() => controller.compactWatchSelection = key);
@@ -108,101 +140,107 @@ class _CompactWatchPanelState extends State<_CompactWatchPanel> {
         final roots = buildWatchTree(controller.watches);
         _syncSelection(roots);
         final rows = _visibleRows(roots);
-        return Material(
-          color: WorkbenchColors.surface,
-          child: Column(
-            children: [
-              _toolbar(context),
-              Expanded(
-                child: rows.isEmpty
-                    ? Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Text('从资源库加入变量', style: workbenchMuted),
-                              const SizedBox(height: 10),
-                              if (widget.onShowSymbols != null)
-                                TalButton(
-                                  onPressed: widget.onShowSymbols,
-                                  child: const Text('打开资源库'),
-                                ),
-                            ],
+        return PanelKeyboardListener(
+          focusNode: _panelFocus,
+          onKeyEvent: _handleShortcut,
+          child: Material(
+            color: WorkbenchColors.surface,
+            child: Column(
+              children: [
+                _toolbar(context),
+                Expanded(
+                  child: rows.isEmpty
+                      ? Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Text('从资源库加入变量', style: workbenchMuted),
+                                const SizedBox(height: 10),
+                                if (widget.onShowSymbols != null)
+                                  TalButton(
+                                    onPressed: widget.onShowSymbols,
+                                    child: const Text('打开资源库'),
+                                  ),
+                              ],
+                            ),
                           ),
-                        ),
-                      )
-                    : ListView.builder(
-                        key: const ValueKey('compact-watch-list'),
-                        itemCount: rows.length,
-                        itemBuilder: (context, index) {
-                          final item = rows[index],
-                              node = item.node,
-                              watch = node.watch;
-                          if (node.children.isNotEmpty) {
-                            return InkWell(
-                              onTap: () => setState(() {
-                                if (!controller.compactExpandedWatches.add(
-                                  watch.symbol.key,
-                                )) {
-                                  controller.compactExpandedWatches.remove(
+                        )
+                      : ListView.builder(
+                          key: const ValueKey('compact-watch-list'),
+                          itemCount: rows.length,
+                          itemBuilder: (context, index) {
+                            final item = rows[index],
+                                node = item.node,
+                                watch = node.watch;
+                            if (node.children.isNotEmpty) {
+                              return InkWell(
+                                onTap: () => setState(() {
+                                  if (!controller.compactExpandedWatches.add(
                                     watch.symbol.key,
-                                  );
-                                }
-                              }),
-                              child: Padding(
-                                padding: EdgeInsets.fromLTRB(
-                                  8 + item.depth * 8,
-                                  12,
-                                  8,
-                                  12,
-                                ),
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      controller.compactExpandedWatches
-                                              .contains(watch.symbol.key)
-                                          ? Icons.expand_more
-                                          : Icons.chevron_right,
-                                      size: 16,
-                                    ),
-                                    const SizedBox(width: 5),
-                                    Expanded(
-                                      child: Text(
-                                        node.label,
-                                        style: talMono,
-                                        overflow: TextOverflow.ellipsis,
+                                  )) {
+                                    controller.compactExpandedWatches.remove(
+                                      watch.symbol.key,
+                                    );
+                                  }
+                                }),
+                                child: Padding(
+                                  padding: EdgeInsets.fromLTRB(
+                                    8 + item.depth * 8,
+                                    12,
+                                    8,
+                                    12,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        controller.compactExpandedWatches
+                                                .contains(watch.symbol.key)
+                                            ? Icons.expand_more
+                                            : Icons.chevron_right,
+                                        size: 16,
                                       ),
-                                    ),
-                                    Text(
-                                      '${node.children.length}',
-                                      style: workbenchMuted,
-                                    ),
-                                  ],
+                                      const SizedBox(width: 5),
+                                      Expanded(
+                                        child: Text(
+                                          node.label,
+                                          style: talMono,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                      Text(
+                                        '${node.children.length}',
+                                        style: workbenchMuted,
+                                      ),
+                                    ],
+                                  ),
                                 ),
+                              );
+                            }
+                            return WatchRowAnchor(
+                              key: ValueKey(
+                                'compact-watch-${watch.symbol.key}',
+                              ),
+                              controller: controller,
+                              watchKey: watch.symbol.key,
+                              child: _CompactWatchRow(
+                                key: ValueKey(watch.symbol.key),
+                                controller: controller,
+                                watch: watch,
+                                label: node.label,
+                                depth: item.depth,
+                                selected:
+                                    watch.symbol.key ==
+                                    controller.compactWatchSelection,
+                                onSelect: () => _select(watch.symbol.key),
                               ),
                             );
-                          }
-                          return WatchRowAnchor(
-                            key: ValueKey('compact-watch-${watch.symbol.key}'),
-                            controller: controller,
-                            watchKey: watch.symbol.key,
-                            child: _CompactWatchRow(
-                              key: ValueKey(watch.symbol.key),
-                              controller: controller,
-                              watch: watch,
-                              label: node.label,
-                              depth: item.depth,
-                              selected:
-                                  watch.symbol.key ==
-                                  controller.compactWatchSelection,
-                              onSelect: () => _select(watch.symbol.key),
-                            ),
-                          );
-                        },
-                      ),
-              ),
-            ],
+                          },
+                        ),
+                ),
+              ],
+            ),
           ),
         );
       },
@@ -239,6 +277,14 @@ class _CompactWatchPanelState extends State<_CompactWatchPanel> {
             ),
           ),
           const Spacer(),
+          TalIconButton(
+            key: const ValueKey('compact-watch-undo'),
+            tooltip: '撤回删除 (Ctrl+Z) · 采集中删除可在 10 秒内撤回',
+            onPressed: controller.canUndoWatchDeletion
+                ? controller.undoWatchDeletion
+                : null,
+            icon: const Icon(Icons.undo, size: 16),
+          ),
         ],
       ),
     );
@@ -273,6 +319,76 @@ class _CompactWatchRowState extends State<_CompactWatchRow> {
   String? _writeError;
   int _editRevision = 0;
   String get _key => widget.watch.symbol.key;
+
+  void _activate() {
+    widget.onSelect();
+    Focus.of(context).requestFocus();
+  }
+
+  Future<void> _adjustColor() async {
+    _activate();
+    final color = await showTalDialog<Color>(
+      context: context,
+      builder: (context) => WatchColorDialog(initialColor: widget.watch.color),
+    );
+    if (mounted && color != null) widget.controller.setWatchColor(_key, color);
+  }
+
+  Future<void> _showContextMenu(Offset position, {bool touch = false}) async {
+    _activate();
+    final overlay =
+        Overlay.of(context).context.findRenderObject()! as RenderBox;
+    final local = overlay.globalToLocal(position);
+    final controller = widget.controller;
+    final watch = widget.watch;
+    final action = await showTalContextMenu<String>(
+      context: context,
+      position: RelativeRect.fromSize(local & Size.zero, overlay.size),
+      touchOptimized: touch,
+      items: [
+        _watchPopupItem(
+          value: 'color',
+          icon: Icons.palette_outlined,
+          label: '颜色调整',
+          touchOptimized: touch,
+        ),
+        _watchPopupItem(
+          value: 'visibility',
+          icon: watch.plotted
+              ? Icons.visibility_off_outlined
+              : Icons.visibility_outlined,
+          label: watch.plotted ? '隐藏曲线' : '显示曲线',
+          enabled: watch.samplingEnabled,
+          touchOptimized: touch,
+        ),
+        const PopupMenuDivider(),
+        _watchPopupItem(
+          value: 'delete',
+          icon: Icons.delete_outline,
+          label: '删除变量',
+          touchOptimized: touch,
+        ),
+        _watchPopupItem(
+          value: 'undo',
+          icon: Icons.undo,
+          label: '撤回删除',
+          enabled: controller.canUndoWatchDeletion,
+          touchOptimized: touch,
+        ),
+      ],
+    );
+    if (!mounted) return;
+    switch (action) {
+      case 'color':
+        await _adjustColor();
+      case 'visibility':
+        controller.toggleWatchPlot(_key, !watch.plotted);
+      case 'delete':
+        controller.removeWatch(_key);
+      case 'undo':
+        controller.undoWatchDeletion();
+    }
+  }
 
   @override
   void initState() {
@@ -494,15 +610,16 @@ class _CompactWatchRowState extends State<_CompactWatchRow> {
       ),
     );
     return InkWell(
-      onTap: widget.onSelect,
-      onSecondaryTap: widget.onSelect,
+      onTap: _activate,
+      onSecondaryTapUp: (details) => _showContextMenu(details.globalPosition),
+      onLongPress: () {
+        final box = context.findRenderObject()! as RenderBox;
+        _showContextMenu(
+          box.localToGlobal(box.size.center(Offset.zero)),
+          touch: true,
+        );
+      },
       child: Container(
-        padding: EdgeInsets.fromLTRB(
-          10 + math.min(widget.depth, 3) * 8,
-          7,
-          11,
-          7,
-        ),
         decoration: BoxDecoration(
           color: widget.selected
               ? WorkbenchColors.selection
@@ -515,109 +632,147 @@ class _CompactWatchRowState extends State<_CompactWatchRow> {
             bottom: const BorderSide(color: WorkbenchColors.border),
           ),
         ),
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            // Keep the accepted 120px editor; only stack when the dock is too narrow.
-            final narrow =
-                constraints.maxWidth < (ui.touchOptimized ? 272 : 260);
-            final valueLabel = AnimatedBuilder(
-              animation: controller.telemetryChanges,
-              builder: (context, _) {
-                final value = watch.updatedAtMs == null
-                    ? '—'
-                    : watch.valueLabel;
-                return Tooltip(
-                  message: value,
-                  child: Text(
-                    value,
-                    key: ValueKey('compact-watch-value-$_key'),
-                    style: talMono.copyWith(fontSize: 14),
-                    textAlign: TextAlign.right,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                );
-              },
-            );
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 3,
-                      height: 12,
-                      color: watch.samplingEnabled
-                          ? watch.color
-                          : Colors.transparent,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Tooltip(
-                        message: watch.symbol.name,
+        child: Stack(
+          children: [
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                21 + math.min(widget.depth, 3) * 8,
+                7,
+                11,
+                7,
+              ),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  // Keep the accepted 120px editor; only stack when the dock is too narrow.
+                  final narrow =
+                      constraints.maxWidth < (ui.touchOptimized ? 272 : 260);
+                  final valueLabel = AnimatedBuilder(
+                    animation: controller.telemetryChanges,
+                    builder: (context, _) {
+                      final value = watch.updatedAtMs == null
+                          ? '—'
+                          : watch.valueLabel;
+                      return Tooltip(
+                        message: value,
+                        triggerMode: TooltipTriggerMode.manual,
                         child: Text(
-                          widget.label,
-                          style: talMono,
-                          overflow: TextOverflow.ellipsis,
+                          value,
+                          key: ValueKey('compact-watch-value-$_key'),
+                          style: talMono.copyWith(fontSize: 14),
+                          textAlign: TextAlign.right,
                           maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      );
+                    },
+                  );
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Tooltip(
+                              message: watch.symbol.name,
+                              triggerMode: TooltipTriggerMode.manual,
+                              child: Text(
+                                widget.label,
+                                style: talMono,
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 1,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          SizedBox(
+                            width: ui.touchOptimized ? 112 : 96,
+                            child: TalDropdown<WatchReadMode>(
+                              key: ValueKey('watch-read-mode-$_key'),
+                              subtle: true,
+                              value: watch.readMode,
+                              values: WatchReadMode.values,
+                              label: (mode) => mode.label,
+                              onChanged: (mode) {
+                                widget.onSelect();
+                                controller.setWatchReadMode(_key, mode);
+                              },
+                            ),
+                          ),
+                          action,
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      if (narrow) ...[
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: valueLabel,
+                        ),
+                        const SizedBox(height: 4),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(
+                              maxWidth: constraints.maxWidth,
+                            ),
+                            child: writeGroup,
+                          ),
+                        ),
+                      ] else
+                        Row(
+                          children: [
+                            SizedBox(
+                              width: ui.touchOptimized ? 82 : 76,
+                              child: valueLabel,
+                            ),
+                            const SizedBox(width: 8),
+                            const Spacer(),
+                            writeGroup,
+                          ],
+                        ),
+                      if (_writeError != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 5),
+                          child: Text(
+                            _writeError!,
+                            key: ValueKey('compact-watch-write-error-$_key'),
+                            style: workbenchMuted.copyWith(
+                              color: TalColors.error,
+                            ),
+                          ),
+                        ),
+                    ],
+                  );
+                },
+              ),
+            ),
+            if (watch.samplingEnabled)
+              Positioned(
+                left: math.min(widget.depth, 3) * 8,
+                top: 0,
+                bottom: 0,
+                width: 23,
+                child: Tooltip(
+                  message: '双击调整颜色',
+                  triggerMode: TooltipTriggerMode.manual,
+                  child: GestureDetector(
+                    key: ValueKey('compact-watch-color-$_key'),
+                    behavior: HitTestBehavior.opaque,
+                    onTap: _activate,
+                    onDoubleTap: _adjustColor,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(10, 12, 10, 14),
+                      child: DecoratedBox(
+                        key: ValueKey('compact-watch-color-bar-$_key'),
+                        decoration: BoxDecoration(
+                          color: watch.color,
+                          borderRadius: BorderRadius.circular(2),
                         ),
                       ),
                     ),
-                    const SizedBox(width: 6),
-                    SizedBox(
-                      width: ui.touchOptimized ? 112 : 96,
-                      child: TalDropdown<WatchReadMode>(
-                        key: ValueKey('watch-read-mode-$_key'),
-                        subtle: true,
-                        value: watch.readMode,
-                        values: WatchReadMode.values,
-                        label: (mode) => mode.label,
-                        onChanged: (mode) {
-                          widget.onSelect();
-                          controller.setWatchReadMode(_key, mode);
-                        },
-                      ),
-                    ),
-                    action,
-                  ],
+                  ),
                 ),
-                const SizedBox(height: 4),
-                if (narrow) ...[
-                  Align(alignment: Alignment.centerLeft, child: valueLabel),
-                  const SizedBox(height: 4),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(
-                        maxWidth: constraints.maxWidth,
-                      ),
-                      child: writeGroup,
-                    ),
-                  ),
-                ] else
-                  Row(
-                    children: [
-                      SizedBox(
-                        width: ui.touchOptimized ? 82 : 76,
-                        child: valueLabel,
-                      ),
-                      const SizedBox(width: 8),
-                      const Spacer(),
-                      writeGroup,
-                    ],
-                  ),
-                if (_writeError != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 5),
-                    child: Text(
-                      _writeError!,
-                      key: ValueKey('compact-watch-write-error-$_key'),
-                      style: workbenchMuted.copyWith(color: TalColors.error),
-                    ),
-                  ),
-              ],
-            );
-          },
+              ),
+          ],
         ),
       ),
     );

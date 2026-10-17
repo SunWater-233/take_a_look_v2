@@ -51,6 +51,7 @@ enum ControllerCommand {
   addSelectedToWatch,
   removeWatch,
   removeWatches,
+  undoWatchDeletion,
   reorderWatch,
   clearWatches,
   toggleWatchSampling,
@@ -250,6 +251,7 @@ class BackendCommandMapper {
       case ControllerCommand.addSelectedToWatch:
       case ControllerCommand.removeWatch:
       case ControllerCommand.removeWatches:
+      case ControllerCommand.undoWatchDeletion:
       case ControllerCommand.reorderWatch:
       case ControllerCommand.clearWatches:
       case ControllerCommand.toggleWatchSampling:

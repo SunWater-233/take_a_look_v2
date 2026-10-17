@@ -132,7 +132,9 @@ extension TakeALookControllerTelemetry on TakeALookController {
   }
 
   void applyWatchValues(Map<String, dynamic> payload) {
-    final byKey = {for (final watch in _watches) watch.symbol.key: watch};
+    final byKey = {
+      for (final watch in acquisitionWatches) watch.symbol.key: watch,
+    };
     for (final raw in payload['values'] as List? ?? const []) {
       if (raw is! Map) continue;
       final watch = byKey[raw['key']];
@@ -153,7 +155,7 @@ extension TakeALookControllerTelemetry on TakeALookController {
   void applyBackendSamples(Map<String, dynamic> payload) {
     elapsedSeconds = telemetryStore.applyJsonFrames(
       payload,
-      _watches,
+      acquisitionWatches,
       currentElapsed: elapsedSeconds,
     );
     _emitTelemetry();
@@ -162,7 +164,7 @@ extension TakeALookControllerTelemetry on TakeALookController {
   void applyBackendSampleBatch(BackendSampleBatch batch) {
     elapsedSeconds = telemetryStore.applyBinaryBatch(
       batch,
-      _watches,
+      acquisitionWatches,
       currentElapsed: elapsedSeconds,
     );
     _emitTelemetry();
@@ -172,7 +174,7 @@ extension TakeALookControllerTelemetry on TakeALookController {
     plotHistory.clear();
     state.acquisition.rawRecording = {};
     elapsedSeconds = 0;
-    telemetryStore.clear(_watches);
+    telemetryStore.clear(_allRetainedWatches);
     _frozenPlotSamples.clear();
     if (plottingPaused || !followLatest) _frozenPlotEndSeconds = 0;
     _emitState([signals.sampling, signals.telemetry, signals.plot]);

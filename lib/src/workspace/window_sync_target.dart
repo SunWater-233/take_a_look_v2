@@ -118,6 +118,15 @@ class WindowSyncTarget {
                     analysis && analysisRevision != _analysisRevision,
               );
               if (data.isNotEmpty) await send('state', data);
+              if (data['watches'] case final List watches) {
+                final keys = watches
+                    .map((watch) => (watch as Map)['key'])
+                    .toSet();
+                // Once a row disappears, the replica has released its buffer.
+                // Undo must send its complete retained tail, even if no
+                // telemetry message was sent between deletion and restoration.
+                _cursors.removeWhere((key, _) => !keys.contains(key));
+              }
               _versions = versions;
               if (analysis) _analysisRevision = analysisRevision;
             }

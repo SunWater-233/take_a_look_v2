@@ -84,6 +84,9 @@ class TakeALookController extends ChangeNotifier {
   final PathPicker? targetPackPicker;
   final List<SymbolItem> _symbols = <SymbolItem>[];
   final List<WatchItem> _watches = <WatchItem>[];
+  final List<List<_DeletedWatch>> _watchDeletions = [];
+  final Set<String> _removedWatchKeys = {};
+  bool _remoteCanUndoWatchDeletion = false;
   final List<LogEntry> _logs = <LogEntry>[];
   final Set<String> _selectedSymbols = <String>{};
   final Set<String> _expandedSymbolTreeNodes = <String>{};
@@ -223,6 +226,29 @@ class TakeALookController extends ChangeNotifier {
   bool isSymbolTreeNodeExpanded(String key) =>
       _expandedSymbolTreeNodes.contains(key);
   List<WatchItem> get watches => List.unmodifiable(_watches);
+
+  /// Includes captures retained briefly after removal so undo has no data gap.
+  Iterable<WatchItem> get acquisitionWatches sync* {
+    yield* _watches;
+    for (final batch in _watchDeletions) {
+      for (final entry in batch) {
+        if (entry.expiry != null) yield entry.watch;
+      }
+    }
+  }
+
+  Iterable<WatchItem> get _allRetainedWatches sync* {
+    yield* _watches;
+    for (final batch in _watchDeletions) {
+      for (final entry in batch) {
+        yield entry.watch;
+      }
+    }
+  }
+
+  bool get canUndoWatchDeletion => _isDetachedRemote
+      ? _remoteCanUndoWatchDeletion
+      : _watchDeletions.isNotEmpty;
   List<LogEntry> get logs => List.unmodifiable(_logs);
   Set<String> get selectedSymbols => Set.unmodifiable(_selectedSymbols);
   double get uiScale => _uiScale.value;
@@ -253,7 +279,10 @@ class TakeALookController extends ChangeNotifier {
     final recent = plottingPaused
         ? _frozenPlotSamples[watch.symbol.key] ?? watch.samples
         : watch.samples;
-    final history = plotHistory.samplesFor(watch.symbol.key);
+    final history = plotHistory.samplesFor(
+      watch.symbol.key,
+      minimumTime: watch.historyStartSeconds,
+    );
     final start = math.max(
       0.0,
       plotWindowEndSeconds - plotVisibleWindowSeconds,
@@ -276,7 +305,7 @@ class TakeALookController extends ChangeNotifier {
       ..rttSampleRateHz = rttSampleRateHz
       ..rttEnabled = rttEnabled
       ..rttProtocol = rttProtocol;
-    for (final watch in _watches) {
+    for (final watch in acquisitionWatches) {
       telemetryStore.configureWatch(watch);
     }
   }
@@ -318,7 +347,7 @@ class TakeALookController extends ChangeNotifier {
     unawaited(
       sender(ControllerCommand.setWatches, {
         'watches': [
-          for (final watch in _watches)
+          for (final watch in acquisitionWatches)
             {
               'key': watch.symbol.key,
               'color':
@@ -326,7 +355,9 @@ class TakeALookController extends ChangeNotifier {
               'sampling': watch.samplingEnabled,
               'readMode': watch.readMode.name,
               'monitorRateHz': watch.monitorRateHz,
-              'plotted': watch.plotted,
+              'plotted':
+                  !_removedWatchKeys.contains(watch.symbol.key) &&
+                  watch.plotted,
             },
         ],
       }),
@@ -353,8 +384,9 @@ class TakeALookController extends ChangeNotifier {
     elapsedSeconds += 0.033;
     _phase += 0.033;
     final now = DateTime.now().millisecondsSinceEpoch;
-    for (var index = 0; index < _watches.length; index += 1) {
-      final watch = _watches[index];
+    final acquiring = acquisitionWatches.toList();
+    for (var index = 0; index < acquiring.length; index += 1) {
+      final watch = acquiring[index];
       if (watch.readMode == WatchReadMode.manual) continue;
       if (watch.samplingEnabled && samplingPaused) continue;
       if (watch.readMode == WatchReadMode.monitor &&
@@ -533,6 +565,7 @@ class TakeALookController extends ChangeNotifier {
     _ticker?.cancel();
     _plotRefreshTimer?.cancel();
     _samplingClockTimer?.cancel();
+    _clearWatchDeletionHistory();
     _samplingElapsedStopwatch.stop();
     _uiScale.dispose();
     signals.dispose();

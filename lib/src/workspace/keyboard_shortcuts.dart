@@ -15,7 +15,8 @@ enum WorkspaceShortcut {
   saveLayout(PhysicalKeyboardKey.keyS, LogicalKeyboardKey.keyS, shift: true),
   findSource(PhysicalKeyboardKey.keyF, LogicalKeyboardKey.keyF),
   closeSource(PhysicalKeyboardKey.keyW, LogicalKeyboardKey.keyW),
-  selectAllWatches(PhysicalKeyboardKey.keyA, LogicalKeyboardKey.keyA);
+  selectAllWatches(PhysicalKeyboardKey.keyA, LogicalKeyboardKey.keyA),
+  undoWatchDeletion(PhysicalKeyboardKey.keyZ, LogicalKeyboardKey.keyZ);
 
   const WorkspaceShortcut(
     this.physicalKey,

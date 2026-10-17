@@ -271,8 +271,24 @@ class _WatchPanelState extends State<_WatchPanel> {
 
   KeyEventResult _handleWatchShortcut(KeyEvent event) {
     final focusContext = FocusManager.instance.primaryFocus?.context;
-    if (focusContext?.findAncestorWidgetOfExactType<EditableText>() != null) {
+    if (ModalRoute.of(context)?.isCurrent == false ||
+        focusContext?.findAncestorWidgetOfExactType<EditableText>() != null) {
       return KeyEventResult.ignored;
+    }
+    if (WorkspaceShortcut.undoWatchDeletion.matches(event) &&
+        controller.canUndoWatchDeletion) {
+      controller.undoWatchDeletion();
+      return KeyEventResult.handled;
+    }
+    if (event is KeyDownEvent &&
+        !event.synthesized &&
+        event.logicalKey == LogicalKeyboardKey.delete &&
+        !HardwareKeyboard.instance.isControlPressed &&
+        !HardwareKeyboard.instance.isMetaPressed &&
+        !HardwareKeyboard.instance.isAltPressed &&
+        _selectedWatchKeys.isNotEmpty) {
+      controller.removeWatches(_selectedWatchKeys);
+      return KeyEventResult.handled;
     }
     if (!WorkspaceShortcut.selectAllWatches.matches(event)) {
       return KeyEventResult.ignored;
@@ -407,6 +423,13 @@ class _WatchPanelState extends State<_WatchPanel> {
           touchOptimized: request.touchOptimized,
         ),
         _watchPopupItem(
+          value: 'undo',
+          icon: Icons.undo,
+          label: '撤回删除',
+          enabled: controller.canUndoWatchDeletion,
+          touchOptimized: request.touchOptimized,
+        ),
+        _watchPopupItem(
           value: 'copy',
           icon: Icons.copy_outlined,
           label: count == 1 ? '复制命令名' : '复制所选命令名（$count）',
@@ -451,6 +474,8 @@ class _WatchPanelState extends State<_WatchPanel> {
       case 'remove':
         _selectedWatchKeys.removeAll(keys);
         controller.removeWatches(keys);
+      case 'undo':
+        controller.undoWatchDeletion();
       case 'copy':
         final names = [
           for (final watch in controller.watches)

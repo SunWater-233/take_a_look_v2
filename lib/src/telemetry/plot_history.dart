@@ -124,18 +124,18 @@ class PlotHistory {
     }
   }
 
-  SampleBuffer? samplesFor(String key) {
+  SampleBuffer? samplesFor(String key, {double minimumTime = 0}) {
     if (_wanted == null) return null;
     for (final item in _cache) {
       if (_covers(item.window.request, reduced: item.window.reduced)) {
-        return item.samples[key];
+        return item.samplesFor(key, minimumTime);
       }
     }
     // Keep the overlapping curve visible while its neighbouring range loads.
     for (final item in _cache) {
       if (item.window.request.start <= _visibleEnd &&
           item.window.request.end >= _visibleStart) {
-        return item.samples[key];
+        return item.samplesFor(key, minimumTime);
       }
     }
     return null;
@@ -173,5 +173,26 @@ class _CachedWindow {
   }
   final HistoryWindow window;
   final Map<String, SampleBuffer> samples = {};
+  final Map<String, ({double minimum, SampleBuffer buffer})> _trimmed = {};
   int pointCount = 0;
+
+  SampleBuffer? samplesFor(String key, double minimumTime) {
+    final source = samples[key];
+    if (source == null || source.isEmpty || source.first.dx >= minimumTime) {
+      return source;
+    }
+    final cached = _trimmed[key];
+    if (cached?.minimum == minimumTime) return cached!.buffer;
+    // A variable re-added after permanent deletion starts a new history.
+    // Cache the clipped numeric buffer to retain the chart's fast path.
+    final index = source.lowerBound(minimumTime);
+    final trimmed = SampleBuffer(capacity: math.max(1, source.length - index));
+    for (final point in source.skip(index)) {
+      trimmed.add(point);
+    }
+    final buffer = trimmed.snapshot();
+    pointCount += buffer.length - (cached?.buffer.length ?? 0);
+    _trimmed[key] = (minimum: minimumTime, buffer: buffer);
+    return buffer;
+  }
 }

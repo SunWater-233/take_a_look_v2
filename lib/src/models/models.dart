@@ -134,6 +134,7 @@ class WatchItem {
   Color color;
   final SampleBuffer samples;
   int totalSampleCount = 0;
+  double historyStartSeconds = 0;
   WatchReadMode readMode = WatchReadMode.capture;
   double? monitorRateHz;
   int? updatedAtMs;

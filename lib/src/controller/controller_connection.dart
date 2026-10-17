@@ -112,7 +112,7 @@ extension TakeALookControllerConnection on TakeALookController {
             current.type != replacement.type ||
             current.size != replacement.size ||
             current.section != replacement.section ||
-            current.backendKey != replacement.backendKey ||
+            current.key != replacement.key ||
             current.writable != replacement.writable ||
             current.dataSource != replacement.dataSource) {
           unchanged = false;
@@ -121,6 +121,20 @@ extension TakeALookControllerConnection on TakeALookController {
       }
       if (unchanged) return;
     }
+    final removedNames = {
+      for (final symbol in _symbols)
+        if (_removedWatchKeys.contains(symbol.key))
+          (symbol.source, symbol.name),
+    };
+    // An undo entry belongs to one symbol table/recording, never a new binary.
+    _clearWatchDeletionHistory();
+    _removedWatchKeys.addAll(
+      next
+          .where(
+            (symbol) => removedNames.contains((symbol.source, symbol.name)),
+          )
+          .map((symbol) => symbol.key),
+    );
     _symbols
       ..clear()
       ..addAll(next);

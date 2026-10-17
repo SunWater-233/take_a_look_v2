@@ -116,6 +116,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
               'plotted': watch.plotted,
               'value': watch.value,
               'sampleCursor': watch.totalSampleCount,
+              'historyStartSeconds': watch.historyStartSeconds,
               if (includeSamples)
                 'samples': packedSamples
                     ? watch.samples.packedRange()
@@ -124,6 +125,8 @@ extension TakeALookControllerSnapshot on TakeALookController {
                       ],
             },
         ],
+      if (wants('canUndoWatchDeletion'))
+        'canUndoWatchDeletion': canUndoWatchDeletion,
       if (wants('logs')) 'logs': [for (final entry in _logs) entry.toJson()],
       if (wants('analysisSession'))
         'analysisSession': analysisSession.toJson(
@@ -236,6 +239,8 @@ extension TakeALookControllerSnapshot on TakeALookController {
   }
 
   void _applySnapshot(JsonObject data) {
+    final previousSymbolRevision = _symbolRevision;
+    final hadDeletedWatches = _watchDeletions.isNotEmpty;
     _touchSnapshotFields(data.keys);
     final hasConnectionState = const {
       'connectionStatus',
@@ -263,7 +268,11 @@ extension TakeALookControllerSnapshot on TakeALookController {
     }.any(data.containsKey);
     final hasSymbolState =
         data.containsKey('selectedSymbols') || data.containsKey('symbols');
-    final hasWatchState = data.containsKey('watches');
+    final hasWatchState =
+        data.containsKey('watches') || data.containsKey('canUndoWatchDeletion');
+    if (_isDetachedRemote && data.containsKey('canUndoWatchDeletion')) {
+      _remoteCanUndoWatchDeletion = data['canUndoWatchDeletion'] == true;
+    }
     final hasPlotHighlightState = data.containsKey('plotHighlightedWatchKey');
     final hasPlotWatchSelection = data.containsKey(
       'plotWatchSelectionRevision',
@@ -448,6 +457,9 @@ extension TakeALookControllerSnapshot on TakeALookController {
         ..addAll(
           (data['watches'] as List? ?? const []).map((raw) {
             final item = Map<String, dynamic>.from(raw as Map);
+            // Backend state includes captures held for the undo grace period.
+            // A delayed echo must never bring a deleted row back into the UI.
+            if (_removedWatchKeys.contains(item['key'])) return null;
             final symbol = symbolsByKey[item['key'] as String];
             if (symbol == null) return null;
             final samples = item['samples'];
@@ -460,6 +472,10 @@ extension TakeALookControllerSnapshot on TakeALookController {
                         : null,
                   )
                   ..samplingEnabled = item['sampling'] != false
+                  ..historyStartSeconds =
+                      (item['historyStartSeconds'] as num?)?.toDouble() ??
+                      previousWatches[symbol.key]?.historyStartSeconds ??
+                      0
                   ..readMode = WatchReadMode.parse(
                     item['readMode'],
                     sampling: item['sampling'] != false,
@@ -469,7 +485,10 @@ extension TakeALookControllerSnapshot on TakeALookController {
                       (item['updatedAtMs'] as num?)?.toInt() ??
                       previousWatches[symbol.key]?.updatedAtMs
                   ..plotted = item['plotted'] == true
-                  ..value = _numericValue(item['value']);
+                  ..value = _numericValue(
+                    item['value'],
+                    fallback: previousWatches[symbol.key]?.value ?? 0,
+                  );
             telemetryStore.configureWatch(watch);
             _appendWireSamples(watch.samples, samples);
             watch.totalSampleCount = samples == null
@@ -553,12 +572,16 @@ extension TakeALookControllerSnapshot on TakeALookController {
         _frozenPlotSamples.clear();
       }
     }
+    final deletedWatchesInvalidated =
+        hadDeletedWatches && previousSymbolRevision != _symbolRevision;
+    if (deletedWatchesInvalidated && !_isDetachedRemote) _syncWatchesBackend();
     _emitState([
       if (hasConnectionState) signals.connection,
       if (hasTargetCatalog) signals.targetCatalog,
       if (hasSamplingState) signals.sampling,
       if (hasSymbolState) signals.symbols,
       if (hasWatchState ||
+          deletedWatchesInvalidated ||
           hasPlotWatchSelection ||
           data.containsKey('connectionKind'))
         signals.watches,

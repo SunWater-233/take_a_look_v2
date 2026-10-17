@@ -95,7 +95,10 @@ The shared UI module lives in `lib/src/theme/`. Pages import its public entry
 point, `theme/theme.dart`; module internals import their specific dependencies
 directly instead of importing the public entry point.
 
-- `tokens.dart`: colors, fonts, text styles, and shared border tokens.
+- `tokens.dart`: `TalPalette` base colors, `TalColors` semantic UI colors,
+  independent `TalChartColors` / `TalSyntaxColors`, fonts, and shared borders.
+- `workbench_style.dart`: workbench aliases of the same semantic colors and
+  workbench typography; it does not define a second palette.
 - `material_theme.dart`: `buildTalTheme` and Material component styles.
 - `interaction.dart`: `TalUiTheme` dimensions and `TalInteractionRegion` input policy.
 - `controls.dart` / `dropdown.dart`: `TalButton`, `TalIconButton`,
@@ -105,6 +108,20 @@ directly instead of importing the public entry point.
 
 New panels should use these shared controls and theme values instead of adding
 their own device checks or fixed control sizes.
+
+The orange/midnight theme uses `#F44A22` for primary actions and focus,
+`#161616` for the workspace, `#FEF8E8` for headings, `#E4E2E3` for body text,
+and `#A8AAAC` for secondary text. Panels, inputs, hover surfaces, and borders
+use neutral gray levels from `TalColors`. Primary actions use
+`TalButtonVariant.filled` with dark text on orange; secondary controls use
+neutral hover surfaces. Disabled controls stay neutral. Caption buttons use
+the shared `talCaptionButtonStyle`, including the orange close-button hover.
+
+Keep application color literals in `theme/tokens.dart`, including semantic
+success/warning/error colors, chart presets, and syntax highlighting. Chart
+presets retain their existing values independently of UI status colors;
+saved/custom series colors are data and are not recolored by a theme change.
+Both the main window and detached-window startup use the same background.
 
 `TalInteractionRegion` follows actual mouse/keyboard, touch, and pen input in
 each window. Desktop controls are compact (32 logical pixels); touch controls

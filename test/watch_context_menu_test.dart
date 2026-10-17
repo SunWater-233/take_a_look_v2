@@ -169,12 +169,14 @@ void main() {
     await tester.tap(find.text('为所选变量设置曲线颜色（3）'));
     await tester.pumpAndSettle();
     await tester.tap(
-      find.byKey(ValueKey('watch-color-preset-${TalColors.blue.toARGB32()}')),
+      find.byKey(
+        ValueKey('watch-color-preset-${TalChartColors.blue.toARGB32()}'),
+      ),
     );
     await tester.tap(find.byKey(const ValueKey('watch-color-confirm')));
     await tester.pumpAndSettle();
     expect(
-      controller.watches.every((watch) => watch.color == TalColors.blue),
+      controller.watches.every((watch) => watch.color == TalChartColors.blue),
       isTrue,
     );
 

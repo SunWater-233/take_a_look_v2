@@ -118,7 +118,7 @@ class CartesianChartRenderer {
   final CartesianPlotViewport viewport;
 
   void drawBackground() {
-    canvas.drawRect(Offset.zero & size, Paint()..color = TalColors.input);
+    canvas.drawRect(Offset.zero & size, Paint()..color = TalColors.background);
   }
 
   void drawGrid({bool visible = true}) {

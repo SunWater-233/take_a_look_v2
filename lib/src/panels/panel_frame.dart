@@ -98,7 +98,9 @@ class TalPanelTabSurface extends StatelessWidget {
               maxLines: 1,
               softWrap: false,
               overflow: TextOverflow.clip,
-              style: talBody,
+              style: talBody.copyWith(
+                color: selected ? TalColors.heading : TalColors.muted,
+              ),
             ),
           ),
           if (unread)

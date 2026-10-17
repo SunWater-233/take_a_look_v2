@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../theme/theme.dart';
 import '../workspace/panel_types.dart';
 
 export '../workspace/panel_types.dart';
@@ -25,7 +26,7 @@ Future<void> launchWorkbench(
     final options = WindowOptions(
       // Detached panels retain their workspace size without a fixed minimum.
       size: launch?.initialSize,
-      backgroundColor: const Color(0xFF050505),
+      backgroundColor: TalColors.background,
       title: panel == null
           ? title
           : launch?.role == SecondaryWindowRole.dragPreview

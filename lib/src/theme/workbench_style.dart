@@ -1,17 +1,19 @@
 import 'package:flutter/material.dart';
 
-/// Workbench chrome is scoped separately from the existing project dialogs.
+import 'tokens.dart';
+
 abstract final class WorkbenchColors {
-  static const background = Color(0xFF0F1114);
-  static const surface = Color(0xFF191C20);
-  static const raised = Color(0xFF24282E);
-  static const input = Color(0xFF111419);
-  static const border = Color(0xFF373E47);
-  static const text = Color(0xFFE8ECF1);
-  static const muted = Color(0xFFA5AEBC);
-  static const selection = Color(0xFF31251F);
-  static const accent = Color(0xFFF44A22);
-  static const success = Color(0xFF5DC59A);
+  static const background = TalColors.background;
+  static const surface = TalColors.surface;
+  static const raised = TalColors.surfaceAlt;
+  static const input = TalColors.input;
+  static const border = TalColors.border;
+  static const text = TalColors.text;
+  static const heading = TalColors.heading;
+  static const muted = TalColors.muted;
+  static const selection = TalColors.selection;
+  static const accent = TalColors.accent;
+  static const success = TalColors.success;
 }
 
 const workbenchBody = TextStyle(

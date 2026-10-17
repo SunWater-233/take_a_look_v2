@@ -93,7 +93,7 @@ class TelemetryPainter extends CustomPainter {
         final notice = TextPainter(
           text: TextSpan(
             text: '绘图历史从 ${earliest.toStringAsFixed(2)} s 开始；更早记录请导出原始 CSV',
-            style: const TextStyle(color: Color(0xFFAAAAAA), fontSize: 12),
+            style: const TextStyle(color: TalColors.muted, fontSize: 12),
           ),
           textDirection: TextDirection.ltr,
           maxLines: 1,
@@ -132,7 +132,7 @@ class TelemetryPainter extends CustomPainter {
     );
     renderer.drawPolyline(
       series.points,
-      Color.lerp(series.watch.color, Colors.white, 0.3)!,
+      Color.lerp(series.watch.color, TalChartColors.highlight, 0.3)!,
       strokeWidth: 3.4,
     );
     canvas.drawCircle(hovered.position, 4, Paint()..color = series.watch.color);
@@ -140,7 +140,7 @@ class TelemetryPainter extends CustomPainter {
       hovered.position,
       4,
       Paint()
-        ..color = Colors.white
+        ..color = TalChartColors.highlight
         ..strokeWidth = 1.5
         ..style = PaintingStyle.stroke,
     );

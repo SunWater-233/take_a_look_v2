@@ -133,6 +133,7 @@ Future<void> showWorkbenchConnectionSettings(
       AnimatedBuilder(
         animation: controller.connectionChanges,
         builder: (_, _) => TalButton(
+          variant: TalButtonVariant.filled,
           onPressed: controller.connectionStatus == ConnectionStatus.connecting
               ? null
               : controller.toggleConnection,

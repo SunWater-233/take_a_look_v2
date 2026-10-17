@@ -490,7 +490,7 @@ class _SourceProjectDialogState extends State<_SourceProjectDialog> {
                       padding: const EdgeInsets.only(bottom: 12),
                       child: SelectableText(
                         _error!,
-                        style: talBody.copyWith(color: Colors.redAccent),
+                        style: talBody.copyWith(color: TalColors.error),
                       ),
                     ),
                   Wrap(
@@ -703,7 +703,7 @@ class _SourceTaskOutputState extends State<_SourceTaskOutput> {
       }
       final expanded = (widget.embedded || _expanded) && widget.maxHeight >= 85;
       final tone = task.status == 'failed'
-          ? Colors.redAccent
+          ? TalColors.error
           : task.status == 'succeeded'
           ? TalColors.success
           : TalColors.muted;
@@ -850,7 +850,7 @@ class _SourceTaskOutputState extends State<_SourceTaskOutput> {
                                   text,
                                   style: talMono.copyWith(
                                     color: line['stream'] == 'stderr'
-                                        ? Colors.redAccent
+                                        ? TalColors.error
                                         : TalColors.muted,
                                   ),
                                 ),

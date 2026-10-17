@@ -201,7 +201,7 @@ class PlotAxisSettingsDialogState extends State<PlotAxisSettingsDialog> {
                 alignment: Alignment.centerLeft,
                 child: Text(
                   errorText!,
-                  style: const TextStyle(color: Color(0xFFE25858)),
+                  style: const TextStyle(color: TalColors.error),
                 ),
               ),
             ],

@@ -138,6 +138,7 @@ class WorkbenchToolbar extends StatelessWidget {
                   const SizedBox(width: 8),
                   TalButton.icon(
                     key: const ValueKey('workbench-capture-toggle'),
+                    variant: TalButtonVariant.filled,
                     onPressed: controller.toggleSampling,
                     icon: Icon(
                       controller.samplingPaused
@@ -275,7 +276,9 @@ class WorkbenchNavigation extends StatelessWidget {
       key: key,
       onPressed: onPressed,
       style: TextButton.styleFrom(
-        foregroundColor: active ? WorkbenchColors.text : WorkbenchColors.muted,
+        foregroundColor: active
+            ? WorkbenchColors.heading
+            : WorkbenchColors.muted,
         padding: const EdgeInsets.symmetric(horizontal: 12),
       ),
       icon: Icon(icon, size: 16),

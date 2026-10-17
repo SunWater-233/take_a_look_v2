@@ -140,7 +140,7 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
       TitleBarStyle.hidden,
       windowButtonVisibility: false,
     );
-    await windowManager.setBackgroundColor(const Color(0xFF050505));
+    await windowManager.setBackgroundColor(TalColors.background);
     await windowManager.setMinimumSize(Size.zero);
     await TalDragPreview.setClickThrough(false);
     await windowManager.setAlwaysOnTop(false);

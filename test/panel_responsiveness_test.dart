@@ -213,7 +213,9 @@ void main() {
     expect(find.text('选择绘制颜色'), findsOneWidget);
 
     await tester.tap(
-      find.byKey(ValueKey('watch-color-preset-${TalColors.blue.toARGB32()}')),
+      find.byKey(
+        ValueKey('watch-color-preset-${TalChartColors.blue.toARGB32()}'),
+      ),
     );
     // Opening the picker may also highlight its watch row. Count the color
     // commit separately from that independent plot-selection notification.
@@ -221,7 +223,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('watch-color-confirm')));
     await tester.pumpAndSettle();
 
-    expect(controller.watches.single.color, TalColors.blue);
+    expect(controller.watches.single.color, TalChartColors.blue);
     expect(plotEvents - eventsBeforeConfirm, 1);
 
     controller.dispose();

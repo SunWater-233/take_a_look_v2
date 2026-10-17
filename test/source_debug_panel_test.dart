@@ -88,7 +88,7 @@ void main() {
       final nonExecutableLine = tester.widget<Container>(
         find.byKey(const ValueKey('executable-line-2')),
       );
-      expect(executableLine.color, const Color(0xFF353236));
+      expect(executableLine.color, TalColors.surfaceAlt);
       expect(nonExecutableLine.color, Colors.transparent);
 
       await tester.tap(find.byKey(const ValueKey('breakpoint-2')));

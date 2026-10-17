@@ -70,8 +70,8 @@ class WorkspaceGridPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final minorPaint = Paint()..color = const Color(0xFF242123);
-    final majorPaint = Paint()..color = const Color(0xFF3A3638);
+    final minorPaint = Paint()..color = TalColors.borderSoft;
+    final majorPaint = Paint()..color = TalColors.border;
     for (
       var index = 1, x = _geometry.gridCellSize;
       x < size.width;

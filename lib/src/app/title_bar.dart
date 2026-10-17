@@ -79,7 +79,7 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
     final detached = widget.subtitle != null;
     return Container(
       height: TalUiTheme.of(context).titleBarHeight,
-      color: widget.workbench ? WorkbenchColors.background : TalColors.input,
+      color: TalColors.background,
       child: Row(
         children: [
           if (detached)
@@ -171,7 +171,7 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
   }
 
   static const _brandStyle = TextStyle(
-    color: TalColors.text,
+    color: TalColors.heading,
     fontSize: 18,
     fontWeight: FontWeight.w800,
     fontFamily: talBrandFontFamily,
@@ -606,24 +606,11 @@ class _CaptionButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ui = TalUiTheme.of(context);
-    return Tooltip(
-      message: tooltip,
-      // Paint ink above the title bar's opaque background.
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: ui.controlRadius,
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onPressed,
-          borderRadius: ui.controlRadius,
-          hoverColor: close ? TalColors.accent : TalColors.hover,
-          child: SizedBox(
-            width: ui.touchOptimized ? 48 : 44,
-            height: ui.titleButtonHeight,
-            child: Icon(icon, size: 18, color: TalColors.text),
-          ),
-        ),
-      ),
+    return TalIconButton(
+      tooltip: tooltip,
+      onPressed: onPressed,
+      style: talCaptionButtonStyle(ui, close: close),
+      icon: Icon(icon, size: 18),
     );
   }
 }

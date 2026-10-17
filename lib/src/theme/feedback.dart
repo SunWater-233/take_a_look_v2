@@ -307,7 +307,7 @@ class _DesktopNoticeState extends State<_DesktopNotice>
         key: ValueKey(widget.isError ? 'tal-error-popup' : 'tal-notice-popup'),
         color: TalColors.surfaceAlt,
         elevation: 12,
-        shadowColor: Colors.black,
+        shadowColor: TalColors.shadow,
         shape: RoundedRectangleBorder(
           borderRadius: ui.menuRadius,
           side: BorderSide(color: color),

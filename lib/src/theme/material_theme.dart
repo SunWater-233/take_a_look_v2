@@ -26,6 +26,38 @@ final ButtonStyle talSuccessOutlinedButtonStyle = ButtonStyle(
   side: const WidgetStatePropertyAll(BorderSide(color: TalColors.success)),
 );
 
+ButtonStyle talCaptionButtonStyle(TalUiTheme ui, {required bool close}) {
+  final size = Size(ui.touchOptimized ? 48 : 44, ui.titleButtonHeight);
+  bool highlighted(Set<WidgetState> states) =>
+      states.contains(WidgetState.hovered) ||
+      states.contains(WidgetState.focused) ||
+      states.contains(WidgetState.pressed);
+
+  return ButtonStyle(
+    minimumSize: WidgetStatePropertyAll(size),
+    maximumSize: WidgetStatePropertyAll(size),
+    overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+    foregroundColor: WidgetStateProperty.resolveWith(
+      (states) =>
+          close && highlighted(states) ? TalColors.onAccent : TalColors.text,
+    ),
+    backgroundColor: WidgetStateProperty.resolveWith((states) {
+      if (!highlighted(states)) {
+        return Colors.transparent;
+      }
+      if (!close) {
+        return TalColors.hover;
+      }
+      return states.contains(WidgetState.pressed)
+          ? TalColors.accentPressed
+          : TalColors.accent;
+    }),
+    shape: WidgetStatePropertyAll(
+      RoundedRectangleBorder(borderRadius: ui.controlRadius),
+    ),
+  );
+}
+
 ThemeData buildTalTheme({TalInputMode inputMode = TalInputMode.mouseKeyboard}) {
   final ui = TalUiTheme(inputMode: inputMode);
   final radius = ui.controlRadius;
@@ -52,9 +84,39 @@ ThemeData buildTalTheme({TalInputMode inputMode = TalInputMode.mouseKeyboard}) {
     scaffoldBackgroundColor: TalColors.background,
     colorScheme: const ColorScheme.dark(
       primary: TalColors.accent,
-      secondary: TalColors.success,
+      onPrimary: TalColors.onAccent,
+      primaryContainer: TalColors.selection,
+      onPrimaryContainer: TalColors.text,
+      secondary: TalColors.muted,
+      onSecondary: TalColors.background,
+      secondaryContainer: TalColors.surfaceAlt,
+      onSecondaryContainer: TalColors.text,
+      tertiary: TalColors.info,
+      onTertiary: TalColors.background,
+      tertiaryContainer: TalColors.surfaceAlt,
+      onTertiaryContainer: TalColors.text,
       surface: TalColors.surface,
-      error: Color(0xFFE25858),
+      onSurface: TalColors.text,
+      onSurfaceVariant: TalColors.muted,
+      surfaceDim: TalColors.background,
+      surfaceBright: TalColors.hover,
+      surfaceContainerLowest: TalColors.input,
+      surfaceContainerLow: TalColors.background,
+      surfaceContainer: TalColors.surface,
+      surfaceContainerHigh: TalColors.surfaceAlt,
+      surfaceContainerHighest: TalColors.hover,
+      surfaceTint: Colors.transparent,
+      outline: TalColors.controlBorder,
+      outlineVariant: TalColors.borderSoft,
+      error: TalColors.error,
+      onError: TalColors.background,
+      errorContainer: TalColors.errorContainer,
+      onErrorContainer: TalColors.text,
+      inverseSurface: TalColors.text,
+      onInverseSurface: TalColors.background,
+      inversePrimary: TalColors.accentPressed,
+      shadow: TalColors.shadow,
+      scrim: TalColors.shadow,
     ),
   );
 
@@ -62,7 +124,13 @@ ThemeData buildTalTheme({TalInputMode inputMode = TalInputMode.mouseKeyboard}) {
     extensions: [ui],
     splashColor: TalColors.accent.withAlpha(28),
     hoverColor: TalColors.hover,
+    disabledColor: TalColors.disabled,
     dividerColor: TalColors.border,
+    textSelectionTheme: TextSelectionThemeData(
+      cursorColor: TalColors.accent,
+      selectionColor: TalColors.accent.withValues(alpha: 0.25),
+      selectionHandleColor: TalColors.accent,
+    ),
     menuTheme: MenuThemeData(style: menuStyle),
     menuButtonTheme: MenuButtonThemeData(
       style: talContextMenuButtonStyle.copyWith(
@@ -84,7 +152,7 @@ ThemeData buildTalTheme({TalInputMode inputMode = TalInputMode.mouseKeyboard}) {
       ),
       constraints: BoxConstraints(maxWidth: ui.dialogMaxWidth),
       titleTextStyle: TextStyle(
-        color: TalColors.text,
+        color: TalColors.heading,
         fontFamily: talFontFamily,
         fontFamilyFallback: talFontFamilyFallback,
         fontSize: ui.touchOptimized ? 24 : 18,
@@ -97,7 +165,7 @@ ThemeData buildTalTheme({TalInputMode inputMode = TalInputMode.mouseKeyboard}) {
     popupMenuTheme: PopupMenuThemeData(
       color: TalColors.surfaceAlt,
       surfaceTintColor: Colors.transparent,
-      shadowColor: Colors.black,
+      shadowColor: TalColors.shadow,
       elevation: 8,
       shape: menuShape,
       menuPadding: const EdgeInsets.symmetric(vertical: 4),
@@ -120,7 +188,7 @@ ThemeData buildTalTheme({TalInputMode inputMode = TalInputMode.mouseKeyboard}) {
     ),
     textTheme: base.textTheme.apply(
       bodyColor: TalColors.text,
-      displayColor: TalColors.text,
+      displayColor: TalColors.heading,
       fontFamily: talFontFamily,
       fontFamilyFallback: talFontFamilyFallback,
     ),
@@ -167,19 +235,23 @@ ThemeData buildTalTheme({TalInputMode inputMode = TalInputMode.mouseKeyboard}) {
         padding: WidgetStatePropertyAll(
           EdgeInsets.symmetric(horizontal: ui.controlHorizontalPadding),
         ),
-        foregroundColor: const WidgetStatePropertyAll(TalColors.text),
+        foregroundColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.disabled)
+              ? TalColors.disabled
+              : TalColors.onAccent,
+        ),
+        overlayColor: const WidgetStatePropertyAll(Colors.transparent),
         backgroundColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.disabled)) {
+            return TalColors.surfaceAlt;
+          }
           if (states.contains(WidgetState.pressed)) {
             return TalColors.accentPressed;
           }
-          return TalColors.surfaceAlt;
-        }),
-        side: WidgetStateProperty.resolveWith((states) {
-          return BorderSide(
-            color: states.contains(WidgetState.hovered)
-                ? TalColors.accent
-                : TalColors.border,
-          );
+          if (states.contains(WidgetState.hovered)) {
+            return TalColors.accentHover;
+          }
+          return TalColors.accent;
         }),
         shape: WidgetStatePropertyAll(
           RoundedRectangleBorder(borderRadius: radius),
@@ -189,6 +261,7 @@ ThemeData buildTalTheme({TalInputMode inputMode = TalInputMode.mouseKeyboard}) {
     ),
     textButtonTheme: TextButtonThemeData(
       style: ButtonStyle(
+        overlayColor: const WidgetStatePropertyAll(Colors.transparent),
         minimumSize: controlSize,
         maximumSize: controlMaximumSize,
         visualDensity: VisualDensity.standard,
@@ -196,9 +269,18 @@ ThemeData buildTalTheme({TalInputMode inputMode = TalInputMode.mouseKeyboard}) {
         padding: WidgetStatePropertyAll(
           EdgeInsets.symmetric(horizontal: ui.controlHorizontalPadding),
         ),
-        foregroundColor: const WidgetStatePropertyAll(TalColors.text),
+        foregroundColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.disabled)
+              ? TalColors.disabled
+              : TalColors.text,
+        ),
         backgroundColor: WidgetStateProperty.resolveWith((states) {
-          return states.contains(WidgetState.hovered)
+          if (states.contains(WidgetState.disabled)) {
+            return Colors.transparent;
+          }
+          return states.contains(WidgetState.hovered) ||
+                  states.contains(WidgetState.focused) ||
+                  states.contains(WidgetState.pressed)
               ? TalColors.hover
               : Colors.transparent;
         }),
@@ -210,6 +292,7 @@ ThemeData buildTalTheme({TalInputMode inputMode = TalInputMode.mouseKeyboard}) {
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: ButtonStyle(
+        overlayColor: const WidgetStatePropertyAll(Colors.transparent),
         minimumSize: controlSize,
         maximumSize: controlMaximumSize,
         visualDensity: VisualDensity.standard,
@@ -217,17 +300,31 @@ ThemeData buildTalTheme({TalInputMode inputMode = TalInputMode.mouseKeyboard}) {
         padding: WidgetStatePropertyAll(
           EdgeInsets.symmetric(horizontal: ui.controlHorizontalPadding),
         ),
-        foregroundColor: const WidgetStatePropertyAll(TalColors.text),
+        foregroundColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.disabled)
+              ? TalColors.disabled
+              : TalColors.text,
+        ),
         backgroundColor: WidgetStateProperty.resolveWith((states) {
-          return states.contains(WidgetState.hovered)
+          if (states.contains(WidgetState.disabled)) {
+            return TalColors.surfaceAlt;
+          }
+          return states.contains(WidgetState.hovered) ||
+                  states.contains(WidgetState.focused) ||
+                  states.contains(WidgetState.pressed)
               ? TalColors.hover
               : TalColors.surfaceAlt;
         }),
         side: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.disabled)) {
+            return const BorderSide(color: TalColors.borderSoft);
+          }
           return BorderSide(
-            color: states.contains(WidgetState.hovered)
+            color: states.contains(WidgetState.focused)
                 ? TalColors.accent
-                : TalColors.border,
+                : states.contains(WidgetState.hovered)
+                ? TalColors.muted
+                : TalColors.controlBorder,
           );
         }),
         shape: WidgetStatePropertyAll(
@@ -238,14 +335,24 @@ ThemeData buildTalTheme({TalInputMode inputMode = TalInputMode.mouseKeyboard}) {
     ),
     iconButtonTheme: IconButtonThemeData(
       style: ButtonStyle(
+        overlayColor: const WidgetStatePropertyAll(Colors.transparent),
         minimumSize: WidgetStatePropertyAll(Size.square(ui.iconButtonSize)),
         maximumSize: WidgetStatePropertyAll(Size.square(ui.iconButtonSize)),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         visualDensity: VisualDensity.standard,
         padding: const WidgetStatePropertyAll(EdgeInsets.zero),
-        foregroundColor: const WidgetStatePropertyAll(TalColors.text),
+        foregroundColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.disabled)
+              ? TalColors.disabled
+              : TalColors.text,
+        ),
         backgroundColor: WidgetStateProperty.resolveWith((states) {
-          return states.contains(WidgetState.hovered)
+          if (states.contains(WidgetState.disabled)) {
+            return Colors.transparent;
+          }
+          return states.contains(WidgetState.hovered) ||
+                  states.contains(WidgetState.focused) ||
+                  states.contains(WidgetState.pressed)
               ? TalColors.hover
               : Colors.transparent;
         }),
@@ -264,11 +371,19 @@ ThemeData buildTalTheme({TalInputMode inputMode = TalInputMode.mouseKeyboard}) {
           ? VisualDensity.standard
           : VisualDensity.compact,
       fillColor: WidgetStateProperty.resolveWith((states) {
+        if (states.contains(WidgetState.disabled)) {
+          return TalColors.surfaceAlt;
+        }
         return states.contains(WidgetState.selected)
             ? TalColors.accent
             : TalColors.input;
       }),
-      side: const BorderSide(color: TalColors.border),
+      checkColor: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.disabled)
+            ? TalColors.disabled
+            : TalColors.onAccent,
+      ),
+      side: talControlBorder,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(3)),
     ),
     dropdownMenuTheme: DropdownMenuThemeData(menuStyle: menuStyle),

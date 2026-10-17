@@ -1,6 +1,6 @@
 part of 'panels.dart';
 
-const _sourceAttentionColor = Color(0xFFF5A04B);
+const _sourceAttentionColor = TalColors.accent;
 
 class _SourceUnreadDot extends StatelessWidget {
   const _SourceUnreadDot({super.key});

@@ -245,7 +245,7 @@ class _TalDropdownState<T> extends State<TalDropdown<T>>
                   child: Material(
                     color: TalColors.input,
                     elevation: 12,
-                    shadowColor: Colors.black,
+                    shadowColor: TalColors.shadow,
                     clipBehavior: Clip.antiAlias,
                     shape: RoundedRectangleBorder(
                       borderRadius: ui.controlRadius,

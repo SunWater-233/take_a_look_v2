@@ -139,6 +139,38 @@ void main() {
     expect(brand.style?.fontWeight, FontWeight.w800);
   });
 
+  testWidgets(
+    'caption hover uses neutral surfaces and a readable orange close',
+    (tester) async {
+      await pumpTitleBar(tester);
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: Offset.zero);
+      for (final label in ['最小化', '最大化/还原', '关闭']) {
+        final button = find.widgetWithIcon(IconButton, switch (label) {
+          '最小化' => Icons.remove,
+          '关闭' => Icons.close,
+          _ => Icons.crop_square,
+        });
+        await mouse.moveTo(tester.getCenter(button));
+        await tester.pumpAndSettle();
+        final material = tester.widget<Material>(
+          find.descendant(of: button, matching: find.byType(Material)).first,
+        );
+        expect(
+          material.color,
+          label == '关闭' ? TalColors.accent : TalColors.hover,
+        );
+        final icon = find.descendant(of: button, matching: find.byType(Icon));
+        expect(
+          IconTheme.of(tester.element(icon)).color,
+          label == '关闭' ? TalColors.onAccent : TalColors.text,
+        );
+        expect(tester.getSize(button), const Size(44, 34));
+      }
+      await mouse.removePointer();
+    },
+  );
+
   testWidgets('real-time variable menu keeps the three-level RTT menu', (
     tester,
   ) async {

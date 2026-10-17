@@ -111,7 +111,7 @@ void main() {
     final error = find.textContaining('[ERROR] 后端：Error attempting');
     final info = find.textContaining('[INFO] 已连接 pyOCD 调试探针。');
     expect(tester.widget<Text>(warning).style?.color, TalColors.amber);
-    expect(tester.widget<Text>(error).style?.color, TalColors.accent);
+    expect(tester.widget<Text>(error).style?.color, TalColors.error);
     expect(tester.widget<Text>(info).style?.color, TalColors.text);
     expect(controller.lastBackendError, isNull);
   });

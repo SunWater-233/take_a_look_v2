@@ -192,7 +192,7 @@ class DesktopAxisMenuState extends State<DesktopAxisMenu> {
                   child: Text(
                     errorText!,
                     style: const TextStyle(
-                      color: Color(0xFFE25858),
+                      color: TalColors.error,
                       fontSize: 10,
                     ),
                   ),

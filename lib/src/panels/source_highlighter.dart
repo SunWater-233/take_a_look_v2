@@ -241,12 +241,12 @@ class _CppSyntaxHighlighter {
   static TextStyle _createStyle(_SourceTokenKind kind) => TextStyle(
     color: switch (kind) {
       _SourceTokenKind.plain => TalColors.text,
-      _SourceTokenKind.keyword => const Color(0xFFC586C0),
-      _SourceTokenKind.type => const Color(0xFF4EC9B0),
-      _SourceTokenKind.number => const Color(0xFFB5CEA8),
-      _SourceTokenKind.string => const Color(0xFFCE9178),
-      _SourceTokenKind.comment => const Color(0xFF6A9955),
-      _SourceTokenKind.preprocessor => const Color(0xFFC8C8C8),
+      _SourceTokenKind.keyword => TalSyntaxColors.keyword,
+      _SourceTokenKind.type => TalSyntaxColors.type,
+      _SourceTokenKind.number => TalSyntaxColors.number,
+      _SourceTokenKind.string => TalSyntaxColors.string,
+      _SourceTokenKind.comment => TalSyntaxColors.comment,
+      _SourceTokenKind.preprocessor => TalSyntaxColors.preprocessor,
     },
   );
 

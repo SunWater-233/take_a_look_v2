@@ -1704,7 +1704,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     final isSearchResult = _revealedSearchLine == lineNumber;
     return ColoredBox(
       color: isCurrent
-          ? const Color(0x333B82F6)
+          ? TalColors.selection
           : isSearchResult
           ? TalColors.amber.withValues(alpha: 0.16)
           : Colors.transparent,
@@ -1717,7 +1717,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
                   ? const Icon(
                       Icons.arrow_right,
                       size: 18,
-                      color: Color(0xFF65A7FF),
+                      color: TalColors.accent,
                     )
                   : const SizedBox.shrink(),
             ),
@@ -1732,7 +1732,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
               width: _lineNumberWidth,
               height: _lineHeight,
               color: canSetBreakpoint
-                  ? const Color(0xFF353236)
+                  ? TalColors.surfaceAlt
                   : Colors.transparent,
               child: Row(
                 children: [
@@ -1750,7 +1750,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
                                 Icons.circle,
                                 size: 11,
                                 color: breakpoint?.verified == true
-                                    ? const Color(0xFFE25858)
+                                    ? TalColors.error
                                     : TalColors.amber,
                               ),
                             )
@@ -1765,8 +1765,8 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
                         textAlign: TextAlign.right,
                         style: TextStyle(
                           color: canSetBreakpoint
-                              ? const Color(0xFFC8C4C9)
-                              : const Color(0xFF625E63),
+                              ? TalColors.muted
+                              : TalColors.disabled,
                           fontSize: 12,
                           height: 1.45,
                           fontFamily: talFontFamily,

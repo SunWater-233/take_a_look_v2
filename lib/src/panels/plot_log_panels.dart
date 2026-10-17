@@ -129,7 +129,7 @@ class _LogPanelState extends State<_LogPanel> {
                                     LogLevel.debug => TalColors.muted,
                                     LogLevel.warning => TalColors.amber,
                                     LogLevel.error ||
-                                    LogLevel.critical => TalColors.accent,
+                                    LogLevel.critical => TalColors.error,
                                     LogLevel.info => TalColors.text,
                                   },
                                 ),

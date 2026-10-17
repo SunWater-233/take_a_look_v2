@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'tokens.dart';
+
 /// Visual variants for the application's regular action button.
 ///
 /// Keeping the variant on one wrapper makes the call site explicit while the
@@ -138,7 +140,20 @@ class TalPopupMenuButton<T> extends StatelessWidget {
       onSelected: onSelected,
       tooltip: tooltip,
       enabled: enabled,
-      child: TalButton(onPressed: null, child: child),
+      child: TalButton(
+        onPressed: null,
+        style: ButtonStyle(
+          foregroundColor: WidgetStatePropertyAll(
+            enabled ? TalColors.text : TalColors.disabled,
+          ),
+          side: WidgetStatePropertyAll(
+            BorderSide(
+              color: enabled ? TalColors.controlBorder : TalColors.borderSoft,
+            ),
+          ),
+        ),
+        child: child,
+      ),
     );
   }
 }

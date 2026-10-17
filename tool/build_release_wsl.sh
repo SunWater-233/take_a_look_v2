@@ -6,7 +6,7 @@ usage() {
   cat <<'HELP'
 Usage: bash tool/build_release_wsl.sh [--version <version>] [--check] [--native] [--keep-build]
 
-Default: reuse the prepared Debian 11 chroot and Linux Flutter 3.44.9 SDK.
+Default: discover a prepared Debian 11 chroot and its Linux Flutter SDK.
   --version     Override major.minor.patch[+build] for this build only.
                 Defaults to pubspec.yaml; the source checkout is not changed.
   --check       Check the build environment without compiling.
@@ -19,8 +19,8 @@ Logs:    build/logs/linux-release-<timestamp>-<pid>.log
 
 Optional Linux environment variables:
   TAL_LINUX_CACHE         Environment cache (default: ~/.cache/take-a-look-linux)
-  TAL_LINUX_ROOTFS        Prepared Debian chroot (default: <cache>/bullseye)
-  TAL_LINUX_FLUTTER_ROOT  Linux Flutter SDK (default: <cache>/flutter-3.44.9)
+  TAL_LINUX_ROOTFS        Prepared Debian chroot (overrides discovery)
+  TAL_LINUX_FLUTTER_ROOT  Linux Flutter SDK (overrides discovery)
   TAL_MAX_GLIBC          ABI limit (default: 2.31 in chroot; unset in native mode)
   FLUTTER, PYTHON        Tool overrides for --native; see docs/linux-install.md
 
@@ -54,8 +54,36 @@ done
 [[ "$(uname -s)" == Linux ]] || die 'Run this script in Linux/WSL, or use tool/build_release_wsl.cmd on Windows.'
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cache_root="${TAL_LINUX_CACHE:-$HOME/.cache/take-a-look-linux}"
-rootfs="${TAL_LINUX_ROOTFS:-$cache_root/bullseye}"
-sdk_root="${TAL_LINUX_FLUTTER_ROOT:-$cache_root/flutter-3.44.9}"
+rootfs="${TAL_LINUX_ROOTFS:-}"
+sdk_root="${TAL_LINUX_FLUTTER_ROOT:-}"
+
+linux_sdk_ready() {
+  [[ -x "$1/bin/flutter" && -x "$1/bin/cache/dart-sdk/bin/dart" ]]
+}
+
+discover_environment() {
+  local candidate
+  if [[ -z "$rootfs" ]]; then
+    for candidate in "$cache_root/bullseye" /root/.cache/take-a-look-linux/bullseye /opt/take-a-look-build/debian11; do
+      if [[ -x "$candidate/bin/bash" ]]; then
+        rootfs=$candidate
+        break
+      fi
+    done
+  fi
+  [[ -n "$rootfs" && -x "$rootfs/bin/bash" ]] || die "Prepared Debian build environment missing: ${rootfs:-$cache_root/bullseye}. See docs/linux-install.md; use --native for a configured Linux host."
+  rootfs="$(realpath "$rootfs")"
+  [[ "$rootfs" != / ]] || die 'TAL_LINUX_ROOTFS must not be the host root directory.'
+  if [[ -z "$sdk_root" ]]; then
+    for candidate in "$cache_root/flutter-3.44.9" /root/.cache/take-a-look-linux/flutter-3.44.9 "$rootfs/opt/flutter"; do
+      if linux_sdk_ready "$candidate"; then
+        sdk_root=$candidate
+        break
+      fi
+    done
+  fi
+  [[ -n "$sdk_root" ]] || die 'Linux Flutter SDK missing. Set TAL_LINUX_FLUTTER_ROOT to a prepared Linux SDK.'
+}
 
 require_linux_sdk() {
   local dart="$1/bin/cache/dart-sdk/bin/dart"
@@ -65,6 +93,7 @@ require_linux_sdk() {
 
 run_build() {
   if (( native )); then
+    sdk_root="${sdk_root:-$cache_root/flutter-3.44.9}"
     if [[ -z "${FLUTTER:-}" && -x "$sdk_root/bin/flutter" ]]; then
       export FLUTTER="$sdk_root/bin/flutter"
     fi
@@ -87,12 +116,18 @@ run_build() {
     return
   fi
 
-  [[ -x "$rootfs/bin/bash" && -f "$rootfs/opt/tal-python-path" ]] || die "Prepared Debian build environment missing: $rootfs. See docs/linux-install.md; use --native for a configured Linux host."
-  rootfs="$(realpath "$rootfs")"
-  [[ "$rootfs" != / ]] || die 'TAL_LINUX_ROOTFS must not be the host root directory.'
+  (( EUID == 0 )) || die 'The prepared chroot requires root. Use tool/build_release_wsl.ps1 on Windows, or sudo -E bash tool/build_release_wsl.sh in Linux.'
+  discover_environment
   require_linux_sdk "$sdk_root"
   sdk_root="$(realpath "$sdk_root")"
-  (( EUID == 0 )) || die 'The prepared chroot requires root. Run this script with sudo -E, or select the root user in WSL.'
+  local backend_python
+  if [[ -f "$rootfs/opt/tal-python-path" ]]; then
+    backend_python="$(tr -d '\r\n' < "$rootfs/opt/tal-python-path")"
+  else
+    # The original /opt/take-a-look-build environment predates this marker.
+    backend_python=/opt/python311/bin/python3.11
+  fi
+  [[ "$backend_python" == /* && -x "$rootfs$backend_python" ]] || die "Python missing inside $rootfs. Set /opt/tal-python-path inside the chroot to its Python 3.11+ executable."
   for command in unshare mount chroot; do
     command -v "$command" >/dev/null || die "Missing build tool: $command"
   done
@@ -101,27 +136,30 @@ run_build() {
   flock -n 9 || die 'Another release build is using this Debian environment.'
   echo "Build environment: $rootfs"
   echo "Linux Flutter SDK: $sdk_root"
+  echo "Chroot Python: $backend_python"
   echo "Maximum allowed glibc requirement: ${TAL_MAX_GLIBC:-2.31}"
 
   # All mounts belong to this child namespace, including when compilation fails
   # or is interrupted. No persistent host mounts or unmount cleanup are needed.
-  unshare --mount --propagation private bash -s -- "$project_root" "$rootfs" "$sdk_root" "$check_only" "${package_arguments[@]}" <<'CHROOT'
+  unshare --mount --propagation private bash -s -- "$project_root" "$rootfs" "$sdk_root" "$backend_python" "$check_only" "${package_arguments[@]}" <<'CHROOT'
 set -euo pipefail
 project_root=$1
 rootfs=$2
 sdk_root=$3
-check_only=$4
-shift 4
+backend_python=$4
+check_only=$5
+shift 5
 mkdir -p "$rootfs"/{proc,dev,sys,opt/flutter,workspace}
 mount --bind /proc "$rootfs/proc"
 mount --rbind /dev "$rootfs/dev"
 mount --make-rslave "$rootfs/dev"
 mount --bind /sys "$rootfs/sys"
-mount --bind "$sdk_root" "$rootfs/opt/flutter"
+if [[ "$sdk_root" != "$(realpath "$rootfs/opt/flutter")" ]]; then
+  mount --bind "$sdk_root" "$rootfs/opt/flutter"
+fi
 mount --bind "$project_root" "$rootfs/workspace"
 # Replace a possible symlink rather than following it outside the rootfs.
 cp -L --remove-destination /etc/resolv.conf "$rootfs/etc/resolv.conf"
-backend_python="$(tr -d '\r\n' < "$rootfs/opt/tal-python-path")"
 chroot "$rootfs" /usr/bin/env \
   -u DISPLAY -u WAYLAND_DISPLAY -u TAKE_A_LOOK_TEST_GDB \
   -u PYTHONHOME -u PYTHONPATH -u LD_LIBRARY_PATH -u VIRTUAL_ENV -u FLUTTER_ROOT \

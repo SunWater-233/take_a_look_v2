@@ -183,12 +183,18 @@ bash tool/build_release_wsl.sh --version 1.2.3
 压缩包名称及 `BUILD-INFO.json`；不会修改工作区的 `pubspec.yaml`。
 例如 `1.2.3` 会生成 `take-a-look-v2-1.2.3-git.<提交>-linux-<架构>.tar.gz`。
 
-默认复用此前配置的 `~/.cache/take-a-look-linux/bullseye` Debian 11 chroot 和
-`~/.cache/take-a-look-linux/flutter-3.44.9` Linux SDK；chroot 内的
-`/opt/tal-python-path` 保存 Python 3.11+ 可执行文件路径。本机的这些缓存位于 WSL
-root 用户下，因此使用该环境需要以 WSL root 用户运行；Linux 普通用户可使用
-`sudo -E bash tool/build_release_wsl.sh`，并通过下面的变量指定实际缓存位置。
-脚本会检查缓存，不会自动下载或安装系统环境。
+PowerShell 入口在默认 chroot 模式下自动选择 WSL root 用户，以运行独立挂载
+命名空间和 chroot；`-Native` 模式仍使用发行版的默认用户。直接在 WSL 普通用户
+终端使用 chroot 时，请运行 `sudo -E bash tool/build_release_wsl.sh`。
+
+默认依次查找 `<缓存>/bullseye`、`/root/.cache/take-a-look-linux/bullseye` 和
+本机旧布局 `/opt/take-a-look-build/debian11`。Linux SDK 依次查找
+`<缓存>/flutter-3.44.9`、`/root/.cache/take-a-look-linux/flutter-3.44.9` 和所选
+chroot 内的 `/opt/flutter`。日志打印实际路径和 Flutter 版本。
+chroot 内的 `/opt/tal-python-path` 保存 Python 3.11+ 可执行文件路径；
+兼容旧环境缺少该文件时使用 `/opt/python311/bin/python3.11`。
+脚本会检查已有环境，不会自动下载或安装系统环境；所有候选目录均不存在时需先
+配置 Debian 11 环境，或使用已配好开发依赖的原生 Linux 环境。
 
 可以用 Linux 环境变量 `TAL_LINUX_CACHE`、`TAL_LINUX_ROOTFS`、
 `TAL_LINUX_FLUTTER_ROOT` 覆盖缓存、chroot 和 SDK 路径。默认以 `TAL_MAX_GLIBC=2.31`

@@ -29,3 +29,19 @@ python -m venv .venv
 
 Start it manually with `python -m take_a_look_backend.stdio`. Diagnostic output
 is written only to stderr, so stdout remains a valid protocol stream.
+
+The `targetCatalog` capability exposes `listTargets`, `inspectTargetPack {path}`,
+`importTargetPack {previewId}`, `discardTargetPackPreview {previewId}`,
+`removeTargetPack {packId}` and `selectTarget {name, packId}`. Inspection stages
+and validates a local CMSIS `.pack`; import commits that exact preview. Pack IDs
+are SHA-256 hashes. The library keeps its pack metadata, selected source/version
+and recent targets in an atomically replaced `index.json` under `TAL_PACKS_DIR`
+or the platform's user data directory (see the root README).
+
+Catalog RPCs run on a separate ordered worker. Only selected targets enter the
+pyOCD registry, and each local session restores builtin definitions before
+loading its selected pack. This permits choosing a user pack even when a builtin
+target has the same normalized name. Disconnect and failed opens clear those
+definitions and close the pack archive. Mutations emit state patches containing
+`targetPackId`, `targetPartNumber`, `targetPackLabel`, `targetPackMissing` and
+`targetCatalogRevision`; detached windows request the shared main-window library.

@@ -13,6 +13,85 @@ import 'package:take_a_look_v2/src/theme/theme.dart';
 import 'package:take_a_look_v2/src/workspace/panel_types.dart';
 
 void main() {
+  test(
+    'async task failures report errors once and sync to detached windows',
+    () {
+      final controller = TakeALookController();
+      final detached = TakeALookController();
+      addTearDown(controller.dispose);
+      addTearDown(detached.dispose);
+      controller.applySourceTask({
+        'id': 'download-1',
+        'status': 'running',
+        'phase': 'download',
+      });
+      expect(controller.lastBackendError, isNull);
+      final failure = {
+        'id': 'download-1',
+        'status': 'failed',
+        'phase': 'download',
+        'message': '固件写后校验失败：地址 0x08000000',
+      };
+      controller.applyBackendEvent(BackendEventType.sourceTask, failure);
+      final error = controller.lastBackendError;
+      expect(error?['code'], 'source_task_failed');
+      expect(error?['operation'], 'sourceTask');
+      expect(error?['message'], failure['message']);
+      final logCount = controller.logs.length;
+      controller.applySourceTask(failure);
+      expect(identical(error, controller.lastBackendError), isTrue);
+      expect(controller.logs.length, logCount);
+      detached.applySnapshot(controller.stateSnapshot());
+      expect(detached.lastBackendError, error);
+      expect(detached.sourceTask.status, 'failed');
+      controller.applySourceTask({...failure, 'id': 'download-2'});
+      expect(controller.logs.length, logCount + 1);
+    },
+  );
+
+  test('rejected task starts preserve backend error details', () async {
+    final controller = TakeALookController(
+      backendCommand: (_, _) async => throw const BackendException(
+        'firmware_missing',
+        '下载文件不存在',
+        'app.axf',
+      ),
+    );
+    addTearDown(controller.dispose);
+    await controller.startSourceTask('download');
+    expect(controller.lastBackendError?['code'], 'firmware_missing');
+    expect(controller.lastBackendError?['message'], '下载文件不存在');
+    expect(controller.lastBackendError?['details'], 'app.axf');
+  });
+
+  testWidgets('download failures show feedback without an output panel', (
+    tester,
+  ) async {
+    final controller = TakeALookController(backendCommand: (_, _) async {});
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTalTheme(),
+        home: Scaffold(
+          body: WorkbenchFeedback(
+            controller: controller,
+            child: const SizedBox.shrink(),
+          ),
+        ),
+      ),
+    );
+    controller.applySourceTask({
+      'id': 'download',
+      'status': 'failed',
+      'message': '固件写后校验失败',
+    });
+    await tester.pumpAndSettle();
+    expect(find.text('编译 / 下载失败'), findsOneWidget);
+    expect(find.text('固件写后校验失败'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   test('source task snapshots retain output and clearing across windows', () {
     final main = TakeALookController();
     final detached = TakeALookController();

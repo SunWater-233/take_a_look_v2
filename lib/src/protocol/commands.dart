@@ -79,6 +79,12 @@ enum ControllerCommand {
 
 /// Commands implemented by the Python hardware process.
 enum BackendMethod {
+  listTargets,
+  inspectTargetPack,
+  importTargetPack,
+  discardTargetPackPreview,
+  removeTargetPack,
+  selectTarget,
   setSourceProject,
   startSourceTask,
   cancelSourceTask,

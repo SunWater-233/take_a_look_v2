@@ -58,7 +58,6 @@ void main() {
       ),
     );
     await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('workbench-resource-toggle')));
     await tester.pumpAndSettle();
   }
 

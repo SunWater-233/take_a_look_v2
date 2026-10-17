@@ -19,6 +19,7 @@ class TalDropdown<T> extends StatefulWidget {
     required this.label,
     required this.onChanged,
     this.highlightOnHover = true,
+    this.subtle = false,
     super.key,
   });
 
@@ -27,6 +28,9 @@ class TalDropdown<T> extends StatefulWidget {
   final String Function(T value) label;
   final ValueChanged<T> onChanged;
   final bool highlightOnHover;
+
+  /// A quiet trigger for repeated row actions; the menu behavior stays shared.
+  final bool subtle;
 
   @override
   State<TalDropdown<T>> createState() => _TalDropdownState<T>();
@@ -131,9 +135,15 @@ class _TalDropdownState<T> extends State<TalDropdown<T>>
                   ),
                   height: ui.controlHeight,
                   decoration: BoxDecoration(
-                    color: highlight ? TalColors.hover : TalColors.input,
+                    color: highlight
+                        ? TalColors.hover
+                        : widget.subtle
+                        ? Colors.transparent
+                        : TalColors.input,
                     borderRadius: ui.controlRadius,
-                    border: const Border.fromBorderSide(talControlBorder),
+                    border: widget.subtle
+                        ? null
+                        : const Border.fromBorderSide(talControlBorder),
                   ),
                   child: Row(
                     children: [
@@ -149,13 +159,17 @@ class _TalDropdownState<T> extends State<TalDropdown<T>>
                         ),
                       ),
                       Container(
-                        width: ui.touchOptimized ? 44 : 30,
+                        width: widget.subtle
+                            ? (ui.touchOptimized ? 32 : 24)
+                            : (ui.touchOptimized ? 44 : 30),
                         height: double.infinity,
                         decoration: BoxDecoration(
                           color: highlight ? TalColors.hover : null,
-                          border: const Border(
-                            left: BorderSide(color: TalColors.borderSoft),
-                          ),
+                          border: widget.subtle
+                              ? null
+                              : const Border(
+                                  left: BorderSide(color: TalColors.borderSoft),
+                                ),
                         ),
                         child: Icon(
                           Icons.arrow_drop_down,

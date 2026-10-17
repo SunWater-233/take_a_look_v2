@@ -109,6 +109,13 @@ class MainWindowSync {
       prepareWindow(window, const [WorkspacePanelId.analysis]);
 
   Future<dynamic> _handleCall(MethodCall call) async {
+    if (call.method == 'targetCatalog') {
+      final envelope = Map<String, dynamic>.from(call.arguments as Map);
+      return controller.requestTargetCatalog(
+        envelope['operation'] as String,
+        Map<String, Object?>.from(envelope['arguments'] as Map),
+      );
+    }
     if (call.method == 'snapshot') {
       // Prewarmed windows need metadata only. Assignment supplies the exact
       // history and analysis dataset before the window becomes visible.
@@ -353,6 +360,17 @@ Future<void> releaseDetachedWindow() async {
   await _mainChannel.invokeMethod<void>(releaseDetachedWindowMethod, {
     'windowId': currentWindow.windowId,
   });
+}
+
+Future<JsonObject> requestTargetCatalogFromMain(
+  String operation,
+  JsonObject arguments,
+) async {
+  final result = await _mainChannel.invokeMethod<Map<Object?, Object?>>(
+    'targetCatalog',
+    {'operation': operation, 'arguments': arguments},
+  );
+  return Map<String, Object?>.from(result ?? const {});
 }
 
 Future<void> sendCommandToMain(

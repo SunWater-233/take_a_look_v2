@@ -21,11 +21,25 @@ EmberMobile gateway / remote GDB Server; it does not expose a network listener.
 
 ## Development
 
-The default workspace uses a wide chart/source canvas and a compact variable
-sidebar. The top navigation switches between realtime tuning, source debugging,
-and analysis; resources and the combined log/build/register output can be
-opened as needed. Panel docking, detached windows, layout saving, UI scaling,
-and the original project settings dialog remain available.
+The default workspace places symbols on the left, variable monitoring on the
+right, and chart/source/analysis tabs in the center. Sidebar tabs share each
+panel's existing header; no permanent vertical tab rails reserve canvas space.
+The thin handle follows the sidebar's inner edge and toggles it open or closed.
+Drag the handle horizontally while expanded to resize the sidebar.
+Clicking sidebar tabs only selects a panel. Multiple tabs can be switched,
+reordered, or selected through the header menu. Narrow windows show one sidebar
+as an overlay.
+
+Drag any panel tab to a workspace edge to dock it on that side. The edge lights
+immediately and shows a placement preview after 300 ms; movement within the
+same edge does not restart the delay. Dropping applies the layout with a 220 ms
+transition; Esc cancels a drag. Tabs can return to the center or move between
+sides through dragging or the header menu. A wide variable-monitoring panel
+automatically shows the full table. Sidebar changes preserve panel state,
+including input drafts and source-view position, and hidden source panels do
+not consume window shortcuts or mark files as read. Detached windows, the
+combined log/build/register output, UI scaling and project settings remain
+available.
 
 New variables added from the resource library or source view start in **仅监视**
 (monitor only). The three per-variable read policies are:
@@ -45,6 +59,10 @@ Existing version-1 layout files are preserved on first launch of this workspace.
 Use **视图 → 恢复保存的布局** to restore one, or save the new layout; saving creates a
 one-time `.v1.bak` backup. A restored legacy layout can also be saved and will
 reopen with its chosen panel presentation.
+Version-2 side groups migrate to the sidebar model, with a `.v2.bak` backup on
+the first version-3 save. The desktop app saves sidebar placement, tab order,
+widths, selection and collapsed state after edits; `Ctrl+Shift+S` also saves
+immediately. Switching to analysis no longer automatically hides monitoring.
 
 Prerequisites are Flutter, Python 3.11 or newer, and platform build tools.
 
@@ -64,6 +82,37 @@ The app searches for Python in this order:
 `TAKE_A_LOOK_BACKEND_DIR` can override the backend source directory. These
 overrides are useful for development and diagnostics; normal development uses
 `backend/.venv` automatically.
+
+## Target chips and user packs
+
+Click **目标芯片** in connection settings to search the complete pyOCD builtin
+catalogue and imported CMSIS Device Family Packs. Search matches part numbers,
+vendors and families; filters include recent targets, builtin targets and user
+packs. Select a row to inspect its core, memory regions, source and version;
+press Enter in the search field, double-click a row, or use **使用此芯片** to save.
+Cancel leaves the current target unchanged. **自动选择 / 通用 Cortex-M** uses
+probe-provided target information where available; a generic Cortex-M target
+does not provide chip-specific flash programming support.
+
+Use **添加芯片包** to preview and import a local `.pack` file. The app copies the
+pack into its own library, so moving the original file does not break it.
+**管理芯片包** lists versions, import dates and sizes and can show or remove the
+targets supplied by each pack. Identical files are deduplicated; different
+versions remain distinct and connections load the exact selected source.
+Search text is retained after importing a missing device's pack.
+
+The selected target, pack version and recent targets survive restarts. While
+connected, browsing and importing remain available; changing targets and
+deleting the active pack require disconnecting. If a selected pack is missing,
+the app preserves its identity and blocks connection until it is reimported or
+another target is selected. The first version supports Cortex-M CMSIS DFPs;
+SDK archives and non-Cortex-M devices are not added to this catalogue.
+
+Pack storage is `%LOCALAPPDATA%\TakeALook\packs` on Windows,
+`~/Library/Application Support/TakeALook/packs` on macOS, and
+`${XDG_DATA_HOME:-~/.local/share}/take-a-look/packs` on Linux.
+`TAL_PACKS_DIR` overrides this location. It is independent of the app installation
+directory and is preserved across application upgrades.
 
 ## Source layout
 

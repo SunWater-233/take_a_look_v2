@@ -42,13 +42,13 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
     expect(watch.totalSampleCount, initial + 10);
     controller.toggleWatchSampling(watch.symbol.key, true);
-    controller.writeWatch(watch.symbol.key, '42.5');
+    expect(await controller.writeWatch(watch.symbol.key, '42.5'), isTrue);
     controller.setSampleRate(1000);
     final before = watch.totalSampleCount;
     await tester.pump(const Duration(milliseconds: 100));
     expect(watch.totalSampleCount, before + 100);
     expect(watch.value, 42.5);
-    controller.writeWatch(watch.symbol.key, 'NaN');
+    expect(await controller.writeWatch(watch.symbol.key, 'NaN'), isFalse);
     expect(controller.lastBackendError?['code'], 'ui_test_write_failed');
     controller.clearSamples();
     expect(watch.totalSampleCount, 0);

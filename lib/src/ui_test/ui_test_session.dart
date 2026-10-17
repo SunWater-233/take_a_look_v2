@@ -274,8 +274,11 @@ void motor_control_tick(void)
             !watch.symbol.writable ||
             value == null ||
             !value.isFinite) {
-          _error('ui_test_write_failed', '模拟变量写入失败。', '请连接模拟探针并输入有效数值。');
-          return;
+          throw const BackendException(
+            'ui_test_write_failed',
+            '模拟变量写入失败。',
+            '请连接模拟探针并输入有效数值。',
+          );
         }
         _writtenValues[watch.symbol.key] = value;
         controller.applyWatchValues({

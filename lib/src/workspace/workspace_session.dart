@@ -43,6 +43,9 @@ class DetachedPanelPlacement {
     required this.panels,
     required this.originalPanels,
     required this.activePanel,
+    this.sidebar,
+    this.sidebarWidth = 280,
+    this.sidebarCollapsed = false,
   });
 
   final String groupId;
@@ -51,4 +54,7 @@ class DetachedPanelPlacement {
   final List<WorkspacePanelId> panels;
   final List<WorkspacePanelId> originalPanels;
   final WorkspacePanelId activePanel;
+  final WorkspaceSidebarSide? sidebar;
+  final double sidebarWidth;
+  final bool sidebarCollapsed;
 }

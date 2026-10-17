@@ -49,6 +49,12 @@ extension TakeALookControllerSnapshot on TakeALookController {
       if (wants('connectionStatus')) 'connectionStatus': connectionStatus.name,
       if (wants('probeType')) 'probeType': probeType,
       if (wants('targetName')) 'targetName': targetName,
+      if (wants('targetPackId')) 'targetPackId': targetPackId,
+      if (wants('targetPartNumber')) 'targetPartNumber': targetPartNumber,
+      if (wants('targetPackLabel')) 'targetPackLabel': targetPackLabel,
+      if (wants('targetPackMissing')) 'targetPackMissing': targetPackMissing,
+      if (wants('targetCatalogRevision'))
+        'targetCatalogRevision': targetCatalogRevision,
       if (wants('swdClock')) 'swdClock': swdClock,
       if (wants('serialNumber')) 'serialNumber': serialNumber,
       if (wants('connectionKind')) 'connectionKind': connectionKind,
@@ -235,6 +241,10 @@ extension TakeALookControllerSnapshot on TakeALookController {
       'connectionStatus',
       'probeType',
       'targetName',
+      'targetPackId',
+      'targetPartNumber',
+      'targetPackLabel',
+      'targetPackMissing',
       'swdClock',
       'serialNumber',
       'connectionKind',
@@ -293,6 +303,21 @@ extension TakeALookControllerSnapshot on TakeALookController {
     );
     probeType = data['probeType'] as String? ?? probeType;
     targetName = data['targetName'] as String? ?? targetName;
+    state.connection.targetPackId =
+        data['targetPackId'] as String? ?? targetPackId;
+    state.connection.targetPartNumber =
+        data['targetPartNumber'] as String? ??
+        data['targetName'] as String? ??
+        targetPartNumber;
+    state.connection.targetPackLabel =
+        data['targetPackLabel'] as String? ?? targetPackLabel;
+    state.connection.targetPackMissing =
+        data['targetPackMissing'] as bool? ?? targetPackMissing;
+    final hasTargetCatalog =
+        data.containsKey('targetCatalogRevision') &&
+        data['targetCatalogRevision'] != targetCatalogRevision;
+    state.connection.targetCatalogRevision =
+        data['targetCatalogRevision'] as int? ?? targetCatalogRevision;
     swdClock = data['swdClock'] as String? ?? swdClock;
     serialNumber = data['serialNumber'] as String? ?? serialNumber;
     connectionKind = data['connectionKind'] as String? ?? connectionKind;
@@ -530,6 +555,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
     }
     _emitState([
       if (hasConnectionState) signals.connection,
+      if (hasTargetCatalog) signals.targetCatalog,
       if (hasSamplingState) signals.sampling,
       if (hasSymbolState) signals.symbols,
       if (hasWatchState ||

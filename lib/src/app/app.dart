@@ -74,6 +74,8 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
         final client = BackendClient();
         controller = TakeALookController(
           backendCommand: client.command,
+          targetCatalogRequest: client.targetCatalogRequest,
+          targetPackPicker: pickTargetPack,
           symbolFilePicker: pickSymbolFile,
           sourceRootPicker: pickSourceRootDirectory,
           csvExportPathPicker: pickCsvExportPath,
@@ -95,6 +97,8 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
       remoteController = TakeALookController(
         remoteCommand: (method, arguments) =>
             sendCommandToMain(remoteController, method, arguments),
+        targetCatalogRequest: requestTargetCatalogFromMain,
+        targetPackPicker: pickTargetPack,
         csvImportContentsPicker: pickCsvImportContents,
         csvImportPathPicker: kIsWeb ? null : pickCsvImportPath,
       );
@@ -469,11 +473,10 @@ class _MainWorkbenchState extends State<MainWorkbench> {
     final task = widget.controller.sourceTask;
     if (!task.running || task.id == _shownSourceTask) return;
     _shownSourceTask = task.id;
-    widget.controller.workbenchOutputTab = 1;
-    final workspace = workspaceKey.currentState;
-    if (workspace != null && !workspace.outputDocked) {
-      unawaited(workspace.toggleWorkbenchOutput());
-    }
+    unawaited(
+      workspaceKey.currentState?.showPanel(WorkspacePanelId.buildOutput) ??
+          Future<void>.value(),
+    );
   }
 
   KeyEventResult _handleWorkbenchShortcut(KeyEvent event) {

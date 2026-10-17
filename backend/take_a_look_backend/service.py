@@ -22,6 +22,7 @@ from take_a_look_backend.services.symbols import load_symbols_from_elf
 from take_a_look_backend.services.elf_context import ElfLoadContext
 from take_a_look_backend.services.source_project import SourceProjects
 from take_a_look_backend.services.source_tasks import SourceTasks
+from take_a_look_backend.services.target_catalog import TargetCatalog
 
 
 EventSink = Callable[[EventName, object], None]
@@ -49,6 +50,7 @@ class BackendService(SamplingServiceMixin):
         remote_backend_factory: Callable[..., RemoteMemoryBackend] = RemoteMemoryBackend,
         recording_directory: Path | None = None,
         source_settings_file: Path | None = None,
+        target_directory: Path | None = None,
     ) -> None:
         self._emit_event = event_sink
         self._memory = memory_backend or PyOcdMemoryBackend()
@@ -67,7 +69,8 @@ class BackendService(SamplingServiceMixin):
 
         self._connection_status = "disconnected"
         self._probe_type = "自动发现任意探针"
-        self._target_name = "auto"
+        self._targets = TargetCatalog(target_directory)
+        self._target_name = str(self._targets.selected["name"])
         self._swd_clock = "4 MHz"
         self._serial_number = ""
         self._connection_kind = "local"
@@ -131,8 +134,38 @@ class BackendService(SamplingServiceMixin):
                     self._connection_status = "disconnected"
         finally:
             self._recording_worker.close()
+            self._targets.close()
 
     def handle(self, method: RpcMethod, params: Mapping[str, object]) -> dict[str, object]:
+        if method is RpcMethod.LIST_TARGETS:
+            return {**self._targets.snapshot(), "state": self._targets.selection_state()}
+        if method is RpcMethod.INSPECT_TARGET_PACK:
+            return self._targets.inspect(_required_string(params, "path"))
+        if method is RpcMethod.DISCARD_TARGET_PACK_PREVIEW:
+            self._targets.discard_preview(_required_string(params, "previewId"))
+            return {}
+        if method is RpcMethod.IMPORT_TARGET_PACK:
+            result = self._targets.import_pack(_required_string(params, "previewId"))
+            return {**result, "state": self._publish_target_state()}
+        if method is RpcMethod.REMOVE_TARGET_PACK:
+            pack_id = _required_string(params, "packId")
+            with self._lock:
+                if (self._connection_kind == "local" and self._connection_status != "disconnected"
+                        and self._targets.selected.get("packId") == pack_id):
+                    raise ProtocolError("pack_in_use", "这个芯片包正在使用，请先断开连接。")
+                self._targets.remove(pack_id)
+            return {"state": self._publish_target_state()}
+        if method is RpcMethod.SELECT_TARGET:
+            name = _required_string(params, "name")
+            pack_id = params.get("packId", "")
+            if not isinstance(pack_id, str):
+                raise ProtocolError("invalid_request", "packId must be a string.")
+            with self._lock:
+                if self._connection_status != "disconnected":
+                    raise ProtocolError("already_connected", "请先断开连接，再更换目标芯片。")
+                self._targets.select(name, pack_id)
+                self._target_name = str(self._targets.selected["name"])
+            return {"state": self._publish_target_state()}
         if method is RpcMethod.CANCEL_SOURCE_TASK:
             result = self._source_tasks.cancel()
             self._emit(EventName.SOURCE_TASK, result)
@@ -178,6 +211,7 @@ class BackendService(SamplingServiceMixin):
                     "remoteGdb",
                     "sourceBuild",
                     "firmwareDownload",
+                    "targetCatalog",
                 ],
                 "state": self.state_snapshot(),
             }
@@ -232,6 +266,7 @@ class BackendService(SamplingServiceMixin):
 
     def _runtime_state_locked(self) -> dict[str, object]:
         return {
+            **self._targets.selection_state(),
             "connectionStatus": self._connection_status,
             "probeType": self._probe_type,
             "targetName": self._target_name,
@@ -260,6 +295,12 @@ class BackendService(SamplingServiceMixin):
             "debug": self._debug_state_locked(),
         }
 
+    def _publish_target_state(self) -> dict[str, object]:
+        with self._lock:
+            state = self._targets.selection_state()
+        self._emit(EventName.STATE, state)
+        return state
+
     def _connect(self, params: Mapping[str, object]) -> dict[str, object]:
         with self._lock:
             if self._connection_status == "connected":
@@ -280,6 +321,7 @@ class BackendService(SamplingServiceMixin):
                 frequency_hz=_parse_frequency_hz(self._swd_clock),
                 unique_id=self._serial_number.strip() or None,
                 probe_filter=_probe_filter(self._probe_type),
+                pack_path=self._targets.connection_pack() if self._connection_kind == "local" else None,
             )
             self._memory.connect(config)
             initial_execution_state = self._memory.debug_state()
@@ -302,6 +344,8 @@ class BackendService(SamplingServiceMixin):
                 failed_state = self._runtime_state_locked()
             self._emit(EventName.LOG, {"level": "error", "message": f"连接调试探针失败：{error}"})
             self._emit(EventName.STATE, failed_state)
+            if isinstance(error, ProtocolError):
+                raise
             raise ProtocolError("connect_failed", "Unable to connect to the debug probe.", str(error)) from error
         with self._lock:
             self._connection_status = "connected"
@@ -431,7 +475,7 @@ class BackendService(SamplingServiceMixin):
                 now = time.monotonic()
                 if now - last_progress >= 0.1 or value >= 1:
                     last_progress = now
-                    task.phase("download", f"正在写入固件 {value * 100:.0f}%", max(0.0, min(1.0, value)))
+                    task.phase("download", f"正在下载与校验固件 {value * 100:.0f}%", max(0.0, min(1.0, value)))
             # The sampler and RPC guards reserve the session without holding the
             # service lock throughout flash; getState and shutdown stay responsive.
             self._memory.program_firmware(str(staged), progress)
@@ -897,7 +941,12 @@ class BackendService(SamplingServiceMixin):
         if "probeType" in params:
             self._probe_type = _required_string(params, "probeType")
         if "targetName" in params:
-            self._target_name = _required_string(params, "targetName")
+            name = _required_string(params, "targetName")
+            if name != self._target_name:
+                if self._connection_status != "disconnected":
+                    raise ProtocolError("already_connected", "请先断开连接，再更换目标芯片。")
+                self._targets.select(name, legacy=True)
+                self._target_name = str(self._targets.selected["name"])
         if "swdClock" in params:
             self._swd_clock = _required_string(params, "swdClock")
             _parse_frequency_hz(self._swd_clock)

@@ -1,5 +1,14 @@
 import 'package:file_selector/file_selector.dart';
 
+Future<String?> pickTargetPack() async {
+  final file = await openFile(
+    acceptedTypeGroups: const [
+      XTypeGroup(label: 'CMSIS 芯片支持包', extensions: ['pack']),
+    ],
+  );
+  return file?.path;
+}
+
 Future<String?> pickSymbolFile() async {
   final file = await openFile(
     acceptedTypeGroups: const [

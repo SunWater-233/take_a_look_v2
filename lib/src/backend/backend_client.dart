@@ -45,6 +45,7 @@ class BackendClient {
   StreamSubscription<List<int>>? _stdoutSubscription;
   StreamSubscription<String>? _stderrSubscription;
   BackendStreamDecoder? _streamDecoder;
+  Future<void> _writeTail = Future<void>.value();
   final Map<int, Completer<Map<String, dynamic>>> _pending = {};
   final Map<int, List<String>> _sampleSchemas = {};
   final Set<int> _captureOnlySchemas = {};
@@ -55,6 +56,22 @@ class BackendClient {
   bool _closed = false;
 
   bool get isRunning => _process != null;
+
+  Future<Map<String, Object?>> targetCatalogRequest(
+    String operation,
+    Map<String, Object?> arguments,
+  ) {
+    final method = switch (operation) {
+      'listTargets' => BackendMethod.listTargets,
+      'inspectTargetPack' => BackendMethod.inspectTargetPack,
+      'importTargetPack' => BackendMethod.importTargetPack,
+      'discardTargetPackPreview' => BackendMethod.discardTargetPackPreview,
+      'removeTargetPack' => BackendMethod.removeTargetPack,
+      'selectTarget' => BackendMethod.selectTarget,
+      _ => throw ArgumentError.value(operation, 'operation'),
+    };
+    return request(method, arguments);
+  }
 
   Future<void> start() async {
     if (_process != null) return;
@@ -82,6 +99,7 @@ class BackendClient {
                 runInShell: launch.runInShell,
               ));
       _process = process;
+      _writeTail = Future<void>.value();
       _streamDecoder = BackendStreamDecoder(
         onJsonLine: _handleLine,
         onSamplePayload: _handleSamplePayload,
@@ -129,12 +147,13 @@ class BackendClient {
       if (call == null) return;
       await request(call.method, call.params);
     } catch (error) {
-      // Loading owns its lifecycle in the controller, including error feedback.
+      // These operations await completion and own error feedback in the controller.
       if (const {
         ControllerCommand.loadSymbols,
         ControllerCommand.setSourceProject,
         ControllerCommand.startSourceTask,
         ControllerCommand.cancelSourceTask,
+        ControllerCommand.writeWatch,
       }.contains(command)) {
         rethrow;
       }
@@ -171,13 +190,24 @@ class BackendClient {
       final response = completer.future.timeout(
         method == BackendMethod.loadSymbols
             ? symbolLoadTimeout
+            : const {
+                BackendMethod.listTargets,
+                BackendMethod.inspectTargetPack,
+                BackendMethod.importTargetPack,
+              }.contains(method)
+            ? const Duration(minutes: 5)
             : commandTimeout,
         onTimeout: () =>
             throw BackendException('timeout', '后端命令超时：${method.wireName}'),
       );
-      final results = await Future.wait<dynamic>([
-        response,
-        Future<void>.sync(() async {
+      // IOSink cannot accept another write while flush() is binding its
+      // stream. Serialize writes only; responses may complete independently.
+      _writeTail = _writeTail.then((_) async {
+        if (!identical(_process, process) ||
+            !identical(_pending[requestId], completer)) {
+          return;
+        }
+        try {
           process.stdin.writeln(
             jsonEncode({
               'v': protocolVersion,
@@ -187,9 +217,13 @@ class BackendClient {
             }),
           );
           await process.stdin.flush();
-        }),
-      ]);
-      return results.first as Map<String, dynamic>;
+        } catch (error, stack) {
+          // Complete the response too, so a failed send cancels its timeout
+          // immediately and leaves the write queue usable for later requests.
+          if (!completer.isCompleted) completer.completeError(error, stack);
+        }
+      });
+      return await response;
     } finally {
       _pending.remove(requestId);
     }
@@ -207,6 +241,7 @@ class BackendClient {
       } catch (_) {}
     }
     if (force) process?.kill();
+    await _writeTail;
     await process?.stdin.close();
     await _stdoutSubscription?.cancel();
     await _stderrSubscription?.cancel();

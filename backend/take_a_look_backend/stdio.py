@@ -21,6 +21,12 @@ from take_a_look_backend.protocol import (
 from take_a_look_backend.service import BackendService
 from take_a_look_backend.services.ordered_worker import OrderedWorker
 from take_a_look_backend.services.source_project import default_settings_file
+from take_a_look_backend.services.target_catalog import default_pack_directory
+
+TARGET_METHODS = {
+    RpcMethod.LIST_TARGETS, RpcMethod.INSPECT_TARGET_PACK, RpcMethod.IMPORT_TARGET_PACK,
+    RpcMethod.DISCARD_TARGET_PACK_PREVIEW, RpcMethod.REMOVE_TARGET_PACK, RpcMethod.SELECT_TARGET,
+}
 
 
 class StdioServer:
@@ -30,13 +36,15 @@ class StdioServer:
         self._write_lock = threading.Lock()
         self._output_worker = OrderedWorker('tal-pipe-output')
         self._export_worker = OrderedWorker('tal-csv-export', max_jobs=8)
+        self._catalog_worker = OrderedWorker('tal-target-catalog', max_jobs=16)
         self._output_error: Exception | None = None
         self._closed = False
         self._sample_schema_id = 0
         self._sample_keys: list[str] = []
         self._sample_sequence = 0
         self._sample_capture_only = False
-        self._service = BackendService(self._send_event, source_settings_file=default_settings_file())
+        self._service = BackendService(self._send_event, source_settings_file=default_settings_file(),
+                                       target_directory=default_pack_directory())
 
     def run(self) -> int:
         try:
@@ -53,6 +61,14 @@ class StdioServer:
         request_id: object | None = None
         try:
             request_id, method, params = parse_request(line)
+            if method in TARGET_METHODS:
+                task = self._catalog_worker.submit(
+                    lambda: self._complete_catalog(request_id, method, params), block=False)
+                if task is None:
+                    raise ProtocolError("busy", "芯片库任务队列已满，请等待当前操作完成。")
+                return
+            if method is RpcMethod.SHUTDOWN:
+                self._catalog_worker.drain()
             if method is RpcMethod.EXPORT_CSV:
                 prepared = self._service.prepare_csv_export(params)
                 task = self._export_worker.submit(
@@ -67,6 +83,12 @@ class StdioServer:
         except Exception as error:  # Never corrupt the protocol stream with a traceback.
             self._write(error_response(request_id, error))
 
+    def _complete_catalog(self, request_id, method, params) -> None:
+        try:
+            self._write(response(request_id, self._service.handle(method, params)))
+        except Exception as error:
+            self._write(error_response(request_id, error))
+
     def _complete_export(self, request_id, prepared) -> None:
         try:
             self._write(response(request_id, self._service.finish_csv_export(prepared)))
@@ -78,6 +100,7 @@ class StdioServer:
             return
         self._closed = True
         try:
+            self._catalog_worker.close()
             self._export_worker.close()
             self._service.close()
         finally:

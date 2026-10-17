@@ -56,8 +56,11 @@ extension TakeALookControllerSourceTools on TakeALookController {
       await sender(ControllerCommand.startSourceTask, {'kind': kind});
     } on Object catch (error) {
       applyBackendEvent(BackendEventType.error, {
-        'code': 'source_task_failed',
-        'message': error.toString(),
+        'code': error is BackendException ? error.code : 'source_task_failed',
+        'operation': 'sourceTask',
+        'message': error is BackendException ? error.message : error.toString(),
+        if (error is BackendException && error.details != null)
+          'details': error.details,
       });
     }
   }
@@ -83,7 +86,19 @@ extension TakeALookControllerSourceTools on TakeALookController {
   }
 
   void applySourceTask(Map<String, dynamic> data) {
+    final previousId = sourceTask.id;
+    final previousStatus = sourceTask.status;
     sourceTask.applyJson(data);
+    if (sourceTask.status == 'failed' &&
+        (sourceTask.id != previousId || previousStatus != 'failed')) {
+      applyBackendEvent(BackendEventType.error, {
+        'code': 'source_task_failed',
+        'operation': 'sourceTask',
+        'message': sourceTask.message.isEmpty
+            ? '编译或下载失败，请查看输出。'
+            : sourceTask.message,
+      });
+    }
     _emitState([signals.sourceTools]);
   }
 }

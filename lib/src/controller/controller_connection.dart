@@ -300,8 +300,13 @@ extension TakeALookControllerConnection on TakeALookController {
   }
 
   void setTargetName(String value) {
+    if (connectionStatus != ConnectionStatus.disconnected) return;
     if (_dispatchCommand(ControllerCommand.setTargetName, value)) return;
     targetName = value;
+    state.connection.targetPackId = '';
+    state.connection.targetPartNumber = value;
+    state.connection.targetPackLabel = '内置';
+    state.connection.targetPackMissing = false;
     _emitState([signals.connection]);
   }
 

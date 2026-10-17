@@ -5,11 +5,13 @@ class _SourceDebugPanel extends StatefulWidget {
     required this.controller,
     this.readOnlyPreview = false,
     this.externalOutput = false,
+    this.visible = true,
   });
 
   final TakeALookController controller;
   final bool readOnlyPreview;
   final bool externalOutput;
+  final bool visible;
 
   @override
   State<_SourceDebugPanel> createState() => _SourceDebugPanelState();
@@ -79,7 +81,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     controller.symbolChanges.addListener(_handleDebugChange);
     controller.sourceWorkspaceChanges.addListener(_handleSourceWorkspaceChange);
     controller.sourceToolsChanges.addListener(_handleFirmwareTask);
-    if (!widget.readOnlyPreview) {
+    if (!widget.readOnlyPreview && widget.visible) {
       controller.setSourceViewVisible(_sourceViewId, true);
     }
     _restoreSourceWorkspace();
@@ -89,6 +91,20 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   @override
   void didUpdateWidget(covariant _SourceDebugPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.visible != widget.visible &&
+        oldWidget.controller == controller &&
+        !widget.readOnlyPreview) {
+      controller.setSourceViewVisible(_sourceViewId, widget.visible);
+      if (widget.visible) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || !widget.visible) return;
+          controller.dismissSourceAttention();
+          if (_selectedPath case final path?) {
+            controller.markSourceFileRead(path);
+          }
+        });
+      }
+    }
     if (oldWidget.controller == controller &&
         oldWidget.readOnlyPreview == widget.readOnlyPreview) {
       return;
@@ -104,7 +120,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     controller.symbolChanges.addListener(_handleDebugChange);
     controller.sourceToolsChanges.addListener(_handleFirmwareTask);
     controller.sourceWorkspaceChanges.addListener(_handleSourceWorkspaceChange);
-    if (!widget.readOnlyPreview) {
+    if (!widget.readOnlyPreview && widget.visible) {
       controller.setSourceViewVisible(_sourceViewId, true);
     }
     _selectedPath = null;
@@ -176,7 +192,9 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     for (final path in _openPaths) {
       _externalPathKeys.add(_pathKey(path));
     }
-    if (!widget.readOnlyPreview) controller.dismissSourceAttention();
+    if (!widget.readOnlyPreview && widget.visible) {
+      controller.dismissSourceAttention();
+    }
   }
 
   void _handleSourceWorkspaceChange() {
@@ -262,7 +280,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
       revealLine = request.line;
       controller.sourceLocationRequest = null;
     }
-    if (path != null && !widget.readOnlyPreview) {
+    if (path != null && !widget.readOnlyPreview && widget.visible) {
       controller.openSourceFile(path);
       path = controller.openSourcePathFor(path) ?? path;
     }
@@ -283,7 +301,9 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
         _lines = highlighted.lines;
         _maximumLineLength = highlighted.maximumLineLength;
       });
-      if (!widget.readOnlyPreview) controller.markSourceFileRead(path);
+      if (!widget.readOnlyPreview && widget.visible) {
+        controller.markSourceFileRead(path);
+      }
       if (revealLine != null) {
         _scrollToLine(revealLine, immediate: true);
       } else {

@@ -84,6 +84,11 @@ class ConnectionState {
   ConnectionStatus status = ConnectionStatus.disconnected;
   String probeType = '自动发现任意探针';
   String targetName = 'auto';
+  String targetPackId = '';
+  String targetPartNumber = 'auto';
+  String targetPackLabel = '内置';
+  bool targetPackMissing = false;
+  int targetCatalogRevision = 0;
   String swdClock = '4 MHz';
   String serialNumber = '';
   String connectionKind = 'local';

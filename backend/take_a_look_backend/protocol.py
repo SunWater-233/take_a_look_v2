@@ -36,6 +36,12 @@ class RpcMethod(StrEnum):
     SET_SOURCE_PROJECT = "setSourceProject"
     START_SOURCE_TASK = "startSourceTask"
     CANCEL_SOURCE_TASK = "cancelSourceTask"
+    LIST_TARGETS = "listTargets"
+    INSPECT_TARGET_PACK = "inspectTargetPack"
+    IMPORT_TARGET_PACK = "importTargetPack"
+    DISCARD_TARGET_PACK_PREVIEW = "discardTargetPackPreview"
+    REMOVE_TARGET_PACK = "removeTargetPack"
+    SELECT_TARGET = "selectTarget"
 
 
 class EventName(StrEnum):

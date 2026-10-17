@@ -63,7 +63,7 @@ def run() -> int:
         output = io.BytesIO()
         requests = '\n'.join(
             json.dumps({"v": 2, "id": index, "method": method, "params": {}})
-            for index, method in enumerate(("handshake", "shutdown"), 1)
+            for index, method in enumerate(("handshake", "listTargets", "shutdown"), 1)
         ) + '\n'
         StdioServer(io.StringIO(requests), output).run()
         responses = {
@@ -73,9 +73,12 @@ def run() -> int:
         }
         if responses[1]["result"]["protocolVersion"] != 2:
             raise RuntimeError("Unexpected protocol version")
-        if responses[2]["result"]["state"]["connectionStatus"] != "disconnected":
+        if len(responses[2]["result"]["targets"]) < 100:
+            raise RuntimeError("Builtin target catalogue is missing")
+        if responses[3]["result"]["state"]["connectionStatus"] != "disconnected":
             raise RuntimeError("Backend shutdown failed")
         checks["rpc"] = "ok"
+        checks["target_catalog"] = "ok"
     except Exception as error:
         errors.append(f"rpc: {error}")
 

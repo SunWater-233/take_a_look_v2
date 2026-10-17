@@ -337,24 +337,40 @@ extension TakeALookControllerWatches on TakeALookController {
     _emitState([signals.watches, signals.plot]);
   }
 
-  void writeWatch(String key, String input) {
+  Future<bool> writeWatch(String key, String input) async {
     watchInputDrafts[key] = input;
-    if (_dispatchCommand(ControllerCommand.writeWatch, {
-      'key': key,
-      'value': input,
-    })) {
-      return;
-    }
-    final value = double.tryParse(input);
-    final watch = _watchByKey(key);
-    if (value == null || watch == null) {
-      _appendLog('变量写入失败：$input 不是有效数值。');
-    } else {
+    try {
+      final sender = backendCommand ?? remoteCommand;
+      if (sender != null) {
+        await sender(ControllerCommand.writeWatch, {
+          'key': key,
+          'value': input,
+        });
+        return true;
+      }
+      final value = double.tryParse(input);
+      final watch = _watchByKey(key);
+      if (value == null || !value.isFinite || watch == null) {
+        throw const BackendException('invalid_value', '请输入有效数值。');
+      }
       watch.value = value;
       watch.updatedAtMs = DateTime.now().millisecondsSinceEpoch;
       _appendLog('${watch.symbol.name} 已写入 $input，并完成回读验证。');
+      _emitState([signals.telemetry, signals.plot, signals.logs]);
+      return true;
+    } catch (error) {
+      if (!_disposed) {
+        applyBackendEvent(BackendEventType.error, {
+          'code': error is BackendException ? error.code : 'write_failed',
+          'operation': 'writeWatch',
+          'message': error is BackendException ? error.message : '变量写入失败。',
+          'details': error is BackendException
+              ? error.details
+              : error.toString(),
+        });
+      }
+      return false;
     }
-    _emitState([signals.telemetry, signals.plot, signals.logs]);
   }
 }
 

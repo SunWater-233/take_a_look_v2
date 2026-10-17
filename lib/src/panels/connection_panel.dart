@@ -47,16 +47,41 @@ class _ConnectionPanel extends StatelessWidget {
               const SizedBox(height: 10),
               _LabeledField(
                 label: '目标芯片',
-                child: TalDropdown<String>(
-                  value: controller.targetName,
-                  values: const [
-                    'auto',
-                    'stm32f407vg',
-                    'stm32g431rb',
-                    'nrf52840',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    TalButton(
+                      key: const ValueKey('target-chip-selector'),
+                      onPressed: () =>
+                          showTargetChipDialog(context, controller),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              controller.targetName == 'auto'
+                                  ? '自动选择 / 通用 Cortex-M'
+                                  : controller.targetPartNumber,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          const Icon(Icons.search, size: 16),
+                        ],
+                      ),
+                    ),
+                    if (controller.targetPackMissing)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 4),
+                        child: Text(
+                          '芯片包缺失，请重新导入。',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: TalColors.warning,
+                          ),
+                        ),
+                      ),
                   ],
-                  label: (value) => value,
-                  onChanged: controller.setTargetName,
                 ),
               ),
               const SizedBox(height: 10),

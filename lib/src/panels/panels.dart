@@ -28,6 +28,7 @@ import 'source_documents.dart';
 import '../theme/theme.dart';
 import 'table_layout.dart';
 import 'watch_color_dialog.dart';
+import 'target_chip_dialog.dart';
 
 export '../theme/theme.dart' show TalDropdown;
 
@@ -54,6 +55,7 @@ Widget buildWorkspacePanel(
   PanelChrome? chrome,
   bool sourcePreview = false,
   bool workbench = false,
+  Widget? body,
   VoidCallback? onShowSource,
   VoidCallback? onShowSymbols,
 }) {
@@ -64,14 +66,16 @@ Widget buildWorkspacePanel(
       chrome: chrome,
       controller: controller,
       compact: workbench,
-      child: buildWorkspacePanelBody(
-        panel,
-        controller,
-        sourcePreview: sourcePreview,
-        workbench: workbench,
-        onShowSource: onShowSource,
-        onShowSymbols: onShowSymbols,
-      ),
+      child:
+          body ??
+          buildWorkspacePanelBody(
+            panel,
+            controller,
+            sourcePreview: sourcePreview,
+            workbench: workbench,
+            onShowSource: onShowSource,
+            onShowSymbols: onShowSymbols,
+          ),
     ),
   );
 }
@@ -81,6 +85,8 @@ Widget buildWorkspacePanelBody(
   TakeALookController controller, {
   bool sourcePreview = false,
   bool workbench = false,
+  bool visible = true,
+  bool adaptiveWorkbench = false,
   VoidCallback? onShowSource,
   VoidCallback? onShowSymbols,
 }) {
@@ -94,27 +100,37 @@ Widget buildWorkspacePanelBody(
     ),
     WorkspacePanelId.watch =>
       workbench
-          ? _CompactWatchPanel(
-              controller: controller,
-              onShowSource: onShowSource,
-              onShowSymbols: onShowSymbols,
+          ? LayoutBuilder(
+              builder: (context, constraints) =>
+                  adaptiveWorkbench && constraints.maxWidth >= 640
+                  ? _WatchPanel(controller: controller)
+                  : _CompactWatchPanel(
+                      controller: controller,
+                      onShowSymbols: onShowSymbols,
+                    ),
             )
           : _WatchPanel(controller: controller),
     WorkspacePanelId.connection => _ConnectionPanel(controller: controller),
     WorkspacePanelId.plot => _PlotPanel(controller: controller),
-    WorkspacePanelId.analysis => _AnalysisChartPanel(
-      controller: controller,
-      horizontal: workbench,
+    WorkspacePanelId.analysis => LayoutBuilder(
+      builder: (context, constraints) => _AnalysisChartPanel(
+        controller: controller,
+        horizontal:
+            workbench && (!adaptiveWorkbench || constraints.maxWidth >= 680),
+      ),
     ),
     WorkspacePanelId.sourceDebug => _SourceDebugPanel(
       controller: controller,
       readOnlyPreview: sourcePreview,
       externalOutput: workbench,
+      visible: visible,
     ),
-    WorkspacePanelId.log =>
-      workbench
-          ? _WorkbenchOutput(controller: controller, onShowSource: onShowSource)
-          : _LogPanel(controller: controller),
+    WorkspacePanelId.log => _LogPanel(controller: controller),
+    WorkspacePanelId.buildOutput => _BuildOutputPanel(
+      controller: controller,
+      onShowSource: onShowSource,
+    ),
+    WorkspacePanelId.registers => _RegistersPanel(controller: controller),
   };
 }
 

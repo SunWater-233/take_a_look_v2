@@ -32,6 +32,7 @@ part 'controller_watch.dart';
 part 'controller_debug.dart';
 part 'controller_source_workspace.dart';
 part 'controller_source_tools.dart';
+part 'controller_targets.dart';
 
 typedef RemoteCommand =
     Future<void> Function(ControllerCommand command, Object? arguments);
@@ -39,6 +40,8 @@ typedef BackendCommand =
     Future<void> Function(ControllerCommand command, Object? arguments);
 typedef PathPicker = Future<String?> Function();
 typedef TextFilePicker = Future<String?> Function();
+typedef TargetCatalogRequest =
+    Future<JsonObject> Function(String operation, JsonObject arguments);
 
 class TakeALookController extends ChangeNotifier {
   static const double standardPlotRefreshRateHz = 60;
@@ -53,6 +56,8 @@ class TakeALookController extends ChangeNotifier {
     this.csvExportPathPicker,
     this.csvImportContentsPicker,
     this.csvImportPathPicker,
+    this.targetCatalogRequest,
+    this.targetPackPicker,
     HistoryReader? historyReader,
   }) {
     plotHistory = PlotHistory(
@@ -75,6 +80,8 @@ class TakeALookController extends ChangeNotifier {
   final PathPicker? csvExportPathPicker;
   final TextFilePicker? csvImportContentsPicker;
   final PathPicker? csvImportPathPicker;
+  final TargetCatalogRequest? targetCatalogRequest;
+  final PathPicker? targetPackPicker;
   final List<SymbolItem> _symbols = <SymbolItem>[];
   final List<WatchItem> _watches = <WatchItem>[];
   final List<LogEntry> _logs = <LogEntry>[];
@@ -102,7 +109,6 @@ class TakeALookController extends ChangeNotifier {
   final Map<String, String> watchInputDrafts = {};
   String? compactWatchSelection;
   final Set<String> compactExpandedWatches = {};
-  int workbenchOutputTab = 0;
   ({String path, int line})? sourceLocationRequest;
   int _stateRevision = 0;
   int _analysisDataRevision = 0;

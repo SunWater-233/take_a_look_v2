@@ -209,7 +209,7 @@ void main() {
     pendingFile.existsResult.complete(false);
     await tester.pumpAndSettle();
 
-    expect(find.byType(TalPanelFrame), findsNWidgets(2));
+    expect(find.byType(TalPanelFrame), findsNWidgets(3));
     expect(workspace(tester).isPanelVisible(WorkspacePanelId.analysis), isTrue);
     expect(controller.logs, hasLength(initialLogCount));
     await workspace(tester).restoreLayout();
@@ -225,7 +225,7 @@ void main() {
     await pumpWorkbench(tester);
     await waitForLog(tester, '恢复布局失败：');
 
-    expect(find.byType(TalPanelFrame), findsNWidgets(2));
+    expect(find.byType(TalPanelFrame), findsNWidgets(3));
     expect(workspace(tester).isPanelVisible(WorkspacePanelId.plot), isTrue);
     expect(controller.uiScale, 1);
     expect(layoutFile.readAsStringSync(), '{invalid layout');

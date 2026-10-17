@@ -293,7 +293,7 @@ void main() {
     await tester.pump();
   });
 
-  testWidgets('connection dropdown uses the compact anchored menu style', (
+  testWidgets('probe dropdown uses the compact anchored menu style', (
     tester,
   ) async {
     final controller = TakeALookController();
@@ -317,7 +317,9 @@ void main() {
       ),
     );
 
-    final anchor = find.byKey(const ValueKey<String>('compact-dropdown-auto'));
+    final anchor = find.byKey(
+      const ValueKey<String>('compact-dropdown-自动发现任意探针'),
+    );
     final anchorRect = tester.getRect(anchor);
 
     final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
@@ -343,7 +345,7 @@ void main() {
     await tester.pumpAndSettle();
 
     final selectedItem = find.byKey(
-      const ValueKey<String>('dropdown-item-auto'),
+      const ValueKey<String>('dropdown-item-自动发现任意探针'),
     );
     final selectedRect = tester.getRect(selectedItem);
     expect(selectedRect.left, closeTo(anchorRect.left, 1));
@@ -351,7 +353,7 @@ void main() {
     expect(selectedRect.height, closeTo(32, 1));
 
     final selectedSurface = tester.widget<Container>(
-      find.byKey(const ValueKey<String>('dropdown-selected-auto')),
+      find.byKey(const ValueKey<String>('dropdown-selected-自动发现任意探针')),
     );
     final decoration = selectedSurface.decoration! as BoxDecoration;
     expect(
@@ -362,7 +364,7 @@ void main() {
     await mouse.moveTo(selectedRect.center);
     await tester.pump();
     final hoveredSelectedSurface = tester.widget<Container>(
-      find.byKey(const ValueKey<String>('dropdown-selected-auto')),
+      find.byKey(const ValueKey<String>('dropdown-selected-自动发现任意探针')),
     );
     expect(
       (hoveredSelectedSurface.decoration! as BoxDecoration).color,
@@ -372,7 +374,7 @@ void main() {
     await mouse.moveTo(const Offset(800, 600));
     await tester.pump();
     final restoredSelectedSurface = tester.widget<Container>(
-      find.byKey(const ValueKey<String>('dropdown-selected-auto')),
+      find.byKey(const ValueKey<String>('dropdown-selected-自动发现任意探针')),
     );
     expect(
       (restoredSelectedSurface.decoration! as BoxDecoration).color,
@@ -380,7 +382,7 @@ void main() {
     );
 
     await tester.tap(
-      find.byKey(const ValueKey<String>('dropdown-item-stm32f407vg')),
+      find.byKey(const ValueKey<String>('dropdown-item-CMSIS-DAP')),
     );
     await tester.pump();
     final closingStartHeight = tester.getSize(animationFinder).height;
@@ -390,7 +392,7 @@ void main() {
     expect(animationFinder, findsOneWidget);
     await tester.pumpAndSettle();
     expect(animationFinder, findsNothing);
-    expect(controller.targetName, 'stm32f407vg');
+    expect(controller.probeType, 'CMSIS-DAP');
 
     await mouse.removePointer();
     controller.dispose();

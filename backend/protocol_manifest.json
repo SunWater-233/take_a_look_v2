@@ -1,6 +1,12 @@
 {
   "version": 2,
   "methods": [
+    "listTargets",
+    "inspectTargetPack",
+    "importTargetPack",
+    "discardTargetPackPreview",
+    "removeTargetPack",
+    "selectTarget",
     "handshake",
     "getState",
     "connect",

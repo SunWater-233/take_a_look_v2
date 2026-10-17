@@ -90,7 +90,14 @@ void main() {
       expect(watch.readMode, WatchReadMode.manual);
       await tester.tap(find.byKey(const ValueKey('panel-tab-analysis')));
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('workspace-group-watch')), findsNothing);
+      expect(
+        find.byKey(const ValueKey('workspace-group-watch')),
+        findsOneWidget,
+      );
+      // The sidebars now stay under user control. Reclaim the left sidebar to
+      // give the analysis view enough width for its statistics column.
+      await tester.tap(find.byKey(const ValueKey('sidebar-handle-left')));
+      await tester.pumpAndSettle();
       expect(
         find.byKey(const ValueKey('analysis-horizontal-workbench')),
         findsOneWidget,

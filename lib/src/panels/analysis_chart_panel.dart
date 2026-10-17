@@ -208,45 +208,53 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
         color: TalColors.surface,
         border: Border(bottom: BorderSide(color: TalColors.border)),
       ),
-      child: Row(
-        children: [
-          if (!widget.horizontal) Text('分析图表', style: talStrong),
-          if (_sourceLabel.isNotEmpty) ...[
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                '$_sourceLabel · ${_series.length} 条曲线',
-                style: talMuted,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
+      child: LayoutBuilder(
+        builder: (context, constraints) => SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: SizedBox(
+            width: math.max(420, constraints.maxWidth),
+            child: Row(
+              children: [
+                if (!widget.horizontal) Text('分析图表', style: talStrong),
+                if (_sourceLabel.isNotEmpty) ...[
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      '$_sourceLabel · ${_series.length} 条曲线',
+                      style: talMuted,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+                if (_sourceLabel.isEmpty) const Spacer(),
+                if (_series.isNotEmpty) ...[
+                  TalButton.icon(
+                    key: const ValueKey('analysis-fft-toggle'),
+                    style: _session.fftVisible
+                        ? talSelectedOutlinedButtonStyle
+                        : null,
+                    onPressed: _toggleFft,
+                    icon: const Icon(Icons.graphic_eq, size: 16),
+                    label: const Text('FFT'),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                _importButton(),
+                if (_series.isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  TalButton(
+                    onPressed: () {
+                      setState(_session.clearData);
+                      _commitSession(includeData: true);
+                    },
+                    child: const Text('清除'),
+                  ),
+                ],
+              ],
             ),
-          ],
-          if (_sourceLabel.isEmpty) const Spacer(),
-          if (_series.isNotEmpty) ...[
-            TalButton.icon(
-              key: const ValueKey('analysis-fft-toggle'),
-              style: _session.fftVisible
-                  ? talSelectedOutlinedButtonStyle
-                  : null,
-              onPressed: _toggleFft,
-              icon: const Icon(Icons.graphic_eq, size: 16),
-              label: const Text('FFT'),
-            ),
-            const SizedBox(width: 8),
-          ],
-          _importButton(),
-          if (_series.isNotEmpty) ...[
-            const SizedBox(width: 8),
-            TalButton(
-              onPressed: () {
-                setState(_session.clearData);
-                _commitSession(includeData: true);
-              },
-              child: const Text('清除'),
-            ),
-          ],
-        ],
+          ),
+        ),
       ),
     );
   }
@@ -327,17 +335,19 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
 
   Widget _buildEmptyState() {
     return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.analytics_outlined, size: 42, color: TalColors.muted),
-          const SizedBox(height: 12),
-          const Text('导入一段数据开始分析', style: talStrong),
-          const SizedBox(height: 6),
-          const Text('支持本地 CSV，或直接使用当前实时采样缓存', style: talMuted),
-          const SizedBox(height: 16),
-          _importButton(),
-        ],
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.analytics_outlined, size: 42, color: TalColors.muted),
+            const SizedBox(height: 12),
+            const Text('导入一段数据开始分析', style: talStrong),
+            const SizedBox(height: 6),
+            const Text('支持本地 CSV，或直接使用当前实时采样缓存', style: talMuted),
+            const SizedBox(height: 16),
+            _importButton(),
+          ],
+        ),
       ),
     );
   }

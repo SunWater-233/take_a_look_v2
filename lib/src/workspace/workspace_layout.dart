@@ -12,6 +12,9 @@ class WorkspaceGroup {
     required WorkspacePanelId activePanel,
     required this.rect,
     required this.z,
+    this.sidebar,
+    this.sidebarWidth = 280,
+    this.sidebarCollapsed = false,
   }) : panels = List.of(panels),
        _activePanel = ValueNotifier<WorkspacePanelId>(activePanel);
 
@@ -20,6 +23,9 @@ class WorkspaceGroup {
   final ValueNotifier<WorkspacePanelId> _activePanel;
   Rect rect;
   int z;
+  WorkspaceSidebarSide? sidebar;
+  double sidebarWidth;
+  bool sidebarCollapsed;
 
   WorkspacePanelId get activePanel => _activePanel.value;
   set activePanel(WorkspacePanelId value) => _activePanel.value = value;
@@ -31,6 +37,11 @@ class WorkspaceGroup {
     'activePanel': activePanel.name,
     'rect': [rect.left, rect.top, rect.width, rect.height],
     'z': z,
+    if (sidebar != null) ...{
+      'sidebar': sidebar!.name,
+      'sidebarWidth': sidebarWidth,
+      'sidebarCollapsed': sidebarCollapsed,
+    },
   };
 
   factory WorkspaceGroup.fromJson(Map<String, dynamic> json) {
@@ -56,12 +67,27 @@ class WorkspaceGroup {
     if (rect.width <= 0 || rect.height <= 0) {
       throw const FormatException('Workspace group size must be positive.');
     }
+    final sidebarName = json['sidebar'];
+    final sidebar = sidebarName == null
+        ? null
+        : WorkspaceSidebarSide.values
+              .where((side) => side.name == sidebarName)
+              .firstOrNull;
+    final sidebarWidth = (json['sidebarWidth'] as num?)?.toDouble() ?? 280;
+    if ((sidebarName != null && sidebar == null) ||
+        !sidebarWidth.isFinite ||
+        sidebarWidth <= 0) {
+      throw const FormatException('Workspace sidebar is invalid.');
+    }
     return WorkspaceGroup(
       id: json['id'] as String,
       panels: panels,
       activePanel: activePanel,
       rect: rect,
       z: (json['z'] as num).toInt(),
+      sidebar: sidebar,
+      sidebarWidth: sidebarWidth,
+      sidebarCollapsed: json['sidebarCollapsed'] == true,
     );
   }
 }
@@ -87,7 +113,8 @@ class WorkspaceLayoutSnapshot {
   };
 
   factory WorkspaceLayoutSnapshot.fromJson(Map<String, dynamic> json) {
-    if (!const [1, 2].contains(json['version']) || json['groups'] is! List) {
+    if (!const [1, 2, 3, 4].contains(json['version']) ||
+        json['groups'] is! List) {
       throw const FormatException('Unsupported workspace layout format.');
     }
     return WorkspaceLayoutSnapshot(
@@ -109,17 +136,18 @@ class WorkspaceLayoutRepository {
 
   Future<void> save(WorkspaceLayoutSnapshot layout) async {
     await file.parent.create(recursive: true);
-    if (layout.version == 2 && await file.exists()) {
-      final backup = File('${file.path}.v1.bak');
-      if (!await backup.exists()) {
-        try {
-          final previous = jsonDecode(await file.readAsString());
-          if (previous is Map && previous['version'] == 1) {
-            await file.copy(backup.path);
-          }
-        } on FormatException {
-          /* Preserve normal save behavior for invalid old data. */
+    if (layout.version >= 2 && await file.exists()) {
+      try {
+        final previous = jsonDecode(await file.readAsString());
+        if (previous is Map &&
+            previous['version'] is int &&
+            const [1, 2, 3].contains(previous['version']) &&
+            (previous['version'] as int) < layout.version) {
+          final backup = File('${file.path}.v${previous['version']}.bak');
+          if (!await backup.exists()) await file.copy(backup.path);
         }
+      } on FormatException {
+        /* Preserve normal save behavior for invalid old data. */
       }
     }
     await file.writeAsString(jsonEncode(layout.toJson()), flush: true);

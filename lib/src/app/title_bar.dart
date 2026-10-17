@@ -45,6 +45,8 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
     WorkspacePanelId.symbols,
     WorkspacePanelId.watch,
     WorkspacePanelId.log,
+    WorkspacePanelId.buildOutput,
+    WorkspacePanelId.registers,
   ];
 
   bool gridMode = false;

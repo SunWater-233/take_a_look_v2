@@ -121,6 +121,14 @@ class _UiTestAppState extends State<UiTestApp> {
 
       (context as Element).visitChildren(findWorkspace);
       check(workspace != null, 'Workbench layout was not mounted.');
+      await workspace!.showPanel(WorkspacePanelId.log);
+      check(
+        workspaceOutputPanels.every(workspace!.isPanelVisible),
+        'Independent output panels were not available.',
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      await _capture('smoke-output-panels');
+      await workspace!.toggleWorkbenchOutput();
       final monitor = controller.watches[2], manual = controller.watches[3];
       controller.setWatchReadMode(monitor.symbol.key, WatchReadMode.monitor);
       controller.setWatchReadMode(manual.symbol.key, WatchReadMode.manual);

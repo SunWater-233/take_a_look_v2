@@ -204,7 +204,15 @@ Future<JsonObject> executeControllerCommand(
       );
     case ControllerCommand.writeWatch:
       final values = Map<String, Object?>.from(arguments! as Map);
-      controller.writeWatch(values['key'] as String, values['value'] as String);
+      final written = await controller.writeWatch(
+        values['key'] as String,
+        values['value'] as String,
+      );
+      if (!written) {
+        throw StateError(
+          controller.lastBackendError?['message'] as String? ?? '变量写入失败。',
+        );
+      }
     case ControllerCommand.setWatches:
       throw UnsupportedError('setWatches is an internal backend command');
   }

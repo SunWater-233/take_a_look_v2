@@ -169,6 +169,8 @@ extension TakeALookControllerTelemetry on TakeALookController {
   }
 
   void applyBackendSamplesCleared() {
+    plotHistory.clear();
+    state.acquisition.rawRecording = {};
     elapsedSeconds = 0;
     telemetryStore.clear(_watches);
     _frozenPlotSamples.clear();

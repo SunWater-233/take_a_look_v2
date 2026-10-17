@@ -7,7 +7,6 @@ import '../controller/controller.dart';
 import '../models/models.dart';
 import '../panels/panels.dart';
 import '../theme/theme.dart';
-import '../workspace/panel_types.dart';
 import '../workspace/workspace.dart';
 
 /// The fixed application controls stay available while panels are rearranged.
@@ -181,110 +180,6 @@ class WorkbenchToolbar extends StatelessWidget {
     String two(int value) => value.toString().padLeft(2, '0');
     return '${two(ms ~/ 3600000)}:${two(ms ~/ 60000 % 60)}:${two(ms ~/ 1000 % 60)}.${(ms % 1000).toString().padLeft(3, '0')}';
   }
-}
-
-class WorkbenchNavigation extends StatelessWidget {
-  const WorkbenchNavigation({required this.workspaceKey, super.key});
-  final GlobalKey<DockingWorkspaceState> workspaceKey;
-
-  @override
-  Widget build(BuildContext context) {
-    final workspace = workspaceKey.currentState;
-    return Container(
-      height: TalUiTheme.of(context).targetExtent(39),
-      color: WorkbenchColors.background,
-      child: Row(
-        children: [
-          const SizedBox(width: 6),
-          _navigationButton(
-            '资源库',
-            Icons.view_sidebar_outlined,
-            workspace?.resourceDocked ?? false,
-            () => unawaited(
-              workspaceKey.currentState?.toggleWorkbenchResource() ??
-                  Future.value(),
-            ),
-          ),
-          const SizedBox(width: 10),
-          for (final (panel, label, icon) in const [
-            (WorkspacePanelId.plot, '实时调参', Icons.show_chart),
-            (WorkspacePanelId.sourceDebug, '源码调试', Icons.code),
-            (WorkspacePanelId.analysis, '数据分析', Icons.analytics_outlined),
-          ])
-            _navigationButton(
-              label,
-              icon,
-              (workspace?.workbenchView ?? WorkspacePanelId.plot) == panel,
-              () => unawaited(
-                workspaceKey.currentState?.activateWorkbenchView(panel) ??
-                    Future.value(),
-              ),
-              key: ValueKey('workbench-view-${panel.name}'),
-            ),
-          const Spacer(),
-          TalIconButton(
-            tooltip: workspace?.focusedWorkbench == true ? '退出专注视图' : '专注视图',
-            onPressed: () => workspaceKey.currentState?.toggleWorkbenchFocus(),
-            icon: Icon(
-              workspace?.focusedWorkbench == true
-                  ? Icons.fullscreen_exit
-                  : Icons.fullscreen,
-              size: 19,
-            ),
-          ),
-          TalPopupMenuButton<String>(
-            tooltip: '布局',
-            onSelected: (action) {
-              final current = workspaceKey.currentState;
-              if (action == 'save') {
-                unawaited(current?.saveLayout() ?? Future.value());
-              }
-              if (action == 'restore') {
-                unawaited(current?.restoreLayout() ?? Future.value());
-              }
-              if (action == 'reset') current?.resetLayout();
-            },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'save', child: Text('保存布局')),
-              PopupMenuItem(value: 'restore', child: Text('恢复保存的布局')),
-              PopupMenuItem(value: 'reset', child: Text('重置默认布局')),
-            ],
-            child: const Icon(Icons.dashboard_outlined, size: 17),
-          ),
-          const SizedBox(width: 8),
-        ],
-      ),
-    );
-  }
-
-  Widget _navigationButton(
-    String label,
-    IconData icon,
-    bool active,
-    VoidCallback onPressed, {
-    Key? key,
-  }) => Container(
-    decoration: BoxDecoration(
-      border: Border(
-        bottom: BorderSide(
-          color: active ? WorkbenchColors.accent : Colors.transparent,
-          width: 2,
-        ),
-      ),
-    ),
-    child: TextButton.icon(
-      key: key,
-      onPressed: onPressed,
-      style: TextButton.styleFrom(
-        foregroundColor: active
-            ? WorkbenchColors.heading
-            : WorkbenchColors.muted,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-      ),
-      icon: Icon(icon, size: 16),
-      label: Text(label),
-    ),
-  );
 }
 
 class WorkbenchStatusBar extends StatelessWidget {

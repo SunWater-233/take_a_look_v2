@@ -9,6 +9,8 @@ import tempfile
 from pathlib import Path
 from typing import BinaryIO, Iterable, Mapping
 
+from .numeric_history import NumericHistory
+
 
 def recording_directory() -> Path:
     if configured := os.environ.get("TAL_RECORDINGS_DIR"):
@@ -32,10 +34,12 @@ class RawRecording:
         self.committed_bytes = 0
         self.failure: Exception | None = None
         self._closed = False
+        self._history: NumericHistory | None = None
 
     def status(self) -> dict[str, object]:
         return {"path": str(self.path) if self.path else None,
                 "sampleCount": self.sample_count, "bytes": self.committed_bytes,
+                "historyPath": str(self._history.directory) if self._history else None,
                 **({"error": str(self.failure)} if self.failure else {})}
 
     def append(self, frames: Iterable[tuple[float, dict[str, object]]], labels: Mapping[str, str]) -> None:
@@ -62,6 +66,7 @@ class RawRecording:
                 self.directory.mkdir(parents=True, exist_ok=True)
                 self.path = Path(tempfile.mkdtemp(prefix="session-", dir=self.directory)) / "samples.talraw"
                 self._file = self.path.open("wb")
+                self._history = NumericHistory(self.path.parent / "history")
             records = []
             if self.committed_bytes == 0:
                 records.append({"format": "take-a-look-raw", "version": 1})
@@ -72,6 +77,7 @@ class RawRecording:
                            for record in records).encode("utf-8")
             self._file.write(data)
             self._file.flush()
+            self._history.append(rows, self._channels)
             self.committed_bytes = self._file.tell()
             self.sample_count += len(rows)
         except Exception as error:
@@ -90,6 +96,7 @@ class RawRecording:
         self.close()
         self._closed = False
         self.path = None
+        self._history = None
         self._ids.clear()
         self._channels.clear()
         self.sample_count = self.committed_bytes = 0
@@ -97,6 +104,8 @@ class RawRecording:
 
     def close(self) -> None:
         self._closed = True
+        if self._history is not None:
+            self._history.close()
         stream, self._file = self._file, None
         if stream is not None:
             try:

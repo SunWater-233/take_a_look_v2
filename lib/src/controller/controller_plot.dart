@@ -1,6 +1,35 @@
 part of 'controller.dart';
 
 extension TakeALookControllerPlot on TakeALookController {
+  double get maximumPlotWindowSeconds => math.max(120, elapsedSeconds);
+
+  void preparePlotHistory({double? pixelWidth}) {
+    if (pixelWidth != null && pixelWidth.isFinite && pixelWidth > 0) {
+      _plotPixelWidth = pixelWidth;
+    }
+    final end = plotWindowEndSeconds;
+    final start = math.max(0.0, end - plotVisibleWindowSeconds);
+    final plotted = _watches.where((watch) => watch.plotted).toList();
+    plotHistory.update(
+      path: rawRecording['historyPath'] as String?,
+      keys: [for (final watch in plotted) watch.symbol.key],
+      start: start,
+      end: math.max(start + 0.2, end),
+      sourceEnd: elapsedSeconds,
+      pixelWidth: _plotPixelWidth,
+      enabled:
+          _presentationActive &&
+          (plottingPaused ||
+              !followLatest ||
+              plotted.any(
+                (watch) =>
+                    watch.samples.isNotEmpty &&
+                    watch.samples.first.dx > start &&
+                    watch.totalSampleCount > watch.samples.length,
+              )),
+    );
+  }
+
   void setPlotHighlightedWatch(String? key, {bool selectWatchRow = false}) {
     if (key == plotHighlightedWatchKey && !selectWatchRow) return;
     if (key != null && _watchByKey(key) == null) return;
@@ -78,7 +107,7 @@ extension TakeALookControllerPlot on TakeALookController {
     final keepFollowing = preserveFollowLatest && followLatest;
     final span =
         (keepFollowing ? (xMax - xMin).abs() : normalizedXMax - normalizedXMin)
-            .clamp(0.2, 120)
+            .clamp(0.2, maximumPlotWindowSeconds)
             .toDouble();
     final latest = math.max(elapsedSeconds, span);
     final end = normalizedXMax.clamp(span, latest).toDouble();
@@ -134,7 +163,9 @@ extension TakeALookControllerPlot on TakeALookController {
     final xMin = (values['xMin'] as num?)?.toDouble();
     final xMax = (values['xMax'] as num?)?.toDouble();
     if (xMin != null && xMax != null && xMin.isFinite && xMax > xMin) {
-      plotVisibleWindowSeconds = (xMax - xMin).clamp(0.2, 120).toDouble();
+      plotVisibleWindowSeconds = (xMax - xMin)
+          .clamp(0.2, maximumPlotWindowSeconds)
+          .toDouble();
       _frozenPlotEndSeconds = xMax;
     }
     if (values.containsKey('plotAutoY')) {
@@ -178,14 +209,25 @@ extension TakeALookControllerPlot on TakeALookController {
     }
     if (followLatest) _freezePlotViewportIfNeeded();
     followLatest = false;
-    final plottedSamples = _watches
-        .where((watch) => watch.plotted)
-        .expand((watch) => watch.samples);
     var first = double.infinity;
     var last = -double.infinity;
-    for (final point in plottedSamples) {
-      first = math.min(first, point.dx);
-      last = math.max(last, point.dx);
+    if (rawRecording['historyPath'] is String) {
+      first = 0;
+      last = elapsedSeconds;
+    } else {
+      for (final watch in _watches.where((watch) => watch.plotted)) {
+        final samples = watch.samples;
+        if (samples.isEmpty) continue;
+        if (samples.isOrdered) {
+          first = math.min(first, samples.first.dx);
+          last = math.max(last, samples.last.dx);
+        } else {
+          for (final point in samples) {
+            first = math.min(first, point.dx);
+            last = math.max(last, point.dx);
+          }
+        }
+      }
     }
     if (!first.isFinite || !last.isFinite) {
       first = 0;

@@ -92,6 +92,7 @@ TestRecordingCanvas recordPainter(TelemetryPainter painter, Size size) {
     TelemetryInspectionPainter(
       painter.controller,
       hoverPosition: painter.hoverPosition!,
+      inspectionAnchorY: painter.inspectionAnchorY,
     ).paint(canvas, size);
   }
   return canvas;
@@ -99,8 +100,8 @@ TestRecordingCanvas recordPainter(TelemetryPainter painter, Size size) {
 
 List<Paint> curvePaints(TestRecordingCanvas canvas) => [
   for (final call in canvas.invocations)
-    if (call.invocation.memberName == #drawPath)
-      call.invocation.positionalArguments[1] as Paint,
+    if (call.invocation.memberName == #drawRawPoints)
+      call.invocation.positionalArguments[2] as Paint,
 ];
 
 void main() {

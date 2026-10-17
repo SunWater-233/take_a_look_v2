@@ -196,23 +196,27 @@ class _WatchPanelState extends State<_WatchPanel> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        _WatchRow(
-          key: ValueKey<String>(watch.symbol.key),
+        WatchRowAnchor(
           controller: controller,
-          watch: watch,
-          label: node.label,
-          depth: depth,
-          expandable: node.children.isNotEmpty,
-          expanded: expanded,
-          onToggleExpanded: () => _toggleWatchTreeNode(watch.symbol.key),
-          columnWidths: _columnWidths,
-          hiddenColumns: _hiddenColumns,
-          selectedColumns: _selectedColumns,
-          rowHeight: _rowHeight,
-          selected: _selectedWatchKeys.contains(watch.symbol.key),
-          onSelect: _selectWatch,
-          onNameContextMenu: _showNameContextMenu,
-          onPlotContextMenu: _showPlotContextMenu,
+          watchKey: watch.symbol.key,
+          child: _WatchRow(
+            key: ValueKey<String>(watch.symbol.key),
+            controller: controller,
+            watch: watch,
+            label: node.label,
+            depth: depth,
+            expandable: node.children.isNotEmpty,
+            expanded: expanded,
+            onToggleExpanded: () => _toggleWatchTreeNode(watch.symbol.key),
+            columnWidths: _columnWidths,
+            hiddenColumns: _hiddenColumns,
+            selectedColumns: _selectedColumns,
+            rowHeight: _rowHeight,
+            selected: _selectedWatchKeys.contains(watch.symbol.key),
+            onSelect: _selectWatch,
+            onNameContextMenu: _showNameContextMenu,
+            onPlotContextMenu: _showPlotContextMenu,
+          ),
         ),
         if (expanded)
           for (final child in node.children)

@@ -511,7 +511,6 @@ class _MainWorkbenchState extends State<MainWorkbench> {
               ),
               if (widget.toolbar != null) widget.toolbar!,
               WorkbenchToolbar(controller: widget.controller),
-              WorkbenchNavigation(workspaceKey: workspaceKey),
               Expanded(
                 child: DockingWorkspace(
                   key: workspaceKey,

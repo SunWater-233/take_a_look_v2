@@ -88,7 +88,7 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('dropdown-item-手动读取')));
       await tester.pumpAndSettle();
       expect(watch.readMode, WatchReadMode.manual);
-      await tester.tap(find.byKey(const ValueKey('workbench-view-analysis')));
+      await tester.tap(find.byKey(const ValueKey('panel-tab-analysis')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('workspace-group-watch')), findsNothing);
       expect(
@@ -96,12 +96,10 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('区间统计'), findsOneWidget);
-      await tester.tap(
-        find.byKey(const ValueKey('workbench-view-sourceDebug')),
-      );
+      await tester.tap(find.byKey(const ValueKey('panel-tab-sourceDebug')));
       await tester.pumpAndSettle();
       expect(tester.widget<TextField>(input).controller!.text, '123.5');
-      await tester.tap(find.byKey(const ValueKey('workbench-view-plot')));
+      await tester.tap(find.byKey(const ValueKey('panel-tab-plot')));
       await tester.pumpAndSettle();
       expect(controller.analysisSession.selectedRange, (0.0, 2.0));
       expect(tester.widget<TextField>(input).controller!.text, '123.5');

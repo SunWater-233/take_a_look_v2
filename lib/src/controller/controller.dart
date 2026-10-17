@@ -17,6 +17,8 @@ import '../protocol/commands.dart';
 import '../protocol/events.dart';
 import '../telemetry/telemetry_store.dart';
 import '../telemetry/sample_buffer.dart';
+import '../telemetry/numeric_history.dart';
+import '../telemetry/plot_history.dart';
 
 export '../models/demo_data.dart';
 
@@ -51,7 +53,14 @@ class TakeALookController extends ChangeNotifier {
     this.csvExportPathPicker,
     this.csvImportContentsPicker,
     this.csvImportPathPicker,
+    HistoryReader? historyReader,
   }) {
+    plotHistory = PlotHistory(
+      reader: historyReader,
+      onChanged: () {
+        if (!_disposed) signals.plot.emit();
+      },
+    );
     _logs.add(LogEntry('UI 已从 .ui 文件加载，pyOCD 内存读写后端已就绪'));
     _logs.add(LogEntry('读取 .elf / .axf 后，可从符号层级中加入变量到实时调参列表'));
     if (remoteCommand == null && backendCommand == null) {
@@ -102,6 +111,8 @@ class TakeALookController extends ChangeNotifier {
 
   final ControllerState state = ControllerState();
   final TelemetryStore telemetryStore = TelemetryStore();
+  late final PlotHistory plotHistory;
+  double _plotPixelWidth = 1000;
   final ControllerSnapshotCodec snapshotCodec = const ControllerSnapshotCodec();
 
   ConnectionStatus get connectionStatus => state.connection.status;
@@ -233,8 +244,23 @@ class TakeALookController extends ChangeNotifier {
       ? (_frozenPlotEndSeconds ?? elapsedSeconds)
       : elapsedSeconds;
   Iterable<Offset> plotSamplesFor(WatchItem watch) {
-    if (!plottingPaused) return watch.samples;
-    return _frozenPlotSamples[watch.symbol.key] ?? watch.samples;
+    final recent = plottingPaused
+        ? _frozenPlotSamples[watch.symbol.key] ?? watch.samples
+        : watch.samples;
+    final history = plotHistory.samplesFor(watch.symbol.key);
+    final start = math.max(
+      0.0,
+      plotWindowEndSeconds - plotVisibleWindowSeconds,
+    );
+    if (recent.isNotEmpty &&
+        recent.isOrdered &&
+        ((recent.first.dx <= start &&
+                recent.last.dx >=
+                    math.min(plotWindowEndSeconds, elapsedSeconds)) ||
+            (!plottingPaused && watch.totalSampleCount == recent.length))) {
+      return recent;
+    }
+    return history ?? recent;
   }
 
   void _configurePlotRetention() {
@@ -385,6 +411,11 @@ class TakeALookController extends ChangeNotifier {
     bool sync = true,
   }) {
     final changes = changedSignals.toSet();
+    if (changes.contains(signals.plot) ||
+        changes.contains(signals.watches) ||
+        changes.contains(signals.sampling)) {
+      preparePlotHistory();
+    }
     _recordStateChanges(changes);
     for (final signal in changes) {
       signal.emit();
@@ -412,12 +443,15 @@ class TakeALookController extends ChangeNotifier {
 
   void _emitDisplayFrame() {
     if (_disposed || !_presentationActive) return;
+    preparePlotHistory();
     final telemetryChanged = _telemetryDisplayPending;
     if (telemetryChanged) {
       _telemetryDisplayPending = false;
       signals.telemetry.emit();
     }
-    if (!plottingPaused && _watches.any((watch) => watch.plotted)) {
+    if (!plottingPaused &&
+        (followLatest || !plotHistory.hasVisibleWindow) &&
+        _watches.any((watch) => watch.plotted)) {
       signals.plot.emit();
     }
     if (_telemetrySyncPending) {
@@ -489,6 +523,7 @@ class TakeALookController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    plotHistory.dispose();
     _ticker?.cancel();
     _plotRefreshTimer?.cancel();
     _samplingClockTimer?.cancel();

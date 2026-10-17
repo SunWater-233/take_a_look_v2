@@ -38,25 +38,46 @@ List<TelemetryPlotSeries> telemetryPlotSeries(
     );
     _watchOrders[controller] = order;
   }
+  final plottedCount = order.watches.where((watch) => watch.plotted).length;
+  final highlighted = order.watches.any(
+    (watch) =>
+        watch.plotted && watch.symbol.key == controller.plotHighlightedWatchKey,
+  );
+  // Bound GPU line work as channel count grows. Envelopes still retain their
+  // actual extrema; the inspected curve keeps full horizontal pixel resolution.
+  const totalBuckets = 6144.0;
+  final ordinaryWidth = math.min(
+    viewport.plot.width,
+    (totalBuckets - (highlighted ? viewport.plot.width : 0)) /
+        math.max(1, plottedCount - (highlighted ? 1 : 0)),
+  );
   return [
     for (final watch in order.watches)
       if (watch.plotted)
-        _seriesFor(watch, controller.plotSamplesFor(watch), viewport),
+        _seriesFor(
+          watch,
+          controller.plotSamplesFor(watch),
+          viewport,
+          pixelWidth: watch.symbol.key == controller.plotHighlightedWatchKey
+              ? viewport.plot.width
+              : math.max(1, ordinaryWidth),
+        ),
   ];
 }
 
 TelemetryPlotSeries _seriesFor(
   WatchItem watch,
   Iterable<Offset> samples,
-  CartesianPlotViewport viewport,
-) => TelemetryPlotSeries(
+  CartesianPlotViewport viewport, {
+  required double pixelWidth,
+}) => TelemetryPlotSeries(
   watch: watch,
   samples: samples,
   points: downsampleTelemetrySamples(
     samples,
     xMin: viewport.xMin,
     xMax: viewport.xMax,
-    pixelWidth: viewport.plot.width,
+    pixelWidth: pixelWidth,
   ),
 );
 

@@ -206,16 +206,21 @@ class _CompactWatchPanelState extends State<_CompactWatchPanel> {
                               ),
                             );
                           }
-                          return _CompactWatchRow(
+                          return WatchRowAnchor(
                             key: ValueKey('compact-watch-${watch.symbol.key}'),
                             controller: controller,
-                            watch: watch,
-                            label: node.label,
-                            depth: item.depth,
-                            selected:
-                                watch.symbol.key ==
-                                controller.compactWatchSelection,
-                            onSelect: () => _select(watch.symbol.key),
+                            watchKey: watch.symbol.key,
+                            child: _CompactWatchRow(
+                              key: ValueKey(watch.symbol.key),
+                              controller: controller,
+                              watch: watch,
+                              label: node.label,
+                              depth: item.depth,
+                              selected:
+                                  watch.symbol.key ==
+                                  controller.compactWatchSelection,
+                              onSelect: () => _select(watch.symbol.key),
+                            ),
                           );
                         },
                       ),
@@ -519,17 +524,11 @@ class _CompactWatchRowState extends State<_CompactWatchRow> {
                   : null,
             ),
           );
-          final pending =
-              _editor.text.isNotEmpty &&
-              (double.tryParse(_editor.text) != watch.value &&
-                  _editor.text != watch.valueLabel);
           final write = SizedBox(
             width: ui.touchOptimized ? 55 : 44,
             child: TalButton(
               key: ValueKey('compact-watch-write-$_key'),
-              variant: pending
-                  ? TalButtonVariant.filled
-                  : TalButtonVariant.text,
+              variant: TalButtonVariant.filled,
               style: const ButtonStyle(
                 padding: WidgetStatePropertyAll(
                   EdgeInsets.symmetric(horizontal: 5),

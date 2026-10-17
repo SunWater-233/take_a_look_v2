@@ -243,6 +243,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
       'lastBackendError',
     }.any(data.containsKey);
     final hasSamplingState = const {
+      'rawRecording',
       'sampleRateHz',
       'monitorRateHz',
       'rttSampleRateHz',

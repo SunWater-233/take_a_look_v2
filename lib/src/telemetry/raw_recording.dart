@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 
+import 'numeric_history.dart';
+
 /// Append-only acquisition journal, independent of all plot buffers. Channel
 /// IDs keep high-rate batches compact; every file contains its own schema.
 /// Writes go to the OS in batches, with fsync at export/rotation/close. CSV
@@ -31,11 +33,13 @@ class RawSampleRecording {
   int _committedBytes = 0;
   Object? failure;
   bool _closed = false;
+  NumericHistoryWriter? _history;
 
   Map<String, Object?> get status => {
     'path': path,
     'sampleCount': sampleCount,
     'bytes': _committedBytes,
+    'historyPath': _history?.directory.path,
     if (failure != null) 'error': failure.toString(),
   };
 
@@ -72,6 +76,7 @@ class RawSampleRecording {
         );
         path = '${session.path}/samples.talraw';
         _file = File(path!).openSync(mode: FileMode.writeOnly);
+        _history = NumericHistoryWriter(Directory('${session.path}/history'));
       }
       final batch = StringBuffer();
       if (_committedBytes == 0) {
@@ -82,6 +87,7 @@ class RawSampleRecording {
       }
       batch.writeln(jsonEncode({'frames': rows}));
       _file!.writeStringSync(batch.toString());
+      _history!.append(rows, _channels);
       _committedBytes = _file!.positionSync();
       sampleCount += rows.length;
     } catch (error) {
@@ -105,6 +111,7 @@ class RawSampleRecording {
     close();
     _closed = false;
     path = null;
+    _history = null;
     failure = null;
     sampleCount = 0;
     _committedBytes = 0;
@@ -114,6 +121,7 @@ class RawSampleRecording {
 
   void close() {
     _closed = true;
+    _history?.close();
     final file = _file;
     if (file == null) return;
     _file = null;

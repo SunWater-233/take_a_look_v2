@@ -58,12 +58,10 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   WorkspacePanelId? _detachedDraggedPanel;
   int _sourceAdditionRevision = 0;
   bool _legacyLayout = false;
-  WorkspacePanelId _workbenchView = WorkspacePanelId.plot;
   bool _focusedWorkbench = false;
   bool _automaticWorkbenchLayout = true;
 
   bool get usesWorkbenchLayout => widget.workbenchLayout && !_legacyLayout;
-  WorkspacePanelId get workbenchView => _workbenchView;
   bool get resourceDocked => _session.groups.any(
     (group) => group.panels.contains(WorkspacePanelId.symbols),
   );
@@ -109,13 +107,6 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   void _selectGroupPanel(WorkspaceGroup group, WorkspacePanelId panel) {
     setState(() {
       group.activePanel = panel;
-      if (const [
-        WorkspacePanelId.plot,
-        WorkspacePanelId.sourceDebug,
-        WorkspacePanelId.analysis,
-      ].contains(panel)) {
-        _workbenchView = panel;
-      }
     });
     widget.onPanelVisibilityChanged?.call();
   }
@@ -324,6 +315,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   }
 
   Widget _buildGroup(WorkspaceGroup group, Size workspaceSize) {
+    final showResourceToggle = usesWorkbenchLayout && group == _primaryGroup;
     final expanded =
         group == _primaryGroup && (_expandedAnalysis || _focusedWorkbench);
     final effectiveRect = expanded
@@ -338,6 +330,11 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         : group.rect;
     final rawRect = _toPixelRect(effectiveRect, workspaceSize);
     final rect = rawRect.deflate(1.5);
+    final ui = TalUiTheme.of(context);
+    final tabStripTop = usesWorkbenchLayout ? 0.0 : ui.panelHeaderHeight;
+    final tabStripBottom = usesWorkbenchLayout
+        ? ui.panelHeaderHeight
+        : tabStripTop + ui.panelTabStripHeight;
     return Positioned(
       key: ValueKey('workspace-group-${group.id}'),
       left: rect.left,
@@ -347,13 +344,12 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
       child: GestureDetector(
         behavior: HitTestBehavior.translucent,
         onTapDown: (details) {
+          if (!mounted) return;
           final y = details.localPosition.dy;
           final isTabStrip =
-              group.panels.length > 1 &&
-              y >= TalUiTheme.of(context).panelHeaderHeight &&
-              y <
-                  TalUiTheme.of(context).panelHeaderHeight +
-                      TalUiTheme.of(context).panelTabStripHeight;
+              (usesWorkbenchLayout || group.panels.length > 1) &&
+              y >= tabStripTop &&
+              y < tabStripBottom;
           if (!isTabStrip) _bringToFront(group);
         },
         child: Stack(
@@ -387,6 +383,26 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
                     draggable: _session.gridMode && !expanded,
                     groupId: group.id,
                     tabsDraggable: true,
+                    headerLeading: showResourceToggle
+                        ? Semantics(
+                            toggled: resourceDocked,
+                            child: TalIconButton(
+                              key: const ValueKey('workbench-resource-toggle'),
+                              tooltip: '资源库',
+                              onPressed: () =>
+                                  unawaited(toggleWorkbenchResource()),
+                              style: IconButton.styleFrom(
+                                foregroundColor: resourceDocked
+                                    ? WorkbenchColors.accent
+                                    : WorkbenchColors.muted,
+                              ),
+                              icon: const Icon(
+                                Icons.view_sidebar_outlined,
+                                size: 17,
+                              ),
+                            ),
+                          )
+                        : null,
                     onTabAccept: (data, targetIndex) =>
                         _acceptTabDrop(group, data, targetIndex),
                     onTabDragStart: (data) =>
@@ -474,7 +490,6 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   void _applyDefaultLayout() {
     _automaticWorkbenchLayout = true;
     _legacyLayout = false;
-    _workbenchView = WorkspacePanelId.plot;
     _focusedWorkbench = false;
     _session.groups
       ..clear()
@@ -609,8 +624,6 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         _session.groups
           ..clear()
           ..addAll(restored);
-        final active = _primaryGroup?.activePanel;
-        if (active != null) _workbenchView = active;
         _session.zCursor = _session.groups.fold(
           20,
           (value, group) => math.max(value, group.z),

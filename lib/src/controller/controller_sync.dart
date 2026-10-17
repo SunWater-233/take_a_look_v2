@@ -56,6 +56,7 @@ extension TakeALookControllerSync on TakeALookController {
     _resetPlotRefreshSchedule();
     _reconcileSamplingClock();
     if (!active && releaseHistory && _isDetachedRemote) {
+      plotHistory.clear();
       for (final watch in _watches) {
         watch.samples.clear();
       }

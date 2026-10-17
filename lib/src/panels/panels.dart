@@ -12,6 +12,7 @@ import 'package:desktop_drop/desktop_drop.dart';
 import '../chart/chart.dart';
 import '../chart/cartesian_renderer.dart';
 import '../chart/axis_settings.dart';
+import '../chart/inspection_anchor.dart';
 import '../analysis/analysis.dart';
 import '../analysis/analysis_fft.dart';
 import '../analysis/analysis_worker.dart';

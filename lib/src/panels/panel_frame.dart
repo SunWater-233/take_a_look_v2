@@ -299,16 +299,6 @@ class _TalPanelFrameState extends State<TalPanelFrame> {
   Widget _buildCompact(BuildContext context) {
     final chrome = widget.chrome;
     final tabs = chrome?.tabs ?? [widget.panel];
-    final activeOnly =
-        chrome?.groupId == 'plot' &&
-        tabs.every(
-          (panel) => const [
-            WorkspacePanelId.plot,
-            WorkspacePanelId.sourceDebug,
-            WorkspacePanelId.analysis,
-          ].contains(panel),
-        );
-    final visibleTabs = activeOnly ? [widget.panel] : tabs;
     return Container(
       key: ValueKey(
         chrome?.groupId == null
@@ -326,77 +316,65 @@ class _TalPanelFrameState extends State<TalPanelFrame> {
       ),
       child: Column(
         children: [
-          GestureDetector(
-            onDoubleTap: chrome?.onFloat,
-            child: Container(
-              height: TalUiTheme.of(context).panelHeaderHeight,
-              decoration: const BoxDecoration(
-                color: WorkbenchColors.surface,
-                border: Border(
-                  bottom: BorderSide(color: WorkbenchColors.border),
+          Container(
+            height: TalUiTheme.of(context).panelHeaderHeight,
+            decoration: const BoxDecoration(
+              color: WorkbenchColors.surface,
+              border: Border(bottom: BorderSide(color: WorkbenchColors.border)),
+            ),
+            child: Row(
+              children: [
+                ?chrome?.headerLeading,
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.bottomLeft,
+                    child: _PanelTabs(
+                      controller: widget.controller,
+                      tabs: tabs,
+                      selected: widget.panel,
+                      onSelected: chrome?.onSelect ?? (_) {},
+                      groupId: chrome?.groupId,
+                      draggable: chrome?.tabsDraggable ?? false,
+                      onAccept: chrome?.onTabAccept,
+                      onDragStart: chrome?.onTabDragStart,
+                      onDragUpdate: chrome?.onTabDragUpdate,
+                      onDragEnd: chrome?.onTabDragEnd,
+                      workbench: true,
+                    ),
+                  ),
                 ),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Align(
-                      alignment: Alignment.bottomLeft,
-                      child: _PanelTabs(
-                        controller: widget.controller,
-                        tabs: visibleTabs,
-                        selected: widget.panel,
-                        onSelected: chrome?.onSelect ?? (_) {},
-                        groupId: chrome?.groupId,
-                        draggable: chrome?.tabsDraggable ?? false,
-                        onAccept: chrome?.onTabAccept == null
-                            ? null
-                            : (data, index) => chrome!.onTabAccept!(
-                                data,
-                                index +
-                                    (activeOnly
-                                        ? tabs.indexOf(widget.panel)
-                                        : 0),
-                              ),
-                        onDragStart: chrome?.onTabDragStart,
-                        onDragUpdate: chrome?.onTabDragUpdate,
-                        onDragEnd: chrome?.onTabDragEnd,
-                        workbench: true,
+                if (chrome?.draggable == true)
+                  GestureDetector(
+                    onPanStart: chrome!.onDragStart,
+                    onPanUpdate: chrome.onDragUpdate,
+                    onPanEnd: chrome.onDragEnd,
+                    child: const MouseRegion(
+                      cursor: SystemMouseCursors.grab,
+                      child: SizedBox(
+                        width: 22,
+                        child: Icon(Icons.drag_indicator, size: 16),
                       ),
                     ),
                   ),
-                  if (chrome?.draggable == true)
-                    GestureDetector(
-                      onPanStart: chrome!.onDragStart,
-                      onPanUpdate: chrome.onDragUpdate,
-                      onPanEnd: chrome.onDragEnd,
-                      child: const MouseRegion(
-                        cursor: SystemMouseCursors.grab,
-                        child: SizedBox(
-                          width: 22,
-                          child: Icon(Icons.drag_indicator, size: 16),
-                        ),
-                      ),
-                    ),
-                  if (chrome != null && chrome.showActions) ...[
+                if (chrome != null && chrome.showActions) ...[
+                  TalIconButton(
+                    tooltip: '弹出为独立窗口',
+                    onPressed: chrome.onFloat,
+                    icon: const Icon(Icons.open_in_new, size: 15),
+                  ),
+                  if (tabs.length > 1)
                     TalIconButton(
-                      tooltip: '弹出为独立窗口',
-                      onPressed: chrome.onFloat,
-                      icon: const Icon(Icons.open_in_new, size: 15),
+                      tooltip: '从组合中拆分当前面板',
+                      onPressed: chrome.onSeparate,
+                      icon: const Icon(Icons.call_split, size: 15),
                     ),
-                    if (tabs.length > 1)
-                      TalIconButton(
-                        tooltip: '从组合中拆分当前面板',
-                        onPressed: chrome.onSeparate,
-                        icon: const Icon(Icons.call_split, size: 15),
-                      ),
-                    TalIconButton(
-                      tooltip: '隐藏面板（可从“视图”恢复）',
-                      onPressed: chrome.onClose,
-                      icon: const Icon(Icons.close, size: 16),
-                    ),
-                  ],
+                  TalIconButton(
+                    tooltip: '隐藏面板（可从“视图”恢复）',
+                    onPressed: chrome.onClose,
+                    icon: const Icon(Icons.close, size: 16),
+                  ),
                 ],
-              ),
+              ],
             ),
           ),
           Expanded(child: widget.child),

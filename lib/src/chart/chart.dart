@@ -7,6 +7,7 @@ import 'axis_settings.dart';
 import 'cartesian_renderer.dart';
 import 'desktop_axis_menu.dart';
 import 'hover.dart';
+import 'inspection_anchor.dart';
 import 'painter.dart';
 import 'selection_painter.dart';
 import 'viewport.dart';
@@ -28,6 +29,7 @@ class TelemetryChart extends StatefulWidget {
 class _TelemetryChartState extends State<TelemetryChart> {
   final MenuController _desktopMenuController = MenuController();
   final ValueNotifier<Offset?> _hoverPosition = ValueNotifier(null);
+  final ValueNotifier<double?> _inspectionAnchorY = ValueNotifier(null);
   int? _dragPointer;
   Offset? _lastDragPosition;
   Offset? _dragStartPosition;
@@ -44,6 +46,27 @@ class _TelemetryChartState extends State<TelemetryChart> {
   TalMenuAnimationLease? _menuAnimationLease;
 
   TakeALookController get controller => widget.controller;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback(_updateInspectionAnchor);
+  }
+
+  void _updateInspectionAnchor(Duration _) {
+    if (!mounted) return;
+    final render = context.findRenderObject();
+    _inspectionAnchorY.value = render is RenderBox
+        ? watchRowCenterInChart(
+            controller,
+            controller.plotHighlightedWatchKey,
+            render,
+          )
+        : null;
+    // Observe completed layouts, including cached sliver scrolling and panel
+    // moves. Registering the callback does not request another frame.
+    WidgetsBinding.instance.addPostFrameCallback(_updateInspectionAnchor);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -91,6 +114,7 @@ class _TelemetryChartState extends State<TelemetryChart> {
                       controller,
                       paintInspection: false,
                       hoverPosition: _hoverPosition,
+                      inspectionAnchorY: _inspectionAnchorY,
                     ),
                     isComplex: true,
                     willChange: true,
@@ -103,6 +127,7 @@ class _TelemetryChartState extends State<TelemetryChart> {
                               painter: TelemetryInspectionPainter(
                                 controller,
                                 hoverPosition: _hoverPosition,
+                                inspectionAnchorY: _inspectionAnchorY,
                               ),
                             ),
                           ),
@@ -170,6 +195,7 @@ class _TelemetryChartState extends State<TelemetryChart> {
   @override
   void dispose() {
     _hoverPosition.dispose();
+    _inspectionAnchorY.dispose();
     _releaseMenuAnimation();
     super.dispose();
   }
@@ -441,7 +467,9 @@ class _TelemetryChartState extends State<TelemetryChart> {
     var yMin = viewport.yMin;
     var yMax = viewport.yMax;
     if (controller.plotMouseXEnabled) {
-      final span = (currentXSpan * xScale).clamp(0.2, 120).toDouble();
+      final span = (currentXSpan * xScale)
+          .clamp(0.2, controller.maximumPlotWindowSeconds)
+          .toDouble();
       if (following) {
         xMin = xMax - span;
       } else {

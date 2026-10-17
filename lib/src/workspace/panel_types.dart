@@ -188,6 +188,7 @@ class PanelChrome {
     this.onTabDragUpdate,
     this.onTabDragEnd,
     this.tabsDraggable = false,
+    this.headerLeading,
   });
 
   final List<WorkspacePanelId> tabs;
@@ -208,4 +209,5 @@ class PanelChrome {
   final void Function(PanelTabDragData, DragUpdateDetails)? onTabDragUpdate;
   final void Function(PanelTabDragData, DraggableDetails)? onTabDragEnd;
   final bool tabsDraggable;
+  final Widget? headerLeading;
 }

@@ -10,7 +10,7 @@ import 'package:take_a_look_v2/src/telemetry/raw_recording.dart';
 
 void main() {
   test(
-    'write readbacks are recorded without merging equal timestamps',
+    'write readbacks refresh the value without adding synthetic samples',
     () async {
       final directory = Directory.systemTemp.createTempSync('tal_readback_');
       final lab = UiTestSession(
@@ -25,20 +25,20 @@ void main() {
       controller.toggleSampling();
       final watch = controller.watches.first;
       controller.writeWatch(watch.symbol.key, '42.5');
-      expect(watch.totalSampleCount, 401);
-      expect(lab.recording.sampleCount, 401);
+      expect(watch.totalSampleCount, 400);
+      expect(lab.recording.sampleCount, 400);
       controller.toggleWatchSampling(watch.symbol.key, false);
       controller.writeWatch(watch.symbol.key, '8.5');
       expect(watch.value, 8.5);
-      expect(lab.recording.sampleCount, 401);
+      expect(lab.recording.sampleCount, 400);
       final csv = File('${directory.path}/readbacks.csv');
-      expect(await lab.recording.exportCsv(csv.path), 401);
+      expect(await lab.recording.exportCsv(csv.path), 400);
       final lines = await csv.readAsLines();
-      expect(lines.length, 402);
+      expect(lines.length, 401);
       final finalRow = lines.last.split(',');
       expect(finalRow.first, '4.000000000');
-      expect(finalRow[1], '"42.5"');
-      expect(finalRow.skip(2).every((value) => value.isEmpty), isTrue);
+      expect(finalRow[1], isNot('"42.5"'));
+      expect(finalRow.skip(2).every((value) => value.isNotEmpty), isTrue);
     },
   );
 

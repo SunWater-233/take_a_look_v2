@@ -23,6 +23,7 @@ class RpcMethod(StrEnum):
     SET_CONFIG = "setConfig"
     SET_WATCHES = "setWatches"
     WRITE_WATCH = "writeWatch"
+    READ_WATCH = "readWatch"
     SET_SAMPLING_PAUSED = "setSamplingPaused"
     SET_RTT = "setRtt"
     CLEAR_SAMPLES = "clearSamples"
@@ -40,6 +41,7 @@ class RpcMethod(StrEnum):
 class EventName(StrEnum):
     STATE = "state"
     SAMPLES = "samples"
+    WATCH_VALUES = "watchValues"
     SAMPLES_CLEARED = "samplesCleared"
     SAMPLE_SCHEMA = "sampleSchema"
     LOG = "log"
@@ -116,6 +118,8 @@ def encode_sample_batch(
     sequence: int,
     keys: list[str],
     frames: list[tuple[float, Mapping[str, object]]],
+    *,
+    updated_at_ms: int | None = None,
 ) -> bytes:
     """Encode high-rate samples without repeating symbol names per value."""
     if len(keys) > 0xFFFF:
@@ -126,13 +130,15 @@ def encode_sample_batch(
     payload = bytearray(
         struct.pack(
             "<BIIIH",
-            SAMPLE_PAYLOAD_VERSION,
+            2 if updated_at_ms is not None else SAMPLE_PAYLOAD_VERSION,
             schema_id,
             sequence,
             len(frames),
             len(keys),
         )
     )
+    if updated_at_ms is not None:
+        payload.extend(struct.pack("<Q", updated_at_ms))
     for elapsed, values in frames:
         validity = bytearray(validity_size)
         numeric_values: dict[int, float] = {}

@@ -21,6 +21,31 @@ EmberMobile gateway / remote GDB Server; it does not expose a network listener.
 
 ## Development
 
+The default workspace uses a wide chart/source canvas and a compact variable
+sidebar. The top navigation switches between realtime tuning, source debugging,
+and analysis; resources and the combined log/build/register output can be
+opened as needed. Panel docking, detached windows, layout saving, UI scaling,
+and the original project settings dialog remain available.
+
+New variables added from the resource library or source view start in **仅监视**
+(monitor only). The three per-variable read policies are:
+
+- **仅监视**: refresh the current value at 2 Hz by default, without adding history.
+- **采集**: use the global capture rate and append samples to the recording.
+- **手动读取**: read only on explicit refresh or after a write.
+
+The full variable table retains metadata, colors, ordering and per-variable
+monitor-rate overrides (0.5–10 Hz). Pausing capture leaves monitoring active;
+hiding a curve does not stop recording. Changing a read policy preserves past
+samples and never fills in history from monitor values. Writes verify by reading
+back immediately and do not create synthetic samples. RTT producers retain their
+device-defined stream rate; monitor mode limits displayed updates, not RTT traffic.
+
+Existing version-1 layout files are preserved on first launch of this workspace.
+Use **视图 → 恢复保存的布局** to restore one, or save the new layout; saving creates a
+one-time `.v1.bak` backup. A restored legacy layout can also be saved and will
+reopen with its chosen panel presentation.
+
 Prerequisites are Flutter, Python 3.11 or newer, and platform build tools.
 
 ```powershell

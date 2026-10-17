@@ -60,6 +60,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
       if (wants('symbolLoad') && symbolLoadProgress != null)
         'symbolLoad': symbolLoadProgress!.toJson(),
       if (wants('sampleRateHz')) 'sampleRateHz': sampleRateHz,
+      if (wants('monitorRateHz')) 'monitorRateHz': monitorRateHz,
       if (wants('rttSampleRateHz')) 'rttSampleRateHz': rttSampleRateHz,
       if (wants('displayRefreshMode')) 'displayRefreshMode': displayRefreshMode,
       if (wants('samplingElapsedSeconds'))
@@ -103,6 +104,9 @@ extension TakeALookControllerSnapshot on TakeALookController {
               'key': watch.symbol.key,
               'color': watch.color.toARGB32(),
               'sampling': watch.samplingEnabled,
+              'readMode': watch.readMode.name,
+              'monitorRateHz': watch.monitorRateHz,
+              'updatedAtMs': watch.updatedAtMs,
               'plotted': watch.plotted,
               'value': watch.value,
               'sampleCursor': watch.totalSampleCount,
@@ -165,6 +169,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
           {
             'key': watch.symbol.key,
             'value': watch.value,
+            'updatedAtMs': watch.updatedAtMs,
             'sampleCursor': watch.totalSampleCount,
             'samples': [
               for (final point in watch.samples) [point.dx, point.dy],
@@ -211,6 +216,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
       'key': watch.symbol.key,
       'value': watch.value,
       'sampleStart': sampleStart,
+      'updatedAtMs': watch.updatedAtMs,
       'sampleCursor': watch.totalSampleCount,
       if (reset) 'reset': true,
       if (includeSamples)
@@ -238,6 +244,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
     }.any(data.containsKey);
     final hasSamplingState = const {
       'sampleRateHz',
+      'monitorRateHz',
       'rttSampleRateHz',
       'samplingPaused',
       'rttEnabled',
@@ -297,6 +304,8 @@ extension TakeALookControllerSnapshot on TakeALookController {
     }
     symbolFile = data['symbolFile'] as String? ?? symbolFile;
     sampleRateHz = (data['sampleRateHz'] as num?)?.toDouble() ?? sampleRateHz;
+    monitorRateHz =
+        (data['monitorRateHz'] as num?)?.toDouble() ?? monitorRateHz;
     rttSampleRateHz =
         (data['rttSampleRateHz'] as num?)?.toDouble() ?? rttSampleRateHz;
     final nextDisplayRefreshMode = data['displayRefreshMode'] as String?;
@@ -425,6 +434,14 @@ extension TakeALookControllerSnapshot on TakeALookController {
                         : null,
                   )
                   ..samplingEnabled = item['sampling'] != false
+                  ..readMode = WatchReadMode.parse(
+                    item['readMode'],
+                    sampling: item['sampling'] != false,
+                  )
+                  ..monitorRateHz = (item['monitorRateHz'] as num?)?.toDouble()
+                  ..updatedAtMs =
+                      (item['updatedAtMs'] as num?)?.toInt() ??
+                      previousWatches[symbol.key]?.updatedAtMs
                   ..plotted = item['plotted'] == true
                   ..value = _numericValue(item['value']);
             telemetryStore.configureWatch(watch);

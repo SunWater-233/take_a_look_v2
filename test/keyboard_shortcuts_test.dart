@@ -58,6 +58,8 @@ void main() {
       ),
     );
     await tester.pump();
+    await tester.tap(find.text('资源库'));
+    await tester.pumpAndSettle();
   }
 
   Future<void> finishSourceRead(WidgetTester tester) async {
@@ -141,7 +143,9 @@ void main() {
         find.byKey(const ValueKey('symbol-search-field')),
         'main',
       );
-      await tester.tap(find.byKey(const ValueKey('panel-tab-sourceDebug')));
+      await tester.tap(
+        find.byKey(const ValueKey('workbench-view-sourceDebug')),
+      );
       await tester.pump();
       await finishSourceRead(tester);
       await command(tester, LogicalKeyboardKey.keyF);
@@ -168,11 +172,13 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pump();
 
-      await tester.tap(find.byKey(const ValueKey('panel-tab-plot')));
+      await tester.tap(find.byKey(const ValueKey('workbench-view-plot')));
       await tester.pump();
       await command(tester, LogicalKeyboardKey.keyF);
       expect(search, findsNothing);
-      await tester.tap(find.byKey(const ValueKey('panel-tab-sourceDebug')));
+      await tester.tap(
+        find.byKey(const ValueKey('workbench-view-sourceDebug')),
+      );
       await tester.pump();
       await command(tester, LogicalKeyboardKey.keyF);
       expect(search, findsOneWidget);
@@ -188,7 +194,9 @@ void main() {
         'sourceFiles': [path],
       });
       await pumpWorkbench(tester);
-      await tester.tap(find.byKey(const ValueKey('panel-tab-sourceDebug')));
+      await tester.tap(
+        find.byKey(const ValueKey('workbench-view-sourceDebug')),
+      );
       await tester.pump();
       await finishSourceRead(tester);
 
@@ -235,7 +243,9 @@ void main() {
         'sourceFiles': ['Z:/firmware/main.c'],
       });
       await pumpWorkbench(tester);
-      await tester.tap(find.byKey(const ValueKey('panel-tab-sourceDebug')));
+      await tester.tap(
+        find.byKey(const ValueKey('workbench-view-sourceDebug')),
+      );
       await tester.pump();
       final editor = TextEditingController(text: 'dialog text');
       await finishSourceRead(tester);

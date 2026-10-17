@@ -35,6 +35,7 @@ class StdioServer:
         self._sample_schema_id = 0
         self._sample_keys: list[str] = []
         self._sample_sequence = 0
+        self._sample_capture_only = False
         self._service = BackendService(self._send_event, source_settings_file=default_settings_file())
 
     def run(self) -> int:
@@ -128,6 +129,10 @@ class StdioServer:
             return
 
         with self._write_lock:
+            capture_only = params.get("captureOnly") is True
+            if capture_only != self._sample_capture_only:
+                self._sample_capture_only = capture_only
+                self._set_sample_schema_unlocked(list(self._sample_keys))
             missing = frame_keys.difference(self._sample_keys)
             if missing:
                 # Preserve discovery order even when another state changed the schema.
@@ -145,6 +150,7 @@ class StdioServer:
                 self._sample_sequence,
                 self._sample_keys,
                 frames,
+                updated_at_ms=params.get("updatedAtMs") if capture_only else None,
             )
             self._enqueue_output(frame_sample_payload(payload))
 
@@ -156,6 +162,7 @@ class StdioServer:
             str(watch["key"])
             for watch in raw_watches
             if isinstance(watch, Mapping) and isinstance(watch.get("key"), str)
+            and ("readMode" not in watch or watch.get("readMode") == "capture")
         ]
         with self._write_lock:
             if keys != self._sample_keys:
@@ -167,7 +174,8 @@ class StdioServer:
         self._write_json_unlocked(
             event(
                 EventName.SAMPLE_SCHEMA,
-                {"id": self._sample_schema_id, "keys": self._sample_keys},
+                {"id": self._sample_schema_id, "keys": self._sample_keys,
+                 **({"captureOnly": True} if self._sample_capture_only else {})},
             )
         )
 

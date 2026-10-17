@@ -1,6 +1,13 @@
 part of 'controller.dart';
 
 extension TakeALookControllerConnection on TakeALookController {
+  void setMonitorRate(double value) {
+    if (!value.isFinite || value < 0.5 || value > 10) return;
+    if (_dispatchCommand(ControllerCommand.setMonitorRate, value)) return;
+    monitorRateHz = value;
+    _emitState([signals.sampling]);
+  }
+
   void setUiScale(double value) {
     if (_dispatchRemote(ControllerCommand.setUiScale, value)) return;
     final normalized = value.clamp(0.5, 2).toDouble();

@@ -90,6 +90,11 @@ class TakeALookController extends ChangeNotifier {
   final ValueNotifier<double> _uiScale = ValueNotifier<double>(1);
   final ControllerSignals signals = ControllerSignals();
   final Map<String, int> _stateFieldRevisions = {};
+  final Map<String, String> watchInputDrafts = {};
+  String? compactWatchSelection;
+  final Set<String> compactExpandedWatches = {};
+  int workbenchOutputTab = 0;
+  ({String path, int line})? sourceLocationRequest;
   int _stateRevision = 0;
   int _analysisDataRevision = 0;
   final Set<String> _visibleSourceViews = <String>{};
@@ -121,6 +126,13 @@ class TakeALookController extends ChangeNotifier {
       state.connection.lastError = value;
 
   double get sampleRateHz => state.acquisition.sampleRateHz;
+  double get monitorRateHz => state.acquisition.monitorRateHz;
+  set monitorRateHz(double value) {
+    if (value.isFinite && value >= 0.5 && value <= 10) {
+      state.acquisition.monitorRateHz = value;
+    }
+  }
+
   set sampleRateHz(double value) {
     if (!value.isFinite || value <= 0) return;
     state.acquisition.sampleRateHz = value;
@@ -280,6 +292,8 @@ class TakeALookController extends ChangeNotifier {
               'color':
                   '#${watch.color.toARGB32().toRadixString(16).padLeft(8, '0')}',
               'sampling': watch.samplingEnabled,
+              'readMode': watch.readMode.name,
+              'monitorRateHz': watch.monitorRateHz,
               'plotted': watch.plotted,
             },
         ],
@@ -301,18 +315,29 @@ class TakeALookController extends ChangeNotifier {
   }
 
   void _tick(Timer timer) {
-    if (connectionStatus != ConnectionStatus.connected || samplingPaused) {
+    if (connectionStatus != ConnectionStatus.connected) {
       return;
     }
     elapsedSeconds += 0.033;
     _phase += 0.033;
+    final now = DateTime.now().millisecondsSinceEpoch;
     for (var index = 0; index < _watches.length; index += 1) {
       final watch = _watches[index];
+      if (watch.readMode == WatchReadMode.manual) continue;
+      if (watch.samplingEnabled && samplingPaused) continue;
+      if (watch.readMode == WatchReadMode.monitor &&
+          watch.updatedAtMs != null &&
+          now - watch.updatedAtMs! < 1000 / monitorRateFor(watch)) {
+        continue;
+      }
       final value =
           math.sin(_phase * (1.2 + index * 0.23)) * (index + 1) +
           math.sin(_phase * 8.0 + index) * 0.12;
       watch.value = value;
-      telemetryStore.append(watch, Offset(elapsedSeconds, value));
+      watch.updatedAtMs = now;
+      if (watch.samplingEnabled) {
+        telemetryStore.append(watch, Offset(elapsedSeconds, value));
+      }
     }
     _emitTelemetry();
   }

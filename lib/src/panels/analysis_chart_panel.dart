@@ -24,9 +24,13 @@ Rect _analysisPlotRect(Size size) => Rect.fromLTRB(
 );
 
 class _AnalysisChartPanel extends StatefulWidget {
-  const _AnalysisChartPanel({required this.controller});
+  const _AnalysisChartPanel({
+    required this.controller,
+    this.horizontal = false,
+  });
 
   final TakeALookController controller;
+  final bool horizontal;
 
   @override
   State<_AnalysisChartPanel> createState() => _AnalysisChartPanelState();
@@ -206,12 +210,19 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
       ),
       child: Row(
         children: [
-          Text('分析图表', style: talStrong),
+          if (!widget.horizontal) Text('分析图表', style: talStrong),
           if (_sourceLabel.isNotEmpty) ...[
             const SizedBox(width: 10),
-            Text('· $_sourceLabel · ${_series.length} 条曲线', style: talMuted),
+            Expanded(
+              child: Text(
+                '$_sourceLabel · ${_series.length} 条曲线',
+                style: talMuted,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           ],
-          const Spacer(),
+          if (_sourceLabel.isEmpty) const Spacer(),
           if (_series.isNotEmpty) ...[
             TalButton.icon(
               key: const ValueKey('analysis-fft-toggle'),
@@ -334,6 +345,51 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
   Widget _buildAnalysisBody() {
     return LayoutBuilder(
       builder: (context, constraints) {
+        if (widget.horizontal && constraints.maxWidth >= 760) {
+          return Row(
+            key: const ValueKey('analysis-horizontal-workbench'),
+            children: [
+              Expanded(
+                child: Column(
+                  children: [
+                    Container(
+                      height: 30,
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      color: WorkbenchColors.surface,
+                      child: const Row(
+                        children: [
+                          Text('时域', style: workbenchBody),
+                          Spacer(),
+                          Text('拖动选择区间', style: workbenchMuted),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      flex: 3,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(8, 6, 8, 0),
+                        child: _buildTimeDomainChart(),
+                      ),
+                    ),
+                    if (_session.fftVisible) ...[
+                      const Divider(height: 1, color: WorkbenchColors.border),
+                      SizedBox(
+                        height: TalUiTheme.of(context).targetExtent(34),
+                        child: _buildFftToolbar(),
+                      ),
+                      Expanded(flex: 2, child: _buildFftPanel()),
+                    ],
+                  ],
+                ),
+              ),
+              Container(width: 1, color: WorkbenchColors.border),
+              SizedBox(
+                width: (constraints.maxWidth * .28).clamp(280.0, 350.0),
+                child: _buildStatisticsSidebar(),
+              ),
+            ],
+          );
+        }
         final maxStatsHeight = math.max(64.0, constraints.maxHeight - 140);
         final minStatsHeight = math.min(88.0, maxStatsHeight);
         final statsHeight = _statsHeight
@@ -375,6 +431,194 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
       },
     );
   }
+
+  Widget _buildStatisticsSidebar() => ValueListenableBuilder<int>(
+    valueListenable: _statsChanges,
+    builder: (context, _, _) {
+      final index = (_session.selectedSeriesIndex ?? 0).clamp(
+        0,
+        _series.length - 1,
+      );
+      final stats = index < _session.selectionStats.length
+          ? _session.selectionStats[index]
+          : null;
+      final range = _selectedRange;
+      Widget metric(String label, String value) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 7),
+        child: Row(
+          children: [
+            Text(label, style: workbenchMuted),
+            const Spacer(),
+            Text(value, style: talMono),
+          ],
+        ),
+      );
+      return ColoredBox(
+        color: WorkbenchColors.surface,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 10, 8, 8),
+              child: Row(
+                children: [
+                  const Text('区间统计', style: workbenchBody),
+                  const Spacer(),
+                  TalButton(
+                    onPressed: _showFullStatistics,
+                    child: const Text('完整统计表'),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                children: [
+                  for (final (seriesIndex, series) in _series.indexed)
+                    InkWell(
+                      onTap: () => _selectStatsCell(seriesIndex, 0),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 3,
+                          horizontal: 4,
+                        ),
+                        color: index == seriesIndex
+                            ? WorkbenchColors.raised
+                            : Colors.transparent,
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 3,
+                              height: 20,
+                              color: series.color,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                series.name,
+                                style: workbenchBody,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            TalIconButton(
+                              tooltip: _seriesVisibility[seriesIndex]
+                                  ? '隐藏曲线'
+                                  : '显示曲线',
+                              onPressed: () => _setSeriesVisibility(
+                                seriesIndex,
+                                value: !_seriesVisibility[seriesIndex],
+                              ),
+                              icon: Icon(
+                                _seriesVisibility[seriesIndex]
+                                    ? Icons.visibility_outlined
+                                    : Icons.visibility_off_outlined,
+                                size: 17,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 14),
+                  const Divider(color: WorkbenchColors.border),
+                  Row(
+                    children: [
+                      const Text('选择区间', style: workbenchBody),
+                      const Spacer(),
+                      TextButton(
+                        onPressed: _selectAllAnalysisRange,
+                        child: const Text('全段'),
+                      ),
+                      TextButton(
+                        onPressed: range == null
+                            ? null
+                            : _clearAnalysisSelection,
+                        child: const Text('清除'),
+                      ),
+                    ],
+                  ),
+                  Text(
+                    range == null
+                        ? '在时域图中拖动选择，或选择全段。'
+                        : '${_formatNumber(range.$1)} s  —  ${_formatNumber(range.$2)} s',
+                    style: workbenchMuted,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    _series[index].name,
+                    style: workbenchBody,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  metric('样本数', stats?.count.toString() ?? '—'),
+                  metric(
+                    '最小值',
+                    stats == null ? '—' : _formatNumber(stats.minimum),
+                  ),
+                  metric(
+                    '最大值',
+                    stats == null ? '—' : _formatNumber(stats.maximum),
+                  ),
+                  metric(
+                    '平均值',
+                    stats == null ? '—' : _formatNumber(stats.average),
+                  ),
+                  metric(
+                    '峰峰值',
+                    stats == null
+                        ? '—'
+                        : _formatNumber(stats.maximum - stats.minimum),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    },
+  );
+
+  Future<void> _showFullStatistics() => showTalDialog<void>(
+    context: context,
+    builder: (context) => Dialog(
+      child: SizedBox(
+        width: 1050,
+        height: math.min(540, MediaQuery.sizeOf(context).height - 100),
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(8),
+              child: Row(
+                children: [
+                  const Text('完整统计表', style: talStrong),
+                  const Spacer(),
+                  TalIconButton(
+                    tooltip: '关闭统计表',
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close, size: 18),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: LayoutBuilder(
+                builder: (context, constraints) => ValueListenableBuilder<int>(
+                  valueListenable: _statsChanges,
+                  builder: (context, _, _) => _buildStats(
+                    _selectedRange?.$1,
+                    _selectedRange?.$2,
+                    height: constraints.maxHeight,
+                    minimumHeight: constraints.maxHeight,
+                    maximumHeight: constraints.maxHeight,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 
   Widget _buildTimeDomainChart() {
     return LayoutBuilder(

@@ -35,9 +35,10 @@ final Expando<_SymbolTreeCache> _symbolTreeCaches = Expando<_SymbolTreeCache>(
 );
 
 class _SymbolPanel extends StatefulWidget {
-  const _SymbolPanel({required this.controller});
+  const _SymbolPanel({required this.controller, this.defaultMonitor = false});
 
   final TakeALookController controller;
+  final bool defaultMonitor;
 
   @override
   State<_SymbolPanel> createState() => _SymbolPanelState();
@@ -375,7 +376,7 @@ class _SymbolPanelState extends State<_SymbolPanel> {
     if (node.expandable) {
       final symbol = node.symbol;
       if (isDoubleTap && symbol != null) {
-        widget.controller.activateSymbol(symbol.key);
+        _addSymbol(symbol.key);
       } else {
         _toggleNode(node);
       }
@@ -396,8 +397,17 @@ class _SymbolPanelState extends State<_SymbolPanel> {
     }
     final symbol = node.symbol;
     if (isDoubleTap && symbol != null) {
-      widget.controller.activateSymbol(symbol.key);
+      _addSymbol(symbol.key);
     }
+  }
+
+  void _addSymbol(String key) {
+    widget.controller.selectSymbols([key]);
+    widget.controller.addSelectedToWatch(
+      mode: widget.defaultMonitor
+          ? WatchReadMode.monitor
+          : WatchReadMode.capture,
+    );
   }
 
   @override
@@ -548,12 +558,16 @@ class _SymbolPanelState extends State<_SymbolPanel> {
                   ),
                   const SizedBox(width: 8),
                   SizedBox(
-                    width: 160,
+                    width: widget.defaultMonitor ? 116 : 160,
                     child: TalButton(
                       onPressed: widget.controller.selectedSymbols.isEmpty
                           ? null
-                          : widget.controller.addSelectedToWatch,
-                      child: const Text('加入实时调参'),
+                          : () => widget.controller.addSelectedToWatch(
+                              mode: widget.defaultMonitor
+                                  ? WatchReadMode.monitor
+                                  : WatchReadMode.capture,
+                            ),
+                      child: Text(widget.defaultMonitor ? '加入监视' : '加入实时调参'),
                     ),
                   ),
                 ],

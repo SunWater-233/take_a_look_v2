@@ -25,6 +25,7 @@ class DockingWorkspace extends StatefulWidget {
     required this.windowSync,
     this.layoutFile,
     this.onPanelVisibilityChanged,
+    this.workbenchLayout = false,
     super.key,
   });
 
@@ -32,6 +33,7 @@ class DockingWorkspace extends StatefulWidget {
   final MainWindowSync windowSync;
   final File? layoutFile;
   final VoidCallback? onPanelVisibilityChanged;
+  final bool workbenchLayout;
 
   @override
   DockingWorkspaceState createState() => DockingWorkspaceState();
@@ -55,6 +57,153 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   String? _detachedDragSourceWindowId;
   WorkspacePanelId? _detachedDraggedPanel;
   int _sourceAdditionRevision = 0;
+  bool _legacyLayout = false;
+  WorkspacePanelId _workbenchView = WorkspacePanelId.plot;
+  bool _focusedWorkbench = false;
+  bool _automaticWorkbenchLayout = true;
+
+  bool get usesWorkbenchLayout => widget.workbenchLayout && !_legacyLayout;
+  WorkspacePanelId get workbenchView => _workbenchView;
+  bool get resourceDocked => _session.groups.any(
+    (group) => group.panels.contains(WorkspacePanelId.symbols),
+  );
+  bool get outputDocked => _session.groups.any(
+    (group) => group.panels.contains(WorkspacePanelId.log),
+  );
+  bool get focusedWorkbench => _focusedWorkbench;
+  WorkspaceGroup? get _primaryGroup =>
+      _session.groups.where((group) => group.id == 'plot').firstOrNull;
+  bool get _expandedAnalysis =>
+      usesWorkbenchLayout &&
+      _primaryGroup?.activePanel == WorkspacePanelId.analysis &&
+      _session.groups.any(
+        (group) =>
+            group.id == 'watch' &&
+            group.panels.length == 1 &&
+            (group.rect.left - (_primaryGroup?.rect.right ?? 0)).abs() < .001,
+      );
+
+  Future<void> activateWorkbenchView(WorkspacePanelId panel) async {
+    if (await detachedWindows.showIfOpen(panel)) return;
+    var group = _session.groups
+        .where((group) => group.panels.contains(panel))
+        .firstOrNull;
+    if (group == null) {
+      group = _primaryGroup;
+      if (group != null) {
+        group.panels.add(panel);
+      } else {
+        group = WorkspaceGroup(
+          id: 'plot',
+          panels: [panel],
+          activePanel: panel,
+          rect: const Rect.fromLTWH(0, 0, .72, 1),
+          z: ++_session.zCursor,
+        );
+        _session.groups.add(group);
+      }
+    }
+    _selectGroupPanel(group, panel);
+  }
+
+  void _selectGroupPanel(WorkspaceGroup group, WorkspacePanelId panel) {
+    setState(() {
+      group.activePanel = panel;
+      if (const [
+        WorkspacePanelId.plot,
+        WorkspacePanelId.sourceDebug,
+        WorkspacePanelId.analysis,
+      ].contains(panel)) {
+        _workbenchView = panel;
+      }
+    });
+    widget.onPanelVisibilityChanged?.call();
+  }
+
+  void toggleWorkbenchFocus() {
+    setState(() => _focusedWorkbench = !_focusedWorkbench);
+    widget.onPanelVisibilityChanged?.call();
+  }
+
+  Future<void> toggleWorkbenchResource() async {
+    if (await detachedWindows.showIfOpen(WorkspacePanelId.symbols)) return;
+    final existing = _session.groups
+        .where((group) => group.panels.contains(WorkspacePanelId.symbols))
+        .firstOrNull;
+    setState(() {
+      if (existing != null) {
+        _detachPanel(existing, WorkspacePanelId.symbols);
+      } else {
+        _session.groups.add(
+          WorkspaceGroup(
+            id: 'resources',
+            panels: [WorkspacePanelId.symbols],
+            activePanel: WorkspacePanelId.symbols,
+            rect: const Rect.fromLTWH(0, 0, .2, 1),
+            z: ++_session.zCursor,
+          ),
+        );
+      }
+      _reflowWorkbench();
+    });
+    widget.onPanelVisibilityChanged?.call();
+  }
+
+  Future<void> toggleWorkbenchOutput() async {
+    if (await detachedWindows.showIfOpen(WorkspacePanelId.log)) return;
+    final existing = _session.groups
+        .where((group) => group.panels.contains(WorkspacePanelId.log))
+        .firstOrNull;
+    setState(() {
+      if (existing != null) {
+        _detachPanel(existing, WorkspacePanelId.log);
+      } else {
+        _session.groups.add(
+          WorkspaceGroup(
+            id: 'output',
+            panels: [WorkspacePanelId.log],
+            activePanel: WorkspacePanelId.log,
+            rect: const Rect.fromLTWH(0, .76, 1, .24),
+            z: ++_session.zCursor,
+          ),
+        );
+      }
+      _reflowWorkbench();
+    });
+    widget.onPanelVisibilityChanged?.call();
+  }
+
+  void _reflowWorkbench() {
+    if (!usesWorkbenchLayout) return;
+    final left = _session.groups.any((group) => group.id == 'resources')
+        ? .20
+        : 0.0;
+    final height = _session.groups.any((group) => group.id == 'output')
+        ? .76
+        : 1.0;
+    final watchGroup = _session.groups
+        .where((group) => group.id == 'watch')
+        .firstOrNull;
+    final sidebarWidth = _session.workspaceSize.width <= 0
+        ? .28
+        : (340 / _session.workspaceSize.width).clamp(.18, .42);
+    final right = watchGroup == null
+        ? 1.0
+        : _automaticWorkbenchLayout
+        ? 1 - sidebarWidth
+        : watchGroup.rect.left;
+    for (final group in _session.groups) {
+      if (group.id == 'plot') {
+        group.rect = Rect.fromLTWH(left, 0, right - left, height);
+      }
+      if (group.id == 'watch') {
+        group.rect = Rect.fromLTWH(right, 0, 1 - right, height);
+      }
+      if (group.id == 'resources') {
+        group.rect = Rect.fromLTWH(0, 0, .20, height);
+      }
+    }
+  }
 
   @visibleForTesting
   String? get debugTabMergeCandidate => _tabMergeCandidate;
@@ -139,7 +288,9 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final size = Size(constraints.maxWidth, constraints.maxHeight);
+        final resized = _session.workspaceSize != size;
         _session.workspaceSize = size;
+        if (resized && _automaticWorkbenchLayout) _reflowWorkbench();
         final sorted = _session.groupsByZ;
         return Listener(
           behavior: HitTestBehavior.translucent,
@@ -160,7 +311,10 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
                       ),
                     ),
                   ),
-                for (final group in sorted) _buildGroup(group, size),
+                for (final group in sorted)
+                  if ((!_expandedAnalysis || group.id != 'watch') &&
+                      (!_focusedWorkbench || group == _primaryGroup))
+                    _buildGroup(group, size),
               ],
             ),
           ),
@@ -170,7 +324,19 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   }
 
   Widget _buildGroup(WorkspaceGroup group, Size workspaceSize) {
-    final rawRect = _toPixelRect(group.rect, workspaceSize);
+    final expanded =
+        group == _primaryGroup && (_expandedAnalysis || _focusedWorkbench);
+    final effectiveRect = expanded
+        ? (_focusedWorkbench
+              ? const Rect.fromLTWH(0, 0, 1, 1)
+              : Rect.fromLTRB(
+                  group.rect.left,
+                  group.rect.top,
+                  1,
+                  group.rect.bottom,
+                ))
+        : group.rect;
+    final rawRect = _toPixelRect(effectiveRect, workspaceSize);
     final rect = rawRect.deflate(1.5);
     return Positioned(
       key: ValueKey('workspace-group-${group.id}'),
@@ -198,11 +364,18 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
                 builder: (context, activePanel, _) => buildWorkspacePanel(
                   activePanel,
                   widget.controller,
+                  workbench: usesWorkbenchLayout,
+                  onShowSource: () => unawaited(
+                    activateWorkbenchView(WorkspacePanelId.sourceDebug),
+                  ),
+                  onShowSymbols: () {
+                    if (!resourceDocked) unawaited(toggleWorkbenchResource());
+                  },
                   chrome: PanelChrome(
                     tabs: List.unmodifiable(group.panels),
                     activePanel: activePanel,
                     highlighted: _session.mergeTarget == group.id,
-                    onSelect: (panel) => group.activePanel = panel,
+                    onSelect: (panel) => _selectGroupPanel(group, panel),
                     onFloat: () =>
                         _floatPanel(group, activePanel, workspaceSize),
                     onClose: () => _hidePanel(group, activePanel),
@@ -211,7 +384,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
                     onDragUpdate: (details) =>
                         _moveGroup(group, details.delta, workspaceSize),
                     onDragEnd: (_) => _endDrag(group),
-                    draggable: _session.gridMode,
+                    draggable: _session.gridMode && !expanded,
                     groupId: group.id,
                     tabsDraggable: true,
                     onTabAccept: (data, targetIndex) =>
@@ -232,7 +405,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
               cursor: SystemMouseCursors.resizeLeftRight,
               width: 7,
               height: rect.height - 28,
-              enabled: true,
+              enabled: !expanded,
               onDragStart: _startResize,
               onDragEnd: _endResize,
               onDrag: (delta) =>
@@ -244,7 +417,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
               cursor: SystemMouseCursors.resizeLeftRight,
               width: 7,
               height: rect.height - 28,
-              enabled: true,
+              enabled: !expanded,
               onDragStart: _startResize,
               onDragEnd: _endResize,
               onDrag: (delta) =>
@@ -256,7 +429,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
               cursor: SystemMouseCursors.resizeUpDown,
               width: rect.width - 28,
               height: 7,
-              enabled: true,
+              enabled: !expanded,
               onDragStart: _startResize,
               onDragEnd: _endResize,
               onDrag: (delta) =>
@@ -268,7 +441,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
               cursor: SystemMouseCursors.resizeUpDown,
               width: rect.width - 28,
               height: 7,
-              enabled: true,
+              enabled: !expanded,
               onDragStart: _startResize,
               onDragEnd: _endResize,
               onDrag: (delta) =>
@@ -280,7 +453,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
               cursor: SystemMouseCursors.resizeDownRight,
               width: 18,
               height: 18,
-              enabled: true,
+              enabled: !expanded,
               visible: true,
               onDragStart: _startResize,
               onDragEnd: _endResize,
@@ -299,52 +472,83 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   }
 
   void _applyDefaultLayout() {
+    _automaticWorkbenchLayout = true;
+    _legacyLayout = false;
+    _workbenchView = WorkspacePanelId.plot;
+    _focusedWorkbench = false;
     _session.groups
       ..clear()
-      ..addAll([
-        WorkspaceGroup(
-          id: 'header',
-          panels: const [
-            WorkspacePanelId.header,
-            WorkspacePanelId.runControl,
-            WorkspacePanelId.sampling,
-          ],
-          activePanel: WorkspacePanelId.header,
-          rect: const Rect.fromLTWH(0, 0, 0.22, 0.18),
-          z: 1,
-        ),
-        WorkspaceGroup(
-          id: 'symbols',
-          panels: const [
-            WorkspacePanelId.symbols,
-            WorkspacePanelId.watch,
-            WorkspacePanelId.connection,
-          ],
-          activePanel: WorkspacePanelId.symbols,
-          rect: const Rect.fromLTWH(0, 0.18, 0.22, 0.58),
-          z: 2,
-        ),
-        WorkspaceGroup(
-          id: 'plot',
-          panels: const [WorkspacePanelId.plot, WorkspacePanelId.sourceDebug],
-          activePanel: WorkspacePanelId.plot,
-          rect: const Rect.fromLTWH(0.22, 0, 0.78, 0.76),
-          z: 3,
-        ),
-        WorkspaceGroup(
-          id: 'log',
-          panels: const [WorkspacePanelId.log],
-          activePanel: WorkspacePanelId.log,
-          rect: const Rect.fromLTWH(0, 0.76, 1, 0.24),
-          z: 4,
-        ),
-      ]);
+      ..addAll(
+        widget.workbenchLayout
+            ? [
+                WorkspaceGroup(
+                  id: 'plot',
+                  panels: const [
+                    WorkspacePanelId.plot,
+                    WorkspacePanelId.sourceDebug,
+                    WorkspacePanelId.analysis,
+                  ],
+                  activePanel: WorkspacePanelId.plot,
+                  rect: const Rect.fromLTWH(0, 0, .72, 1),
+                  z: 1,
+                ),
+                WorkspaceGroup(
+                  id: 'watch',
+                  panels: const [WorkspacePanelId.watch],
+                  activePanel: WorkspacePanelId.watch,
+                  rect: const Rect.fromLTWH(.72, 0, .28, 1),
+                  z: 2,
+                ),
+              ]
+            : [
+                WorkspaceGroup(
+                  id: 'header',
+                  panels: const [
+                    WorkspacePanelId.header,
+                    WorkspacePanelId.runControl,
+                    WorkspacePanelId.sampling,
+                  ],
+                  activePanel: WorkspacePanelId.header,
+                  rect: const Rect.fromLTWH(0, 0, 0.22, 0.18),
+                  z: 1,
+                ),
+                WorkspaceGroup(
+                  id: 'symbols',
+                  panels: const [
+                    WorkspacePanelId.symbols,
+                    WorkspacePanelId.watch,
+                    WorkspacePanelId.connection,
+                  ],
+                  activePanel: WorkspacePanelId.symbols,
+                  rect: const Rect.fromLTWH(0, 0.18, 0.22, 0.58),
+                  z: 2,
+                ),
+                WorkspaceGroup(
+                  id: 'plot',
+                  panels: const [
+                    WorkspacePanelId.plot,
+                    WorkspacePanelId.sourceDebug,
+                  ],
+                  activePanel: WorkspacePanelId.plot,
+                  rect: const Rect.fromLTWH(0.22, 0, 0.78, 0.76),
+                  z: 3,
+                ),
+                WorkspaceGroup(
+                  id: 'log',
+                  panels: const [WorkspacePanelId.log],
+                  activePanel: WorkspacePanelId.log,
+                  rect: const Rect.fromLTWH(0, 0.76, 1, 0.24),
+                  z: 4,
+                ),
+              ],
+      );
     for (final panel in detachedWindows.windows.keys) {
       final group = _session.groups
           .where((candidate) => candidate.panels.contains(panel))
           .firstOrNull;
       if (group != null) _detachPanel(group, panel);
     }
+    _reflowWorkbench();
     if (_session.gridMode) {
       for (final group in _session.groups) {
         group.rect = _snapRectToGrid(group.rect);
@@ -358,6 +562,8 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         WorkspaceLayoutSnapshot(
           groups: _session.groups,
           uiScale: widget.controller.uiScale,
+          version: widget.workbenchLayout ? 2 : 1,
+          legacyPanels: _legacyLayout,
         ),
       );
       widget.controller.report('工作区布局已保存。');
@@ -374,6 +580,10 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
       if (!mounted) return;
       if (layout == null) {
         if (reportMissing) widget.controller.report('尚未保存过工作区布局。');
+        return;
+      }
+      if (widget.workbenchLayout && layout.version == 1 && !reportMissing) {
+        widget.controller.report('已启用横向工作台。旧布局已保留，可在“视图”中恢复。');
         return;
       }
       final restored = <WorkspaceGroup>[];
@@ -394,9 +604,13 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         restored.add(group);
       }
       setState(() {
+        _legacyLayout = layout.version == 1 || layout.legacyPanels;
+        _automaticWorkbenchLayout = false;
         _session.groups
           ..clear()
           ..addAll(restored);
+        final active = _primaryGroup?.activePanel;
+        if (active != null) _workbenchView = active;
         _session.zCursor = _session.groups.fold(
           20,
           (value, group) => math.max(value, group.z),
@@ -467,6 +681,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
 
   void _startDrag(WorkspaceGroup group) {
     if (!_session.gridMode) return;
+    _automaticWorkbenchLayout = false;
     setState(() {
       _session.dragRemainder = Offset.zero;
       _session.draggingGroup = group.id;
@@ -636,7 +851,10 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     return delta;
   }
 
-  void _startResize() => _session.resetResize();
+  void _startResize() {
+    _automaticWorkbenchLayout = false;
+    _session.resetResize();
+  }
 
   void _endResize() => _session.resetResize();
 
@@ -673,6 +891,9 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         _detachedPlacements[groupPanel] = placement;
       }
       _session.groups.remove(group);
+      if (const ['resources', 'output', 'watch'].contains(group.id)) {
+        _reflowWorkbench();
+      }
     });
     widget.onPanelVisibilityChanged?.call();
     await window.show();
@@ -704,6 +925,9 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         activePanel: panel,
       );
       _detachPanel(group, panel);
+      if (const ['resources', 'output', 'watch'].contains(group.id)) {
+        _reflowWorkbench();
+      }
     });
     widget.onPanelVisibilityChanged?.call();
     await window.show();
@@ -720,7 +944,12 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   }
 
   void _hidePanel(WorkspaceGroup group, WorkspacePanelId panel) {
-    setState(() => _detachPanel(group, panel));
+    setState(() {
+      _detachPanel(group, panel);
+      if (const ['resources', 'output', 'watch'].contains(group.id)) {
+        _reflowWorkbench();
+      }
+    });
     widget.onPanelVisibilityChanged?.call();
   }
 
@@ -842,6 +1071,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     PanelTabDragData data,
     Size workspaceSize,
   ) {
+    _automaticWorkbenchLayout = false;
     _resetTabDragState(notify: false);
     setState(() {
       _draggedTabSource = source.id;

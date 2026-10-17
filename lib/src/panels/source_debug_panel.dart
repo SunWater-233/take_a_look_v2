@@ -4,10 +4,12 @@ class _SourceDebugPanel extends StatefulWidget {
   const _SourceDebugPanel({
     required this.controller,
     this.readOnlyPreview = false,
+    this.externalOutput = false,
   });
 
   final TakeALookController controller;
   final bool readOnlyPreview;
+  final bool externalOutput;
 
   @override
   State<_SourceDebugPanel> createState() => _SourceDebugPanelState();
@@ -182,7 +184,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     final nextPath =
         controller.sourceWorkspace.selectedPath ??
         (widget.readOnlyPreview ? _openPaths.firstOrNull : null);
-    if (nextPath != _selectedPath) {
+    if (nextPath != _selectedPath || controller.sourceLocationRequest != null) {
       unawaited(_loadSource(nextPath));
       _restorePanelFocus();
     } else {
@@ -253,6 +255,13 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   }
 
   Future<void> _loadSource(String? path, {int? revealLine}) async {
+    final request = controller.sourceLocationRequest;
+    if (request != null &&
+        path != null &&
+        controller.sourcePathsMatch(request.path, path)) {
+      revealLine = request.line;
+      controller.sourceLocationRequest = null;
+    }
     if (path != null && !widget.readOnlyPreview) {
       controller.openSourceFile(path);
       path = controller.openSourcePathFor(path) ?? path;
@@ -991,8 +1000,8 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
           enabled: !watched,
           child: Text(
             watched
-                ? '已在实时调试中  $symbolLabel$suffix'
-                : '加入实时调试  $symbolLabel$suffix',
+                ? '${widget.externalOutput ? '已在变量监视中' : '已在实时调试中'}  $symbolLabel$suffix'
+                : '${widget.externalOutput ? '加入变量监视' : '加入实时调试'}  $symbolLabel$suffix',
           ),
         ),
       );
@@ -1022,7 +1031,13 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     );
     if (!context.mounted || action == null) return;
     if (action.startsWith('watch:')) {
-      controller.activateSymbol(action.substring('watch:'.length));
+      final key = action.substring('watch:'.length);
+      if (widget.externalOutput) {
+        controller.selectSymbols([key]);
+        controller.addSelectedToWatch(mode: WatchReadMode.monitor);
+      } else {
+        controller.activateSymbol(key);
+      }
     } else if (action.startsWith('include:')) {
       final includePath = action.substring('include:'.length);
       if (_matchingPath(includePath, _sourceFiles) == null) {
@@ -1107,17 +1122,18 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
                     const Divider(height: 1, color: TalColors.borderSoft),
                     Expanded(child: _buildBody()),
                     _buildRegisterStrip(),
-                    _SourceTaskOutput(
-                      controller: controller,
-                      maxHeight: constraints.maxHeight < 240
-                          ? 34
-                          : (constraints.maxHeight * .32).clamp(85.0, 264.0),
-                      onOpenLocation: (path, line) {
-                        _sourceDocuments.invalidate(path);
-                        _openSource(path);
-                        unawaited(_loadSource(path, revealLine: line));
-                      },
-                    ),
+                    if (!widget.externalOutput)
+                      _SourceTaskOutput(
+                        controller: controller,
+                        maxHeight: constraints.maxHeight < 240
+                            ? 34
+                            : (constraints.maxHeight * .32).clamp(85.0, 264.0),
+                        onOpenLocation: (path, line) {
+                          _sourceDocuments.invalidate(path);
+                          _openSource(path);
+                          unawaited(_loadSource(path, revealLine: line));
+                        },
+                      ),
                   ],
                 ),
               ),

@@ -43,6 +43,18 @@ class WatchedVariable:
     plot_enabled: bool = True
     sampling_enabled: bool = True
     value: object = ""
+    read_mode: str | None = None
+    monitor_rate_hz: float | None = None
+    updated_at_ms: int | None = None
+    next_monitor_at: float = 0.0
+
+    @property
+    def mode(self) -> str:
+        return self.read_mode or ("capture" if self.sampling_enabled else "monitor")
+
+    @property
+    def captures(self) -> bool:
+        return self.mode == "capture"
 
 
 def json_value(value: object) -> object:

@@ -12,6 +12,8 @@ extension TakeALookControllerTelemetry on TakeALookController {
       final watch = watchesByKey[item['key'] as String?];
       if (watch == null) continue;
       watch.value = _numericValue(item['value'], fallback: watch.value);
+      watch.updatedAtMs =
+          (item['updatedAtMs'] as num?)?.toInt() ?? watch.updatedAtMs;
       final samples = item['samples'];
       if (samples != null) {
         watch.samples.clear();
@@ -34,6 +36,8 @@ extension TakeALookControllerTelemetry on TakeALookController {
       final watch = watchesByKey[item['key'] as String?];
       if (watch == null) continue;
       watch.value = _numericValue(item['value'], fallback: watch.value);
+      watch.updatedAtMs =
+          (item['updatedAtMs'] as num?)?.toInt() ?? watch.updatedAtMs;
       final sampleStart = item['sampleStart'] as int? ?? 0;
       final sampleCursor = item['sampleCursor'] as int? ?? sampleStart;
       if (item['reset'] == true ||
@@ -70,6 +74,9 @@ extension TakeALookControllerTelemetry on TakeALookController {
         }
       case BackendEventType.samplesCleared:
         applyBackendSamplesCleared();
+      case BackendEventType.watchValues:
+        final payload = _asMap(params);
+        if (payload != null) applyWatchValues(payload);
       case BackendEventType.log:
         final payload = _asMap(params);
         final message = payload?['message'];
@@ -122,6 +129,25 @@ extension TakeALookControllerTelemetry on TakeALookController {
         final payload = _asMap(params);
         if (payload != null) applySourceTask(payload);
     }
+  }
+
+  void applyWatchValues(Map<String, dynamic> payload) {
+    final byKey = {for (final watch in _watches) watch.symbol.key: watch};
+    for (final raw in payload['values'] as List? ?? const []) {
+      if (raw is! Map) continue;
+      final watch = byKey[raw['key']];
+      if (watch == null) continue;
+      final updated = (raw['updatedAtMs'] as num?)?.toInt();
+      if (updated != null &&
+          watch.updatedAtMs != null &&
+          updated < watch.updatedAtMs!) {
+        continue;
+      }
+      watch.value = _numericValue(raw['value'], fallback: watch.value);
+      watch.updatedAtMs = updated ?? DateTime.now().millisecondsSinceEpoch;
+    }
+    // Latest-only values never enter the plot buffer or recording history.
+    _emitTelemetry();
   }
 
   void applyBackendSamples(Map<String, dynamic> payload) {

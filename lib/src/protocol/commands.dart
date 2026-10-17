@@ -12,6 +12,7 @@ enum ControllerCommand {
   toggleConnection,
   loadSymbols,
   setSampleRate,
+  setMonitorRate,
   setDisplayRefreshMode,
   setRttSampleRate,
   setProbeType,
@@ -53,6 +54,9 @@ enum ControllerCommand {
   reorderWatch,
   clearWatches,
   toggleWatchSampling,
+  setWatchReadMode,
+  setWatchMonitorRate,
+  readWatch,
   toggleWatchPlot,
   setWatchColor,
   setWatchColors,
@@ -87,6 +91,7 @@ enum BackendMethod {
   setConfig,
   setWatches,
   writeWatch,
+  readWatch,
   setSamplingPaused,
   setRtt,
   clearSamples,
@@ -143,6 +148,10 @@ class BackendCommandMapper {
       case ControllerCommand.setSampleRate:
         return BackendCall(BackendMethod.setConfig, {
           'sampleRateHz': arguments,
+        });
+      case ControllerCommand.setMonitorRate:
+        return BackendCall(BackendMethod.setConfig, {
+          'monitorRateHz': arguments,
         });
       case ControllerCommand.setRttSampleRate:
         return BackendCall(BackendMethod.setConfig, {
@@ -211,6 +220,8 @@ class BackendCommandMapper {
           BackendMethod.writeWatch,
           Map<String, Object?>.from(arguments! as Map),
         );
+      case ControllerCommand.readWatch:
+        return BackendCall(BackendMethod.readWatch, {'key': arguments});
       case ControllerCommand.setDisplayRefreshMode:
       case ControllerCommand.setUiScale:
       case ControllerCommand.setSourceRoot:
@@ -236,6 +247,8 @@ class BackendCommandMapper {
       case ControllerCommand.reorderWatch:
       case ControllerCommand.clearWatches:
       case ControllerCommand.toggleWatchSampling:
+      case ControllerCommand.setWatchReadMode:
+      case ControllerCommand.setWatchMonitorRate:
       case ControllerCommand.toggleWatchPlot:
       case ControllerCommand.setWatchColor:
       case ControllerCommand.setWatchColors:

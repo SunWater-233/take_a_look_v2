@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'controller.dart';
+import '../models/models.dart';
 import '../protocol/commands.dart';
 
 /// Executes commands arriving from detached windows.
@@ -15,7 +16,9 @@ Future<JsonObject> executeControllerCommand(
 }) async {
   switch (command) {
     case ControllerCommand.setSourceProject:
-      await controller.saveSourceProject(Map<String, dynamic>.from(arguments! as Map));
+      await controller.saveSourceProject(
+        Map<String, dynamic>.from(arguments! as Map),
+      );
     case ControllerCommand.startSourceTask:
       await controller.startSourceTask((arguments! as Map)['kind'] as String);
     case ControllerCommand.cancelSourceTask:
@@ -32,6 +35,8 @@ Future<JsonObject> executeControllerCommand(
       }
     case ControllerCommand.setSampleRate:
       controller.setSampleRate((arguments as num).toDouble());
+    case ControllerCommand.setMonitorRate:
+      controller.setMonitorRate((arguments as num).toDouble());
     case ControllerCommand.setDisplayRefreshMode:
       controller.setDisplayRefreshMode(arguments as String);
     case ControllerCommand.setRttSampleRate:
@@ -136,7 +141,7 @@ Future<JsonObject> executeControllerCommand(
     case ControllerCommand.activateSymbol:
       controller.activateSymbol(arguments as String);
     case ControllerCommand.addSelectedToWatch:
-      controller.addSelectedToWatch();
+      controller.addSelectedToWatch(mode: WatchReadMode.parse(arguments));
     case ControllerCommand.removeWatch:
       controller.removeWatch(arguments as String);
     case ControllerCommand.removeWatches:
@@ -161,6 +166,20 @@ Future<JsonObject> executeControllerCommand(
         values['key'] as String,
         values['value'] as bool,
       );
+    case ControllerCommand.setWatchReadMode:
+      final values = Map<String, Object?>.from(arguments! as Map);
+      controller.setWatchReadMode(
+        values['key'] as String,
+        WatchReadMode.parse(values['mode']),
+      );
+    case ControllerCommand.setWatchMonitorRate:
+      final values = Map<String, Object?>.from(arguments! as Map);
+      controller.setWatchMonitorRate(
+        values['key'] as String,
+        (values['rateHz'] as num?)?.toDouble(),
+      );
+    case ControllerCommand.readWatch:
+      controller.readWatch(arguments as String);
     case ControllerCommand.setWatchColor:
       final values = Map<String, Object?>.from(arguments! as Map);
       controller.setWatchColor(

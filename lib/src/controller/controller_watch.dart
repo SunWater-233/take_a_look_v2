@@ -80,9 +80,9 @@ extension TakeALookControllerWatches on TakeALookController {
     addSelectedToWatch();
   }
 
-  void addSelectedToWatch() {
+  void addSelectedToWatch({WatchReadMode mode = WatchReadMode.capture}) {
     if (_isDetachedRemote &&
-        _dispatchRemote(ControllerCommand.addSelectedToWatch)) {
+        _dispatchRemote(ControllerCommand.addSelectedToWatch, mode.name)) {
       return;
     }
     final existing = _watches.map((item) => item.symbol.key).toSet();
@@ -115,13 +115,14 @@ extension TakeALookControllerWatches on TakeALookController {
             color: seriesColors[_watches.length % seriesColors.length],
           )
           ..samplingEnabled = !isAggregateMember
-          ..plotted = !isAggregateMember,
+          ..readMode = isAggregateMember ? WatchReadMode.monitor : mode
+          ..plotted = !isAggregateMember && mode == WatchReadMode.capture,
       );
     }
     _selectedSymbols.clear();
     _configurePlotRetention();
     _syncWatchesBackend();
-    _appendLog('已加入 ${selected.length} 个变量到实时调参列表。');
+    _appendLog('已加入 ${selected.length} 个变量到变量监视列表。');
     _emitState([signals.symbols, signals.watches, signals.plot, signals.logs]);
   }
 
@@ -140,6 +141,11 @@ extension TakeALookControllerWatches on TakeALookController {
     }
     final previousLength = _watches.length;
     _watches.removeWhere((item) => removedKeys.contains(item.symbol.key));
+    watchInputDrafts.removeWhere((key, _) => removedKeys.contains(key));
+    compactExpandedWatches.removeAll(removedKeys);
+    if (removedKeys.contains(compactWatchSelection)) {
+      compactWatchSelection = null;
+    }
     if (_watches.length == previousLength) return;
     if (removedKeys.contains(plotHighlightedWatchKey)) {
       state.plot.highlightedWatchKey = null;
@@ -170,6 +176,9 @@ extension TakeALookControllerWatches on TakeALookController {
       return;
     }
     _watches.clear();
+    watchInputDrafts.clear();
+    compactExpandedWatches.clear();
+    compactWatchSelection = null;
     state.plot.highlightedWatchKey = null;
     _syncWatchesBackend();
     _appendLog('已清空实时调参列表。');
@@ -187,8 +196,55 @@ extension TakeALookControllerWatches on TakeALookController {
     final watch = _watchByKey(key);
     if (watch == null || watch.samplingEnabled == value) return;
     watch.samplingEnabled = value;
+    watch.plotted = value;
     _syncWatchesBackend();
     _emitState([signals.watches, signals.plot]);
+  }
+
+  bool usesDevicePush(WatchItem watch) =>
+      watch.symbol.dataSource == 'rtt' || (rttEnabled && rttProtocol == 'plus');
+
+  double monitorRateFor(WatchItem watch) =>
+      watch.monitorRateHz ?? monitorRateHz;
+
+  void setWatchReadMode(String key, WatchReadMode mode) {
+    if (_isDetachedRemote &&
+        _dispatchRemote(ControllerCommand.setWatchReadMode, {
+          'key': key,
+          'mode': mode.name,
+        })) {
+      return;
+    }
+    final watch = _watchByKey(key);
+    if (watch == null || watch.readMode == mode) return;
+    watch.readMode = mode;
+    watch.plotted = mode == WatchReadMode.capture;
+    _syncWatchesBackend();
+    _emitState([signals.watches, signals.plot]);
+  }
+
+  void setWatchMonitorRate(String key, double? value) {
+    if (value != null && (!value.isFinite || value < 0.5 || value > 10)) return;
+    if (_isDetachedRemote &&
+        _dispatchRemote(ControllerCommand.setWatchMonitorRate, {
+          'key': key,
+          'rateHz': value,
+        })) {
+      return;
+    }
+    final watch = _watchByKey(key);
+    if (watch == null || watch.monitorRateHz == value) return;
+    watch.monitorRateHz = value;
+    _syncWatchesBackend();
+    _emitState([signals.watches]);
+  }
+
+  void readWatch(String key) {
+    if (_dispatchCommand(ControllerCommand.readWatch, key)) return;
+    final watch = _watchByKey(key);
+    if (watch == null || connectionStatus != ConnectionStatus.connected) return;
+    watch.updatedAtMs = DateTime.now().millisecondsSinceEpoch;
+    _emitTelemetry();
   }
 
   void toggleWatchPlot(String key, bool value) {
@@ -200,7 +256,7 @@ extension TakeALookControllerWatches on TakeALookController {
       return;
     }
     final watch = _watchByKey(key);
-    if (watch != null) watch.plotted = value;
+    if (watch != null) watch.plotted = value && watch.samplingEnabled;
     _syncWatchesBackend();
     _emitState([signals.watches, signals.plot]);
   }
@@ -268,7 +324,7 @@ extension TakeALookControllerWatches on TakeALookController {
     }
     var changed = false;
     for (final watch in _watches) {
-      final plotted = plottedForWatch(watch);
+      final plotted = watch.samplingEnabled && plottedForWatch(watch);
       if (watch.plotted != plotted) {
         watch.plotted = plotted;
         changed = true;
@@ -280,6 +336,7 @@ extension TakeALookControllerWatches on TakeALookController {
   }
 
   void writeWatch(String key, String input) {
+    watchInputDrafts[key] = input;
     if (_dispatchCommand(ControllerCommand.writeWatch, {
       'key': key,
       'value': input,
@@ -292,6 +349,7 @@ extension TakeALookControllerWatches on TakeALookController {
       _appendLog('变量写入失败：$input 不是有效数值。');
     } else {
       watch.value = value;
+      watch.updatedAtMs = DateTime.now().millisecondsSinceEpoch;
       _appendLog('${watch.symbol.name} 已写入 $input，并完成回读验证。');
     }
     _emitState([signals.telemetry, signals.plot, signals.logs]);

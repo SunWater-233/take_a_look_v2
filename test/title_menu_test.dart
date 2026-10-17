@@ -224,7 +224,7 @@ void main() {
     Future<Finder> openHeaderMenuItem() async {
       await tester.tap(find.text('视图'));
       await tester.pumpAndSettle();
-      return find.widgetWithText(MenuItemButton, WorkspacePanelId.header.title);
+      return find.widgetWithText(MenuItemButton, WorkspacePanelId.watch.title);
     }
 
     var headerItem = await openHeaderMenuItem();

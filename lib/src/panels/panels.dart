@@ -34,6 +34,8 @@ part 'panel_frame.dart';
 part 'control_panels.dart';
 part 'symbol_panel.dart';
 part 'watch_panel.dart';
+part 'compact_watch_panel.dart';
+part 'workbench_output.dart';
 part 'connection_panel.dart';
 part 'plot_log_panels.dart';
 part 'analysis_chart_panel.dart';
@@ -50,6 +52,9 @@ Widget buildWorkspacePanel(
   TakeALookController controller, {
   PanelChrome? chrome,
   bool sourcePreview = false,
+  bool workbench = false,
+  VoidCallback? onShowSource,
+  VoidCallback? onShowSymbols,
 }) {
   return PanelKeyboardScope(
     panel: panel,
@@ -57,10 +62,14 @@ Widget buildWorkspacePanel(
       panel: panel,
       chrome: chrome,
       controller: controller,
+      compact: workbench,
       child: buildWorkspacePanelBody(
         panel,
         controller,
         sourcePreview: sourcePreview,
+        workbench: workbench,
+        onShowSource: onShowSource,
+        onShowSymbols: onShowSymbols,
       ),
     ),
   );
@@ -70,20 +79,127 @@ Widget buildWorkspacePanelBody(
   WorkspacePanelId panel,
   TakeALookController controller, {
   bool sourcePreview = false,
+  bool workbench = false,
+  VoidCallback? onShowSource,
+  VoidCallback? onShowSymbols,
 }) {
   return switch (panel) {
     WorkspacePanelId.header => _HeaderPanel(controller: controller),
     WorkspacePanelId.runControl => _RunControlPanel(controller: controller),
     WorkspacePanelId.sampling => _SamplingPanel(controller: controller),
-    WorkspacePanelId.symbols => _SymbolPanel(controller: controller),
-    WorkspacePanelId.watch => _WatchPanel(controller: controller),
+    WorkspacePanelId.symbols => _SymbolPanel(
+      controller: controller,
+      defaultMonitor: workbench,
+    ),
+    WorkspacePanelId.watch =>
+      workbench
+          ? _CompactWatchPanel(
+              controller: controller,
+              onShowSource: onShowSource,
+              onShowSymbols: onShowSymbols,
+            )
+          : _WatchPanel(controller: controller),
     WorkspacePanelId.connection => _ConnectionPanel(controller: controller),
     WorkspacePanelId.plot => _PlotPanel(controller: controller),
-    WorkspacePanelId.analysis => _AnalysisChartPanel(controller: controller),
+    WorkspacePanelId.analysis => _AnalysisChartPanel(
+      controller: controller,
+      horizontal: workbench,
+    ),
     WorkspacePanelId.sourceDebug => _SourceDebugPanel(
       controller: controller,
       readOnlyPreview: sourcePreview,
+      externalOutput: workbench,
     ),
-    WorkspacePanelId.log => _LogPanel(controller: controller),
+    WorkspacePanelId.log =>
+      workbench
+          ? _WorkbenchOutput(controller: controller, onShowSource: onShowSource)
+          : _LogPanel(controller: controller),
   };
 }
+
+Future<void> showWorkbenchConnectionSettings(
+  BuildContext context,
+  TakeALookController controller,
+) => showTalDialog<void>(
+  context: context,
+  builder: (context) => AlertDialog(
+    title: const Text('连接设置'),
+    content: SizedBox(
+      width: 490,
+      height: math.min(530, MediaQuery.sizeOf(context).height * .65),
+      child: _ConnectionPanel(controller: controller),
+    ),
+    actions: [
+      AnimatedBuilder(
+        animation: controller.connectionChanges,
+        builder: (_, _) => TalButton(
+          onPressed: controller.connectionStatus == ConnectionStatus.connecting
+              ? null
+              : controller.toggleConnection,
+          child: Text(controller.connectionLabel),
+        ),
+      ),
+      TalButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('关闭'),
+      ),
+    ],
+  ),
+);
+
+Future<void> showWorkbenchSamplingSettings(
+  BuildContext context,
+  TakeALookController controller,
+) => showTalDialog<void>(
+  context: context,
+  builder: (context) => AlertDialog(
+    title: const Text('采集设置'),
+    content: SizedBox(
+      width: 430,
+      height: 300,
+      child: Column(
+        children: [
+          Expanded(child: _SamplingPanel(controller: controller)),
+          const Divider(height: 1),
+          AnimatedBuilder(
+            animation: controller.samplingChanges,
+            builder: (context, _) => Row(
+              children: [
+                Checkbox(
+                  value: controller.rttEnabled,
+                  onChanged: (value) => controller.toggleRtt(value ?? false),
+                ),
+                const Text('RTT 采集'),
+                const Spacer(),
+                SizedBox(
+                  width: 160,
+                  child: TalDropdown<String>(
+                    value: controller.rttProtocol,
+                    values: const ['normal', 'plus'],
+                    label: (value) =>
+                        value == 'plus' ? 'RTT-Plus' : 'RTT-Normal',
+                    onChanged: controller.setRttProtocol,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ),
+    actions: [
+      TalButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('关闭'),
+      ),
+    ],
+  ),
+);
+
+Future<void> showWorkbenchProjectSettings(
+  BuildContext context,
+  TakeALookController controller,
+) => showDialog<void>(
+  context: context,
+  builder: (_) => _SourceProjectDialog(controller: controller),
+);

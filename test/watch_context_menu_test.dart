@@ -282,8 +282,14 @@ void main() {
       expect(find.text('speed'), findsOneWidget);
       expect(find.text('current'), findsOneWidget);
 
-      await tester.tap(
-        find.byKey(const ValueKey('watch-sampling-motor.speed')),
+      final mode = find.byKey(const ValueKey('watch-table-mode-motor.speed'));
+      await tester.ensureVisible(mode);
+      await tester.tap(mode);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('采集').last);
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('watch-visibility-motor.speed')),
       );
       await tester.tap(
         find.byKey(const ValueKey('watch-visibility-motor.speed')),
@@ -293,7 +299,7 @@ void main() {
         (watch) => watch.symbol.key == 'motor.speed',
       );
       expect(speed.samplingEnabled, isTrue);
-      expect(speed.plotted, isTrue);
+      expect(speed.plotted, isFalse);
       expect(find.byType(Checkbox), findsNothing);
 
       controller.dispose();

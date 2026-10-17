@@ -67,22 +67,32 @@ class WorkspaceGroup {
 }
 
 class WorkspaceLayoutSnapshot {
-  const WorkspaceLayoutSnapshot({required this.groups, required this.uiScale});
+  const WorkspaceLayoutSnapshot({
+    required this.groups,
+    required this.uiScale,
+    this.version = 1,
+    this.legacyPanels = false,
+  });
 
   final List<WorkspaceGroup> groups;
   final double uiScale;
+  final int version;
+  final bool legacyPanels;
 
   Map<String, dynamic> toJson() => {
-    'version': 1,
+    'version': version,
+    if (version >= 2) 'legacyPanels': legacyPanels,
     'uiScale': uiScale,
     'groups': [for (final group in groups) group.toJson()],
   };
 
   factory WorkspaceLayoutSnapshot.fromJson(Map<String, dynamic> json) {
-    if (json['version'] != 1 || json['groups'] is! List) {
+    if (!const [1, 2].contains(json['version']) || json['groups'] is! List) {
       throw const FormatException('Unsupported workspace layout format.');
     }
     return WorkspaceLayoutSnapshot(
+      version: json['version'] as int,
+      legacyPanels: json['legacyPanels'] == true,
       groups: [
         for (final entry in json['groups'] as List)
           WorkspaceGroup.fromJson(Map<String, dynamic>.from(entry as Map)),
@@ -99,6 +109,19 @@ class WorkspaceLayoutRepository {
 
   Future<void> save(WorkspaceLayoutSnapshot layout) async {
     await file.parent.create(recursive: true);
+    if (layout.version == 2 && await file.exists()) {
+      final backup = File('${file.path}.v1.bak');
+      if (!await backup.exists()) {
+        try {
+          final previous = jsonDecode(await file.readAsString());
+          if (previous is Map && previous['version'] == 1) {
+            await file.copy(backup.path);
+          }
+        } on FormatException {
+          /* Preserve normal save behavior for invalid old data. */
+        }
+      }
+    }
     await file.writeAsString(jsonEncode(layout.toJson()), flush: true);
   }
 

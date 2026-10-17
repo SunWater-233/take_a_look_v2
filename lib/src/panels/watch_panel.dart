@@ -9,6 +9,8 @@ const _watchColumnLabels = <String>[
   '操作',
   '图标显示',
   '绘制颜色',
+  '读取模式',
+  '监视频率',
 ];
 
 typedef _WatchRowContextMenuCallback =
@@ -24,10 +26,21 @@ class _WatchPanel extends StatefulWidget {
 }
 
 class _WatchPanelState extends State<_WatchPanel> {
-  static const _minimumColumnWidths = <double>[96, 88, 72, 72, 72, 108, 72, 72];
+  static const _minimumColumnWidths = <double>[
+    96,
+    88,
+    72,
+    72,
+    72,
+    108,
+    72,
+    72,
+    110,
+    120,
+  ];
 
   final ResizableTableLayout _tableLayout = ResizableTableLayout(
-    widths: const [220, 112, 96, 96, 96, 116, 84, 96],
+    widths: const [220, 112, 96, 96, 96, 116, 84, 96, 120, 140],
     minimumWidths: _minimumColumnWidths,
     rowHeight: 44,
   );
@@ -588,7 +601,7 @@ class _WatchPanelState extends State<_WatchPanel> {
                 children: [
                   const Expanded(
                     child: Text(
-                      '展开结构体或数组查看成员；铅笔用于写入，波形用于启停采样，眼睛控制图表显示。',
+                      '展开结构体或数组查看成员；读取模式控制采集，眼睛控制曲线显示。监视频率可按变量覆盖默认值。',
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: talMuted,
@@ -723,7 +736,11 @@ class _WatchRowState extends State<_WatchRow> {
   @override
   void initState() {
     super.initState();
-    editor = TextEditingController(text: widget.watch.valueLabel);
+    editor = TextEditingController(
+      text:
+          widget.controller.watchInputDrafts[widget.watch.symbol.key] ??
+          widget.watch.valueLabel,
+    );
   }
 
   @override
@@ -847,6 +864,11 @@ class _WatchRowState extends State<_WatchRow> {
                         height: TalUiTheme.of(context).targetExtent(30),
                         child: TextField(
                           controller: editor,
+                          onChanged: (value) =>
+                              widget.controller.watchInputDrafts[watch
+                                      .symbol
+                                      .key] =
+                                  value,
                           enabled:
                               watch.symbol.writable &&
                               widget.controller.supportsMemoryWrite,
@@ -885,19 +907,15 @@ class _WatchRowState extends State<_WatchRow> {
                         icon: const Icon(Icons.edit_outlined, size: 16),
                       ),
                       TalIconButton(
-                        key: ValueKey('watch-sampling-${watch.symbol.key}'),
-                        tooltip: watch.samplingEnabled ? '停止采样' : '开始采样',
-                        onPressed: () => widget.controller.toggleWatchSampling(
-                          watch.symbol.key,
-                          !watch.samplingEnabled,
-                        ),
-                        icon: Icon(
-                          Icons.monitor_heart_outlined,
-                          size: 16,
-                          color: watch.samplingEnabled
-                              ? TalColors.accent
-                              : TalColors.muted,
-                        ),
+                        key: ValueKey('watch-read-${watch.symbol.key}'),
+                        tooltip: '立即读取',
+                        onPressed:
+                            widget.controller.connectionStatus ==
+                                ConnectionStatus.connected
+                            ? () =>
+                                  widget.controller.readWatch(watch.symbol.key)
+                            : null,
+                        icon: const Icon(Icons.refresh, size: 16),
                       ),
                     ],
                   ],
@@ -914,10 +932,12 @@ class _WatchRowState extends State<_WatchRow> {
                   child: TalIconButton(
                     key: ValueKey('watch-visibility-${watch.symbol.key}'),
                     tooltip: watch.plotted ? '在图表中隐藏' : '在图表中显示',
-                    onPressed: () => widget.controller.toggleWatchPlot(
-                      watch.symbol.key,
-                      !watch.plotted,
-                    ),
+                    onPressed: watch.samplingEnabled
+                        ? () => widget.controller.toggleWatchPlot(
+                            watch.symbol.key,
+                            !watch.plotted,
+                          )
+                        : null,
                     icon: Icon(
                       watch.plotted
                           ? Icons.visibility_outlined
@@ -955,6 +975,48 @@ class _WatchRowState extends State<_WatchRow> {
                     ),
                   ),
                 ),
+              ),
+            if (!widget.hiddenColumns.contains(8))
+              _WatchCell(
+                width: widget.columnWidths[8],
+                selected: widget.selectedColumns.contains(8),
+                child: widget.expandable
+                    ? const Text('—', style: talMuted)
+                    : TalDropdown<WatchReadMode>(
+                        key: ValueKey('watch-table-mode-${watch.symbol.key}'),
+                        value: watch.readMode,
+                        values: WatchReadMode.values,
+                        label: (mode) => mode.label,
+                        onChanged: (mode) => widget.controller.setWatchReadMode(
+                          watch.symbol.key,
+                          mode,
+                        ),
+                      ),
+              ),
+            if (!widget.hiddenColumns.contains(9))
+              _WatchCell(
+                width: widget.columnWidths[9],
+                selected: widget.selectedColumns.contains(9),
+                child:
+                    widget.expandable || watch.readMode != WatchReadMode.monitor
+                    ? const Text('—', style: talMuted)
+                    : widget.controller.usesDevicePush(watch)
+                    ? const Text('设备推送', style: talMuted)
+                    : TalDropdown<double>(
+                        value: watch.monitorRateHz ?? 0,
+                        values: {
+                          ...[0.0, 0.5, 1.0, 2.0, 5.0, 10.0],
+                          if (watch.monitorRateHz != null) watch.monitorRateHz!,
+                        }.toList()..sort(),
+                        label: (rate) => rate == 0
+                            ? '默认 ${formatReadRate(widget.controller.monitorRateHz)}'
+                            : formatReadRate(rate),
+                        onChanged: (rate) =>
+                            widget.controller.setWatchMonitorRate(
+                              watch.symbol.key,
+                              rate == 0 ? null : rate,
+                            ),
+                      ),
               ),
           ],
         ),

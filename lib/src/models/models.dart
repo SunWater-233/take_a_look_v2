@@ -110,6 +110,22 @@ class SymbolItem {
   }
 }
 
+enum WatchReadMode {
+  monitor,
+  capture,
+  manual;
+
+  String get label => switch (this) {
+    monitor => '仅监视',
+    capture => '采集',
+    manual => '手动读取',
+  };
+
+  static WatchReadMode parse(Object? value, {bool sampling = true}) =>
+      values.where((mode) => mode.name == value).firstOrNull ??
+      (sampling ? capture : monitor);
+}
+
 class WatchItem {
   WatchItem({required this.symbol, required this.color, SampleBuffer? samples})
     : samples = samples ?? SampleBuffer();
@@ -118,7 +134,12 @@ class WatchItem {
   Color color;
   final SampleBuffer samples;
   int totalSampleCount = 0;
-  bool samplingEnabled = true;
+  WatchReadMode readMode = WatchReadMode.capture;
+  double? monitorRateHz;
+  int? updatedAtMs;
+  bool get samplingEnabled => readMode == WatchReadMode.capture;
+  set samplingEnabled(bool value) =>
+      readMode = value ? WatchReadMode.capture : WatchReadMode.monitor;
   bool plotted = true;
   double value = 0;
 

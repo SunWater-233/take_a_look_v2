@@ -5,6 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../controller/controller.dart';
+import '../panels/panels.dart';
+import '../telemetry/recording_storage.dart';
 import '../workspace/keyboard_shortcuts.dart';
 import '../workspace/panel_types.dart';
 import '../theme/theme.dart';
@@ -15,12 +17,16 @@ class TalWindowTitleBar extends StatefulWidget {
     this.subtitle,
     this.controller,
     this.workspaceKey,
+    this.workbench = false,
+    this.recordingStorage,
     super.key,
   });
 
   final String? subtitle;
   final TakeALookController? controller;
   final GlobalKey<DockingWorkspaceState>? workspaceKey;
+  final bool workbench;
+  final RecordingStorage? recordingStorage;
 
   @override
   State<TalWindowTitleBar> createState() => _TalWindowTitleBarState();
@@ -73,7 +79,7 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
     final detached = widget.subtitle != null;
     return Container(
       height: TalUiTheme.of(context).titleBarHeight,
-      color: TalColors.input,
+      color: widget.workbench ? WorkbenchColors.background : TalColors.input,
       child: Row(
         children: [
           if (detached)
@@ -81,9 +87,14 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
           else
             _buildMainTitle(),
           if (!detached) ...[
+            if (widget.workbench)
+              _TitleMenu(label: '文件', menuChildren: _buildFileMenu()),
+            if (widget.workbench)
+              _TitleMenu(label: '采集', menuChildren: _buildVariableMenu()),
             _TitleMenu(label: '视图', menuChildren: _buildViewMenu()),
             const SizedBox(width: 4),
-            _TitleMenu(label: '实时变量', menuChildren: _buildVariableMenu()),
+            if (!widget.workbench)
+              _TitleMenu(label: '实时变量', menuChildren: _buildVariableMenu()),
             const Expanded(child: DragToMoveArea(child: SizedBox.expand())),
           ],
           _CaptionButton(
@@ -171,6 +182,26 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
   List<Widget> _buildViewMenu() {
     final workspace = widget.workspaceKey?.currentState;
     return [
+      if (widget.workbench) ...[
+        _menuItem(
+          label: '资源库',
+          checked: workspace?.resourceDocked ?? false,
+          onPressed: () =>
+              unawaited(workspace?.toggleWorkbenchResource() ?? Future.value()),
+        ),
+        _menuItem(
+          label: '输出',
+          checked: workspace?.outputDocked ?? false,
+          onPressed: () =>
+              unawaited(workspace?.toggleWorkbenchOutput() ?? Future.value()),
+        ),
+        _menuItem(
+          label: '专注视图',
+          checked: workspace?.focusedWorkbench ?? false,
+          onPressed: workspace?.toggleWorkbenchFocus,
+        ),
+        const _MenuDivider(),
+      ],
       SubmenuButton(
         menuStyle: Theme.of(
           context,
@@ -246,6 +277,20 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
   List<Widget> _buildVariableMenu() {
     final state = widget.controller;
     return [
+      if (widget.workbench) ...[
+        _menuItem(
+          label: state?.samplingPaused == true ? '继续采集' : '暂停采集',
+          onPressed: state?.toggleSampling,
+        ),
+        _menuItem(label: '清空采样', onPressed: state?.clearSamples),
+        _menuItem(
+          label: '采集设置',
+          onPressed: state == null
+              ? null
+              : () => showWorkbenchSamplingSettings(context, state),
+        ),
+        const _MenuDivider(),
+      ],
       SubmenuButton(
         menuStyle: Theme.of(
           context,
@@ -342,6 +387,34 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
         child: const Text('RTT设置'),
       ),
       _menuItem(label: '导出原始采样 CSV', onPressed: state?.exportCsv),
+    ];
+  }
+
+  List<Widget> _buildFileMenu() {
+    final state = widget.controller;
+    return [
+      _menuItem(label: '打开 ELF / AXF', onPressed: state?.chooseSymbolFile),
+      _menuItem(
+        label: '工程设置',
+        onPressed: state == null
+            ? null
+            : () => showWorkbenchProjectSettings(context, state),
+      ),
+      const _MenuDivider(),
+      _menuItem(
+        label: '数据分析',
+        onPressed: () => unawaited(
+          widget.workspaceKey?.currentState?.activateWorkbenchView(
+                WorkspacePanelId.analysis,
+              ) ??
+              Future.value(),
+        ),
+      ),
+      _menuItem(label: '导出原始采样 CSV', onPressed: state?.exportCsv),
+      _menuItem(
+        label: '打开录制目录',
+        onPressed: widget.recordingStorage?.openDirectory,
+      ),
     ];
   }
 

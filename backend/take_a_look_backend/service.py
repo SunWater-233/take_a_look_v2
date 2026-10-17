@@ -73,6 +73,9 @@ class BackendService(SamplingServiceMixin):
         self._connection_kind = "local"
         self._remote_config = dict(REMOTE_DEFAULTS)
         self._sample_rate_hz = 50.0
+        self._monitor_rate_hz = 2.0
+        self._monitor_schedule_revision = 0
+        self._latest_rtt_values: dict[str, tuple[object, int]] = {}
         self._rtt_sample_rate_hz = 1000.0
         self._sampling_paused = False
         self._rtt_enabled = False
@@ -87,6 +90,7 @@ class BackendService(SamplingServiceMixin):
         self._pipeline_backpressure = False
         self._recording_error_reported = False
         self._pending_frames: list[tuple[float, dict[str, object]]] = []
+        self._pending_updated_at_ms: int | None = None
         self._pending_recording_frames: list[tuple[float, dict[str, object]]] = []
         self._pending_recording_labels: dict[str, str] = {}
         self._sample_count_since_perf = 0
@@ -151,7 +155,7 @@ class BackendService(SamplingServiceMixin):
             if method is RpcMethod.LOAD_SYMBOLS or (self._source_tasks.reserves_probe and method in {
                 RpcMethod.CONNECT, RpcMethod.DISCONNECT, RpcMethod.TOGGLE_CONNECTION, RpcMethod.SET_CONFIG,
             }) or (self._firmware_busy and method in {
-                RpcMethod.WRITE_WATCH, RpcMethod.SET_WATCHES, RpcMethod.DEBUG_CONTROL, RpcMethod.SET_BREAKPOINTS,
+                RpcMethod.WRITE_WATCH, RpcMethod.READ_WATCH, RpcMethod.SET_WATCHES, RpcMethod.DEBUG_CONTROL, RpcMethod.SET_BREAKPOINTS,
                 RpcMethod.SET_RTT, RpcMethod.SET_SAMPLING_PAUSED, RpcMethod.RESET_TARGET, RpcMethod.CLEAR_SAMPLES,
             }):
                 raise ProtocolError("source_task_busy", "编译或下载任务执行中，请等待任务完成。")
@@ -161,6 +165,7 @@ class BackendService(SamplingServiceMixin):
                 "capabilities": [
                     "symbols",
                     "memorySampling",
+                    "watchReadModes",
                     "memoryWrite",
                     "rttNormal",
                     "rttPlus",
@@ -192,6 +197,8 @@ class BackendService(SamplingServiceMixin):
             return self._set_watches(params)
         if method is RpcMethod.WRITE_WATCH:
             return self._write_watch(params)
+        if method is RpcMethod.READ_WATCH:
+            return self._read_watch(params)
         if method is RpcMethod.SET_SAMPLING_PAUSED:
             return self._set_sampling_paused(params)
         if method is RpcMethod.SET_RTT:
@@ -240,6 +247,7 @@ class BackendService(SamplingServiceMixin):
                 "firmwareDownload": self._connection_kind == "local",
             },
             "sampleRateHz": self._sample_rate_hz,
+            "monitorRateHz": self._monitor_rate_hz,
             "rttSampleRateHz": self._rtt_sample_rate_hz,
             "samplingPaused": self._sampling_paused,
             "rttEnabled": self._rtt_enabled,
@@ -258,6 +266,10 @@ class BackendService(SamplingServiceMixin):
                 return {"state": self._runtime_state_locked()}
             self._apply_config_locked(params)
             self._connection_status = "connecting"
+            self._latest_rtt_values.clear()
+            self._monitor_schedule_revision += 1
+            for watch in self._watches.values():
+                watch.next_monitor_at = 0.0
             connecting_state = self._runtime_state_locked()
         self._emit(EventName.STATE, connecting_state)
         try:
@@ -393,7 +405,10 @@ class BackendService(SamplingServiceMixin):
                           symbol.name == watch.symbol.name and symbol.source_file == watch.symbol.source_file]
             if len(candidates) == 1:
                 symbol = candidates[0]
-                result[symbol.key] = WatchedVariable(symbol, watch.color, watch.plot_enabled, watch.sampling_enabled)
+                result[symbol.key] = WatchedVariable(
+                    symbol, watch.color, watch.plot_enabled, watch.sampling_enabled,
+                    read_mode=watch.mode, monitor_rate_hz=watch.monitor_rate_hz,
+                )
         return result
 
     def _download_firmware(self, staged: Path, original: Path, config: dict[str, object], task: SourceTasks) -> None:
@@ -596,11 +611,10 @@ class BackendService(SamplingServiceMixin):
             if location is not None:
                 self._stopped_location.update({"path": location.path, "line": location.line})
             if not getattr(self._memory, "supports_running_memory", True):
-                symbols = [watch.symbol for watch in self._watches.values() if not watch.symbol.is_rtt]
+                symbols = [watch.symbol for watch in self._watches.values()
+                           if not watch.symbol.is_rtt and watch.mode != "manual"]
                 if symbols:
-                    for key, value in self._memory.read_symbols(symbols).items():
-                        self._watches[key].value = value
-                    self._emit(EventName.STATE, {"watches": [self._watch_json(w) for w in self._watches.values()]})
+                    self._publish_watch_values_locked(self._memory.read_symbols(symbols))
         else:
             self._registers = {}
             self._stopped_location = None
@@ -680,20 +694,36 @@ class BackendService(SamplingServiceMixin):
                 if symbol is None:
                     raise ProtocolError("unknown_symbol", "Watch references an unknown symbol.", key)
                 old = self._watches.get(key)
+                read_mode = raw.get("readMode")
+                if read_mode is None:
+                    read_mode = ("capture" if raw["sampling"] else "monitor") if "sampling" in raw else (old.mode if old else "capture")
+                if not isinstance(read_mode, str) or read_mode not in {"capture", "monitor", "manual"}:
+                    raise ProtocolError("invalid_request", "readMode must be capture, monitor or manual.")
+                monitor_rate = raw.get("monitorRateHz", old.monitor_rate_hz if old else None)
+                if monitor_rate is not None:
+                    monitor_rate = _monitor_frequency(monitor_rate)
                 new_watches[key] = WatchedVariable(
                     symbol=symbol,
                     color=_optional_string(raw, "color") or (old.color if old else "#5EEAD4"),
-                    plot_enabled=bool(raw.get("plotted", old.plot_enabled if old else True)),
-                    sampling_enabled=bool(
-                        raw.get("sampling", old.sampling_enabled if old else True)
-                    ),
+                    plot_enabled=read_mode == "capture" and bool(raw.get("plotted", old.plot_enabled if old else True)),
+                    sampling_enabled=read_mode == "capture",
                     value=old.value if old else "",
+                    read_mode=str(read_mode),
+                    monitor_rate_hz=monitor_rate,
+                    updated_at_ms=old.updated_at_ms if old else None,
+                    next_monitor_at=(old.next_monitor_at if old and old.mode == read_mode
+                                     and old.monitor_rate_hz == monitor_rate else 0.0),
                 )
+            # Seal the old acquisition policy without waiting for disk I/O.
+            self._flush_pending_samples_locked(wait=False)
+            membership_changed = set(new_watches) != set(self._watches)
             self._watches = new_watches
+            self._latest_rtt_values = {key: value for key, value in self._latest_rtt_values.items() if key in new_watches}
+            self._monitor_schedule_revision += 1
             if (self._connection_status == "connected" and self._target_execution_state == "halted"
                     and not getattr(self._memory, "supports_running_memory", True)):
                 self._refresh_debug_state_locked(force=True)
-            if self._rtt_protocol == "plus":
+            if self._rtt_protocol == "plus" and membership_changed:
                 self._stop_rtt_locked()
             state = {"watches": [self._watch_json(watch) for watch in self._watches.values()]}
         self._emit(EventName.STATE, state)
@@ -715,12 +745,38 @@ class BackendService(SamplingServiceMixin):
                 raise ProtocolError("not_connected", "Connect a debug probe before writing variables.")
             try:
                 watch.value = self._memory.write_symbol(watch.symbol, value_text)
+                watch.updated_at_ms = time.time_ns() // 1_000_000
             except Exception as error:
                 raise ProtocolError("write_failed", "Unable to write and verify the variable.", str(error)) from error
             state = {"watches": [self._watch_json(item) for item in self._watches.values()]}
         self._emit(EventName.LOG, {"level": "info", "message": f"已写入 {watch.symbol.name} 并完成回读验证。"})
         self._emit(EventName.STATE, state)
         return {"state": state}
+
+    def _read_watch(self, params: Mapping[str, object]) -> dict[str, object]:
+        key = _required_string(params, "key")
+        with self._lock:
+            watch = self._watches.get(key)
+            if watch is None:
+                raise ProtocolError("unknown_watch", "Watch does not exist.", key)
+            if self._connection_status != "connected":
+                raise ProtocolError("not_connected", "请先连接调试探针。")
+            can_read_memory = (getattr(self._memory, "supports_running_memory", True)
+                               or self._target_execution_state == "halted")
+            if watch.symbol.is_rtt or (not can_read_memory and self._rtt_enabled and self._rtt_protocol == "plus"):
+                latest = self._latest_rtt_values.get(key)
+                if latest is None:
+                    raise ProtocolError("no_data", "尚未收到此 RTT 变量的数据。")
+                self._publish_watch_values_locked({key: latest[0]}, updated_at_ms=latest[1])
+            else:
+                if not getattr(self._memory, "supports_running_memory", True) and self._target_execution_state != "halted":
+                    raise ProtocolError("target_running", "当前 GDB 连接需要暂停目标后读取内存。")
+                try:
+                    self._publish_watch_values_locked(self._memory.read_symbols([watch.symbol]))
+                except Exception as error:
+                    self._handle_remote_failure_locked(error)
+                    raise ProtocolError("read_failed", "变量读取失败。", str(error)) from error
+            return {"values": [self._watch_value_json(watch)]}
 
     def _set_sampling_paused(self, params: Mapping[str, object]) -> dict[str, object]:
         paused = params.get("paused")
@@ -735,7 +791,7 @@ class BackendService(SamplingServiceMixin):
                 "samplingPaused": self._sampling_paused,
                 "elapsedSeconds": self._elapsed_locked(),
             }
-        self._emit(EventName.LOG, {"level": "info", "message": "采样已暂停。" if paused else "采样已继续。"})
+        self._emit(EventName.LOG, {"level": "info", "message": "采集已暂停，低频监视继续。" if paused else "采集已继续。"})
         self._emit(EventName.STATE, state)
         self._wake.set()
         return {"state": state}
@@ -849,6 +905,12 @@ class BackendService(SamplingServiceMixin):
             self._serial_number = _required_string(params, "serialNumber")
         if "sampleRateHz" in params:
             self._sample_rate_hz = _positive_number(params["sampleRateHz"], "sampleRateHz")
+        if "monitorRateHz" in params:
+            self._monitor_rate_hz = _monitor_frequency(params["monitorRateHz"])
+            self._monitor_schedule_revision += 1
+            for watch in self._watches.values():
+                if watch.monitor_rate_hz is None:
+                    watch.next_monitor_at = 0.0
         if "rttSampleRateHz" in params:
             self._rtt_sample_rate_hz = _positive_number(params["rttSampleRateHz"], "rttSampleRateHz")
 
@@ -873,6 +935,9 @@ class BackendService(SamplingServiceMixin):
             "color": watch.color,
             "plotted": watch.plot_enabled,
             "sampling": watch.sampling_enabled,
+            "readMode": watch.mode,
+            "monitorRateHz": watch.monitor_rate_hz,
+            "updatedAtMs": watch.updated_at_ms,
             "value": json_value(watch.value),
         }
 
@@ -891,6 +956,13 @@ def _required_string(values: Mapping[str, object], name: str) -> str:
 def _optional_string(values: Mapping[str, object], name: str) -> str | None:
     value = values.get(name)
     return value if isinstance(value, str) else None
+
+
+def _monitor_frequency(value: object) -> float:
+    number = _positive_number(value, "monitorRateHz")
+    if not 0.5 <= number <= 10:
+        raise ProtocolError("invalid_request", "监视频率必须在 0.5–10 Hz 之间。")
+    return number
 
 
 def _positive_number(value: object, name: str) -> float:

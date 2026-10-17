@@ -12,6 +12,7 @@ const _snapshotFields = <String>{
   'symbolFile',
   'symbolLoad',
   'sampleRateHz',
+  'monitorRateHz',
   'rttSampleRateHz',
   'displayRefreshMode',
   'samplingElapsedSeconds',
@@ -95,6 +96,7 @@ extension TakeALookControllerSync on TakeALookController {
       },
       if (changes.contains(signals.sampling)) ...{
         'sampleRateHz',
+        'monitorRateHz',
         'rttSampleRateHz',
         'samplingPaused',
         'rawRecording',

@@ -645,10 +645,12 @@ class _SourceTaskOutput extends StatefulWidget {
     required this.controller,
     required this.maxHeight,
     required this.onOpenLocation,
+    this.embedded = false,
   });
   final TakeALookController controller;
   final double maxHeight;
   final void Function(String path, int line) onOpenLocation;
+  final bool embedded;
   @override
   State<_SourceTaskOutput> createState() => _SourceTaskOutputState();
 }
@@ -699,7 +701,7 @@ class _SourceTaskOutputState extends State<_SourceTaskOutput> {
           });
         }
       }
-      final expanded = _expanded && widget.maxHeight >= 85;
+      final expanded = (widget.embedded || _expanded) && widget.maxHeight >= 85;
       final tone = task.status == 'failed'
           ? Colors.redAccent
           : task.status == 'succeeded'
@@ -797,15 +799,16 @@ class _SourceTaskOutputState extends State<_SourceTaskOutput> {
                           }
                         },
                       ),
-                    TalIconButton(
-                      key: const ValueKey('source-output-toggle'),
-                      tooltip: expanded ? '折叠输出' : '展开输出',
-                      onPressed: () => setState(() => _expanded = !_expanded),
-                      icon: Icon(
-                        expanded ? Icons.expand_more : Icons.expand_less,
-                        size: 17,
+                    if (!widget.embedded)
+                      TalIconButton(
+                        key: const ValueKey('source-output-toggle'),
+                        tooltip: expanded ? '折叠输出' : '展开输出',
+                        onPressed: () => setState(() => _expanded = !_expanded),
+                        icon: Icon(
+                          expanded ? Icons.expand_more : Icons.expand_less,
+                          size: 17,
+                        ),
                       ),
-                    ),
                   ],
                 ),
               ),
@@ -814,7 +817,12 @@ class _SourceTaskOutputState extends State<_SourceTaskOutput> {
               SizedBox(
                 height:
                     (widget.maxHeight - TalUiTheme.of(context).targetExtent(34))
-                        .clamp(40.0, 230.0),
+                        .clamp(
+                          40.0,
+                          widget.embedded
+                              ? math.max(40.0, widget.maxHeight)
+                              : 230.0,
+                        ),
                 child: task.lines.isEmpty
                     ? const Align(
                         alignment: Alignment.topLeft,

@@ -24,6 +24,8 @@ class BackendSampleBatch {
     required this.values,
     required this.validity,
     required this.validityBytesPerFrame,
+    this.captureOnly = false,
+    this.updatedAtMs,
   });
 
   final int schemaId;
@@ -33,6 +35,8 @@ class BackendSampleBatch {
   final Float64List values;
   final Uint8List validity;
   final int validityBytesPerFrame;
+  final bool captureOnly;
+  final int? updatedAtMs;
 
   int get frameCount => elapsedSeconds.length;
   int get variableCount => keys.length;
@@ -57,13 +61,15 @@ int backendSampleSchemaId(Uint8List payload) {
 
 BackendSampleBatch decodeBackendSamplePayload(
   Uint8List payload,
-  List<String> keys,
-) {
+  List<String> keys, {
+  bool captureOnly = false,
+}) {
   if (payload.length < 15) {
     throw const FormatException('Backend sample payload is truncated');
   }
   final data = ByteData.sublistView(payload);
-  if (data.getUint8(0) != 1) {
+  final version = data.getUint8(0);
+  if (version != 1 && version != 2) {
     throw FormatException(
       'Unsupported sample payload version ${data.getUint8(0)}',
     );
@@ -72,6 +78,11 @@ BackendSampleBatch decodeBackendSamplePayload(
   final sequence = data.getUint32(5, Endian.little);
   final frameCount = data.getUint32(9, Endian.little);
   final variableCount = data.getUint16(13, Endian.little);
+  final headerBytes = version == 2 ? 23 : 15;
+  if (payload.length < headerBytes) {
+    throw const FormatException('Backend sample header is truncated');
+  }
+  final updatedAtMs = version == 2 ? data.getUint64(15, Endian.little) : null;
   if (variableCount != keys.length) {
     throw FormatException(
       'Sample schema $schemaId expected ${keys.length} values, got $variableCount',
@@ -80,7 +91,7 @@ BackendSampleBatch decodeBackendSamplePayload(
 
   final validityBytes = (variableCount + 7) ~/ 8;
   final minimumFrameBytes = 8 + validityBytes;
-  if (frameCount > (payload.length - 15) ~/ minimumFrameBytes) {
+  if (frameCount > (payload.length - headerBytes) ~/ minimumFrameBytes) {
     throw const FormatException('Backend sample frame count is invalid');
   }
   if (frameCount * variableCount > 16 * 1024 * 1024) {
@@ -89,7 +100,7 @@ BackendSampleBatch decodeBackendSamplePayload(
   final elapsed = Float64List(frameCount);
   final values = Float64List(frameCount * variableCount);
   final validity = Uint8List(frameCount * validityBytes);
-  var offset = 15;
+  var offset = headerBytes;
   void requireBytes(int count) {
     if (offset + count > payload.length) {
       throw const FormatException('Backend sample payload is truncated');
@@ -133,6 +144,8 @@ BackendSampleBatch decodeBackendSamplePayload(
     values: values,
     validity: validity,
     validityBytesPerFrame: validityBytes,
+    captureOnly: captureOnly || version == 2,
+    updatedAtMs: updatedAtMs,
   );
 }
 

@@ -10,6 +10,7 @@
     "setConfig",
     "setWatches",
     "writeWatch",
+    "readWatch",
     "setSamplingPaused",
     "setRtt",
     "clearSamples",
@@ -26,6 +27,7 @@
   "events": [
     "state",
     "samples",
+    "watchValues",
     "samplesCleared",
     "sampleSchema",
     "log",

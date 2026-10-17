@@ -9,6 +9,7 @@ import 'package:take_a_look_v2/src/chart/chart.dart';
 import 'package:take_a_look_v2/src/chart/hover.dart';
 import 'package:take_a_look_v2/src/chart/painter.dart';
 import 'package:take_a_look_v2/src/controller/controller.dart';
+import 'package:take_a_look_v2/src/models/models.dart';
 import 'package:take_a_look_v2/src/theme/theme.dart';
 
 TakeALookController controllerWithSeries(Map<String, List<Offset>> samples) {
@@ -29,6 +30,9 @@ TakeALookController controllerWithSeries(Map<String, List<Offset>> samples) {
   });
   controller.selectSymbols(samples.keys);
   controller.addSelectedToWatch();
+  for (final watch in controller.watches) {
+    controller.setWatchReadMode(watch.symbol.key, WatchReadMode.capture);
+  }
   controller.setAllWatchesPlotted(true);
   updateSamples(controller, samples);
   controller.configurePlotView({

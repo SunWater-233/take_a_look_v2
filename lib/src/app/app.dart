@@ -8,6 +8,7 @@ import 'package:tal_drag_preview/tal_drag_preview.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'title_bar.dart';
+import 'workbench_chrome.dart';
 import 'workbench_feedback.dart';
 import '../backend/backend_client.dart';
 import '../controller/controller.dart';
@@ -440,6 +441,40 @@ class MainWorkbench extends StatefulWidget {
 
 class _MainWorkbenchState extends State<MainWorkbench> {
   final workspaceKey = GlobalKey<DockingWorkspaceState>();
+  String _shownSourceTask = '';
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.sourceToolsChanges.addListener(_handleSourceTask);
+  }
+
+  @override
+  void didUpdateWidget(covariant MainWorkbench oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.sourceToolsChanges.removeListener(_handleSourceTask);
+      widget.controller.sourceToolsChanges.addListener(_handleSourceTask);
+      _shownSourceTask = '';
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.controller.sourceToolsChanges.removeListener(_handleSourceTask);
+    super.dispose();
+  }
+
+  void _handleSourceTask() {
+    final task = widget.controller.sourceTask;
+    if (!task.running || task.id == _shownSourceTask) return;
+    _shownSourceTask = task.id;
+    widget.controller.workbenchOutputTab = 1;
+    final workspace = workspaceKey.currentState;
+    if (workspace != null && !workspace.outputDocked) {
+      unawaited(workspace.toggleWorkbenchOutput());
+    }
+  }
 
   KeyEventResult _handleWorkbenchShortcut(KeyEvent event) {
     if (WorkspaceShortcut.resetUiScale.matches(event)) {
@@ -466,22 +501,32 @@ class _MainWorkbenchState extends State<MainWorkbench> {
         onKeyEvent: _handleWorkbenchShortcut,
         child: Scaffold(
           body: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               TalWindowTitleBar(
                 controller: widget.controller,
                 workspaceKey: workspaceKey,
+                workbench: true,
+                recordingStorage: widget.recordingStorage,
               ),
               if (widget.toolbar != null) widget.toolbar!,
+              WorkbenchToolbar(controller: widget.controller),
+              WorkbenchNavigation(workspaceKey: workspaceKey),
               Expanded(
                 child: DockingWorkspace(
                   key: workspaceKey,
                   controller: widget.controller,
                   windowSync: widget.windowSync,
                   layoutFile: widget.layoutFile,
+                  workbenchLayout: true,
                   onPanelVisibilityChanged: () {
                     if (mounted) setState(() {});
                   },
                 ),
+              ),
+              WorkbenchStatusBar(
+                controller: widget.controller,
+                workspaceKey: workspaceKey,
               ),
             ],
           ),

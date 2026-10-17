@@ -1,6 +1,7 @@
 enum BackendEventType {
   state,
   samples,
+  watchValues,
   samplesCleared,
   log,
   error,

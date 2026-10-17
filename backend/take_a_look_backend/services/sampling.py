@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from take_a_look_backend.models import json_value
+from take_a_look_backend.models import WatchedVariable, json_value
 from take_a_look_backend.protocol import EventName
 from take_a_look_backend.services.sampling_clock import advance_deadline, wait_until
 
@@ -12,8 +12,9 @@ class SamplingServiceMixin:
     """Time-critical acquisition loop and RTT lifecycle."""
 
     def _sampling_loop(self) -> None:
-        next_memory_at = next_rtt_at = last_emit_at = time.perf_counter()
+        next_memory_at = next_rtt_at = next_monitor_at = last_emit_at = time.perf_counter()
         previous_periods = None
+        monitor_revision = -1
         while not self._shutdown.is_set():
             now = time.perf_counter()
             deadlines = [now + 0.05]
@@ -26,6 +27,9 @@ class SamplingServiceMixin:
                         connected = self._connection_status == "connected"
                     if connected:
                         deadlines.append(self._next_debug_poll_at)
+                    if monitor_revision != self._monitor_schedule_revision:
+                        monitor_revision = self._monitor_schedule_revision
+                        next_monitor_at = now
                     active = connected and not self._sampling_paused and self._target_execution_state != "halted"
                     memory_period = 1.0 / self._sample_rate_hz
                     rtt_period = max(1.0 / self._rtt_sample_rate_hz, 0.002)
@@ -38,8 +42,12 @@ class SamplingServiceMixin:
                     rtt_protocol = self._rtt_protocol
                     if self._pipeline_backpressure:
                         self._flush_pending_samples_locked(wait=False)
-                    if active and not self._pipeline_backpressure:
-                        memory_enabled = (bool(self._watches) and
+                    if connected:
+                        if now >= next_monitor_at:
+                            next_monitor_at = self._poll_monitors_locked(now)
+                        deadlines.append(next_monitor_at)
+                    if connected and not self._pipeline_backpressure:
+                        memory_enabled = (active and any(w.captures and not w.symbol.is_rtt for w in self._watches.values()) and
                             getattr(self._memory, "supports_running_memory", True) and
                             not (rtt_enabled and rtt_protocol == "plus" and self._plus_rtt.is_started))
                         if memory_enabled:
@@ -49,9 +57,13 @@ class SamplingServiceMixin:
                                     self._queue_samples_locked([(elapsed, values)])
                                 next_memory_at = advance_deadline(next_memory_at, time.perf_counter(), memory_period)
                             deadlines.append(next_memory_at)
-                        if rtt_enabled:
+                        # Drain push streams while capture is paused. Monitors use
+                        # fresh cached values; old RTT frames must never be replayed.
+                        if rtt_enabled and self._target_execution_state != "halted":
                             if now >= next_rtt_at:
-                                self._queue_samples_locked(self._read_rtt_locked(elapsed, now))
+                                frames = self._read_rtt_locked(elapsed, now)
+                                if active:
+                                    self._queue_samples_locked(frames)
                                 next_rtt_at = advance_deadline(next_rtt_at, time.perf_counter(), rtt_period)
                             deadlines.append(next_rtt_at)
                     if self._pending_frames:
@@ -71,18 +83,67 @@ class SamplingServiceMixin:
                 self._publish_perf(now)
             wait_until(self._wake, min(deadlines))
 
+    @staticmethod
+    def _watch_value_json(watch: WatchedVariable) -> dict[str, object]:
+        return {"key": watch.symbol.key, "value": json_value(watch.value),
+                "updatedAtMs": watch.updated_at_ms}
+
+    def _remember_values_locked(self, values: dict[str, object], *, updated_at_ms: int | None = None) -> None:
+        stamp = updated_at_ms if updated_at_ms is not None else time.time_ns() // 1_000_000
+        for key, value in values.items():
+            watch = self._watches.get(key)
+            if watch is not None and (watch.updated_at_ms is None or stamp >= watch.updated_at_ms):
+                watch.value = value
+                watch.updated_at_ms = stamp
+
+    def _publish_watch_values_locked(self, values: dict[str, object], *, updated_at_ms: int | None = None) -> None:
+        self._remember_values_locked(values, updated_at_ms=updated_at_ms)
+        payload = [self._watch_value_json(self._watches[key]) for key in values if key in self._watches]
+        if payload:
+            self._emit(EventName.WATCH_VALUES, {"values": payload})
+
+    def _poll_monitors_locked(self, now: float) -> float:
+        """Latest-only polling has its own deadlines, independent of capture."""
+        memory = []
+        pushed: list[tuple[WatchedVariable, tuple[object, int]]] = []
+        next_at = now + 2.0
+        can_read_memory = (getattr(self._memory, "supports_running_memory", True)
+                           or self._target_execution_state == "halted")
+        plus = self._rtt_enabled and self._rtt_protocol == "plus"
+        for watch in self._watches.values():
+            if watch.mode != "monitor":
+                continue
+            period = 1.0 / (watch.monitor_rate_hz or self._monitor_rate_hz)
+            if watch.next_monitor_at <= now:
+                watch.next_monitor_at = now + period
+                if watch.symbol.is_rtt or (plus and self._target_execution_state != "halted"):
+                    cached = self._latest_rtt_values.get(watch.symbol.key)
+                    if cached is not None and (watch.updated_at_ms is None or cached[1] > watch.updated_at_ms):
+                        pushed.append((watch, cached))
+                elif can_read_memory:
+                    memory.append(watch.symbol)
+            next_at = min(next_at, watch.next_monitor_at)
+        if memory:
+            self._publish_watch_values_locked(self._memory.read_symbols(memory))
+        # A fixed RTT producer retains its own rate. Throttle presentation,
+        # without pretending this reduces traffic on the target's link.
+        if pushed:
+            for watch, (value, stamp) in pushed:
+                watch.value, watch.updated_at_ms = value, stamp
+            self._emit(EventName.WATCH_VALUES, {"values": [self._watch_value_json(w) for w, _ in pushed]})
+        return max(now + 0.001, next_at)
+
     def _read_memory_locked(self, rtt_enabled: bool, rtt_protocol: str) -> dict[str, object]:
         if not getattr(self._memory, "supports_running_memory", True):
             return {}
         if rtt_enabled and rtt_protocol == "plus" and self._plus_rtt.is_started:
             return {}
-        symbols = [watch.symbol for watch in self._watches.values() if not watch.symbol.is_rtt]
+        symbols = [watch.symbol for watch in self._watches.values()
+                   if not watch.symbol.is_rtt and watch.captures]
         if not symbols:
             return {}
         values = self._memory.read_symbols(symbols)
-        for key, value in values.items():
-            if key in self._watches:
-                self._watches[key].value = value
+        self._remember_values_locked(values)
         return values
 
     def _read_rtt_locked(self, elapsed: float, now: float) -> list[tuple[float, dict[str, object]]]:
@@ -130,22 +191,30 @@ class SamplingServiceMixin:
                 self._stop_rtt_locked()
                 self._emit(EventName.STATE, {"rttEnabled": False})
             raise
+        latest = {}
         for _frame_elapsed, values in frames:
-            for key, value in values.items():
-                if key in self._watches:
-                    self._watches[key].value = value
+            latest.update({key: value for key, value in values.items() if key in self._watches})
+        stamp = time.time_ns() // 1_000_000
+        self._latest_rtt_values.update({key: (value, stamp) for key, value in latest.items()})
+        if not self._sampling_paused:
+            self._remember_values_locked({key: value for key, value in latest.items()
+                                          if self._watches[key].captures}, updated_at_ms=stamp)
         return frames
 
     def _queue_samples_locked(self, frames: list[tuple[float, dict[str, object]]]) -> None:
         # Capture the sampling switches/labels at acquisition, before a watch
         # can be disabled or removed while this batch waits for publication.
         for elapsed, values in frames:
-            normalized = {key: json_value(value) for key, value in values.items()}
+            normalized = {key: json_value(value) for key, value in values.items()
+                          if key in self._watches and self._watches[key].captures}
+            if not normalized:
+                continue
             self._pending_frames.append((elapsed, normalized))
+            self._pending_updated_at_ms = time.time_ns() // 1_000_000
             recorded = {}
             for key, value in normalized.items():
                 watch = self._watches.get(key)
-                if watch and watch.sampling_enabled:
+                if watch and watch.captures:
                     recorded[key] = value
                     self._pending_recording_labels[key] = watch.symbol.name
             if recorded:
@@ -161,9 +230,10 @@ class SamplingServiceMixin:
         frames = self._pending_frames
         recorded = self._pending_recording_frames
         labels = self._pending_recording_labels
+        updated_at_ms = self._pending_updated_at_ms
         weight = len(frames) * 128 + sum(len(values) for _, values in frames) * 96
         future = self._recording_worker.submit(
-            lambda: self._commit_sample_batch(frames, recorded, labels),
+            lambda: self._commit_sample_batch(frames, recorded, labels, updated_at_ms),
             weight=weight, block=wait if block is None else block)
         if future is None:
             # Retain the acquired batch and stop further reads until admitted.
@@ -174,11 +244,12 @@ class SamplingServiceMixin:
         self._pending_frames = []
         self._pending_recording_frames = []
         self._pending_recording_labels = {}
+        self._pending_updated_at_ms = None
         if wait:
             future.result()
         return True
 
-    def _commit_sample_batch(self, frames, recorded, labels) -> None:
+    def _commit_sample_batch(self, frames, recorded, labels, updated_at_ms=None) -> None:
         previous_path = self._recording.path
         try:
             self._recording.append(recorded, labels)
@@ -199,7 +270,7 @@ class SamplingServiceMixin:
         if self._recording.path != previous_path:
             self._emit(EventName.LOG, {"level": "info", "message": f"原始采样持续保存：{self._recording.path}"})
             self._emit(EventName.STATE, {"rawRecording": self._recording.status()})
-        self._emit(EventName.SAMPLES, {"frames": [
+        self._emit(EventName.SAMPLES, {"captureOnly": True, "updatedAtMs": updated_at_ms, "frames": [
             {"elapsed": elapsed, "values": values} for elapsed, values in frames]})
         self._wake.set()
 
@@ -233,6 +304,7 @@ class SamplingServiceMixin:
         self._plus_rtt.stop()
         self._last_rtt_error = ""
         self._next_rtt_retry_at = 0.0
+        self._latest_rtt_values.clear()
 
     def _elapsed_locked(self, now: float | None = None) -> float:
         if self._connection_started_at is None:

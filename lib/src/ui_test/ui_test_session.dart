@@ -278,13 +278,38 @@ void motor_control_tick(void)
           return;
         }
         _writtenValues[watch.symbol.key] = value;
-        _publishFrames([
-          {
-            'elapsed': controller.elapsedSeconds,
-            'values': {watch.symbol.key: value},
-          },
-        ]);
+        controller.applyWatchValues({
+          'values': [
+            {
+              'key': watch.symbol.key,
+              'value': value,
+              'updatedAtMs': DateTime.now().millisecondsSinceEpoch,
+            },
+          ],
+        });
         controller.addLog('模拟写入 ${watch.symbol.name} = $value。');
+      case BackendMethod.readWatch:
+        final key = call!.params['key'];
+        final index = controller.watches.indexWhere(
+          (watch) => watch.symbol.key == key,
+        );
+        if (index < 0 ||
+            controller.connectionStatus != ConnectionStatus.connected) {
+          _error('ui_test_read_failed', '请先连接模拟探针。', '变量读取失败。');
+          return;
+        }
+        final watch = controller.watches[index];
+        controller.applyWatchValues({
+          'values': [
+            {
+              'key': watch.symbol.key,
+              'value':
+                  _writtenValues[watch.symbol.key] ??
+                  _value(watch.symbol, controller.elapsedSeconds, index),
+              'updatedAtMs': DateTime.now().millisecondsSinceEpoch,
+            },
+          ],
+        });
       case BackendMethod.resetTarget:
         _sourceLine = 10;
         _debug(call!.params['halt'] == true ? 'halted' : 'running');
@@ -353,8 +378,29 @@ void motor_control_tick(void)
 
   void _tick() {
     if (_disposed ||
-        controller.connectionStatus != ConnectionStatus.connected ||
-        controller.samplingPaused ||
+        controller.connectionStatus != ConnectionStatus.connected) {
+      return;
+    }
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final monitored = <Map<String, Object>>[];
+    for (final (index, watch) in controller.watches.indexed) {
+      if (watch.readMode != WatchReadMode.monitor) continue;
+      if (watch.updatedAtMs != null &&
+          now - watch.updatedAtMs! < 1000 / controller.monitorRateFor(watch)) {
+        continue;
+      }
+      monitored.add({
+        'key': watch.symbol.key,
+        'value':
+            _writtenValues[watch.symbol.key] ??
+            _value(watch.symbol, controller.elapsedSeconds, index),
+        'updatedAtMs': now,
+      });
+    }
+    if (monitored.isNotEmpty) {
+      controller.applyWatchValues({'values': monitored});
+    }
+    if (controller.samplingPaused ||
         controller.debugState.executionState == DebugExecutionState.halted) {
       return;
     }
@@ -375,6 +421,7 @@ void motor_control_tick(void)
     final watches = controller.watches
         .where((watch) => watch.samplingEnabled)
         .toList();
+    if (watches.isEmpty) return;
     final frames = <Map<String, Object>>[
       for (var frame = 1; frame <= count; frame++)
         {
@@ -413,7 +460,7 @@ void motor_control_tick(void)
       if (recording.path != previousPath) {
         controller.addLog('原始采样持续保存：${recording.path}');
       }
-      controller.applyBackendSamples({'frames': frames});
+      controller.applyBackendSamples({'frames': frames, 'captureOnly': true});
     } catch (error) {
       _recordingFailed(error);
     }

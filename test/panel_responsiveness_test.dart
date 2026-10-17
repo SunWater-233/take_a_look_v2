@@ -141,7 +141,7 @@ void main() {
     final row = find.byKey(ValueKey<String>(demoSymbols.first.key));
     final initialWidth = tester.getSize(content).width;
     final initialRowHeight = tester.getSize(row).height;
-    for (var index = 0; index < 8; index += 1) {
+    for (var index = 0; index < 10; index += 1) {
       expect(
         find.byKey(ValueKey('watch-column-resize-$index')),
         findsOneWidget,
@@ -169,7 +169,7 @@ void main() {
 
     expect(
       tester.getSize(content).width,
-      closeTo(widthAfterColumnResize + 136, 0.01),
+      closeTo(widthAfterColumnResize + 170, 0.01),
     );
     expect(tester.getSize(row).height, closeTo(initialRowHeight + 8.5, 0.01));
 

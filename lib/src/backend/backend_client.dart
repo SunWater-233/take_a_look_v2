@@ -47,6 +47,7 @@ class BackendClient {
   BackendStreamDecoder? _streamDecoder;
   final Map<int, Completer<Map<String, dynamic>>> _pending = {};
   final Map<int, List<String>> _sampleSchemas = {};
+  final Set<int> _captureOnlySchemas = {};
   Map<String, dynamic> _state = {};
   int _nextRequestId = 1;
   int? _lastSampleSequence;
@@ -214,6 +215,7 @@ class BackendClient {
     _stdoutSubscription = null;
     _stderrSubscription = null;
     _sampleSchemas.clear();
+    _captureOnlySchemas.clear();
     _lastSampleSequence = null;
     for (final pending in _pending.values) {
       if (!pending.isCompleted) {
@@ -295,7 +297,9 @@ class BackendClient {
       throw const FormatException('Invalid backend sample schema');
     }
     _sampleSchemas[id] = List<String>.unmodifiable(rawKeys.cast<String>());
+    if (schema?['captureOnly'] == true) _captureOnlySchemas.add(id);
     if (_sampleSchemas.length > 8) {
+      _captureOnlySchemas.remove(_sampleSchemas.keys.first);
       _sampleSchemas.remove(_sampleSchemas.keys.first);
     }
   }
@@ -306,7 +310,11 @@ class BackendClient {
     if (keys == null) {
       throw FormatException('Unknown backend sample schema $schemaId');
     }
-    final batch = decodeBackendSamplePayload(payload, keys);
+    final batch = decodeBackendSamplePayload(
+      payload,
+      keys,
+      captureOnly: _captureOnlySchemas.contains(schemaId),
+    );
     final previousSequence = _lastSampleSequence;
     if (previousSequence != null &&
         batch.sequence != ((previousSequence + 1) & 0xFFFFFFFF)) {

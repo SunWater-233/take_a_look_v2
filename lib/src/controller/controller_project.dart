@@ -1,47 +1,9 @@
 part of 'controller.dart';
 
-const _projectFields = {
-  'probeType',
-  'targetName',
-  'targetPackId',
-  'swdClock',
-  'serialNumber',
-  'connectionKind',
-  'remoteConfig',
-  'symbolFile',
-  'sampleRateHz',
-  'monitorRateHz',
-  'rttSampleRateHz',
-  'displayRefreshMode',
-  'samplingPaused',
-  'plottingPaused',
-  'rttEnabled',
-  'rttProtocol',
-  'followLatest',
-  'plotVisibleWindowSeconds',
-  'plotRetentionSeconds',
-  'plotAutoY',
-  'plotYMin',
-  'plotYMax',
-  'plotShowGrid',
-  'plotShowLegend',
-  'plotMouseXEnabled',
-  'plotMouseYEnabled',
-  'plotInvertX',
-  'plotInvertY',
-  'uiScale',
-  'selectedSymbols',
-  'symbols',
-  'watches',
-  'analysisSession',
-  'sourceWorkspace',
-  'sourceProject',
-};
-
 extension TakeALookControllerProject on TakeALookController {
   Map<String, dynamic> projectSettings() {
     final data = _encodeSnapshot(
-      fields: _projectFields,
+      fields: ControllerSnapshotSchema.projectFields,
       includeSamples: false,
       includeAnalysisData: true,
     );
@@ -75,7 +37,7 @@ extension TakeALookControllerProject on TakeALookController {
     if (data['symbols'] is! List ||
         data['watches'] is! List ||
         data['sourceProject'] is! Map ||
-        !_projectFields.every(data.containsKey)) {
+        !ControllerSnapshotSchema.projectFields.every(data.containsKey)) {
       throw const FormatException('项目缺少变量或工程配置。');
     }
     for (final key in const [
@@ -119,7 +81,7 @@ extension TakeALookControllerProject on TakeALookController {
     final probe = TakeALookController(backendCommand: (_, _) async {});
     try {
       probe.applySnapshot({
-        for (final key in _projectFields)
+        for (final key in ControllerSnapshotSchema.projectFields)
           if (data.containsKey(key)) key: data[key],
       });
       if (probe.watches.length != (data['watches'] as List).length ||
@@ -166,7 +128,7 @@ extension TakeALookControllerProject on TakeALookController {
 
   Future<void> _restoreProjectSettings(Map<String, dynamic> data) async {
     final settings = <String, dynamic>{
-      for (final key in _projectFields)
+      for (final key in ControllerSnapshotSchema.projectFields)
         if (data.containsKey(key)) key: data[key],
     };
     final sender = projectBackendCommand ?? backendCommand;

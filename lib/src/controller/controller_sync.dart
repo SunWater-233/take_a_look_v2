@@ -1,62 +1,5 @@
 part of 'controller.dart';
 
-const _snapshotFields = <String>{
-  'connectionStatus',
-  'probeType',
-  'targetName',
-  'targetPackId',
-  'targetPartNumber',
-  'targetPackLabel',
-  'targetPackMissing',
-  'targetCatalogRevision',
-  'swdClock',
-  'serialNumber',
-  'connectionKind',
-  'gatewayProtocolVersion',
-  'remoteConfig',
-  'symbolFile',
-  'symbolLoad',
-  'sampleRateHz',
-  'monitorRateHz',
-  'rttSampleRateHz',
-  'displayRefreshMode',
-  'samplingElapsedSeconds',
-  'elapsedSeconds',
-  'samplingPaused',
-  'rawRecording',
-  'plottingPaused',
-  'plotHighlightedWatchKey',
-  'plotWatchSelectionRevision',
-  'rttEnabled',
-  'rttProtocol',
-  'followLatest',
-  'plotVisibleWindowSeconds',
-  'plotRetentionSeconds',
-  'plotAutoY',
-  'plotYMin',
-  'plotYMax',
-  'plotShowGrid',
-  'plotShowLegend',
-  'plotMouseXEnabled',
-  'plotMouseYEnabled',
-  'plotInvertX',
-  'plotInvertY',
-  'plotWindowEndSeconds',
-  'uiScale',
-  'lastBackendError',
-  'selectedSymbols',
-  'symbols',
-  'watches',
-  'canUndoWatchDeletion',
-  'canRedoWatchDeletion',
-  'logs',
-  'analysisSession',
-  'sourceWorkspace',
-  'sourceProject',
-  'sourceTask',
-  'debug',
-};
-
 extension TakeALookControllerSync on TakeALookController {
   void setPresentationActive(bool active, {bool releaseHistory = false}) {
     _presentationActive = active;
@@ -73,88 +16,30 @@ extension TakeALookControllerSync on TakeALookController {
     }
   }
 
-  Map<String, int> snapshotVersions() => {
-    for (final key in _snapshotFields)
-      key: key == 'symbols' ? symbolRevision : _stateFieldRevisions[key] ?? 0,
-  };
+  Map<String, int> snapshotVersions() =>
+      _snapshotRevisions.versions(symbolRevision: symbolRevision);
 
-  void _touchSnapshotFields(Iterable<String> fields) {
-    final revision = ++_stateRevision;
-    for (final key in fields) {
-      if (_snapshotFields.contains(key)) _stateFieldRevisions[key] = revision;
-    }
-  }
+  void _touchSnapshotFields(Iterable<String> fields) =>
+      _snapshotRevisions.touch(fields);
 
-  void _recordStateChanges(Set<ControllerSignal> changes) {
-    _touchSnapshotFields({
-      'uiScale',
-      'elapsedSeconds',
-      'samplingElapsedSeconds',
-      if (changes.contains(signals.connection)) ...{
-        'connectionStatus',
-        'probeType',
-        'targetName',
-        'targetPackId',
-        'targetPartNumber',
-        'targetPackLabel',
-        'targetPackMissing',
-        'swdClock',
-        'serialNumber',
-        'connectionKind',
-        'gatewayProtocolVersion',
-        'remoteConfig',
-        'lastBackendError',
-        'symbolFile',
-      },
-      if (changes.contains(signals.sampling)) ...{
-        'sampleRateHz',
-        'monitorRateHz',
-        'rttSampleRateHz',
-        'samplingPaused',
-        'rawRecording',
-        'rttEnabled',
-        'rttProtocol',
-      },
-      if (changes.contains(signals.targetCatalog)) 'targetCatalogRevision',
-      if (changes.contains(signals.symbols)) ...{
-        'selectedSymbols',
-        'symbolFile',
-      },
-      if (changes.contains(signals.watches)) ...{
-        'watches',
-        'canUndoWatchDeletion',
-        'canRedoWatchDeletion',
-      },
-      if (changes.contains(signals.plot) ||
-          changes.contains(signals.plotControls)) ...{
-        'displayRefreshMode',
-        'plottingPaused',
-        'plotHighlightedWatchKey',
-        'plotWatchSelectionRevision',
-        'followLatest',
-        'plotVisibleWindowSeconds',
-        'plotRetentionSeconds',
-        'plotAutoY',
-        'plotYMin',
-        'plotYMax',
-        'plotShowGrid',
-        'plotShowLegend',
-        'plotMouseXEnabled',
-        'plotMouseYEnabled',
-        'plotInvertX',
-        'plotInvertY',
-        'plotWindowEndSeconds',
-      },
-      if (changes.contains(signals.logs)) 'logs',
-      if (changes.contains(signals.analysis)) 'analysisSession',
-      if (changes.contains(signals.debug)) 'debug',
-      if (changes.contains(signals.sourceWorkspace)) 'sourceWorkspace',
-      if (changes.contains(signals.sourceTools)) ...{
-        'sourceProject',
-        'sourceTask',
-      },
-    });
-  }
+  void _recordStateChanges(Set<ControllerSignal> changes) =>
+      _snapshotRevisions.record({
+        if (changes.contains(signals.connection)) SnapshotDomain.connection,
+        if (changes.contains(signals.sampling)) SnapshotDomain.sampling,
+        if (changes.contains(signals.targetCatalog))
+          SnapshotDomain.targetCatalog,
+        if (changes.contains(signals.symbols)) SnapshotDomain.symbols,
+        if (changes.contains(signals.watches)) SnapshotDomain.watches,
+        if (changes.contains(signals.plot) ||
+            changes.contains(signals.plotControls))
+          SnapshotDomain.plot,
+        if (changes.contains(signals.logs)) SnapshotDomain.logs,
+        if (changes.contains(signals.analysis)) SnapshotDomain.analysis,
+        if (changes.contains(signals.debug)) SnapshotDomain.debug,
+        if (changes.contains(signals.sourceWorkspace))
+          SnapshotDomain.sourceWorkspace,
+        if (changes.contains(signals.sourceTools)) SnapshotDomain.sourceTools,
+      });
 
   JsonObject stateDeltaSnapshot(
     Map<String, int> acknowledged, {
@@ -162,7 +47,7 @@ extension TakeALookControllerSync on TakeALookController {
   }) {
     final versions = snapshotVersions();
     final fields = {
-      for (final key in _snapshotFields)
+      for (final key in ControllerSnapshotSchema.fields)
         if (acknowledged[key] != versions[key]) key,
     };
     return _encodeSnapshot(

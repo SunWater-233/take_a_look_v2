@@ -11,6 +11,14 @@ to `setConfig.connectionKind` (`local`, `ember`, `emberGdb`, or `gdb`) and
 `core`, and `rttDelivery` (`reliable` or `latest`, all strings). Connection settings can be changed while disconnected.
 `connectionCapabilities` reports memory polling, memory writes, and RTT support.
 
+`backends/target_backend.py` defines the target-operation protocol, connection
+capabilities and RTT binding consumed by the service and sampler. Local pyOCD
+and remote adapters share `TypedMemoryBackend` for coalesced reads, numeric
+codecs, register access and write/readback verification. The remote adapter does
+not inherit pyOCD connection, target-registry or flash-programming behavior;
+those remain in the local adapter. Adapter calls retain the service's existing
+serialization and ownership rules.
+
 The GDB adapter starts an installed, architecture-appropriate GDB with MI3;
 `pygdbmi` parses the machine output. GDB itself must be installed separately.
 The current register interface supports ARM/Cortex-M. The private adapter

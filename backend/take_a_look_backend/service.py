@@ -8,6 +8,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from take_a_look_backend.backends.j_scope_rtt import JScopeRttBackend
+from take_a_look_backend.backends.target_backend import TargetBackend, backend_capabilities, capabilities_for_connection
 from take_a_look_backend.backends.pyocd_memory import PyOcdConnectionConfig, PyOcdMemoryBackend
 from take_a_look_backend.backends.rtt_plus import JScopeRttPlusBackend
 from take_a_look_backend.backends.remote_backend import CONNECTION_KINDS, REMOTE_DEFAULTS, RemoteMemoryBackend
@@ -42,18 +43,18 @@ class BackendService(SamplingServiceMixin):
         self,
         event_sink: EventSink,
         *,
-        memory_backend: PyOcdMemoryBackend | None = None,
+        memory_backend: TargetBackend | None = None,
         normal_rtt_backend: JScopeRttBackend | None = None,
         plus_rtt_backend: JScopeRttPlusBackend | None = None,
         symbol_loader: SymbolLoader = load_symbols_from_elf,
         debug_info_loader: DebugInfoLoader = load_debug_info_from_elf,
-        remote_backend_factory: Callable[..., RemoteMemoryBackend] = RemoteMemoryBackend,
+        remote_backend_factory: Callable[..., TargetBackend] = RemoteMemoryBackend,
         recording_directory: Path | None = None,
         source_settings_file: Path | None = None,
         target_directory: Path | None = None,
     ) -> None:
         self._emit_event = event_sink
-        self._memory = memory_backend or PyOcdMemoryBackend()
+        self._memory: TargetBackend = memory_backend or PyOcdMemoryBackend()
         self._local_memory = self._memory
         self._remote_backend_factory = remote_backend_factory
         self._normal_rtt = normal_rtt_backend or JScopeRttBackend()
@@ -275,12 +276,7 @@ class BackendService(SamplingServiceMixin):
             "connectionKind": self._connection_kind,
             "remoteConfig": dict(self._remote_config),
             "gatewayProtocolVersion": getattr(getattr(self._memory, "client", None), "protocol_version", None),
-            "connectionCapabilities": {
-                "memorySampling": self._connection_kind in {"local", "ember"},
-                "memoryWrite": self._connection_kind != "ember",
-                "rtt": self._connection_kind != "gdb",
-                "firmwareDownload": self._connection_kind == "local",
-            },
+            "connectionCapabilities": capabilities_for_connection(self._connection_kind).to_json(),
             "sampleRateHz": self._sample_rate_hz,
             "monitorRateHz": self._monitor_rate_hz,
             "rttSampleRateHz": self._rtt_sample_rate_hz,
@@ -564,7 +560,7 @@ class BackendService(SamplingServiceMixin):
         return {"debug": payload}
 
     def _continue_or_step_locked(self, *, resume: bool) -> None:
-        if getattr(self._memory, "manages_breakpoint_step", False):
+        if backend_capabilities(self._memory).manages_breakpoint_step:
             if resume:
                 self._memory.resume()
             else:
@@ -654,7 +650,7 @@ class BackendService(SamplingServiceMixin):
             self._stopped_location = {"address": pc}
             if location is not None:
                 self._stopped_location.update({"path": location.path, "line": location.line})
-            if not getattr(self._memory, "supports_running_memory", True):
+            if not backend_capabilities(self._memory).memory_sampling:
                 symbols = [watch.symbol for watch in self._watches.values()
                            if not watch.symbol.is_rtt and watch.mode != "manual"]
                 if symbols:
@@ -765,7 +761,7 @@ class BackendService(SamplingServiceMixin):
             self._latest_rtt_values = {key: value for key, value in self._latest_rtt_values.items() if key in new_watches}
             self._monitor_schedule_revision += 1
             if (self._connection_status == "connected" and self._target_execution_state == "halted"
-                    and not getattr(self._memory, "supports_running_memory", True)):
+                    and not backend_capabilities(self._memory).memory_sampling):
                 self._refresh_debug_state_locked(force=True)
             if self._rtt_protocol == "plus" and membership_changed:
                 self._stop_rtt_locked()
@@ -783,7 +779,7 @@ class BackendService(SamplingServiceMixin):
                 raise ProtocolError("unknown_watch", "Watch does not exist.", key)
             if not watch.symbol.is_writable:
                 raise ProtocolError("readonly_symbol", "This symbol is read-only.", watch.symbol.name)
-            if not getattr(self._memory, "supports_memory_write", True):
+            if not backend_capabilities(self._memory).memory_write:
                 raise ProtocolError("unsupported_operation", "EmberMobile 私有协议不支持内存写入，请使用 GDB。")
             if self._connection_status != "connected":
                 raise ProtocolError("not_connected", "Connect a debug probe before writing variables.")
@@ -805,7 +801,7 @@ class BackendService(SamplingServiceMixin):
                 raise ProtocolError("unknown_watch", "Watch does not exist.", key)
             if self._connection_status != "connected":
                 raise ProtocolError("not_connected", "请先连接调试探针。")
-            can_read_memory = (getattr(self._memory, "supports_running_memory", True)
+            can_read_memory = (backend_capabilities(self._memory).memory_sampling
                                or self._target_execution_state == "halted")
             if watch.symbol.is_rtt or (not can_read_memory and self._rtt_enabled and self._rtt_protocol == "plus"):
                 latest = self._latest_rtt_values.get(key)
@@ -813,7 +809,7 @@ class BackendService(SamplingServiceMixin):
                     raise ProtocolError("no_data", "尚未收到此 RTT 变量的数据。")
                 self._publish_watch_values_locked({key: latest[0]}, updated_at_ms=latest[1])
             else:
-                if not getattr(self._memory, "supports_running_memory", True) and self._target_execution_state != "halted":
+                if not backend_capabilities(self._memory).memory_sampling and self._target_execution_state != "halted":
                     raise ProtocolError("target_running", "当前 GDB 连接需要暂停目标后读取内存。")
                 try:
                     self._publish_watch_values_locked(self._memory.read_symbols([watch.symbol]))

@@ -124,7 +124,7 @@ class _AnalysisFftPanelState extends State<_AnalysisFftPanel> {
   Offset? _rectangleZoomStart;
   Rect? _rectangleZoom;
   bool _selectionDragging = false;
-  _AnalysisSelectionDragTarget? _selectionDragTarget;
+  AnalysisSelectionDragTarget? _selectionDragTarget;
   bool _middleDragging = false;
   bool _rightZoomDragging = false;
   bool _rightZoomMoved = false;
@@ -133,8 +133,8 @@ class _AnalysisFftPanelState extends State<_AnalysisFftPanel> {
 
   AnalysisSession get session => widget.session;
   bool get _resizingSelectionBoundary =>
-      _selectionDragTarget == _AnalysisSelectionDragTarget.lowerBound ||
-      _selectionDragTarget == _AnalysisSelectionDragTarget.upperBound;
+      _selectionDragTarget == AnalysisSelectionDragTarget.lowerBound ||
+      _selectionDragTarget == AnalysisSelectionDragTarget.upperBound;
 
   @override
   void dispose() {
@@ -665,7 +665,7 @@ class _AnalysisFftPanelState extends State<_AnalysisFftPanel> {
     }
     final value = _xForPosition(position, size);
     setState(() {
-      _selectionDragTarget = _AnalysisSelectionDragTarget.newRange;
+      _selectionDragTarget = AnalysisSelectionDragTarget.newRange;
       _dragStartX = value;
       session.fftSelectionStart = value;
       session.fftSelectionEnd = value;
@@ -676,14 +676,14 @@ class _AnalysisFftPanelState extends State<_AnalysisFftPanel> {
     final value = _xForPosition(position, size);
     setState(() {
       switch (_selectionDragTarget) {
-        case _AnalysisSelectionDragTarget.newRange:
+        case AnalysisSelectionDragTarget.newRange:
           if (_dragStartX == null) return;
           session.fftSelectionEnd = value;
-        case _AnalysisSelectionDragTarget.lowerBound:
+        case AnalysisSelectionDragTarget.lowerBound:
           final upper = session.fftSelectionEnd;
           if (upper == null) return;
           session.fftSelectionStart = math.min(value, upper);
-        case _AnalysisSelectionDragTarget.upperBound:
+        case AnalysisSelectionDragTarget.upperBound:
           final lower = session.fftSelectionStart;
           if (lower == null) return;
           session.fftSelectionEnd = math.max(value, lower);
@@ -700,7 +700,7 @@ class _AnalysisFftPanelState extends State<_AnalysisFftPanel> {
     return (math.min(start, end), math.max(start, end));
   }
 
-  _AnalysisSelectionDragTarget? _selectionTargetAt(
+  AnalysisSelectionDragTarget? _selectionTargetAt(
     double position,
     Size size,
     (double, double)? range,
@@ -710,12 +710,12 @@ class _AnalysisFftPanelState extends State<_AnalysisFftPanel> {
     final lowerDistance = (position - viewport.mapX(range.$1)).abs();
     final upperDistance = (position - viewport.mapX(range.$2)).abs();
     if (math.min(lowerDistance, upperDistance) >
-        _analysisSelectionHandleHitSlop) {
+        AnalysisPlotInteraction.selectionHandleHitSlop) {
       return null;
     }
     return lowerDistance <= upperDistance
-        ? _AnalysisSelectionDragTarget.lowerBound
-        : _AnalysisSelectionDragTarget.upperBound;
+        ? AnalysisSelectionDragTarget.lowerBound
+        : AnalysisSelectionDragTarget.upperBound;
   }
 
   void _applyRectangleZoom(Rect rectangle, Size size) {

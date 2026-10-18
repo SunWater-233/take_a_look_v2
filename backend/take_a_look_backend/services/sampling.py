@@ -4,6 +4,7 @@ import time
 from typing import Any
 
 from take_a_look_backend.models import WatchedVariable, json_value
+from take_a_look_backend.backends.target_backend import backend_capabilities, backend_rtt_binding
 from take_a_look_backend.protocol import EventName
 from take_a_look_backend.services.sampling_clock import advance_deadline, wait_until
 
@@ -48,7 +49,7 @@ class SamplingServiceMixin:
                         deadlines.append(next_monitor_at)
                     if connected and not self._pipeline_backpressure:
                         memory_enabled = (active and any(w.captures and not w.symbol.is_rtt for w in self._watches.values()) and
-                            getattr(self._memory, "supports_running_memory", True) and
+                            backend_capabilities(self._memory).memory_sampling and
                             not (rtt_enabled and rtt_protocol == "plus" and self._plus_rtt.is_started))
                         if memory_enabled:
                             if now >= next_memory_at:
@@ -107,7 +108,7 @@ class SamplingServiceMixin:
         memory = []
         pushed: list[tuple[WatchedVariable, tuple[object, int]]] = []
         next_at = now + 2.0
-        can_read_memory = (getattr(self._memory, "supports_running_memory", True)
+        can_read_memory = (backend_capabilities(self._memory).memory_sampling
                            or self._target_execution_state == "halted")
         plus = self._rtt_enabled and self._rtt_protocol == "plus"
         for watch in self._watches.values():
@@ -134,7 +135,7 @@ class SamplingServiceMixin:
         return max(now + 0.001, next_at)
 
     def _read_memory_locked(self, rtt_enabled: bool, rtt_protocol: str) -> dict[str, object]:
-        if not getattr(self._memory, "supports_running_memory", True):
+        if not backend_capabilities(self._memory).memory_sampling:
             return {}
         if rtt_enabled and rtt_protocol == "plus" and self._plus_rtt.is_started:
             return {}
@@ -148,7 +149,8 @@ class SamplingServiceMixin:
 
     def _read_rtt_locked(self, elapsed: float, now: float) -> list[tuple[float, dict[str, object]]]:
         backend: Any = self._normal_rtt if self._rtt_protocol == "normal" else self._plus_rtt
-        target = getattr(self._memory, "rtt_target", self._memory.target)
+        binding = backend_rtt_binding(self._memory)
+        target = binding.target
         if not backend.is_started:
             if now < self._next_rtt_retry_at:
                 return []
@@ -157,13 +159,13 @@ class SamplingServiceMixin:
                     symbols = self._normal_rtt.start(
                         target,
                         self._rtt_control_block_address,
-                        self._memory.probe,
+                        binding.probe,
                     )
                 else:
                     symbols = self._plus_rtt.start(
                         target,
                         self._rtt_control_block_address,
-                        self._memory.probe,
+                        binding.probe,
                         list(self._watches.values()),
                     )
                 if self._rtt_protocol == "normal":

@@ -20,8 +20,6 @@ class _SourceDebugPanel extends StatefulWidget {
 class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   static const _lineHeight = 22.0;
   static const _searchResultHeight = 30.0;
-  static const _maxSearchResults = 1000;
-  static const _searchReadBatchSize = 8;
   final ScrollController _verticalController = ScrollController();
   final ScrollController _horizontalController = ScrollController();
   final ScrollController _tabController = ScrollController();
@@ -33,10 +31,10 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   final Map<String, GlobalKey> _tabKeys = <String, GlobalKey>{};
   final Set<String> _externalPathKeys = <String>{};
   final SourceDocuments _sourceDocuments = SourceDocuments();
+  late final SourceSearchController _search = SourceSearchController(
+    _sourceDocuments,
+  );
   List<String> _sourceFiles = const [];
-  List<String> _searchIndexPaths = const [];
-  Future<List<SourceSearchFile>>? _searchFileIndexFuture;
-  int _searchIndexGeneration = 0;
   final FocusNode _panelFocusNode = FocusNode();
   final FocusNode _searchFocusNode = FocusNode();
   final TextEditingController _searchController = TextEditingController();
@@ -49,7 +47,6 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   Map<int, DebugBreakpoint> _lineBreakpoints = const {};
   String? _loadError;
   int _loadGeneration = 0;
-  int _searchGeneration = 0;
   bool _canScrollTabsRight = false;
   bool _draggingFiles = false;
   bool _searchVisible = false;
@@ -58,8 +55,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   int _activeSearchIndex = -1;
   int? _revealedSearchLine;
   _SourceTokenSelection? _sourceSelection;
-  Timer? _searchDebounce;
-  List<_SourceSearchResult> _searchResults = const [];
+  List<SourceSearchResult> _searchResults = const [];
   Map<String, String> get _resolvedSourcePaths =>
       _sourceDocuments.resolvedPaths;
   String _observedSourceRoot = '';
@@ -131,8 +127,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     _resolvedSourcePaths.clear();
     _invalidateSearchFileIndex();
     _sourceDocuments.clearIndex();
-    _searchDebounce?.cancel();
-    _searchGeneration += 1;
+    _search.cancel();
     _searchController.clear();
     _searchResults = const [];
     _sourceSelection = null;
@@ -161,7 +156,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     _panelFocusNode.dispose();
     _searchFocusNode.dispose();
     _searchController.dispose();
-    _searchDebounce?.cancel();
+    _search.dispose();
     _tabController
       ..removeListener(_updateTabOverflow)
       ..dispose();
@@ -503,8 +498,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   }
 
   void _closeSearch() {
-    _searchDebounce?.cancel();
-    _searchGeneration += 1;
+    _search.cancel();
     setState(() {
       _searchVisible = false;
       _searching = false;
@@ -516,8 +510,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   }
 
   void _queueSearch(String query, {bool immediate = false}) {
-    _searchDebounce?.cancel();
-    final generation = ++_searchGeneration;
+    _search.cancel();
     if (query.trim().isEmpty) {
       setState(() {
         _searching = false;
@@ -533,103 +526,23 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
       _activeSearchIndex = -1;
       _searchSelectionChanged = false;
     });
-    void run() => unawaited(_searchAcrossFiles(query, generation));
-    if (immediate) {
-      run();
-    } else {
-      _searchDebounce = Timer(const Duration(milliseconds: 100), run);
-    }
-  }
-
-  void _invalidateSearchFileIndex() {
-    _searchFileIndexFuture = null;
-    _searchIndexGeneration += 1;
-  }
-
-  Future<List<SourceSearchFile>> _getSearchFiles() {
-    final pathsByKey = <String, String>{};
-    for (final path in [..._sourceFiles, ..._openPaths]) {
-      pathsByKey.putIfAbsent(_pathKey(path), () => path);
-    }
-    final paths = pathsByKey.values.toList();
-    if (_searchFileIndexFuture != null &&
-        listEquals(paths, _searchIndexPaths)) {
-      return _searchFileIndexFuture!;
-    }
-    _searchIndexPaths = paths;
-    final indexGeneration = ++_searchIndexGeneration;
-    final root = controller.debugState.sourceRoot;
-    final rootIndex = root.isEmpty
-        ? Future.value(const <String, List<String>>{})
-        : (_indexSourceRoot(root));
-    return _searchFileIndexFuture = _buildSearchFileIndex(
-      paths,
-      root,
-      rootIndex,
-      Map.of(_resolvedSourcePaths),
-      indexGeneration,
+    _search.queue(
+      query,
+      immediate: immediate,
+      getFiles: _getSearchFiles,
+      readDocument: _readSearchDocument,
+      beforeContents: () => WidgetsBinding.instance.endOfFrame,
+      publish: (results, searching) =>
+          _publishSearchResults(results, searching: searching),
     );
   }
 
-  Future<List<SourceSearchFile>> _buildSearchFileIndex(
-    List<String> paths,
-    String root,
-    Future<Map<String, List<String>>> rootIndexFuture,
-    Map<String, String> resolvedPaths,
-    int generation,
-  ) async {
-    final rootIndex = await rootIndexFuture;
-    if (!mounted || generation != _searchIndexGeneration) return const [];
-    final filesByKey = <String, SourceSearchFile>{};
-    for (final path in rootIndex.values.expand((paths) => paths)) {
-      final file = SourceSearchFile(path: path, sourceRoot: root);
-      filesByKey[file.key] = file;
-    }
-    for (var start = 0; start < paths.length; start += _searchReadBatchSize) {
-      if (!mounted || generation != _searchIndexGeneration) return const [];
-      final batch = await Future.wait(
-        paths.skip(start).take(_searchReadBatchSize).map((path) async {
-          final key = _pathKey(path);
-          var localPath = resolvedPaths[key] ?? filesByKey[key]?.localPath;
-          if (localPath == null && root.isNotEmpty) {
-            localPath = filesByKey[_pathKey('$root/$path')]?.localPath;
-            final candidates = rootIndex[_basename(path).toLowerCase()];
-            if (localPath == null && candidates != null) {
-              // Only ambiguous build-machine aliases need a filesystem probe,
-              // and only when constructing the index, never for each query.
-              if (!await File(path).exists()) {
-                var bestScore = -1;
-                for (final candidate in candidates) {
-                  final score = sourcePathSuffixLength(path, candidate);
-                  if (score > bestScore) {
-                    bestScore = score;
-                    localPath = candidate;
-                  }
-                }
-              }
-            }
-          }
-          return SourceSearchFile(
-            path: path,
-            localPath: localPath,
-            sourceRoot: root,
-            searchContents: true,
-          );
-        }),
-      );
-      for (final file in batch) {
-        // Keep a single result for a local file and its DWARF alias, retaining
-        // the debug path for opening the source and setting breakpoints.
-        if (filesByKey[file.key]?.searchContents != true) {
-          filesByKey[file.key] = file;
-        }
-      }
-    }
-    return filesByKey.values.toList()..sort((left, right) {
-      final priority = left.priority.compareTo(right.priority);
-      return priority != 0 ? priority : left.key.compareTo(right.key);
-    });
-  }
+  void _invalidateSearchFileIndex() => _search.invalidateIndex();
+
+  Future<List<SourceSearchFile>> _getSearchFiles() => _search.files(
+    sourcePaths: [..._sourceFiles, ..._openPaths],
+    sourceRoot: controller.debugState.sourceRoot,
+  );
 
   Future<SourceSearchText?> _readSearchDocument(SourceSearchFile file) async {
     try {
@@ -639,94 +552,11 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     }
   }
 
-  Future<void> _searchAcrossFiles(String query, int generation) async {
-    final files = await _getSearchFiles();
-    if (!mounted || generation != _searchGeneration) return;
-    final fileResults = List.generate(3, (_) => <_SourceSearchResult>[]);
-    for (final file in searchSourceFiles(
-      files,
-      query,
-      limit: _maxSearchResults,
-    )) {
-      fileResults[file.priority].add(
-        _SourceSearchResult.file(path: file.path, preview: file.localPath),
-      );
-    }
-    _publishSearchResults(
-      fileResults.expand((group) => group).toList(),
-      generation,
-    );
-    // Render filename matches before reading and searching file contents.
-    await WidgetsBinding.instance.endOfFrame;
-    if (!mounted || generation != _searchGeneration) return;
-    final results = <_SourceSearchResult>[];
-    for (var priority = 0; priority < fileResults.length; priority += 1) {
-      results.addAll(
-        fileResults[priority].take(_maxSearchResults - results.length),
-      );
-      if (results.length >= _maxSearchResults) break;
-      final contentFiles = files
-          .where(
-            (file) =>
-                file.priority == priority &&
-                file.searchContents &&
-                !file.isBinaryArtifact,
-          )
-          .toList();
-      for (
-        var start = 0;
-        start < contentFiles.length;
-        start += _searchReadBatchSize
-      ) {
-        if (!mounted || generation != _searchGeneration) return;
-        final batch = contentFiles
-            .skip(start)
-            .take(_searchReadBatchSize)
-            .toList();
-        final documents = await Future.wait(batch.map(_readSearchDocument));
-        if (!mounted || generation != _searchGeneration) return;
-        for (var index = 0; index < batch.length; index += 1) {
-          final document = documents[index];
-          if (document == null) continue;
-          for (final match in document.search(
-            query,
-            limit: _maxSearchResults - results.length,
-          )) {
-            results.add(
-              _SourceSearchResult(
-                path: batch[index].path,
-                line: match.line,
-                column: match.column,
-                preview: match.preview,
-              ),
-            );
-          }
-          if (results.length >= _maxSearchResults) break;
-        }
-        _publishSearchResults(
-          [
-            ...results,
-            ...fileResults.skip(priority + 1).expand((group) => group),
-          ].take(_maxSearchResults).toList(),
-          generation,
-        );
-        if (results.length >= _maxSearchResults) break;
-        // Let new keystrokes cancel an obsolete content scan between batches.
-        if (start + batch.length < contentFiles.length) {
-          await Future<void>.delayed(Duration.zero);
-        }
-      }
-      if (results.length >= _maxSearchResults) break;
-    }
-    _publishSearchResults(results, generation, searching: false);
-  }
-
   void _publishSearchResults(
-    List<_SourceSearchResult> results,
-    int generation, {
+    List<SourceSearchResult> results, {
     bool searching = true,
   }) {
-    if (!mounted || generation != _searchGeneration) return;
+    if (!mounted) return;
     final active = _searchSelectionChanged && _activeSearchIndex >= 0
         ? _searchResults[_activeSearchIndex]
         : null;
@@ -1998,26 +1828,6 @@ class _SourceTokenSelection {
   final int start;
   final int end;
   final String token;
-}
-
-class _SourceSearchResult {
-  const _SourceSearchResult({
-    required this.path,
-    required this.line,
-    required this.column,
-    required this.preview,
-  });
-
-  const _SourceSearchResult.file({required this.path, required this.preview})
-    : line = null,
-      column = null;
-
-  final String path;
-  final int? line;
-  final int? column;
-  final String preview;
-
-  bool get isFile => line == null;
 }
 
 String _pathKey(String path) => path.replaceAll('\\', '/').toLowerCase();

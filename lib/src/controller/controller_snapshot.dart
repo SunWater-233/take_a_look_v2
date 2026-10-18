@@ -1,42 +1,19 @@
 part of 'controller.dart';
 
-/// Serialization boundary for main/detached window state synchronization.
-class ControllerSnapshotCodec {
-  const ControllerSnapshotCodec();
-
-  JsonObject encode(
-    TakeALookController controller, {
-    bool includeSamples = true,
-    bool packedSamples = false,
-    bool? includeAnalysisData,
-  }) {
-    return controller._encodeSnapshot(
-      includeSamples: includeSamples,
-      packedSamples: packedSamples,
-      includeAnalysisData: includeAnalysisData,
-    );
-  }
-
-  void apply(TakeALookController controller, JsonObject data) {
-    controller._applySnapshot(data);
-  }
-}
-
 extension TakeALookControllerSnapshot on TakeALookController {
   JsonObject snapshot({
     bool includeSamples = true,
     bool packedSamples = false,
     bool? includeAnalysisData,
   }) {
-    return snapshotCodec.encode(
-      this,
+    return _encodeSnapshot(
       includeSamples: includeSamples,
       packedSamples: packedSamples,
       includeAnalysisData: includeAnalysisData,
     );
   }
 
-  void applySnapshot(JsonObject data) => snapshotCodec.apply(this, data);
+  void applySnapshot(JsonObject data) => _applySnapshot(data);
 
   JsonObject _encodeSnapshot({
     bool includeSamples = true,
@@ -44,130 +21,24 @@ extension TakeALookControllerSnapshot on TakeALookController {
     bool? includeAnalysisData,
     Set<String>? fields,
   }) {
-    bool wants(String key) => fields == null || fields.contains(key);
-    return {
-      if (wants('connectionStatus')) 'connectionStatus': connectionStatus.name,
-      if (wants('probeType')) 'probeType': probeType,
-      if (wants('targetName')) 'targetName': targetName,
-      if (wants('targetPackId')) 'targetPackId': targetPackId,
-      if (wants('targetPartNumber')) 'targetPartNumber': targetPartNumber,
-      if (wants('targetPackLabel')) 'targetPackLabel': targetPackLabel,
-      if (wants('targetPackMissing')) 'targetPackMissing': targetPackMissing,
-      if (wants('targetCatalogRevision'))
-        'targetCatalogRevision': targetCatalogRevision,
-      if (wants('swdClock')) 'swdClock': swdClock,
-      if (wants('serialNumber')) 'serialNumber': serialNumber,
-      if (wants('connectionKind')) 'connectionKind': connectionKind,
-      if (wants('gatewayProtocolVersion'))
-        'gatewayProtocolVersion': state.connection.gatewayProtocolVersion,
-      if (wants('remoteConfig'))
-        'remoteConfig': Map<String, String>.from(remoteConfig),
-      if (wants('symbolFile')) 'symbolFile': symbolFile,
-      if (wants('symbolLoad') && symbolLoadProgress != null)
-        'symbolLoad': symbolLoadProgress!.toJson(),
-      if (wants('sampleRateHz')) 'sampleRateHz': sampleRateHz,
-      if (wants('monitorRateHz')) 'monitorRateHz': monitorRateHz,
-      if (wants('rttSampleRateHz')) 'rttSampleRateHz': rttSampleRateHz,
-      if (wants('displayRefreshMode')) 'displayRefreshMode': displayRefreshMode,
-      if (wants('samplingElapsedSeconds'))
-        'samplingElapsedSeconds': samplingElapsedSeconds,
-      if (wants('elapsedSeconds')) 'elapsedSeconds': elapsedSeconds,
-      if (wants('samplingPaused')) 'samplingPaused': samplingPaused,
-      if (wants('rawRecording')) 'rawRecording': rawRecording,
-      if (wants('plottingPaused')) 'plottingPaused': plottingPaused,
-      if (wants('plotHighlightedWatchKey'))
-        'plotHighlightedWatchKey': plotHighlightedWatchKey,
-      if (wants('plotWatchSelectionRevision'))
-        'plotWatchSelectionRevision': plotWatchSelectionRevision,
-      if (wants('rttEnabled')) 'rttEnabled': rttEnabled,
-      if (wants('rttProtocol')) 'rttProtocol': rttProtocol,
-      if (wants('followLatest')) 'followLatest': followLatest,
-      if (wants('plotVisibleWindowSeconds'))
-        'plotVisibleWindowSeconds': plotVisibleWindowSeconds,
-      if (wants('plotRetentionSeconds'))
-        'plotRetentionSeconds': plotRetentionSeconds,
-      if (wants('plotAutoY')) 'plotAutoY': plotAutoY,
-      if (wants('plotYMin')) 'plotYMin': plotYMin,
-      if (wants('plotYMax')) 'plotYMax': plotYMax,
-      if (wants('plotShowGrid')) 'plotShowGrid': plotShowGrid,
-      if (wants('plotShowLegend')) 'plotShowLegend': plotShowLegend,
-      if (wants('plotMouseXEnabled')) 'plotMouseXEnabled': plotMouseXEnabled,
-      if (wants('plotMouseYEnabled')) 'plotMouseYEnabled': plotMouseYEnabled,
-      if (wants('plotInvertX')) 'plotInvertX': plotInvertX,
-      if (wants('plotInvertY')) 'plotInvertY': plotInvertY,
-      if (wants('plotWindowEndSeconds'))
-        'plotWindowEndSeconds': plotWindowEndSeconds,
-      if (wants('uiScale')) 'uiScale': uiScale,
-      if (wants('lastBackendError')) 'lastBackendError': lastBackendError,
-      if (wants('selectedSymbols'))
-        'selectedSymbols': _selectedSymbols.toList(),
-      if (wants('symbols'))
-        'symbols': [for (final symbol in _symbols) symbol.toJson()],
-      if (wants('watches'))
-        'watches': [
-          for (final watch in _watches)
-            {
-              'key': watch.symbol.key,
-              'color': watch.color.toARGB32(),
-              'sampling': watch.samplingEnabled,
-              'readMode': watch.readMode.name,
-              'monitorRateHz': watch.monitorRateHz,
-              'updatedAtMs': watch.updatedAtMs,
-              'plotted': watch.plotted,
-              'value': watch.value,
-              'sampleCursor': watch.totalSampleCount,
-              'historyStartSeconds': watch.historyStartSeconds,
-              if (includeSamples)
-                'samples': packedSamples
-                    ? watch.samples.packedRange()
-                    : [
-                        for (final point in watch.samples) [point.dx, point.dy],
-                      ],
-            },
-        ],
-      if (wants('canUndoWatchDeletion'))
-        'canUndoWatchDeletion': canUndoWatchDeletion,
-      if (wants('canRedoWatchDeletion'))
-        'canRedoWatchDeletion': canRedoWatchDeletion,
-      if (wants('logs')) 'logs': [for (final entry in _logs) entry.toJson()],
-      if (wants('analysisSession'))
-        'analysisSession': analysisSession.toJson(
-          includeData: includeAnalysisData ?? includeSamples,
-          packed: packedSamples,
-        ),
-      if (wants('sourceWorkspace')) 'sourceWorkspace': sourceWorkspace.toJson(),
-      if (wants('sourceProject')) 'sourceProject': sourceProject.toJson(),
-      if (wants('sourceTask')) 'sourceTask': sourceTask.toJson(),
-      if (wants('debug'))
-        'debug': {
-          'stopRevision': debugState.stopRevision,
-          'executionState': debugState.executionState.name,
-          'sourceFiles': debugState.sourceFiles,
-          'sourceRoot': debugState.sourceRoot,
-          'executableLines': {
-            for (final entry in debugState.executableLines.entries)
-              entry.key: entry.value.toList()..sort(),
-          },
-          'breakpoints': [
-            for (final breakpoint in debugState.resolvedBreakpoints)
-              breakpoint.toJson(),
-          ],
-          'requestedBreakpoints': {
-            for (final entry in debugState.requestedBreakpoints.entries)
-              entry.key: entry.value.toList()..sort(),
-          },
-          'registers': debugState.registers,
-          'stoppedLocation': debugState.programCounter == null
-              ? null
-              : {
-                  'address': debugState.programCounter,
-                  if (debugState.currentSource != null)
-                    'path': debugState.currentSource,
-                  if (debugState.currentLine != null)
-                    'line': debugState.currentLine,
-                },
-        },
-    };
+    return snapshotCodec.encode(
+      ControllerSnapshotView(
+        state: state,
+        symbols: _symbols,
+        selectedSymbols: _selectedSymbols,
+        watches: _watches,
+        logs: _logs,
+        uiScale: uiScale,
+        samplingElapsedSeconds: samplingElapsedSeconds,
+        plotWindowEndSeconds: plotWindowEndSeconds,
+        canUndoWatchDeletion: canUndoWatchDeletion,
+        canRedoWatchDeletion: canRedoWatchDeletion,
+      ),
+      fields: fields,
+      includeSamples: includeSamples,
+      packedSamples: packedSamples,
+      includeAnalysisData: includeAnalysisData,
+    );
   }
 
   Map<String, dynamic> stateSnapshot() => snapshot(includeSamples: false);
@@ -244,36 +115,25 @@ extension TakeALookControllerSnapshot on TakeALookController {
     final previousSymbolRevision = _symbolRevision;
     final hadDeletedWatches = _watchDeletions.isNotEmpty;
     _touchSnapshotFields(data.keys);
-    final hasConnectionState = const {
-      'connectionStatus',
-      'probeType',
-      'targetName',
-      'targetPackId',
-      'targetPartNumber',
-      'targetPackLabel',
-      'targetPackMissing',
-      'swdClock',
-      'serialNumber',
-      'connectionKind',
-      'gatewayProtocolVersion',
-      'remoteConfig',
-      'lastBackendError',
-    }.any(data.containsKey);
-    final hasSamplingState = const {
-      'rawRecording',
-      'sampleRateHz',
-      'monitorRateHz',
-      'rttSampleRateHz',
-      'samplingPaused',
-      'rttEnabled',
-      'rttProtocol',
-    }.any(data.containsKey);
-    final hasSymbolState =
-        data.containsKey('selectedSymbols') || data.containsKey('symbols');
-    final hasWatchState =
-        data.containsKey('watches') ||
-        data.containsKey('canUndoWatchDeletion') ||
-        data.containsKey('canRedoWatchDeletion');
+    final hasConnectionState = ControllerSnapshotSchema.containsDomain(
+      data,
+      SnapshotDomain.connection,
+      except: {SnapshotField.symbolFile},
+    );
+    final hasSamplingState = ControllerSnapshotSchema.containsDomain(
+      data,
+      SnapshotDomain.sampling,
+    );
+    final hasSymbolState = ControllerSnapshotSchema.containsDomain(
+      data,
+      SnapshotDomain.symbols,
+      except: {SnapshotField.symbolFile},
+      include: {SnapshotField.symbols},
+    );
+    final hasWatchState = ControllerSnapshotSchema.containsDomain(
+      data,
+      SnapshotDomain.watches,
+    );
     if (_isDetachedRemote && data.containsKey('canUndoWatchDeletion')) {
       _remoteCanUndoWatchDeletion = data['canUndoWatchDeletion'] == true;
     }
@@ -293,23 +153,14 @@ extension TakeALookControllerSnapshot on TakeALookController {
     final hasPlotState =
         hasWatchState ||
         hasElapsedState ||
-        const {
-          'displayRefreshMode',
-          'plottingPaused',
-          'followLatest',
-          'plotVisibleWindowSeconds',
-          'plotRetentionSeconds',
-          'plotAutoY',
-          'plotYMin',
-          'plotYMax',
-          'plotShowGrid',
-          'plotShowLegend',
-          'plotMouseXEnabled',
-          'plotMouseYEnabled',
-          'plotInvertX',
-          'plotInvertY',
-          'plotWindowEndSeconds',
-        }.any(data.containsKey);
+        ControllerSnapshotSchema.containsDomain(
+          data,
+          SnapshotDomain.plot,
+          except: {
+            SnapshotField.plotHighlightedWatchKey,
+            SnapshotField.plotWatchSelectionRevision,
+          },
+        );
     final wasPlotFrozen = plottingPaused;
     final previousConnectionStatus = connectionStatus;
     final previousDisplayRefreshMode = displayRefreshMode;

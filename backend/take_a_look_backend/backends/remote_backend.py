@@ -7,7 +7,8 @@ from typing import Any
 
 from take_a_look_backend.backends.ember_transport import EmberClient
 from take_a_look_backend.backends.gdb_mi import GdbTarget, normalize_host
-from take_a_look_backend.backends.pyocd_memory import PyOcdMemoryBackend
+from take_a_look_backend.backends.typed_memory import TypedMemoryBackend
+from take_a_look_backend.backends.target_backend import capabilities_for_connection
 
 
 REMOTE_DEFAULTS: dict[str, object] = {
@@ -31,7 +32,7 @@ def _integer(config: dict[str, object], key: str, minimum: int, maximum: int) ->
     return value
 
 
-class RemoteMemoryBackend(PyOcdMemoryBackend):
+class RemoteMemoryBackend(TypedMemoryBackend):
     """Reuse typed codecs/coalesced reads; never enumerate a local USB probe."""
 
     def __init__(self, kind: str, options: dict[str, object]) -> None:
@@ -41,10 +42,7 @@ class RemoteMemoryBackend(PyOcdMemoryBackend):
         self.client: EmberClient | None = None
         self.ember: EmberTarget | None = None
         self.rtt_target: Any | None = None
-        self.supports_running_memory = kind == "ember"
-        self.supports_memory_write = kind != "ember"
-        self.supports_rtt = kind != "gdb"
-        self.manages_breakpoint_step = kind != "ember"
+        self.capabilities = capabilities_for_connection(kind)
         self._owns_gdb = False
 
     @property

@@ -7,7 +7,7 @@ from numbers import Real
 from typing import Any
 
 from take_a_look_backend.backends.j_scope_rtt import _connect_native_jlink_target, _find_native_jlink
-from take_a_look_backend.backends.pyocd_memory import decode_symbol_value
+from take_a_look_backend.backends.typed_memory import decode_symbol_value
 from take_a_look_backend.models import SymbolInfo, WatchedVariable
 
 

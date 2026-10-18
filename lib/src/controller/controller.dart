@@ -10,6 +10,10 @@ import '../analysis/analysis.dart';
 import 'controller_command_router.dart';
 import 'controller_signals.dart';
 import 'controller_state.dart';
+import 'controller_snapshot_codec.dart';
+import 'controller_snapshot_schema.dart';
+
+export 'controller_snapshot_codec.dart';
 import '../models/demo_data.dart';
 import '../models/models.dart';
 import '../models/source_tools.dart';
@@ -115,12 +119,11 @@ class TakeALookController extends ChangeNotifier {
   DateTime? _lastPerformanceLogAt;
   final ValueNotifier<double> _uiScale = ValueNotifier<double>(1);
   final ControllerSignals signals = ControllerSignals();
-  final Map<String, int> _stateFieldRevisions = {};
+  final SnapshotRevisions _snapshotRevisions = SnapshotRevisions();
   final Map<String, String> watchInputDrafts = {};
   String? compactWatchSelection;
   final Set<String> compactExpandedWatches = {};
   ({String path, int line})? sourceLocationRequest;
-  int _stateRevision = 0;
   int _analysisDataRevision = 0;
   final Set<String> _visibleSourceViews = <String>{};
   bool _sourceWorkspaceNotificationPending = false;
@@ -270,7 +273,7 @@ class TakeALookController extends ChangeNotifier {
   SymbolLoadProgress? get symbolLoadProgress => state.symbolLoad;
   bool get isSymbolLoading => state.symbolLoad?.isLoading ?? false;
   Listenable get watchChanges => signals.watches;
-  int get watchRevision => _stateFieldRevisions['watches'] ?? 0;
+  int get watchRevision => _snapshotRevisions.revisionOf(SnapshotField.watches);
   Listenable get telemetryChanges => signals.telemetry;
   Listenable get plotChanges => signals.plot;
   Listenable get plotControlChanges => signals.plotControls;

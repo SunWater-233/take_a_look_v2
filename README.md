@@ -153,6 +153,20 @@ their existing `part` organization inside their directories; import
 `part` file directly. Benchmark scripts use the current source paths; archived
 performance results retain the paths recorded when those measurements ran.
 
+The workspace widget delegates layout transitions and version migrations to
+`WorkspaceLayoutController`, tab-drag targets and dwell deadlines to
+`WorkspaceTabDragSession`, and file operations, autosave and write ordering to
+`WorkspacePersistence`. These objects can be tested without native windows.
+The widget owns rendering, coordinate conversion and native-window effects.
+
+`controller_snapshot_schema.dart` defines snapshot wire fields, revision domains
+and project inclusion together. `ControllerSnapshotCodec` encodes a typed view
+of state without depending on the controller; patch application remains in the
+controller because it reconciles live samples, deletions and display clocks.
+`SourceSearchController` owns cached file indexing and cancellable content scans,
+while `AnalysisPlotInteraction` owns time-domain plot gestures and viewport
+transitions. Their panel widgets retain focus, scrolling, menus and presentation.
+
 ## Shared UI and input modes
 
 The shared UI module lives in `lib/src/theme/`. Pages import its public entry

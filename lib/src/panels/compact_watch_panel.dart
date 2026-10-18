@@ -58,6 +58,11 @@ class _CompactWatchPanelState extends State<_CompactWatchPanel> {
             null) {
       return KeyEventResult.ignored;
     }
+    if (WorkspaceShortcut.redoWatchDeletion.matches(event) &&
+        controller.canRedoWatchDeletion) {
+      controller.redoWatchDeletion();
+      return KeyEventResult.handled;
+    }
     if (WorkspaceShortcut.undoWatchDeletion.matches(event) &&
         controller.canUndoWatchDeletion) {
       controller.undoWatchDeletion();
@@ -156,12 +161,12 @@ class _CompactWatchPanelState extends State<_CompactWatchPanel> {
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Text('从资源库加入变量', style: workbenchMuted),
+                                const Text('从符号变量加入变量', style: workbenchMuted),
                                 const SizedBox(height: 10),
                                 if (widget.onShowSymbols != null)
                                   TalButton(
                                     onPressed: widget.onShowSymbols,
-                                    child: const Text('打开资源库'),
+                                    child: const Text('打开符号变量'),
                                   ),
                               ],
                             ),
@@ -277,14 +282,6 @@ class _CompactWatchPanelState extends State<_CompactWatchPanel> {
             ),
           ),
           const Spacer(),
-          TalIconButton(
-            key: const ValueKey('compact-watch-undo'),
-            tooltip: '撤回删除 (Ctrl+Z) · 采集中删除可在 10 秒内撤回',
-            onPressed: controller.canUndoWatchDeletion
-                ? controller.undoWatchDeletion
-                : null,
-            icon: const Icon(Icons.undo, size: 16),
-          ),
         ],
       ),
     );
@@ -375,6 +372,13 @@ class _CompactWatchRowState extends State<_CompactWatchRow> {
           enabled: controller.canUndoWatchDeletion,
           touchOptimized: touch,
         ),
+        _watchPopupItem(
+          value: 'redo',
+          icon: Icons.redo,
+          label: '重做删除 (Ctrl+Y)',
+          enabled: controller.canRedoWatchDeletion,
+          touchOptimized: touch,
+        ),
       ],
     );
     if (!mounted) return;
@@ -387,6 +391,8 @@ class _CompactWatchRowState extends State<_CompactWatchRow> {
         controller.removeWatch(_key);
       case 'undo':
         controller.undoWatchDeletion();
+      case 'redo':
+        controller.redoWatchDeletion();
     }
   }
 

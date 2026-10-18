@@ -48,6 +48,7 @@ const _snapshotFields = <String>{
   'symbols',
   'watches',
   'canUndoWatchDeletion',
+  'canRedoWatchDeletion',
   'logs',
   'analysisSession',
   'sourceWorkspace',
@@ -122,6 +123,7 @@ extension TakeALookControllerSync on TakeALookController {
       if (changes.contains(signals.watches)) ...{
         'watches',
         'canUndoWatchDeletion',
+        'canRedoWatchDeletion',
       },
       if (changes.contains(signals.plot) ||
           changes.contains(signals.plotControls)) ...{

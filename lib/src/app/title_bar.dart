@@ -49,7 +49,8 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
     WorkspacePanelId.registers,
   ];
 
-  bool gridMode = false;
+  bool _gridMode = false;
+  bool get gridMode => widget.workspaceKey?.currentState?.gridMode ?? _gridMode;
   double get uiScale => widget.controller?.uiScale ?? 1;
 
   @override
@@ -184,26 +185,6 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
   List<Widget> _buildViewMenu() {
     final workspace = widget.workspaceKey?.currentState;
     return [
-      if (widget.workbench) ...[
-        _menuItem(
-          label: '资源库',
-          checked: workspace?.resourceDocked ?? false,
-          onPressed: () =>
-              unawaited(workspace?.toggleWorkbenchResource() ?? Future.value()),
-        ),
-        _menuItem(
-          label: '输出',
-          checked: workspace?.outputDocked ?? false,
-          onPressed: () =>
-              unawaited(workspace?.toggleWorkbenchOutput() ?? Future.value()),
-        ),
-        _menuItem(
-          label: '专注视图',
-          checked: workspace?.focusedWorkbench ?? false,
-          onPressed: workspace?.toggleWorkbenchFocus,
-        ),
-        const _MenuDivider(),
-      ],
       SubmenuButton(
         menuStyle: Theme.of(
           context,
@@ -395,6 +376,28 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
   List<Widget> _buildFileMenu() {
     final state = widget.controller;
     return [
+      _menuItem(
+        label: '打开项目',
+        shortcut: WorkspaceShortcut.openProject.menuActivator,
+        onPressed: () => unawaited(
+          widget.workspaceKey?.currentState?.openProject() ?? Future.value(),
+        ),
+      ),
+      _menuItem(
+        label: '保存项目',
+        shortcut: WorkspaceShortcut.saveProject.menuActivator,
+        onPressed: () => unawaited(
+          widget.workspaceKey?.currentState?.saveProject() ?? Future.value(),
+        ),
+      ),
+      _menuItem(
+        label: '项目另存为',
+        onPressed: () => unawaited(
+          widget.workspaceKey?.currentState?.saveProject(saveAs: true) ??
+              Future.value(),
+        ),
+      ),
+      const _MenuDivider(),
       _menuItem(label: '打开 ELF / AXF', onPressed: state?.chooseSymbolFile),
       _menuItem(
         label: '工程设置',
@@ -432,9 +435,10 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
   }
 
   void _toggleGridMode() {
-    setState(() => gridMode = !gridMode);
-    widget.workspaceKey?.currentState?.setGridMode(gridMode);
-    widget.controller?.report(gridMode ? '网格模式已开启。' : '网格模式已关闭。');
+    final next = !gridMode;
+    widget.workspaceKey?.currentState?.setGridMode(next);
+    setState(() => _gridMode = next);
+    widget.controller?.report(next ? '网格模式已开启。' : '网格模式已关闭。');
   }
 
   void _setRttProtocol(String protocol) {

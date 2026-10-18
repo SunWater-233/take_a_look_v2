@@ -38,13 +38,28 @@ sides through dragging or the header menu. A wide variable-monitoring panel
 automatically shows the full table. Sidebar changes preserve panel state,
 including input drafts and source-view position, and hidden source panels do
 not consume window shortcuts or mark files as read. Detached windows, the
-combined log/build/register output, UI scaling and project settings remain
+independent log/build/register panels, UI scaling and project settings remain
 available.
+
+Use **文件 → 保存项目** (`Ctrl+S`) to save a `.talproj` file, **打开项目**
+(`Ctrl+O`) to restore it, or **项目另存为** to create another copy. Projects
+include layout, tabs, sidebar/output sizes and collapsed state, variables and
+their colors/read policies, monitor and plot settings, input drafts, connection
+configuration, build commands, source tabs, breakpoints and analysis data.
+Open projects while disconnected; restoring never connects, starts a build or
+writes saved values to the target. Raw capture history remains in recordings.
+Floating panels return to their saved dock positions on restore.
+
+Drag the bottom status bar upward to open output, or drag its top boundary
+downward to collapse it. Nearby common heights gently snap on release. The
+selected output tab and height survive collapse; builds and downloads open the
+build/download output automatically. Variable deletion supports `Ctrl+Z` to undo
+and `Ctrl+Y` to redo, including detached windows.
 
 New variables added from the resource library or source view start in **仅监视**
 (monitor only). The three per-variable read policies are:
 
-- **仅监视**: refresh the current value at 2 Hz by default, without adding history.
+- **仅监视**: refresh the current value at 10 Hz by default, without adding history.
 - **采集**: use the global capture rate and append samples to the recording.
 - **手动读取**: read only on explicit refresh or after a write.
 

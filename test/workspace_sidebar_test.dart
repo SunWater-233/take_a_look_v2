@@ -205,7 +205,7 @@ void main() {
       await tester.pump();
     }
     await tester.pumpAndSettle();
-    expect(bench.frame('output').chrome!.tabs, [WorkspacePanelId.registers]);
+    expect(bench.frame('output').chrome!.tabs, workspaceOutputPanels);
     expect(
       bench.workspace.detachedWindows.windows,
       isNot(contains(WorkspacePanelId.registers)),

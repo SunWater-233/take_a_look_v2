@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 
 import '../controller/controller.dart';
 import '../models/models.dart';
@@ -208,48 +209,63 @@ class WorkbenchStatusBar extends StatelessWidget {
       final monitoring = controller.watches.any(
         (watch) => watch.readMode == WatchReadMode.monitor,
       );
-      return Container(
-        height: TalUiTheme.of(context).targetExtent(30),
-        padding: const EdgeInsets.only(left: 12, right: 6),
-        decoration: const BoxDecoration(
-          color: WorkbenchColors.background,
-          border: Border(top: BorderSide(color: WorkbenchColors.border)),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              Icons.circle,
-              size: 7,
-              color: connected
-                  ? WorkbenchColors.success
-                  : WorkbenchColors.muted,
+      return MouseRegion(
+        cursor: SystemMouseCursors.resizeUpDown,
+        child: GestureDetector(
+          key: const ValueKey('workbench-output-drag'),
+          behavior: HitTestBehavior.opaque,
+          dragStartBehavior: DragStartBehavior.down,
+          onVerticalDragStart: (_) =>
+              workspaceKey.currentState?.startOutputDrag(),
+          onVerticalDragUpdate: (details) =>
+              workspaceKey.currentState?.updateOutputDrag(details.delta.dy),
+          onVerticalDragEnd: (_) => workspaceKey.currentState?.endOutputDrag(),
+          onVerticalDragCancel: () =>
+              workspaceKey.currentState?.endOutputDrag(),
+          child: Container(
+            height: TalUiTheme.of(context).targetExtent(30),
+            padding: const EdgeInsets.only(left: 12, right: 6),
+            decoration: const BoxDecoration(
+              color: WorkbenchColors.background,
+              border: Border(top: BorderSide(color: WorkbenchColors.border)),
             ),
-            const SizedBox(width: 7),
-            Expanded(
-              child: Text(
-                connected
-                    ? '${controller.samplingPaused ? '采集暂停' : '采集中'}    ${monitoring ? '监视刷新中    ' : ''}${controller.debugState.executionState == DebugExecutionState.halted ? '目标暂停' : '目标运行'}    $captures 路采集'
-                    : '未连接目标',
-                style: workbenchMuted,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.circle,
+                  size: 7,
+                  color: connected
+                      ? WorkbenchColors.success
+                      : WorkbenchColors.muted,
+                ),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: Text(
+                    connected
+                        ? '${controller.samplingPaused ? '采集暂停' : '采集中'}    ${monitoring ? '监视刷新中    ' : ''}${controller.debugState.executionState == DebugExecutionState.halted ? '目标暂停' : '目标运行'}    $captures 路采集'
+                        : '未连接目标',
+                    style: workbenchMuted,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                TextButton.icon(
+                  key: const ValueKey('workbench-output-toggle'),
+                  onPressed: () => unawaited(
+                    workspaceKey.currentState?.toggleWorkbenchOutput() ??
+                        Future.value(),
+                  ),
+                  icon: Icon(
+                    workspaceKey.currentState?.outputDocked == true
+                        ? Icons.expand_more
+                        : Icons.chevron_right,
+                    size: 16,
+                  ),
+                  label: const Text('输出'),
+                ),
+              ],
             ),
-            TextButton.icon(
-              key: const ValueKey('workbench-output-toggle'),
-              onPressed: () => unawaited(
-                workspaceKey.currentState?.toggleWorkbenchOutput() ??
-                    Future.value(),
-              ),
-              icon: Icon(
-                workspaceKey.currentState?.outputDocked == true
-                    ? Icons.expand_more
-                    : Icons.chevron_right,
-                size: 16,
-              ),
-              label: const Text('输出'),
-            ),
-          ],
+          ),
         ),
       );
     },

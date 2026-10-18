@@ -148,6 +148,12 @@ Future<JsonObject> executeControllerCommand(
       controller.removeWatches((arguments as List).cast<String>());
     case ControllerCommand.undoWatchDeletion:
       controller.undoWatchDeletion();
+    case ControllerCommand.redoWatchDeletion:
+      controller.redoWatchDeletion();
+    case ControllerCommand.configureProject:
+      throw const FormatException(
+        'Project configuration belongs to the main window.',
+      );
     case ControllerCommand.reorderWatch:
       final values = Map<String, Object?>.from(arguments! as Map);
       controller.reorderWatch(

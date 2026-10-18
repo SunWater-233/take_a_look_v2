@@ -44,7 +44,7 @@ extension TakeALookControllerSourceTools on TakeALookController {
   }
 
   Future<void> startSourceTask(String kind) async {
-    if (sourceTask.running) return;
+    if (sourceTask.running || _restoringProject) return;
     try {
       final sender = remoteCommand ?? backendCommand;
       if (sender == null) {

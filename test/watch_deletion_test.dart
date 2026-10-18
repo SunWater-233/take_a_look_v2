@@ -40,6 +40,58 @@ void main() {
   }
 
   testWidgets(
+    'redo preserves deletion order and retained samples across multiple cycles',
+    (tester) async {
+      final controller = fixture();
+      final keys = controller.watches.map((w) => w.symbol.key).toList();
+      sample(controller, keys[0], 1);
+      controller.removeWatch(keys[0]);
+      controller.removeWatch(keys[1]);
+      controller.undoWatchDeletion();
+      controller.undoWatchDeletion();
+      expect(controller.canRedoWatchDeletion, isTrue);
+      controller.redoWatchDeletion();
+      expect(controller.watches.map((w) => w.symbol.key), [keys[1], keys[2]]);
+      expect(controller.canRedoWatchDeletion, isTrue);
+      controller.redoWatchDeletion();
+      expect(controller.watches.single.symbol.key, keys[2]);
+      expect(controller.canRedoWatchDeletion, isFalse);
+      controller.undoWatchDeletion();
+      controller.undoWatchDeletion();
+      expect(controller.watches.map((w) => w.symbol.key), keys);
+      expect(controller.watches.first.samples, isNotEmpty);
+      controller.removeWatch(keys[2]);
+      expect(controller.canRedoWatchDeletion, isFalse);
+      await tester.pump(const Duration(seconds: 10));
+    },
+  );
+
+  testWidgets(
+    'detached window synchronizes redo availability and routes Ctrl+Y command',
+    (tester) async {
+      final controller = fixture();
+      final key = controller.watches.first.symbol.key;
+      final remote = TakeALookController(
+        remoteCommand: (command, args) async {
+          await controller.handleCommand(command, args);
+        },
+      );
+      addTearDown(remote.dispose);
+      controller.removeWatch(key);
+      controller.undoWatchDeletion();
+      remote.applySnapshot(controller.stateSnapshot());
+      expect(remote.canRedoWatchDeletion, isTrue);
+      remote.redoWatchDeletion();
+      await tester.pump();
+      remote.applySnapshot(controller.stateSnapshot());
+      expect(controller.watches.any((w) => w.symbol.key == key), isFalse);
+      expect(remote.canRedoWatchDeletion, isFalse);
+      expect(remote.canUndoWatchDeletion, isTrue);
+      controller.undoWatchDeletion();
+    },
+  );
+
+  testWidgets(
     'capture deletion retains continuous data and original settings',
     (tester) async {
       final controller = fixture();

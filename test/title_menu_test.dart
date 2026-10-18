@@ -259,7 +259,18 @@ void main() {
       return find.widgetWithText(MenuItemButton, WorkspacePanelId.watch.title);
     }
 
+    await tester.tap(find.text('文件'));
+    await tester.pumpAndSettle();
+    expect(find.text('打开项目'), findsOneWidget);
+    expect(find.text('保存项目'), findsOneWidget);
+    expect(find.text('项目另存为'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+
     var headerItem = await openHeaderMenuItem();
+    for (final removed in ['资源库', '输出', '专注视图']) {
+      expect(find.widgetWithText(MenuItemButton, removed), findsNothing);
+    }
     expect(
       find.descendant(of: headerItem, matching: find.byIcon(Icons.check)),
       findsOneWidget,

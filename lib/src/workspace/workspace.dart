@@ -7,6 +7,9 @@ import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../controller/controller.dart';
+import '../protocol/events.dart';
+import '../app/file_pickers.dart';
+import 'project_document.dart';
 import 'detached_window_coordinator.dart';
 import 'panel_types.dart';
 import '../panels/panels.dart';
@@ -27,6 +30,8 @@ class DockingWorkspace extends StatefulWidget {
     this.layoutFile,
     this.onPanelVisibilityChanged,
     this.workbenchLayout = false,
+    this.projectOpenPathPicker,
+    this.projectSavePathPicker,
     super.key,
   });
 
@@ -35,6 +40,8 @@ class DockingWorkspace extends StatefulWidget {
   final File? layoutFile;
   final VoidCallback? onPanelVisibilityChanged;
   final bool workbenchLayout;
+  final PathPicker? projectOpenPathPicker;
+  final PathPicker? projectSavePathPicker;
 
   @override
   DockingWorkspaceState createState() => DockingWorkspaceState();
@@ -71,6 +78,12 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   Offset? _tabDragLocalPosition;
   Timer? _layoutSaveTimer;
   Future<void> _layoutWrite = Future<void>.value();
+  String? _projectPath;
+  bool _projectBusy = false;
+  double? _outputDragHeight;
+  int _layoutRestoreRevision = 0;
+
+  String? get projectPath => _projectPath;
 
   bool get usesWorkbenchLayout => widget.workbenchLayout && !_legacyLayout;
   bool get resourceDocked => _session.groups.any(
@@ -82,11 +95,12 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
       .where((group) => group.id == 'output' && group.sidebar == null)
       .firstOrNull;
   bool get outputDocked => usesWorkbenchLayout
-      ? _outputGroup != null
+      ? _outputGroup != null && !_outputGroup!.outputCollapsed
       : _session.groups.any(
           (group) => group.panels.contains(WorkspacePanelId.log),
         );
   bool get focusedWorkbench => _focusedWorkbench;
+  bool get gridMode => _session.gridMode;
   WorkspaceGroup? get _primaryGroup =>
       _session.groups.where((group) => group.id == 'plot').firstOrNull;
   bool get _narrowWorkspace =>
@@ -124,6 +138,9 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   }
 
   Rect _groupPixelRect(WorkspaceGroup group, Size size) {
+    if (usesWorkbenchLayout && group == _outputGroup && group.outputCollapsed) {
+      return _toPixelRect(group.rect, size).translate(0, size.height);
+    }
     if (usesWorkbenchLayout && group.sidebar != null && !_session.gridMode) {
       final width = _sidebarPixels(group, size);
       final hidden = _sidebarHidden(group);
@@ -174,7 +191,10 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     bool toggleSidebar = false,
   }) {
     setState(() {
-      if (panel.isWorkbenchOutput) _focusedWorkbench = false;
+      if (panel.isWorkbenchOutput) {
+        _focusedWorkbench = false;
+        group.outputCollapsed = false;
+      }
       if (usesWorkbenchLayout && group.sidebar != null) {
         final close =
             toggleSidebar &&
@@ -239,7 +259,11 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   Future<void> toggleWorkbenchOutput() async {
     if (usesWorkbenchLayout) {
       final output = _outputGroup;
-      if (output == null) {
+      if (output == null || output.outputCollapsed) {
+        if (output != null) {
+          _showWorkbenchOutput(output.activePanel);
+          return;
+        }
         final available = workspaceOutputPanels
             .where((panel) => !isPanelVisible(panel))
             .toList();
@@ -250,7 +274,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         }
       } else {
         setState(() {
-          _session.groups.remove(output);
+          output.outputCollapsed = true;
           _reflowWorkbench();
         });
         widget.onPanelVisibilityChanged?.call();
@@ -281,6 +305,69 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     widget.onPanelVisibilityChanged?.call();
   }
 
+  void startOutputDrag() {
+    if (!usesWorkbenchLayout) return;
+    _startResize();
+    _outputDragHeight = outputDocked
+        ? (1 - _outputGroup!.rect.top) * _session.workspaceSize.height
+        : 0;
+  }
+
+  void updateOutputDrag(double deltaY) {
+    if (!usesWorkbenchLayout || _session.workspaceSize.isEmpty) return;
+    if (_outputDragHeight == null) startOutputDrag();
+    final height = _session.workspaceSize.height;
+    _outputDragHeight = (_outputDragHeight! - deltaY).clamp(0, height * .8);
+    var output = _outputGroup;
+    if (output == null && _outputDragHeight! >= 90) {
+      final available = workspaceOutputPanels
+          .where((p) => !isPanelVisible(p))
+          .toList();
+      if (available.isEmpty) return;
+      _showWorkbenchOutput(available.first);
+      output = _outputGroup;
+    }
+    if (output == null) return;
+    setState(() {
+      // Hysteresis makes the closed/open boundary feel deliberate.
+      output!.outputCollapsed = output.outputCollapsed
+          ? _outputDragHeight! < 90
+          : _outputDragHeight! < 56;
+      if (!output.outputCollapsed) {
+        final pixels = _outputDragHeight!.clamp(130, height * .8);
+        output.rect = Rect.fromLTWH(0, 1 - pixels / height, 1, pixels / height);
+        _focusedWorkbench = false;
+      }
+      _reflowWorkbench();
+    });
+    widget.onPanelVisibilityChanged?.call();
+  }
+
+  void endOutputDrag() {
+    if (_outputDragHeight == null) return;
+    final output = _outputGroup;
+    final height = _session.workspaceSize.height;
+    if (output != null && !output.outputCollapsed && height > 0) {
+      final pixels = (1 - output.rect.top) * height;
+      final stops = [180.0, 300.0, height * .5]
+        ..sort((a, b) => (a - pixels).abs().compareTo((b - pixels).abs()));
+      if ((stops.first - pixels).abs() <= 18) {
+        setState(() {
+          final snapped = stops.first.clamp(130, height * .8);
+          output.rect = Rect.fromLTWH(
+            0,
+            1 - snapped / height,
+            1,
+            snapped / height,
+          );
+          _reflowWorkbench();
+        });
+      }
+    }
+    _outputDragHeight = null;
+    _endResize();
+  }
+
   void _showWorkbenchOutput(WorkspacePanelId panel) {
     setState(() {
       var output = _outputGroup;
@@ -299,6 +386,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         output.panels.add(panel);
       }
       output.activePanel = panel;
+      output.outputCollapsed = false;
       _focusedWorkbench = false;
       _reflowWorkbench();
     });
@@ -318,7 +406,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         ? const Size(1280, 800)
         : _session.workspaceSize;
     final output = _outputGroup;
-    final height = output?.rect.top.clamp(.2, .9) ?? 1.0;
+    final height = outputDocked ? output!.rect.top.clamp(.2, .9) : 1.0;
     final leftGroup = _sidebarGroup(WorkspaceSidebarSide.left);
     final rightGroup = _sidebarGroup(WorkspaceSidebarSide.right);
     final left =
@@ -403,6 +491,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
       if (!_session.groups.contains(target)) _session.groups.add(target!);
       if (!target!.panels.contains(panel)) target!.panels.add(panel);
       target!.activePanel = panel;
+      target!.outputCollapsed = false;
       target!.z = _nextZ();
       _overlaySidebar = null;
       _focusedWorkbench = false;
@@ -607,7 +696,12 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
                       child: Text('将标签拖回这里，或通过标签菜单移回工作区', style: talMuted),
                     ),
                   ),
-                for (final group in ordered) _buildGroup(group, size),
+                for (final group in ordered)
+                  if (!(usesWorkbenchLayout &&
+                      group == _outputGroup &&
+                      group.outputCollapsed &&
+                      _outputDragHeight == null))
+                    _buildGroup(group, size),
                 if (usesWorkbenchLayout) ..._dockOverlays(size),
               ],
             ),
@@ -757,10 +851,19 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
                     width: rect.width - 28,
                     height: 7,
                     enabled: !expanded,
-                    onDragStart: _startResize,
-                    onDragEnd: _endResize,
-                    onDrag: (delta) =>
-                        _resizeGroup(group, delta, workspaceSize, top: true),
+                    onDragStart: group == _outputGroup && usesWorkbenchLayout
+                        ? startOutputDrag
+                        : _startResize,
+                    onDragEnd: group == _outputGroup && usesWorkbenchLayout
+                        ? endOutputDrag
+                        : _endResize,
+                    onDrag: (delta) {
+                      if (group == _outputGroup && usesWorkbenchLayout) {
+                        updateOutputDrag(delta.dy);
+                      } else {
+                        _resizeGroup(group, delta, workspaceSize, top: true);
+                      }
+                    },
                   ),
                   WorkspaceResizeHandle(
                     handleKey: ValueKey('resize-${group.id}-bottom'),
@@ -1103,6 +1206,105 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
 
   Future<void> saveLayout() => _persistLayout(report: true);
 
+  WorkspaceLayoutSnapshot projectLayout() {
+    final groups = [
+      for (final group in _session.groups)
+        WorkspaceGroup.fromJson(group.toJson()),
+    ];
+    // Floating panels return to their saved dock positions when a project opens.
+    for (final entry in _detachedPlacements.entries) {
+      if (groups.any((group) => group.panels.contains(entry.key))) continue;
+      final placement = entry.value;
+      var group = groups.where((g) => g.id == placement.groupId).firstOrNull;
+      if (group == null) {
+        group = WorkspaceGroup(
+          id: placement.groupId,
+          panels: [entry.key],
+          activePanel: entry.key,
+          rect: placement.groupRect,
+          z: placement.groupZ,
+          sidebar: placement.sidebar,
+          sidebarWidth: placement.sidebarWidth,
+          sidebarCollapsed: placement.sidebarCollapsed,
+        );
+        groups.add(group);
+      } else {
+        group.panels.add(entry.key);
+      }
+    }
+    return WorkspaceLayoutSnapshot(
+      groups: groups,
+      uiScale: widget.controller.uiScale,
+      version: widget.workbenchLayout ? 4 : 1,
+      legacyPanels: _legacyLayout,
+    );
+  }
+
+  Future<void> saveProject({bool saveAs = false}) async {
+    if (_projectBusy) return;
+    _projectBusy = true;
+    try {
+      var path = saveAs ? null : _projectPath;
+      path ??= await (widget.projectSavePathPicker ?? pickProjectSavePath)();
+      if (path == null || path.isEmpty || !mounted) return;
+      if (!path.toLowerCase().endsWith('.talproj')) path = '$path.talproj';
+      final document = ProjectDocument(
+        settings: widget.controller.projectSettings(),
+        layout: projectLayout(),
+        gridMode: _session.gridMode,
+        focused: _focusedWorkbench,
+      );
+      await document.write(File(path));
+      if (!mounted) return;
+      _projectPath = path;
+      widget.controller.report('项目已保存：$path');
+      widget.onPanelVisibilityChanged?.call();
+    } catch (error) {
+      if (mounted) {
+        widget.controller.applyBackendEvent(BackendEventType.error, {
+          'code': 'project_save_failed',
+          'message': '保存项目失败：$error',
+        });
+      }
+    } finally {
+      _projectBusy = false;
+    }
+  }
+
+  Future<void> openProject() async {
+    if (_projectBusy) return;
+    _projectBusy = true;
+    try {
+      final path =
+          await (widget.projectOpenPathPicker ?? pickProjectOpenPath)();
+      if (path == null || path.isEmpty || !mounted) return;
+      final document = await ProjectDocument.read(File(path));
+      if (!mounted) return;
+      _layoutRestoreRevision++;
+      await widget.controller.restoreProjectSettings(document.settings);
+      if (!mounted) return;
+      await detachedWindows.returnAllPanels();
+      if (!mounted) return;
+      _detachedPlacements.clear();
+      _layoutSaveTimer?.cancel();
+      _session.gridMode = document.gridMode;
+      _focusedWorkbench = document.focused;
+      applyProjectLayout(document.layout);
+      _projectPath = path;
+      _scheduleLayoutSave();
+      widget.controller.report('已打开项目：$path');
+    } catch (error) {
+      if (mounted) {
+        widget.controller.applyBackendEvent(BackendEventType.error, {
+          'code': 'project_open_failed',
+          'message': '打开项目失败：$error',
+        });
+      }
+    } finally {
+      _projectBusy = false;
+    }
+  }
+
   Future<void> _persistLayout({required bool report}) async {
     _layoutSaveTimer?.cancel();
     final snapshot = WorkspaceLayoutSnapshot.fromJson(
@@ -1128,9 +1330,10 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   Future<void> restoreLayout() => _restoreLayout();
 
   Future<void> _restoreLayout({bool reportMissing = true}) async {
+    final revision = ++_layoutRestoreRevision;
     try {
       final layout = await _layoutRepository.load();
-      if (!mounted) return;
+      if (!mounted || revision != _layoutRestoreRevision) return;
       if (layout == null) {
         if (reportMissing) widget.controller.report('尚未保存过工作区布局。');
         return;
@@ -1139,74 +1342,79 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         widget.controller.report('已启用横向工作台。旧布局已保留，可在“视图”中恢复。');
         return;
       }
-      final restored = <WorkspaceGroup>[];
-      final seenPanels = <WorkspacePanelId>{};
-      // Versions 2 and 3 nested build output and registers inside the log tab.
-      // Expand that tab in its saved group, preserving its position and peers.
-      if (widget.workbenchLayout &&
-          const [2, 3].contains(layout.version) &&
-          !layout.legacyPanels) {
-        final logGroup = layout.groups
-            .where((group) => group.panels.contains(WorkspacePanelId.log))
-            .firstOrNull;
-        if (logGroup != null) {
-          final existingPanels = layout.groups
-              .expand((group) => group.panels)
-              .toSet();
-          logGroup.panels.insertAll(
-            logGroup.panels.indexOf(WorkspacePanelId.log) + 1,
-            workspaceOutputPanels
-                .skip(1)
-                .where((panel) => !existingPanels.contains(panel)),
-          );
-        }
-      }
-      for (final group in layout.groups) {
-        if (widget.workbenchLayout &&
-            layout.version == 2 &&
-            !layout.legacyPanels) {
-          if (group.id == 'resources') {
-            group.sidebar = WorkspaceSidebarSide.left;
-          }
-          if (group.id == 'watch') group.sidebar = WorkspaceSidebarSide.right;
-          if (group.sidebar != null) {
-            group.sidebarWidth = group.sidebar == WorkspaceSidebarSide.left
-                ? 240
-                : 320;
-          }
-        }
-        group.panels.removeWhere(
-          (panel) =>
-              detachedWindows.windows.containsKey(panel) ||
-              !seenPanels.add(panel),
-        );
-        if (group.panels.isEmpty) continue;
-        if (!group.panels.contains(group.activePanel)) {
-          group.activePanel = group.panels.first;
-        }
-        group.rect = _session.gridMode
-            ? _snapRectToGrid(group.rect)
-            : _clampRect(group.rect);
-        restored.add(group);
-      }
-      setState(() {
-        _legacyLayout = layout.version == 1 || layout.legacyPanels;
-        _automaticWorkbenchLayout = false;
-        _session.groups
-          ..clear()
-          ..addAll(restored);
-        _session.zCursor = _session.groups.fold(
-          20,
-          (value, group) => math.max(value, group.z),
-        );
-        _reflowWorkbench();
-      });
-      widget.onPanelVisibilityChanged?.call();
-      widget.controller.setUiScale(layout.uiScale);
+      applyProjectLayout(layout);
       widget.controller.report('已恢复保存的工作区布局');
     } on Object catch (error) {
       if (mounted) widget.controller.report('恢复布局失败：$error');
     }
+  }
+
+  void applyProjectLayout(WorkspaceLayoutSnapshot snapshot) {
+    final layout = WorkspaceLayoutSnapshot.fromJson(snapshot.toJson());
+    final restored = <WorkspaceGroup>[];
+    final seenPanels = <WorkspacePanelId>{};
+    // Versions 2 and 3 nested build output and registers inside the log tab.
+    // Expand that tab in its saved group, preserving its position and peers.
+    if (widget.workbenchLayout &&
+        const [2, 3].contains(layout.version) &&
+        !layout.legacyPanels) {
+      final logGroup = layout.groups
+          .where((group) => group.panels.contains(WorkspacePanelId.log))
+          .firstOrNull;
+      if (logGroup != null) {
+        final existingPanels = layout.groups
+            .expand((group) => group.panels)
+            .toSet();
+        logGroup.panels.insertAll(
+          logGroup.panels.indexOf(WorkspacePanelId.log) + 1,
+          workspaceOutputPanels
+              .skip(1)
+              .where((panel) => !existingPanels.contains(panel)),
+        );
+      }
+    }
+    for (final group in layout.groups) {
+      if (widget.workbenchLayout &&
+          layout.version == 2 &&
+          !layout.legacyPanels) {
+        if (group.id == 'resources') {
+          group.sidebar = WorkspaceSidebarSide.left;
+        }
+        if (group.id == 'watch') group.sidebar = WorkspaceSidebarSide.right;
+        if (group.sidebar != null) {
+          group.sidebarWidth = group.sidebar == WorkspaceSidebarSide.left
+              ? 240
+              : 320;
+        }
+      }
+      group.panels.removeWhere(
+        (panel) =>
+            detachedWindows.windows.containsKey(panel) ||
+            !seenPanels.add(panel),
+      );
+      if (group.panels.isEmpty) continue;
+      if (!group.panels.contains(group.activePanel)) {
+        group.activePanel = group.panels.first;
+      }
+      group.rect = _session.gridMode
+          ? _snapRectToGrid(group.rect)
+          : _clampRect(group.rect);
+      restored.add(group);
+    }
+    setState(() {
+      _legacyLayout = layout.version == 1 || layout.legacyPanels;
+      _automaticWorkbenchLayout = false;
+      _session.groups
+        ..clear()
+        ..addAll(restored);
+      _session.zCursor = _session.groups.fold(
+        20,
+        (value, group) => math.max(value, group.z),
+      );
+      _reflowWorkbench();
+    });
+    widget.onPanelVisibilityChanged?.call();
+    widget.controller.setUiScale(layout.uiScale);
   }
 
   void resetLayout() {

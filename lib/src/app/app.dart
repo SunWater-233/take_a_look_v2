@@ -74,6 +74,7 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
         final client = BackendClient();
         controller = TakeALookController(
           backendCommand: client.command,
+          projectBackendCommand: client.projectCommand,
           targetCatalogRequest: client.targetCatalogRequest,
           targetPackPicker: pickTargetPack,
           symbolFilePicker: pickSymbolFile,
@@ -430,6 +431,8 @@ class MainWorkbench extends StatefulWidget {
     this.layoutFile,
     this.toolbar,
     this.recordingStorage,
+    this.projectOpenPathPicker,
+    this.projectSavePathPicker,
     super.key,
   });
 
@@ -438,6 +441,8 @@ class MainWorkbench extends StatefulWidget {
   final File? layoutFile;
   final Widget? toolbar;
   final RecordingStorage? recordingStorage;
+  final PathPicker? projectOpenPathPicker;
+  final PathPicker? projectSavePathPicker;
 
   @override
   State<MainWorkbench> createState() => _MainWorkbenchState();
@@ -471,8 +476,9 @@ class _MainWorkbenchState extends State<MainWorkbench> {
 
   void _handleSourceTask() {
     final task = widget.controller.sourceTask;
-    if (!task.running || task.id == _shownSourceTask) return;
-    _shownSourceTask = task.id;
+    final key = '${task.id}:${task.phase}';
+    if (!task.running || key == _shownSourceTask) return;
+    _shownSourceTask = key;
     unawaited(
       workspaceKey.currentState?.showPanel(WorkspacePanelId.buildOutput) ??
           Future<void>.value(),
@@ -480,6 +486,14 @@ class _MainWorkbenchState extends State<MainWorkbench> {
   }
 
   KeyEventResult _handleWorkbenchShortcut(KeyEvent event) {
+    if (WorkspaceShortcut.saveProject.matches(event)) {
+      unawaited(workspaceKey.currentState?.saveProject() ?? Future.value());
+      return KeyEventResult.handled;
+    }
+    if (WorkspaceShortcut.openProject.matches(event)) {
+      unawaited(workspaceKey.currentState?.openProject() ?? Future.value());
+      return KeyEventResult.handled;
+    }
     if (WorkspaceShortcut.resetUiScale.matches(event)) {
       widget.controller.setUiScale(1);
       setState(() {});
@@ -521,6 +535,8 @@ class _MainWorkbenchState extends State<MainWorkbench> {
                   windowSync: widget.windowSync,
                   layoutFile: widget.layoutFile,
                   workbenchLayout: true,
+                  projectOpenPathPicker: widget.projectOpenPathPicker,
+                  projectSavePathPicker: widget.projectSavePathPicker,
                   onPanelVisibilityChanged: () {
                     if (mounted) setState(() {});
                   },

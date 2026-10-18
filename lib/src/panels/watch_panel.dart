@@ -275,6 +275,11 @@ class _WatchPanelState extends State<_WatchPanel> {
         focusContext?.findAncestorWidgetOfExactType<EditableText>() != null) {
       return KeyEventResult.ignored;
     }
+    if (WorkspaceShortcut.redoWatchDeletion.matches(event) &&
+        controller.canRedoWatchDeletion) {
+      controller.redoWatchDeletion();
+      return KeyEventResult.handled;
+    }
     if (WorkspaceShortcut.undoWatchDeletion.matches(event) &&
         controller.canUndoWatchDeletion) {
       controller.undoWatchDeletion();
@@ -430,6 +435,13 @@ class _WatchPanelState extends State<_WatchPanel> {
           touchOptimized: request.touchOptimized,
         ),
         _watchPopupItem(
+          value: 'redo',
+          icon: Icons.redo,
+          label: '重做删除 (Ctrl+Y)',
+          enabled: controller.canRedoWatchDeletion,
+          touchOptimized: request.touchOptimized,
+        ),
+        _watchPopupItem(
           value: 'copy',
           icon: Icons.copy_outlined,
           label: count == 1 ? '复制命令名' : '复制所选命令名（$count）',
@@ -476,6 +488,8 @@ class _WatchPanelState extends State<_WatchPanel> {
         controller.removeWatches(keys);
       case 'undo':
         controller.undoWatchDeletion();
+      case 'redo':
+        controller.redoWatchDeletion();
       case 'copy':
         final names = [
           for (final watch in controller.watches)

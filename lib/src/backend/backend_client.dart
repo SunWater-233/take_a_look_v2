@@ -150,6 +150,7 @@ class BackendClient {
       // These operations await completion and own error feedback in the controller.
       if (const {
         ControllerCommand.loadSymbols,
+        ControllerCommand.configureProject,
         ControllerCommand.setSourceProject,
         ControllerCommand.startSourceTask,
         ControllerCommand.cancelSourceTask,
@@ -171,6 +172,16 @@ class BackendClient {
         });
       }
     }
+  }
+
+  /// Project restoration awaits each operation and reports any failure once.
+  Future<void> projectCommand(
+    ControllerCommand command,
+    Object? arguments,
+  ) async {
+    final call = BackendCommandMapper.translate(command, arguments, _state);
+    if (call == null) throw StateError('Unsupported project command: $command');
+    await request(call.method, call.params);
   }
 
   Future<Map<String, dynamic>> request(

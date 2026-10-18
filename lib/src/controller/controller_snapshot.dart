@@ -127,6 +127,8 @@ extension TakeALookControllerSnapshot on TakeALookController {
         ],
       if (wants('canUndoWatchDeletion'))
         'canUndoWatchDeletion': canUndoWatchDeletion,
+      if (wants('canRedoWatchDeletion'))
+        'canRedoWatchDeletion': canRedoWatchDeletion,
       if (wants('logs')) 'logs': [for (final entry in _logs) entry.toJson()],
       if (wants('analysisSession'))
         'analysisSession': analysisSession.toJson(
@@ -269,9 +271,14 @@ extension TakeALookControllerSnapshot on TakeALookController {
     final hasSymbolState =
         data.containsKey('selectedSymbols') || data.containsKey('symbols');
     final hasWatchState =
-        data.containsKey('watches') || data.containsKey('canUndoWatchDeletion');
+        data.containsKey('watches') ||
+        data.containsKey('canUndoWatchDeletion') ||
+        data.containsKey('canRedoWatchDeletion');
     if (_isDetachedRemote && data.containsKey('canUndoWatchDeletion')) {
       _remoteCanUndoWatchDeletion = data['canUndoWatchDeletion'] == true;
+    }
+    if (_isDetachedRemote && data.containsKey('canRedoWatchDeletion')) {
+      _remoteCanRedoWatchDeletion = data['canRedoWatchDeletion'] == true;
     }
     final hasPlotHighlightState = data.containsKey('plotHighlightedWatchKey');
     final hasPlotWatchSelection = data.containsKey(

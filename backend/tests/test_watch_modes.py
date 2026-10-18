@@ -49,10 +49,11 @@ def test_monitor_cadence_and_overrides_continue_while_capture_is_paused(rig):
     service, memory, symbols, events = rig
     service.handle(RpcMethod.SET_SAMPLING_PAUSED, {'paused': True})
     service._poll_monitors_locked(10.0)
-    service._poll_monitors_locked(10.49)
+    assert service.state_snapshot()['monitorRateHz'] == 10.0
+    service._poll_monitors_locked(10.09)
     assert memory.values[symbols['watch'].key] == 1
     assert memory.values[symbols['slow'].key] == 1
-    service._poll_monitors_locked(10.5)
+    service._poll_monitors_locked(10.1)
     assert memory.values[symbols['watch'].key] == 2
     assert memory.values[symbols['slow'].key] == 1
     service._poll_monitors_locked(12.0)

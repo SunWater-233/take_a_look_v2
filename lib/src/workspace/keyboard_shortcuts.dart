@@ -13,10 +13,13 @@ enum WorkspaceShortcut {
     alternate: (PhysicalKeyboardKey.numpad0, LogicalKeyboardKey.numpad0),
   ),
   saveLayout(PhysicalKeyboardKey.keyS, LogicalKeyboardKey.keyS, shift: true),
+  saveProject(PhysicalKeyboardKey.keyS, LogicalKeyboardKey.keyS),
+  openProject(PhysicalKeyboardKey.keyO, LogicalKeyboardKey.keyO),
   findSource(PhysicalKeyboardKey.keyF, LogicalKeyboardKey.keyF),
   closeSource(PhysicalKeyboardKey.keyW, LogicalKeyboardKey.keyW),
   selectAllWatches(PhysicalKeyboardKey.keyA, LogicalKeyboardKey.keyA),
-  undoWatchDeletion(PhysicalKeyboardKey.keyZ, LogicalKeyboardKey.keyZ);
+  undoWatchDeletion(PhysicalKeyboardKey.keyZ, LogicalKeyboardKey.keyZ),
+  redoWatchDeletion(PhysicalKeyboardKey.keyY, LogicalKeyboardKey.keyY);
 
   const WorkspaceShortcut(
     this.physicalKey,

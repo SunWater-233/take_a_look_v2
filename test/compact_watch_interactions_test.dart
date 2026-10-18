@@ -175,16 +175,43 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('toolbar restores the last removed row from an empty panel', (
+  testWidgets('Ctrl+Y redoes a deletion after Ctrl+Z restores it', (
     tester,
   ) async {
     final controller = await mount(tester);
+    await tester.tap(find.text('iq_ref'));
+    await tester.pump();
+    controller.removeWatch(controller.watches.first.symbol.key);
+    await tester.pump();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+    expect(controller.watches, hasLength(2));
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyY);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+    expect(controller.watches, hasLength(1));
+    controller.undoWatchDeletion();
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('Ctrl+Z restores the last removed row without a toolbar button', (
+    tester,
+  ) async {
+    final controller = await mount(tester);
+    await tester.tap(find.text('iq_ref'));
+    await tester.pump();
     controller.removeWatches(
       controller.watches.map((watch) => watch.symbol.key),
     );
     await tester.pump();
     expect(controller.watches, isEmpty);
-    await tester.tap(find.byKey(const ValueKey('compact-watch-undo')));
+    expect(find.byKey(const ValueKey('compact-watch-undo')), findsNothing);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pump();
     expect(controller.watches, hasLength(2));
     await tester.pumpWidget(const SizedBox.shrink());
@@ -211,7 +238,10 @@ void main() {
     await tester.tap(find.text('删除变量'));
     await tester.pumpAndSettle();
     expect(controller.watches, hasLength(1));
-    await tester.tap(find.byKey(const ValueKey('compact-watch-undo')));
+    expect(find.byKey(const ValueKey('compact-watch-undo')), findsNothing);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pump();
     expect(controller.watches, hasLength(2));
     await tester.pumpWidget(const SizedBox.shrink());

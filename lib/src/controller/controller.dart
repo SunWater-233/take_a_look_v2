@@ -33,6 +33,7 @@ part 'controller_debug.dart';
 part 'controller_source_workspace.dart';
 part 'controller_source_tools.dart';
 part 'controller_targets.dart';
+part 'controller_project.dart';
 
 typedef RemoteCommand =
     Future<void> Function(ControllerCommand command, Object? arguments);
@@ -51,6 +52,7 @@ class TakeALookController extends ChangeNotifier {
   TakeALookController({
     this.remoteCommand,
     this.backendCommand,
+    this.projectBackendCommand,
     this.symbolFilePicker,
     this.sourceRootPicker,
     this.csvExportPathPicker,
@@ -75,6 +77,7 @@ class TakeALookController extends ChangeNotifier {
 
   final RemoteCommand? remoteCommand;
   final BackendCommand? backendCommand;
+  final BackendCommand? projectBackendCommand;
   final PathPicker? symbolFilePicker;
   final PathPicker? sourceRootPicker;
   final PathPicker? csvExportPathPicker;
@@ -85,13 +88,17 @@ class TakeALookController extends ChangeNotifier {
   final List<SymbolItem> _symbols = <SymbolItem>[];
   final List<WatchItem> _watches = <WatchItem>[];
   final List<List<_DeletedWatch>> _watchDeletions = [];
+  final List<List<String>> _watchDeletionRedos = [];
   final Set<String> _removedWatchKeys = {};
   bool _remoteCanUndoWatchDeletion = false;
+  bool _remoteCanRedoWatchDeletion = false;
   final List<LogEntry> _logs = <LogEntry>[];
   final Set<String> _selectedSymbols = <String>{};
   final Set<String> _expandedSymbolTreeNodes = <String>{};
   int _symbolRevision = 0;
   bool _pickingSymbolFile = false;
+  bool _restoringProject = false;
+  bool get isProjectRestoring => _restoringProject;
   int _nextSymbolLoadId = 0;
   Timer? _ticker;
   Timer? _plotRefreshTimer;
@@ -249,6 +256,9 @@ class TakeALookController extends ChangeNotifier {
   bool get canUndoWatchDeletion => _isDetachedRemote
       ? _remoteCanUndoWatchDeletion
       : _watchDeletions.isNotEmpty;
+  bool get canRedoWatchDeletion => _isDetachedRemote
+      ? _remoteCanRedoWatchDeletion
+      : _watchDeletionRedos.isNotEmpty;
   List<LogEntry> get logs => List.unmodifiable(_logs);
   Set<String> get selectedSymbols => Set.unmodifiable(_selectedSymbols);
   double get uiScale => _uiScale.value;
@@ -342,6 +352,7 @@ class TakeALookController extends ChangeNotifier {
   bool get _isDetachedRemote => remoteCommand != null && backendCommand == null;
 
   void _syncWatchesBackend() {
+    if (_restoringProject) return;
     final sender = backendCommand;
     if (sender == null) return;
     unawaited(

@@ -175,9 +175,11 @@ class WorkspaceResizeHandle extends StatelessWidget {
         child: GestureDetector(
           key: handleKey,
           behavior: HitTestBehavior.opaque,
+          dragStartBehavior: DragStartBehavior.down,
           onPanStart: enabled ? (_) => onDragStart() : null,
           onPanUpdate: enabled ? (details) => onDrag(details.delta) : null,
           onPanEnd: enabled ? (_) => onDragEnd() : null,
+          onPanCancel: enabled ? onDragEnd : null,
           child: SizedBox(
             width: math.max(1, width),
             height: math.max(1, height),

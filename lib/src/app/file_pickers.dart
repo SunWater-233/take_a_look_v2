@@ -1,5 +1,18 @@
 import 'package:file_selector/file_selector.dart';
 
+Future<String?> pickProjectOpenPath() async => (await openFile(
+  acceptedTypeGroups: const [
+    XTypeGroup(label: 'Take A Look 项目', extensions: ['talproj']),
+  ],
+))?.path;
+
+Future<String?> pickProjectSavePath() async => (await getSaveLocation(
+  suggestedName: '未命名项目.talproj',
+  acceptedTypeGroups: const [
+    XTypeGroup(label: 'Take A Look 项目', extensions: ['talproj']),
+  ],
+))?.path;
+
 Future<String?> pickTargetPack() async {
   final file = await openFile(
     acceptedTypeGroups: const [

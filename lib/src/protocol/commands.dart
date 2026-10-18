@@ -52,6 +52,8 @@ enum ControllerCommand {
   removeWatch,
   removeWatches,
   undoWatchDeletion,
+  redoWatchDeletion,
+  configureProject,
   reorderWatch,
   clearWatches,
   toggleWatchSampling,
@@ -129,6 +131,11 @@ class BackendCommandMapper {
     JsonObject backendState,
   ) {
     switch (command) {
+      case ControllerCommand.configureProject:
+        return BackendCall(
+          BackendMethod.setConfig,
+          Map<String, Object?>.from(arguments! as Map),
+        );
       case ControllerCommand.setSourceProject:
         return BackendCall(
           BackendMethod.setSourceProject,
@@ -252,6 +259,7 @@ class BackendCommandMapper {
       case ControllerCommand.removeWatch:
       case ControllerCommand.removeWatches:
       case ControllerCommand.undoWatchDeletion:
+      case ControllerCommand.redoWatchDeletion:
       case ControllerCommand.reorderWatch:
       case ControllerCommand.clearWatches:
       case ControllerCommand.toggleWatchSampling:

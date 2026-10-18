@@ -64,6 +64,15 @@ class DetachedWindowCoordinator {
     return true;
   }
 
+  Future<void> returnAllPanels() async {
+    for (final entry in _pool.values.toList()) {
+      if (entry.panels.isEmpty) continue;
+      await entry.controller.hide();
+      _assign(entry, activePanel: null, panels: const []);
+    }
+    _pendingReleasedPanels.clear();
+  }
+
   Future<String?> windowAt(
     Offset screenPosition, {
     String? excludingWindowId,

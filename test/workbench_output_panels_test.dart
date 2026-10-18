@@ -119,6 +119,61 @@ void main() {
     });
   }
 
+  for (final kind in [PointerDeviceKind.mouse, PointerDeviceKind.touch]) {
+    testWidgets(
+      '$kind output drags open, snaps, collapses and reopens for download',
+      (tester) async {
+        final bench = _Workbench(tester);
+        addTearDown(bench.dispose);
+        await bench.mount();
+        final bar = find.byKey(const ValueKey('workbench-output-drag'));
+        final gesture = await tester.startGesture(
+          tester.getCenter(bar),
+          kind: kind,
+        );
+        await gesture.moveBy(const Offset(0, -290));
+        await tester.pump();
+        await gesture.up();
+        await tester.pumpAndSettle();
+        expect(bench.workspace.outputDocked, isTrue);
+        final output = find.byKey(const ValueKey('workspace-group-output'));
+        expect(tester.getSize(output).height, closeTo(297, 1));
+        await tester.tap(find.byKey(const ValueKey('panel-tab-registers')));
+        await tester.pumpAndSettle();
+        await tester.drag(
+          find.byKey(const ValueKey('resize-output-top')),
+          const Offset(0, 340),
+          kind: kind,
+        );
+        await tester.pumpAndSettle();
+        expect(bench.workspace.outputDocked, isFalse);
+        // A second drag can reopen the same group with its selected tab intact.
+        await tester.drag(bar, const Offset(0, -290), kind: kind);
+        await tester.pumpAndSettle();
+        expect(bench.frame('output').panel, WorkspacePanelId.registers);
+        bench.controller.applySourceTask({
+          'id': 'build-and-download',
+          'status': 'running',
+          'phase': 'build',
+        });
+        await tester.pumpAndSettle();
+        expect(bench.frame('output').panel, WorkspacePanelId.buildOutput);
+        await bench.workspace.toggleWorkbenchOutput();
+        await tester.pumpAndSettle();
+        expect(bench.workspace.outputDocked, isFalse);
+        bench.controller.applySourceTask({
+          'id': 'build-and-download',
+          'status': 'running',
+          'phase': 'download',
+        });
+        await tester.pumpAndSettle();
+        expect(bench.workspace.outputDocked, isTrue);
+        expect(bench.frame('output').panel, WorkspacePanelId.buildOutput);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
   testWidgets('a build opens and selects its independent output panel', (
     tester,
   ) async {

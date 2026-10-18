@@ -67,6 +67,7 @@ extension TakeALookControllerConnection on TakeALookController {
   }
 
   Future<void> toggleConnection() async {
+    if (_restoringProject) return;
     if (_dispatchCommand(ControllerCommand.toggleConnection)) return;
     if (connectionStatus == ConnectionStatus.connected) {
       connectionStatus = ConnectionStatus.disconnected;

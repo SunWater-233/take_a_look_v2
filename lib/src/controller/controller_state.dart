@@ -109,7 +109,7 @@ class ConnectionState {
 class AcquisitionState {
   Map<String, dynamic> rawRecording = <String, dynamic>{};
   double sampleRateHz = 50;
-  double monitorRateHz = 2;
+  double monitorRateHz = 10;
   double rttSampleRateHz = 1000;
   String displayRefreshMode = 'standard';
   double elapsedSeconds = 0;

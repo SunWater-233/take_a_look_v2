@@ -15,6 +15,7 @@ class WorkspaceGroup {
     this.sidebar,
     this.sidebarWidth = 280,
     this.sidebarCollapsed = false,
+    this.outputCollapsed = false,
   }) : panels = List.of(panels),
        _activePanel = ValueNotifier<WorkspacePanelId>(activePanel);
 
@@ -26,6 +27,7 @@ class WorkspaceGroup {
   WorkspaceSidebarSide? sidebar;
   double sidebarWidth;
   bool sidebarCollapsed;
+  bool outputCollapsed;
 
   WorkspacePanelId get activePanel => _activePanel.value;
   set activePanel(WorkspacePanelId value) => _activePanel.value = value;
@@ -37,6 +39,7 @@ class WorkspaceGroup {
     'activePanel': activePanel.name,
     'rect': [rect.left, rect.top, rect.width, rect.height],
     'z': z,
+    if (outputCollapsed) 'outputCollapsed': true,
     if (sidebar != null) ...{
       'sidebar': sidebar!.name,
       'sidebarWidth': sidebarWidth,
@@ -88,6 +91,7 @@ class WorkspaceGroup {
       sidebar: sidebar,
       sidebarWidth: sidebarWidth,
       sidebarCollapsed: json['sidebarCollapsed'] == true,
+      outputCollapsed: json['outputCollapsed'] == true,
     );
   }
 }

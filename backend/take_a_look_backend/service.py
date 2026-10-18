@@ -76,7 +76,7 @@ class BackendService(SamplingServiceMixin):
         self._connection_kind = "local"
         self._remote_config = dict(REMOTE_DEFAULTS)
         self._sample_rate_hz = 50.0
-        self._monitor_rate_hz = 2.0
+        self._monitor_rate_hz = 10.0
         self._monitor_schedule_revision = 0
         self._latest_rtt_values: dict[str, tuple[object, int]] = {}
         self._rtt_sample_rate_hz = 1000.0

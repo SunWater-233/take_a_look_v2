@@ -125,6 +125,7 @@ extension TakeALookControllerWatches on TakeALookController {
         .where((item) => selectedKeys.contains(item.key))
         .where((item) => !existing.contains(item.key))
         .toList();
+    if (selected.isNotEmpty) _watchDeletionRedos.clear();
     for (final symbol in selected) {
       // Re-adding a retained variable is equivalent to undoing its removal.
       final retained = _takeDeletedWatch(symbol.key);
@@ -190,6 +191,7 @@ extension TakeALookControllerWatches on TakeALookController {
       deleted.add(entry);
     }
     if (deleted.isEmpty) return;
+    _watchDeletionRedos.clear();
     _watchDeletions.add(deleted);
     _removedWatchKeys.addAll(deleted.map((entry) => entry.watch.symbol.key));
     // Bound undo memory when acquisition is paused for a long editing session.
@@ -215,6 +217,9 @@ extension TakeALookControllerWatches on TakeALookController {
     if (_dispatchRemote(ControllerCommand.undoWatchDeletion)) return;
     if (_watchDeletions.isEmpty) return;
     final entries = _watchDeletions.removeLast();
+    _watchDeletionRedos.add([
+      for (final entry in entries) entry.watch.symbol.key,
+    ]);
     for (final entry in entries) {
       entry.expiry?.cancel();
       entry.expiry = null;
@@ -225,6 +230,18 @@ extension TakeALookControllerWatches on TakeALookController {
     _syncWatchesBackend();
     _emitState([signals.watches, signals.plot]);
     signals.telemetrySync.emit();
+  }
+
+  void redoWatchDeletion() {
+    if (_dispatchRemote(ControllerCommand.redoWatchDeletion)) return;
+    if (_watchDeletionRedos.isEmpty) return;
+    final keys = _watchDeletionRedos.removeLast();
+    final remaining = List<List<String>>.of(_watchDeletionRedos);
+    removeWatches(keys);
+    _watchDeletionRedos
+      ..clear()
+      ..addAll(remaining);
+    _emitState([signals.watches]);
   }
 
   void _restoreDeletedWatch(_DeletedWatch entry, {int? index}) {
@@ -270,6 +287,7 @@ extension TakeALookControllerWatches on TakeALookController {
   }
 
   void _clearWatchDeletionHistory() {
+    _watchDeletionRedos.clear();
     for (final batch in List.of(_watchDeletions)) {
       for (final entry in List.of(batch)) {
         _discardDeletedWatch(entry);

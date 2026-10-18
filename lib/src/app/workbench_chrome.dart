@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
@@ -47,127 +46,136 @@ class WorkbenchToolbar extends StatelessWidget {
           builder: (context, bounds) => SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: SizedBox(
-              width: math.max(1040, bounds.maxWidth - 24),
-              child: Row(
-                children: [
-                  TalButton.icon(
-                    key: const ValueKey('workbench-connection'),
-                    onPressed: () =>
-                        showWorkbenchConnectionSettings(context, controller),
-                    icon: Icon(
-                      Icons.circle,
-                      size: 7,
-                      color: connected
-                          ? WorkbenchColors.success
-                          : WorkbenchColors.muted,
-                    ),
-                    label: Text('$connectionName  $connectionStatus  ▾'),
-                  ),
-                  const SizedBox(width: 14),
-                  TalButton.icon(
-                    key: const ValueKey('workbench-target'),
-                    onPressed: connected
-                        ? (halted
-                              ? controller.resumeTarget
-                              : controller.haltTarget)
-                        : null,
-                    icon: Icon(
-                      halted ? Icons.play_arrow_outlined : Icons.pause,
-                      size: 17,
-                    ),
-                    label: Text(halted ? '继续目标' : '暂停目标'),
-                  ),
-                  const SizedBox(width: 8),
-                  TalPopupMenuButton<bool>(
-                    tooltip: '复位目标',
-                    onSelected: (halt) {
-                      if (connected) controller.resetTarget(halt: halt);
-                    },
-                    itemBuilder: (_) => [
-                      PopupMenuItem(
-                        value: false,
-                        enabled: connected,
-                        child: const Text('复位运行'),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minWidth: bounds.maxWidth - 24),
+              child: IntrinsicWidth(
+                child: Row(
+                  children: [
+                    TalButton.icon(
+                      key: const ValueKey('workbench-connection'),
+                      onPressed: () =>
+                          showWorkbenchConnectionSettings(context, controller),
+                      icon: Icon(
+                        Icons.circle,
+                        size: 7,
+                        color: connected
+                            ? WorkbenchColors.success
+                            : WorkbenchColors.muted,
                       ),
-                      PopupMenuItem(
-                        value: true,
-                        enabled: connected,
-                        child: const Text('复位暂停'),
+                      label: Text('$connectionName  $connectionStatus  ▾'),
+                    ),
+                    const SizedBox(width: 14),
+                    TalButton.icon(
+                      key: const ValueKey('workbench-target'),
+                      onPressed: connected
+                          ? (halted
+                                ? controller.resumeTarget
+                                : controller.haltTarget)
+                          : null,
+                      icon: Icon(
+                        halted ? Icons.play_arrow_outlined : Icons.pause,
+                        size: 17,
                       ),
-                    ],
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.restart_alt, size: 18),
-                        SizedBox(width: 5),
-                        Text('复位'),
-                        Icon(Icons.expand_more, size: 16),
+                      label: Text(halted ? '继续目标' : '暂停目标'),
+                    ),
+                    const SizedBox(width: 8),
+                    TalButton.icon(
+                      key: const ValueKey('workbench-disconnect'),
+                      onPressed: connected ? controller.toggleConnection : null,
+                      icon: const Icon(Icons.link_off, size: 17),
+                      label: const Text('断开连接'),
+                    ),
+                    const SizedBox(width: 8),
+                    TalPopupMenuButton<bool>(
+                      tooltip: '复位目标',
+                      onSelected: (halt) {
+                        if (connected) controller.resetTarget(halt: halt);
+                      },
+                      itemBuilder: (_) => [
+                        PopupMenuItem(
+                          value: false,
+                          enabled: connected,
+                          child: const Text('复位运行'),
+                        ),
+                        PopupMenuItem(
+                          value: true,
+                          enabled: connected,
+                          child: const Text('复位暂停'),
+                        ),
                       ],
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  const SizedBox(
-                    height: 24,
-                    child: VerticalDivider(color: WorkbenchColors.border),
-                  ),
-                  const SizedBox(width: 12),
-                  const Text('采集', style: workbenchBody),
-                  const SizedBox(width: 8),
-                  SizedBox(
-                    width: 112,
-                    child: TalDropdown<double>(
-                      value: controller.sampleRateHz,
-                      values: {
-                        ...[
-                          50.0,
-                          100.0,
-                          200.0,
-                          500.0,
-                          1000.0,
-                          2000.0,
-                          5000.0,
-                          7000.0,
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.restart_alt, size: 18),
+                          SizedBox(width: 5),
+                          Text('复位'),
+                          Icon(Icons.expand_more, size: 16),
                         ],
-                        controller.sampleRateHz,
-                      }.toList()..sort(),
-                      label: formatReadRate,
-                      onChanged: controller.setSampleRate,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  TalButton.icon(
-                    key: const ValueKey('workbench-capture-toggle'),
-                    variant: TalButtonVariant.filled,
-                    onPressed: controller.toggleSampling,
-                    icon: Icon(
-                      controller.samplingPaused
-                          ? Icons.play_arrow_outlined
-                          : Icons.pause,
-                      size: 17,
+                    const SizedBox(width: 12),
+                    const SizedBox(
+                      height: 24,
+                      child: VerticalDivider(color: WorkbenchColors.border),
                     ),
-                    label: Text(controller.samplingPaused ? '继续采集' : '暂停采集'),
-                  ),
-                  const SizedBox(width: 10),
-                  TalButton(
-                    onPressed: () =>
-                        showWorkbenchSamplingSettings(context, controller),
-                    child: Text(
-                      controller.rttEnabled
-                          ? 'RTT ${controller.rttProtocol == 'plus' ? 'Plus' : 'Normal'}'
-                          : 'RTT 关闭',
+                    const SizedBox(width: 12),
+                    const Text('采集', style: workbenchBody),
+                    const SizedBox(width: 8),
+                    SizedBox(
+                      width: 112,
+                      child: TalDropdown<double>(
+                        value: controller.sampleRateHz,
+                        values: {
+                          ...[
+                            50.0,
+                            100.0,
+                            200.0,
+                            500.0,
+                            1000.0,
+                            2000.0,
+                            5000.0,
+                            7000.0,
+                          ],
+                          controller.sampleRateHz,
+                        }.toList()..sort(),
+                        label: formatReadRate,
+                        onChanged: controller.setSampleRate,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 18),
-                  const Spacer(),
-                  AnimatedBuilder(
-                    animation: controller.clockChanges,
-                    builder: (_, _) => Text(
-                      _elapsed(controller.samplingElapsedSeconds),
-                      style: talMono.copyWith(color: WorkbenchColors.muted),
+                    const SizedBox(width: 8),
+                    TalButton.icon(
+                      key: const ValueKey('workbench-capture-toggle'),
+                      variant: TalButtonVariant.filled,
+                      onPressed: controller.toggleSampling,
+                      icon: Icon(
+                        controller.samplingPaused
+                            ? Icons.play_arrow_outlined
+                            : Icons.pause,
+                        size: 17,
+                      ),
+                      label: Text(controller.samplingPaused ? '继续采集' : '暂停采集'),
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 10),
+                    TalButton(
+                      onPressed: () =>
+                          showWorkbenchSamplingSettings(context, controller),
+                      child: Text(
+                        controller.rttEnabled
+                            ? 'RTT ${controller.rttProtocol == 'plus' ? 'Plus' : 'Normal'}'
+                            : 'RTT 关闭',
+                      ),
+                    ),
+                    const SizedBox(width: 18),
+                    const Spacer(),
+                    AnimatedBuilder(
+                      animation: controller.clockChanges,
+                      builder: (_, _) => Text(
+                        _elapsed(controller.samplingElapsedSeconds),
+                        style: talMono.copyWith(color: WorkbenchColors.muted),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

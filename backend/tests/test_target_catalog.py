@@ -5,6 +5,7 @@ import json
 import threading
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -117,7 +118,7 @@ def test_failed_session_releases_registry_and_archive(tmp_path):
     backend = PyOcdMemoryBackend()
     class Session:
         def __init__(self, *args, **kwargs):
-            pass
+            self.target = None
         def open(self):
             raise RuntimeError("failed open")
         def close(self):
@@ -130,6 +131,47 @@ def test_failed_session_releases_registry_and_archive(tmp_path):
     backend._prepare_target(PyOcdConnectionConfig("nrf52840", 1000000))
     backend.disconnect()
     path.unlink()  # Windows rejects this if an archive handle leaked.
+
+
+@pytest.mark.parametrize('prefix', [b'   ', b'\r\n\t ', b'\xef\xbb\xbf   ', b'', b'\xef\xbb\xbf'])
+def test_pack_svd_declaration_is_normalised_before_session_open(tmp_path, prefix):
+    from pyocd.debug.svd.loader import SVDFile
+
+    path = make_pack(tmp_path)
+    xml = (b'<?xml version="1.0" encoding="utf-8"?><device><name>TestChip</name>'
+           b'<addressUnitBits>8</addressUnitBits><width>32</width><peripherals/></device>')
+    original = io.BytesIO(prefix + xml)
+    target = SimpleNamespace(_svd_location=SVDFile(original))
+    class Session:
+        def __init__(self, *args, **kwargs):
+            self.target = target
+        def open(self):
+            self.target._svd_location.load()
+        def close(self):
+            pass
+    backend = PyOcdMemoryBackend()
+    before = path.read_bytes()
+    try:
+        with patch('pyocd.core.helpers.ConnectHelper.get_all_connected_probes', return_value=[object()]), patch('pyocd.core.session.Session', Session):
+            backend.connect(PyOcdConnectionConfig('nrf52840', 1000000, pack_path=str(path)))
+        assert target._svd_location.device.name == 'TestChip'
+        assert original.getvalue() == prefix + xml
+        assert path.read_bytes() == before
+    finally:
+        backend.disconnect()
+
+
+def test_svd_without_declaration_is_preserved():
+    from pyocd.debug.svd.loader import SVDFile
+    from take_a_look_backend.backends.pyocd_memory import _normalise_pack_svd
+
+    data = io.BytesIO(b' \n<!-- comment --><device><name>TestChip</name>'
+                      b'<addressUnitBits>8</addressUnitBits><width>32</width><peripherals/></device>')
+    target = SimpleNamespace(_svd_location=SVDFile(data))
+    _normalise_pack_svd(target)
+    assert target._svd_location.filename is data
+    target._svd_location.load()
+    assert target._svd_location.device.name == 'TestChip'
 
 
 def test_remove_retains_selected_identity_and_never_falls_back(tmp_path, catalog):

@@ -101,6 +101,7 @@ def test_preflight_rejects_invalid_firmware_before_any_write(tmp_path, device, c
     device.builder.erase.assert_not_called()
     device.builder.program.assert_not_called()
     device.target.write_memory_block8.assert_not_called()
+    device.target.reset_and_halt.assert_not_called()
 
 
 def test_valid_flash_and_ram_are_loaded_and_fully_verified(tmp_path, device):
@@ -116,9 +117,33 @@ def test_valid_flash_and_ram_are_loaded_and_fully_verified(tmp_path, device):
     assert 0x20000010 + len(b'RAM data') not in device.memory
     device.builder.erase.assert_called_once()
     device.builder.program.assert_called_once()
+    device.target.reset_and_halt.assert_called_once()
 
 
-@pytest.mark.parametrize('readback', [b'bad', b'', b'go'])
+def test_reset_clocks_before_flash_algorithm_changes_wait_states(tmp_path, device):
+    # Model the GD32E50x pack: Init clears Flash wait states, so reads fail
+    # while the application's high-speed clocks are still active.
+    reset_clocks = False
+    def reset():
+        nonlocal reset_clocks
+        reset_clocks = True
+    device.target.reset_and_halt.side_effect = reset
+    device.builder.erase.side_effect = lambda **_: reset_clocks or pytest.fail('erase before reset')
+    device.target.read_memory_block8.side_effect = lambda address, size: [
+        device.memory.get(address+i, 0) if reset_clocks else 255 for i in range(size)]
+    device.backend.program_firmware(firmware(tmp_path/'app.elf', [(0x08000000, b'good')]), lambda _: None)
+    assert reset_clocks
+
+
+def test_reset_failure_prevents_erase_and_programming(tmp_path, device):
+    device.target.reset_and_halt.side_effect = RuntimeError('reset failed')
+    with pytest.raises(RuntimeError, match='reset failed'):
+        device.backend.program_firmware(firmware(tmp_path/'app.elf', [(0x08000000, b'good')]), lambda _: None)
+    device.builder.erase.assert_not_called()
+    device.builder.program.assert_not_called()
+
+
+@pytest.mark.parametrize('readback', [b'bad', b'', b'go', b'good!'])
 def test_bad_or_short_readback_never_reports_success(tmp_path, device, readback):
     device.target.read_memory_block8.side_effect = lambda *_: readback
     progress = []
@@ -126,6 +151,8 @@ def test_bad_or_short_readback_never_reports_success(tmp_path, device, readback)
         device.backend.program_firmware(firmware(tmp_path/'app.elf', [(0x08000000, b'good')]), progress.append)
     assert error.value.code == 'firmware_verify_failed'
     assert '0x080000' in error.value.details
+    assert '期望 ' in error.value.details
+    assert '实际 ' in error.value.details
     assert 1 not in progress
 
 
@@ -162,7 +189,7 @@ def test_elf_uses_flash_load_address_for_ram_initialisers(tmp_path, device):
     assert 0x20000000 not in device.memory
 
 
-def test_failed_verification_fails_async_task_and_does_not_reset_or_resume(tmp_path, device):
+def test_failed_verification_fails_async_task_without_post_download_reset_or_resume(tmp_path, device):
     device.target.read_memory_block8.side_effect = lambda *_: b'bad!'
     firmware(tmp_path/'app.elf', [(0x08000000, b'good')])
     service = BackendService(lambda *_: None, memory_backend=device.backend,
@@ -179,7 +206,9 @@ def test_failed_verification_fails_async_task_and_does_not_reset_or_resume(tmp_p
         assert result['status'] == 'failed', result
         assert '校验失败' in result['message']
         assert service._sampling_paused and not service._rtt_enabled
-        device.target.reset_and_halt.assert_not_called()
+        # Only the reset before programming is allowed; a failed verification
+        # must not trigger the service's post-download reset or resume.
+        device.target.reset_and_halt.assert_called_once()
         device.target.resume.assert_not_called()
     finally:
         service.close()

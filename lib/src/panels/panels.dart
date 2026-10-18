@@ -145,8 +145,12 @@ Future<void> showWorkbenchConnectionSettings(
     title: const Text('连接设置'),
     content: SizedBox(
       width: 490,
-      height: math.min(530, MediaQuery.sizeOf(context).height * .65),
-      child: _ConnectionPanel(controller: controller),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: math.min(530, MediaQuery.sizeOf(context).height * .65),
+        ),
+        child: _ConnectionPanel(controller: controller),
+      ),
     ),
     actions: [
       AnimatedBuilder(

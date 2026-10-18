@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import threading
 import zipfile
 from dataclasses import dataclass
@@ -78,6 +79,8 @@ class PyOcdMemoryBackend(TypedMemoryBackend):
         try:
             self._prepare_target(config)
             session = Session(probe, auto_open=False, options=options)
+            if config.pack_path is not None:
+                _normalise_pack_svd(session.target)
             session.open()
             timings["session_open_s"] = perf_counter() - open_started
         except Exception:
@@ -169,6 +172,10 @@ class PyOcdMemoryBackend(TypedMemoryBackend):
         for address, data in segments:
             loader.add_data(address, data)
         try:
+            # Pack algorithms may change Flash latency without resetting the
+            # application's clocks (GD32E50x sets zero wait states). Start from
+            # reset clocks before any smart-flash reads, erase, or programming.
+            target.reset_and_halt()
             loader.commit()
             target.halt()
             target.flush()
@@ -182,8 +189,11 @@ class PyOcdMemoryBackend(TypedMemoryBackend):
                     if actual != expected:
                         mismatch = next((i for i, (a, b) in enumerate(zip(actual, expected)) if a != b),
                                         min(len(actual), len(expected)))
+                        expected_byte = f"0x{expected[mismatch]:02X}" if mismatch < len(expected) else "数据结束"
+                        actual_byte = f"0x{actual[mismatch]:02X}" if mismatch < len(actual) else "未读到数据"
                         raise ProtocolError("firmware_verify_failed", "固件写后校验失败，未确认下载成功。",
-                                            f"地址 0x{address + offset + mismatch:08X}")
+                                            f"地址 0x{address + offset + mismatch:08X}，"
+                                            f"期望 {expected_byte}，实际 {actual_byte}")
                     verified += len(expected)
                     progress(0.8 + 0.2 * verified / total)
         finally:
@@ -215,6 +225,18 @@ class PyOcdMemoryBackend(TypedMemoryBackend):
             raise RuntimeError("pyOCD 后端尚未连接。")
         return self.target
 
+
+
+def _normalise_pack_svd(target: Any) -> None:
+    """Repair whitespace before a pack SVD's XML declaration in memory only."""
+    location = getattr(target, "_svd_location", None)
+    if location is None or not isinstance(location.filename, io.BytesIO):
+        return
+    data = location.filename.getvalue()
+    bom = b"\xef\xbb\xbf" if data.startswith(b"\xef\xbb\xbf") else b""
+    stripped = data[len(bom):].lstrip(b" \t\r\n")
+    if stripped.startswith(b"<?xml") and bom + stripped != data:
+        location.filename = io.BytesIO(bom + stripped)
 
 
 def _firmware_segments(path: str, target: Any) -> list[tuple[int, bytes]]:

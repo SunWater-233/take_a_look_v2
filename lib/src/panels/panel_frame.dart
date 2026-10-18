@@ -409,60 +409,73 @@ class _TalPanelFrameState extends State<TalPanelFrame> {
     );
   }
 
-  Widget _workspaceMenu(PanelChrome chrome) => PopupMenuButton<Object>(
-    key: ValueKey('panel-menu-${chrome.groupId}'),
-    tooltip: '标签菜单',
-    icon: const Icon(Icons.more_horiz, size: 18),
-    constraints: const BoxConstraints(minWidth: 180, maxWidth: 280),
-    onSelected: (value) {
-      if (value is WorkspacePanelId) {
-        if (value != chrome.activePanel) chrome.onSelect(value);
-      } else if (value is WorkspacePanelAction) {
-        chrome.onWorkspaceAction!(value);
-      } else if (value == 'float') {
-        chrome.onFloat();
-      } else if (value == 'hide') {
-        chrome.onClose();
-      }
-    },
-    itemBuilder: (_) => [
+  Widget _workspaceMenu(PanelChrome chrome) => MenuAnchor(
+    style: Theme.of(
+      context,
+    ).menuTheme.style?.copyWith(alignment: AlignmentDirectional.bottomStart),
+    animated: true,
+    builder: (context, controller, child) => TalIconButton(
+      key: ValueKey('panel-menu-${chrome.groupId}'),
+      tooltip: '标签菜单',
+      icon: const Icon(Icons.more_horiz, size: 18),
+      onPressed: () {
+        if (controller.isOpen) {
+          controller.close();
+        } else {
+          controller.open();
+        }
+      },
+    ),
+    menuChildren: [
       if (chrome.tabs.length > 1) ...[
         for (final tab in chrome.tabs)
-          CheckedPopupMenuItem<Object>(
-            value: tab,
-            checked: tab == chrome.activePanel,
+          MenuItemButton(
+            leadingIcon: SizedBox(
+              width: 16,
+              child: tab == chrome.activePanel
+                  ? const Icon(Icons.check, size: 14, color: TalColors.text)
+                  : null,
+            ),
+            onPressed: () {
+              if (tab != chrome.activePanel) chrome.onSelect(tab);
+            },
             child: Text(tab == WorkspacePanelId.watch ? '变量监视' : tab.title),
           ),
-        const PopupMenuDivider(),
+        const Divider(height: 7, thickness: 1, color: TalColors.borderSoft),
       ],
-      PopupMenuItem<Object>(
-        value: WorkspacePanelAction.dockLeft,
-        enabled: chrome.sidebar != WorkspaceSidebarSide.left,
+      MenuItemButton(
+        onPressed: chrome.sidebar == WorkspaceSidebarSide.left
+            ? null
+            : () => chrome.onWorkspaceAction!(WorkspacePanelAction.dockLeft),
         child: const Text('移至左侧栏'),
       ),
-      PopupMenuItem<Object>(
-        value: WorkspacePanelAction.dockRight,
-        enabled: chrome.sidebar != WorkspaceSidebarSide.right,
+      MenuItemButton(
+        onPressed: chrome.sidebar == WorkspaceSidebarSide.right
+            ? null
+            : () => chrome.onWorkspaceAction!(WorkspacePanelAction.dockRight),
         child: const Text('移至右侧栏'),
       ),
-      PopupMenuItem<Object>(
-        value: WorkspacePanelAction.dockBottom,
-        enabled: chrome.groupId != 'output',
+      MenuItemButton(
+        onPressed: chrome.groupId == 'output'
+            ? null
+            : () => chrome.onWorkspaceAction!(WorkspacePanelAction.dockBottom),
         child: const Text('移至底部'),
       ),
       if (chrome.sidebar != null || chrome.groupId == 'output')
-        const PopupMenuItem<Object>(
-          value: WorkspacePanelAction.moveToWorkspace,
-          child: Text('移回工作区'),
+        MenuItemButton(
+          onPressed: () =>
+              chrome.onWorkspaceAction!(WorkspacePanelAction.moveToWorkspace),
+          child: const Text('移回工作区'),
         ),
       if (chrome.sidebar != null)
-        const PopupMenuItem<Object>(
-          value: WorkspacePanelAction.collapse,
-          child: Text('收起侧栏'),
+        MenuItemButton(
+          onPressed: () =>
+              chrome.onWorkspaceAction!(WorkspacePanelAction.collapse),
+          child: const Text('收起侧栏'),
         ),
-      const PopupMenuDivider(),
-      const PopupMenuItem<Object>(value: 'float', child: Text('弹出为独立窗口')),
-      const PopupMenuItem<Object>(value: 'hide', child: Text('隐藏当前页面')),
+      const Divider(height: 7, thickness: 1, color: TalColors.borderSoft),
+      MenuItemButton(onPressed: chrome.onFloat, child: const Text('弹出为独立窗口')),
+      MenuItemButton(onPressed: chrome.onClose, child: const Text('隐藏当前页面')),
     ],
   );
 }

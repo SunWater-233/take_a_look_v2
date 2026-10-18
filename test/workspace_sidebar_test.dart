@@ -501,6 +501,67 @@ void main() {
     },
   );
 
+  for (final width in [1400.0, 760.0]) {
+    testWidgets('sidebar handles follow output animation at width $width', (
+      tester,
+    ) async {
+      final bench = _Workbench(tester);
+      addTearDown(bench.dispose);
+      await bench.mount(width: width);
+
+      void expectHandlesFollowSidebars() {
+        for (final side in WorkspaceSidebarSide.values) {
+          final group = side == WorkspaceSidebarSide.left
+              ? 'resources'
+              : 'watch';
+          final sidebar = tester.getRect(
+            find.byKey(ValueKey('workspace-group-$group')),
+          );
+          final handle = tester.getRect(
+            find.byKey(ValueKey('sidebar-handle-${side.name}')),
+          );
+          expect(
+            handle.center.dy,
+            closeTo(sidebar.top + sidebar.height * .43, 2),
+          );
+          expect(handle.top, greaterThanOrEqualTo(sidebar.top));
+          expect(handle.bottom, lessThan(sidebar.bottom));
+        }
+      }
+
+      if (width < 900) {
+        await tester.tap(find.byKey(const ValueKey('sidebar-handle-left')));
+        await tester.pumpAndSettle();
+      }
+      expectHandlesFollowSidebars();
+      final initialY = tester
+          .getCenter(find.byKey(const ValueKey('sidebar-handle-right')))
+          .dy;
+      await bench.workspace.toggleWorkbenchOutput();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expectHandlesFollowSidebars();
+      expect(
+        tester.getCenter(find.byKey(const ValueKey('sidebar-handle-right'))).dy,
+        lessThan(initialY),
+      );
+      await tester.pumpAndSettle();
+      expectHandlesFollowSidebars();
+
+      await bench.workspace.toggleWorkbenchOutput();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expectHandlesFollowSidebars();
+      await tester.pumpAndSettle();
+      expectHandlesFollowSidebars();
+      expect(
+        tester.getCenter(find.byKey(const ValueKey('sidebar-handle-right'))).dy,
+        closeTo(initialY, .1),
+      );
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   testWidgets('sidebars collapse into handles without reserving a rail', (
     tester,
   ) async {

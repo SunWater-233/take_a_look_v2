@@ -127,16 +127,34 @@ void main() {
         addTearDown(bench.dispose);
         await bench.mount();
         final bar = find.byKey(const ValueKey('workbench-output-drag'));
+        final initialHandleY = tester
+            .getCenter(find.byKey(const ValueKey('sidebar-handle-right')))
+            .dy;
         final gesture = await tester.startGesture(
           tester.getCenter(bar),
           kind: kind,
         );
         await gesture.moveBy(const Offset(0, -290));
         await tester.pump();
+        final output = find.byKey(const ValueKey('workspace-group-output'));
+        final raisedHandleY = tester
+            .getCenter(find.byKey(const ValueKey('sidebar-handle-right')))
+            .dy;
+        expect(raisedHandleY, lessThan(initialHandleY));
+        await gesture.moveBy(const Offset(0, -300));
+        await tester.pump();
+        for (final side in WorkspaceSidebarSide.values) {
+          final handle = tester.getRect(
+            find.byKey(ValueKey('sidebar-handle-${side.name}')),
+          );
+          expect(handle.center.dy, lessThan(raisedHandleY));
+          expect(handle.bottom, lessThan(tester.getTopLeft(output).dy));
+        }
+        await gesture.moveBy(const Offset(0, 300));
+        await tester.pump();
         await gesture.up();
         await tester.pumpAndSettle();
         expect(bench.workspace.outputDocked, isTrue);
-        final output = find.byKey(const ValueKey('workspace-group-output'));
         expect(tester.getSize(output).height, closeTo(297, 1));
         await tester.tap(find.byKey(const ValueKey('panel-tab-registers')));
         await tester.pumpAndSettle();
@@ -147,6 +165,14 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(bench.workspace.outputDocked, isFalse);
+        for (final side in WorkspaceSidebarSide.values) {
+          expect(
+            tester
+                .getCenter(find.byKey(ValueKey('sidebar-handle-${side.name}')))
+                .dy,
+            closeTo(initialHandleY, .1),
+          );
+        }
         // A second drag can reopen the same group with its selected tab intact.
         await tester.drag(bar, const Offset(0, -290), kind: kind);
         await tester.pumpAndSettle();

@@ -791,7 +791,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
             right: side == WorkspaceSidebarSide.right
                 ? size.width - rect.left
                 : null,
-            top: math.max(0, size.height * .43 - 36),
+            top: math.max(0, rect.top + rect.height * .43 - 36),
             width: TalUiTheme.of(context).touchOptimized ? 44 : 18,
             height: 72,
             child: WorkspaceSidebarHandle(

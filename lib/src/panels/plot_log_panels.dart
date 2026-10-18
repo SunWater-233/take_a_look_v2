@@ -76,84 +76,136 @@ class _LogPanel extends StatefulWidget {
 }
 
 class _LogPanelState extends State<_LogPanel> {
+  final _scroll = ScrollController();
   PointerDeviceKind _lastPointerKind = PointerDeviceKind.mouse;
+  bool _followLatest = true;
+  bool _scrollToLatestScheduled = false;
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  void _scheduleScrollToLatest() {
+    if (!_followLatest || _scrollToLatestScheduled) return;
+    _scrollToLatestScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollToLatestScheduled = false;
+      // Recheck after layout so a pending update cannot override manual scrolling.
+      if (!mounted || !_followLatest || !_scroll.hasClients) return;
+      final position = _scroll.position;
+      if (position.hasContentDimensions && position.extentAfter > 0) {
+        _scroll.jumpTo(position.maxScrollExtent);
+      }
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
+  bool _onScroll(ScrollNotification notification) {
+    if (notification.depth == 0 && notification is ScrollUpdateNotification) {
+      // Content growth changes metrics, but only scrolling interrupts following.
+      _followLatest = notification.metrics.extentAfter <= 1;
+    }
+    return false;
+  }
+
+  bool _onScrollMetrics(ScrollMetricsNotification notification) {
+    if (notification.depth == 0) {
+      if (notification.metrics.extentAfter <= 1) _followLatest = true;
+      _scheduleScrollToLatest();
+    }
+    return false;
+  }
 
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: widget.controller.logChanges,
-      builder: (context, _) => Padding(
-        padding: const EdgeInsets.all(10),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: TalColors.input,
-            border: Border.all(color: TalColors.border),
-          ),
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: Listener(
-                  onPointerDown: (event) => _lastPointerKind = event.kind,
-                  child: SelectionArea(
-                    key: const ValueKey('log-selection-area'),
-                    contextMenuBuilder: (context, state) =>
-                        TalSelectionContextMenu(
-                          anchors: state.contextMenuAnchors,
-                          buttonItems: [
-                            ...state.contextMenuButtonItems,
-                            ContextMenuButtonItem(
-                              label: 'Clear all',
-                              onPressed: () {
-                                state.hideToolbar();
-                                state.clearSelection();
-                                widget.controller.clearLogs();
-                              },
-                            ),
-                          ],
-                          touchOptimized:
-                              _lastPointerKind != PointerDeviceKind.mouse,
-                        ),
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.all(4),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          for (final entry in widget.controller.logs)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 3),
-                              child: Text(
-                                '[${entry.timeLabel}] '
-                                '[${entry.level.name.toUpperCase()}] ${entry.message}',
-                                style: talMono.copyWith(
-                                  color: switch (entry.level) {
-                                    LogLevel.debug => TalColors.muted,
-                                    LogLevel.warning => TalColors.amber,
-                                    LogLevel.error ||
-                                    LogLevel.critical => TalColors.error,
-                                    LogLevel.info => TalColors.text,
-                                  },
-                                ),
+      builder: (context, _) {
+        if (widget.controller.logs.isEmpty) _followLatest = true;
+        _scheduleScrollToLatest();
+        return Padding(
+          padding: const EdgeInsets.all(10),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: TalColors.input,
+              border: Border.all(color: TalColors.border),
+            ),
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: Listener(
+                    onPointerDown: (event) => _lastPointerKind = event.kind,
+                    child: SelectionArea(
+                      key: const ValueKey('log-selection-area'),
+                      contextMenuBuilder: (context, state) =>
+                          TalSelectionContextMenu(
+                            anchors: state.contextMenuAnchors,
+                            buttonItems: [
+                              ...state.contextMenuButtonItems,
+                              ContextMenuButtonItem(
+                                label: 'Clear all',
+                                onPressed: () {
+                                  state.hideToolbar();
+                                  state.clearSelection();
+                                  widget.controller.clearLogs();
+                                },
                               ),
+                            ],
+                            touchOptimized:
+                                _lastPointerKind != PointerDeviceKind.mouse,
+                          ),
+                      child: NotificationListener<ScrollMetricsNotification>(
+                        onNotification: _onScrollMetrics,
+                        child: NotificationListener<ScrollNotification>(
+                          onNotification: _onScroll,
+                          child: SingleChildScrollView(
+                            key: const ValueKey('log-scroll'),
+                            controller: _scroll,
+                            padding: const EdgeInsets.all(4),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                for (final entry in widget.controller.logs)
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 3),
+                                    child: Text(
+                                      '[${entry.timeLabel}] '
+                                      '[${entry.level.name.toUpperCase()}] ${entry.message}',
+                                      style: talMono.copyWith(
+                                        color: switch (entry.level) {
+                                          LogLevel.debug => TalColors.muted,
+                                          LogLevel.warning => TalColors.amber,
+                                          LogLevel.error ||
+                                          LogLevel.critical => TalColors.error,
+                                          LogLevel.info => TalColors.text,
+                                        },
+                                      ),
+                                    ),
+                                  ),
+                              ],
                             ),
-                        ],
+                          ),
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-              Positioned(
-                right: 4,
-                top: 3,
-                child: TalIconButton(
-                  tooltip: '清空日志',
-                  onPressed: widget.controller.clearLogs,
-                  icon: const Icon(Icons.delete_sweep_outlined, size: 17),
+                Positioned(
+                  right: 4,
+                  top: 3,
+                  child: TalIconButton(
+                    tooltip: '清空日志',
+                    onPressed: widget.controller.clearLogs,
+                    icon: const Icon(Icons.delete_sweep_outlined, size: 17),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

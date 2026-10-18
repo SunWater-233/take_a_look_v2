@@ -695,13 +695,17 @@ class _SymbolTreeRow extends StatelessWidget {
       ),
     );
 
-    return Material(
+    final row = Material(
       key: ValueKey('symbol-tree-row-${node.key}'),
       color: rowColor,
       child: InkWell(
         onTap: () => onSelectNode(node),
-        onSecondaryTapDown: node.kind == _SymbolTreeNodeKind.sourceFile
-            ? (details) => onFileContextMenu(node, details.globalPosition)
+        onSecondaryTapUp: node.kind == _SymbolTreeNodeKind.sourceFile
+            ? (details) {
+                if (details.kind != PointerDeviceKind.mouse) {
+                  onFileContextMenu(node, details.globalPosition);
+                }
+              }
             : null,
         onLongPress: node.kind == _SymbolTreeNodeKind.sourceFile
             ? () {
@@ -775,6 +779,21 @@ class _SymbolTreeRow extends StatelessWidget {
           ),
         ),
       ),
+    );
+    if (node.kind != _SymbolTreeNodeKind.sourceFile) return row;
+    return Listener(
+      onPointerDown: (event) {
+        if (event.kind != PointerDeviceKind.mouse ||
+            event.buttons & kSecondaryMouseButton == 0) {
+          return;
+        }
+        context
+            .findAncestorStateOfType<_RightDragResizeRegionState>()
+            ?._registerContextMenu(event.pointer, (position) {
+              if (context.mounted) onFileContextMenu(node, position);
+            });
+      },
+      child: row,
     );
   }
 }

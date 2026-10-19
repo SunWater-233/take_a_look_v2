@@ -153,9 +153,21 @@ class TalPanelFrame extends StatefulWidget {
 
 class _TalPanelFrameState extends State<TalPanelFrame> {
   bool collapsed = false;
+  final _nativeBodyKey = GlobalKey();
 
   @override
   Widget build(BuildContext context) {
+    final panel = _buildPanel(context);
+    return TalDragPreview.nativeWayland
+        ? NativePanelPreview(bodyKey: _nativeBodyKey, child: panel)
+        : panel;
+  }
+
+  Widget _previewBody() => TalDragPreview.nativeWayland
+      ? RepaintBoundary(key: _nativeBodyKey, child: widget.child)
+      : widget.child;
+
+  Widget _buildPanel(BuildContext context) {
     if (widget.compact) return _buildCompact(context);
     final chrome = widget.chrome;
     final tabs = chrome?.tabs ?? [widget.panel];
@@ -289,7 +301,10 @@ class _TalPanelFrameState extends State<TalPanelFrame> {
                 ),
               ),
             ),
-            if (!collapsed && tabs.length > 1)
+            if (!collapsed &&
+                (tabs.length > 1 ||
+                    (TalDragPreview.nativeWayland &&
+                        chrome?.tabsDraggable == true)))
               _PanelTabs(
                 controller: widget.controller,
                 tabs: tabs,
@@ -302,7 +317,7 @@ class _TalPanelFrameState extends State<TalPanelFrame> {
                 onDragUpdate: chrome.onTabDragUpdate,
                 onDragEnd: chrome.onTabDragEnd,
               ),
-            if (!collapsed) Expanded(child: widget.child),
+            if (!collapsed) Expanded(child: _previewBody()),
           ],
         ),
       ),
@@ -403,7 +418,7 @@ class _TalPanelFrameState extends State<TalPanelFrame> {
               ],
             ),
           ),
-          Expanded(child: widget.child),
+          Expanded(child: _previewBody()),
         ],
       ),
     );
@@ -518,6 +533,8 @@ class _PanelTabsState extends State<_PanelTabs> {
 
   final GlobalKey _tabStripKey = GlobalKey();
   final ScrollController _scrollController = ScrollController();
+  final Map<WorkspacePanelId, GlobalKey> _nativeTabKeys = {};
+  bool _nativeDebugReported = false;
   WorkspacePanelId? _draggedPanel;
   int? _previewInsertionIndex;
 
@@ -529,6 +546,12 @@ class _PanelTabsState extends State<_PanelTabs> {
 
   @override
   Widget build(BuildContext context) {
+    if (TalDragPreview.debugNativeDrag && !_nativeDebugReported) {
+      _nativeDebugReported = true;
+      debugPrint(
+        'Native tab strip: ${widget.groupId}, draggable=${widget.draggable}, scope=${nativePanelDragHostOf(context) != null}',
+      );
+    }
     final tabList = ListView(
       controller: _scrollController,
       scrollDirection: Axis.horizontal,
@@ -541,6 +564,36 @@ class _PanelTabsState extends State<_PanelTabs> {
       ],
     );
     final strip = _tabStrip(tabList);
+    final native = nativePanelDragHostOf(context);
+    if (native != null && widget.draggable) {
+      return NativePanelDropRegion(
+        onMove: (payload, position) {
+          final index = _insertionIndexAt(position);
+          if (index == _previewInsertionIndex &&
+              _draggedPanel == payload.panel) {
+            return;
+          }
+          setState(() {
+            _draggedPanel = payload.panel;
+            _previewInsertionIndex = index;
+          });
+        },
+        onLeave: () {
+          if (mounted) {
+            setState(() {
+              _draggedPanel = null;
+              _previewInsertionIndex = null;
+            });
+          }
+        },
+        onDrop: (payload, position) => native.transfer(
+          payload,
+          groupId: widget.groupId,
+          insertionIndex: _insertionIndexAt(position),
+        ),
+        child: strip,
+      );
+    }
     final accept = widget.onAccept;
     if (!widget.draggable || accept == null) return strip;
     return DragTarget<PanelTabDragData>(
@@ -659,13 +712,17 @@ class _PanelTabsState extends State<_PanelTabs> {
   }
 
   Widget _buildTab(WorkspacePanelId tab, int index) {
-    final tabWidget = Tooltip(
+    Widget tabWidget = Tooltip(
       message: tab.title,
       child: InkWell(
         onTap: () => widget.onSelected(tab),
         child: _tabSurface(tab),
       ),
     );
+    final nativeTabKey = _nativeTabKeys.putIfAbsent(tab, GlobalKey.new);
+    if (TalDragPreview.nativeWayland) {
+      tabWidget = RepaintBoundary(key: nativeTabKey, child: tabWidget);
+    }
     final sourceGroupId = widget.groupId;
     if (!widget.draggable ||
         sourceGroupId == null ||
@@ -673,6 +730,28 @@ class _PanelTabsState extends State<_PanelTabs> {
       return tabWidget;
     }
     final data = PanelTabDragData(sourceGroupId: sourceGroupId, panel: tab);
+    if (nativePanelDragHostOf(context) != null) {
+      return MouseRegion(
+        cursor: SystemMouseCursors.grab,
+        child: NativePanelDragSource(
+          data: data,
+          tabKey: nativeTabKey,
+          onStart: () {
+            widget.onSelected(tab);
+            widget.onDragStart?.call(data);
+          },
+          onEnd: (accepted) => widget.onDragEnd!(
+            data,
+            DraggableDetails(
+              wasAccepted: accepted,
+              offset: Offset.zero,
+              velocity: Velocity.zero,
+            ),
+          ),
+          child: tabWidget,
+        ),
+      );
+    }
     final sourceTab = Opacity(
       key: ValueKey<String>('panel-tab-drag-source-${tab.name}'),
       opacity: _draggedPanel == tab ? 0 : 1,

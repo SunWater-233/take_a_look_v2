@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../controller/controller.dart';
 import 'panel_types.dart';
+import 'panel_transfer.dart';
 import 'window_sync.dart';
 
 class DetachedWindowCoordinator {
@@ -38,6 +39,102 @@ class DetachedWindowCoordinator {
     for (final entry in _assignedWindows.entries)
       entry.key: entry.value.controller,
   };
+
+  bool containsPanel(String windowId, WorkspacePanelId panel) =>
+      _pool[windowId]?.panels.contains(panel) == true;
+
+  Future<bool> acceptNativeTransfer(NativePanelTransfer transfer) async {
+    final panel = transfer.source.panel;
+    final target = _pool[transfer.targetWindowId];
+    final source = transfer.source.fromMainWindow
+        ? null
+        : _pool[transfer.source.windowId];
+    if (target == null ||
+        target.panels.isEmpty ||
+        target.reserved ||
+        (!transfer.source.fromMainWindow &&
+            source?.panels.contains(panel) != true)) {
+      return false;
+    }
+    final panels = List<WorkspacePanelId>.of(target.panels);
+    final oldIndex = panels.indexOf(panel);
+    var index = (transfer.insertionIndex ?? panels.length).clamp(
+      0,
+      panels.length,
+    );
+    if (oldIndex >= 0) {
+      panels.removeAt(oldIndex);
+      if (oldIndex < index) index--;
+    }
+    panels.insert(index.clamp(0, panels.length), panel);
+    final targetSize =
+        await _windowSize(target.controller) ?? panel.preferredWindowSize;
+    await _configure(
+      target.controller,
+      DetachedPanelLaunch(
+        panel: panel,
+        panels: panels,
+        initialSize: targetSize,
+      ),
+    );
+    if (source != null && !identical(source, target)) {
+      try {
+        await removePanelFromWindow(
+          sourceWindowId: transfer.source.windowId,
+          panel: panel,
+        );
+      } on Object {
+        // Destination preparation must not leave a duplicated interactive panel
+        // when the source disappears or rejects its reconfiguration.
+        await _configure(
+          target.controller,
+          DetachedPanelLaunch(
+            panel: target.activePanel!,
+            panels: List.of(target.panels),
+            initialSize: targetSize,
+          ),
+        );
+        rethrow;
+      }
+    }
+    _assign(target, activePanel: panel, panels: panels);
+    await target.controller.show();
+    return true;
+  }
+
+  Future<bool> detachNativePanel(NativePanelPayload payload) async {
+    final source = _pool[payload.windowId];
+    if (source == null ||
+        source.panels.length < 2 ||
+        !source.panels.contains(payload.panel)) {
+      return false;
+    }
+    final window = await acquire(
+      activePanel: payload.panel,
+      panels: [payload.panel],
+      initialSize:
+          await _windowSize(source.controller) ??
+          payload.panel.preferredWindowSize,
+    );
+    try {
+      await removePanelFromWindow(
+        sourceWindowId: payload.windowId,
+        panel: payload.panel,
+      );
+    } on Object {
+      final created = _pool[window.windowId];
+      await window.hide();
+      if (created != null) _clearAssignment(created);
+      _assign(
+        source,
+        activePanel: source.activePanel,
+        panels: List.of(source.panels),
+      );
+      rethrow;
+    }
+    await window.show();
+    return true;
+  }
 
   Stream<void> get changes => _changes.stream;
 
@@ -110,15 +207,15 @@ class DetachedWindowCoordinator {
       ..remove(panel);
     final targetPanels = List<WorkspacePanelId>.of(target.panels);
     if (!targetPanels.contains(panel)) targetPanels.add(panel);
-    final sourceBounds = await _windowBounds(source.controller);
-    final targetBounds = await _windowBounds(target.controller);
+    final sourceSize = await _windowSize(source.controller);
+    final targetSize = await _windowSize(target.controller);
 
     await _configure(
       target.controller,
       DetachedPanelLaunch(
         panel: panel,
         panels: targetPanels,
-        initialSize: targetBounds?.size ?? panel.preferredWindowSize,
+        initialSize: targetSize ?? panel.preferredWindowSize,
       ),
     );
     if (sourcePanels.isEmpty) {
@@ -129,8 +226,7 @@ class DetachedWindowCoordinator {
         DetachedPanelLaunch(
           panel: sourcePanels.first,
           panels: sourcePanels,
-          initialSize:
-              sourceBounds?.size ?? sourcePanels.first.preferredWindowSize,
+          initialSize: sourceSize ?? sourcePanels.first.preferredWindowSize,
         ),
       );
     }
@@ -153,7 +249,7 @@ class DetachedWindowCoordinator {
     final source = _pool[sourceWindowId];
     if (source == null || !source.panels.contains(panel)) return false;
     final remaining = List<WorkspacePanelId>.of(source.panels)..remove(panel);
-    final bounds = await _windowBounds(source.controller);
+    final size = await _windowSize(source.controller);
     if (remaining.isEmpty) {
       await source.controller.hide();
     } else {
@@ -162,7 +258,7 @@ class DetachedWindowCoordinator {
         DetachedPanelLaunch(
           panel: remaining.first,
           panels: remaining,
-          initialSize: bounds?.size ?? remaining.first.preferredWindowSize,
+          initialSize: size ?? remaining.first.preferredWindowSize,
         ),
       );
       await source.controller.show();
@@ -274,13 +370,36 @@ class DetachedWindowCoordinator {
     }
   }
 
+  Future<Size?> _windowSize(WindowController window) async {
+    try {
+      final data = await window.invokeMethod<Map<Object?, Object?>>(
+        getDetachedWindowBoundsMethod,
+      );
+      if (data?['width'] case final num width) {
+        if (data?['height'] case final num height) {
+          if (width.isFinite && height.isFinite && width > 0 && height > 0) {
+            return Size(width.toDouble(), height.toDouble());
+          }
+        }
+      }
+    } on Object {
+      // A disappearing window can still be restored using its panel default.
+    }
+    return null;
+  }
+
   void _assign(
     _PooledDetachedWindow entry, {
     required WorkspacePanelId? activePanel,
     required List<WorkspacePanelId> panels,
   }) {
     final previousActive = entry.activePanel;
-    if (previousActive != null) windowSync.unregisterWindow(previousActive);
+    if (previousActive != null) {
+      windowSync.unregisterWindow(
+        previousActive,
+        windowId: entry.controller.windowId,
+      );
+    }
     for (final previousPanel in entry.panels) {
       if (identical(_assignedWindows[previousPanel], entry)) {
         _assignedWindows.remove(previousPanel);

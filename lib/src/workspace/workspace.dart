@@ -5,12 +5,14 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:tal_drag_preview/tal_drag_preview.dart';
 
 import '../controller/controller.dart';
 import '../protocol/events.dart';
 import '../app/file_pickers.dart';
 import 'project_document.dart';
 import 'detached_window_coordinator.dart';
+import 'native_panel_drag.dart';
 import 'panel_types.dart';
 import '../panels/panels.dart';
 import 'tab_drag_preview_coordinator.dart';
@@ -71,6 +73,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   final Map<WorkspacePanelId, GlobalKey> _panelBodyKeys = {};
   bool _resizing = false;
   double? _outputDragHeight;
+  Future<void> _nativeTransfers = Future<void>.value();
 
   late final WorkspacePersistence _persistence = WorkspacePersistence(
     layoutRepository: () => WorkspaceLayoutRepository(
@@ -396,6 +399,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     super.initState();
     HardwareKeyboard.instance.addHandler(_handleDragKey);
     detachedWindows = DetachedWindowCoordinator(widget.windowSync);
+    widget.windowSync.onPanelTransfer = _queueNativeTransfer;
     tabDragPreview = TabDragPreviewCoordinator(
       prepareState: (window, panel) =>
           widget.windowSync.prepareWindow(window, [panel]),
@@ -414,7 +418,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         unawaited(detachedWindows.prewarm());
-        unawaited(tabDragPreview.prewarm());
+        if (!TalDragPreview.nativeWayland) unawaited(tabDragPreview.prewarm());
       });
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -425,6 +429,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
 
   @override
   void dispose() {
+    widget.windowSync.onPanelTransfer = null;
     HardwareKeyboard.instance.removeHandler(_handleDragKey);
     if (_persistence.hasPendingSave) {
       unawaited(_persistLayout(report: false));
@@ -490,42 +495,45 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
                 ...sorted.where((g) => g.sidebar != null),
               ]
             : sorted;
-        return Listener(
-          behavior: HitTestBehavior.translucent,
-          onPointerUp: (_) => unawaited(tabDragPreview.hide()),
-          onPointerCancel: (_) {
-            _tabDrag.cancel();
-            unawaited(tabDragPreview.hide());
-          },
-          child: ClipRect(
-            child: Stack(
-              children: [
-                const Positioned.fill(
-                  child: ColoredBox(color: TalColors.background),
-                ),
-                if (_session.gridMode)
+        return _nativeDropRegion(
+          Listener(
+            behavior: HitTestBehavior.translucent,
+            onPointerUp: (_) => unawaited(tabDragPreview.hide()),
+            onPointerCancel: (_) {
+              if (TalDragPreview.nativeWayland) return;
+              _tabDrag.cancel();
+              unawaited(tabDragPreview.hide());
+            },
+            child: ClipRect(
+              child: Stack(
+                children: [
                   const Positioned.fill(
-                    child: IgnorePointer(
-                      child: CustomPaint(
-                        key: ValueKey<String>('workspace-grid'),
-                        painter: WorkspaceGridPainter(),
+                    child: ColoredBox(color: TalColors.background),
+                  ),
+                  if (_session.gridMode)
+                    const Positioned.fill(
+                      child: IgnorePointer(
+                        child: CustomPaint(
+                          key: ValueKey<String>('workspace-grid'),
+                          painter: WorkspaceGridPainter(),
+                        ),
                       ),
                     ),
-                  ),
-                if (usesWorkbenchLayout && _primaryGroup == null)
-                  Positioned.fill(
-                    child: Center(
-                      child: Text('将标签拖回这里，或通过标签菜单移回工作区', style: talMuted),
+                  if (usesWorkbenchLayout && _primaryGroup == null)
+                    Positioned.fill(
+                      child: Center(
+                        child: Text('将标签拖回这里，或通过标签菜单移回工作区', style: talMuted),
+                      ),
                     ),
-                  ),
-                for (final group in ordered)
-                  if (!(usesWorkbenchLayout &&
-                      group == _outputGroup &&
-                      group.outputCollapsed &&
-                      _outputDragHeight == null))
-                    _buildGroup(group, size),
-                if (usesWorkbenchLayout) ..._dockOverlays(size),
-              ],
+                  for (final group in ordered)
+                    if (!(usesWorkbenchLayout &&
+                        group == _outputGroup &&
+                        group.outputCollapsed &&
+                        _outputDragHeight == null))
+                      _buildGroup(group, size),
+                  if (usesWorkbenchLayout) ..._dockOverlays(size),
+                ],
+              ),
             ),
           ),
         );
@@ -1320,6 +1328,191 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
 
   bool _near(double first, double second) => _geometry.near(first, second);
 
+  Future<bool> _queueNativeTransfer(NativePanelTransfer transfer) {
+    final previous = _nativeTransfers;
+    final operation = () async {
+      await previous;
+      if (!mounted) return false;
+      return _transferNativePanel(transfer);
+    }();
+    _nativeTransfers = operation.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    return operation;
+  }
+
+  Future<bool> _transferNativePanel(NativePanelTransfer transfer) async {
+    final payload = transfer.source;
+    final panel = payload.panel;
+    final source = payload.fromMainWindow
+        ? _session.groups
+              .where(
+                (group) =>
+                    group.id == payload.groupId && group.panels.contains(panel),
+              )
+              .firstOrNull
+        : null;
+    if (payload.fromMainWindow
+        ? source == null
+        : !detachedWindows.containsPanel(payload.windowId, panel)) {
+      return false;
+    }
+
+    if (!transfer.targetIsMainWindow) {
+      if (transfer.targetWindowId == 'new') {
+        if (source != null) {
+          await _floatSinglePanel(source, panel, _session.workspaceSize);
+          return true;
+        }
+        return detachedWindows.detachNativePanel(payload);
+      }
+      final accepted = await detachedWindows.acceptNativeTransfer(transfer);
+      if (!accepted || !mounted) return accepted;
+      if (source != null) {
+        setState(() {
+          _rememberDetachedPanel(source, panel);
+          _detachPanel(source, panel);
+          _reflowWorkbench();
+        });
+        widget.onPanelVisibilityChanged?.call();
+        _scheduleLayoutSave();
+      }
+      return true;
+    }
+
+    final edge = transfer.dockEdge;
+    if (edge != null && !usesWorkbenchLayout) return false;
+    final target = transfer.targetGroupId == null
+        ? null
+        : _session.groups
+              .where((group) => group.id == transfer.targetGroupId)
+              .firstOrNull;
+    if (transfer.targetGroupId != null && target == null) return false;
+    if (source == null) {
+      final removed = await detachedWindows.removePanelFromWindow(
+        sourceWindowId: payload.windowId,
+        panel: panel,
+      );
+      if (!removed || !mounted) return false;
+      _detachedPlacements.remove(panel);
+    }
+    if (edge != null) {
+      _dockPanelAtEdge(panel, edge);
+    } else if (target == null) {
+      _movePanelToWorkspace(panel);
+    } else if (source != null) {
+      _acceptTabDrop(
+        target,
+        PanelTabDragData(sourceGroupId: source.id, panel: panel),
+        transfer.insertionIndex ?? target.panels.length,
+      );
+    } else {
+      setState(() {
+        target.panels.insert(
+          (transfer.insertionIndex ?? target.panels.length).clamp(
+            0,
+            target.panels.length,
+          ),
+          panel,
+        );
+        target.activePanel = panel;
+        target.z = _nextZ();
+        target.sidebarCollapsed = false;
+        _layout.overlaySidebar = target.sidebar;
+        _reflowWorkbench();
+      });
+      widget.onPanelVisibilityChanged?.call();
+      _scheduleLayoutSave();
+    }
+    return true;
+  }
+
+  void _rememberDetachedPanel(WorkspaceGroup group, WorkspacePanelId panel) {
+    _detachedPlacements[panel] = DetachedPanelPlacement(
+      groupId: group.id,
+      groupRect: group.rect,
+      groupZ: group.z,
+      panels: [panel],
+      originalPanels: List.of(group.panels),
+      activePanel: panel,
+      sidebar: group.sidebar,
+      sidebarWidth: group.sidebarWidth,
+      sidebarCollapsed: group.sidebarCollapsed,
+    );
+  }
+
+  Widget _nativeDropRegion(Widget child) {
+    final host = nativePanelDragHostOf(context);
+    if (host == null) return child;
+    return NativePanelDropRegion(
+      onMove: _nativeWorkspaceMotion,
+      onLeave: () {
+        _tabDrag.localPosition = null;
+        _setDockDropCandidate(null);
+        _clearTabMergeCandidate();
+        _tabDrag.highlightDetachedGroup(null);
+      },
+      onDrop: (payload, position) async {
+        final local = _tabDrag.localPosition;
+        if (local == null ||
+            !(Offset.zero & _session.workspaceSize).contains(local)) {
+          return false;
+        }
+        final edge = _tabDrag.dockCandidate;
+        WorkspaceGroup? target;
+        final targetId = payload.fromMainWindow
+            ? _tabDrag.armedMergeTarget
+            : _tabDrag.highlightedGroupId;
+        if (targetId != null) {
+          target = _session.groups
+              .where((group) => group.id == targetId)
+              .firstOrNull;
+        }
+        if (edge == null &&
+            target == null &&
+            (!usesWorkbenchLayout || _primaryGroup != null)) {
+          // Releasing inside the source workspace before dwell completes keeps
+          // the panel in place. Native DnD still accepts this as a valid drop.
+          return payload.fromMainWindow;
+        }
+        return host.transfer(payload, groupId: target?.id, dockEdge: edge);
+      },
+      child: child,
+    );
+  }
+
+  void _nativeWorkspaceMotion(NativePanelPayload payload, Offset position) {
+    if (payload.fromMainWindow) {
+      if (_tabDrag.sourceGroupId != payload.groupId) {
+        _tabDrag.beginLocal(payload.groupId);
+      }
+    } else if (!_tabDrag.matchesDetached(payload.windowId, payload.panel)) {
+      _tabDrag.beginDetached(payload.windowId, payload.panel);
+    }
+    final box = context.findRenderObject();
+    if (box is! RenderBox || _session.workspaceSize.isEmpty) return;
+    final local = box.globalToLocal(position);
+    _tabDrag.localPosition = local;
+    final edge = _dockEdgeAt(local);
+    _setDockDropCandidate(edge);
+    if (edge != null) return;
+    final normalized = Offset(
+      local.dx / _session.workspaceSize.width,
+      local.dy / _session.workspaceSize.height,
+    );
+    final target = _session.groupsByZ.reversed
+        .where(
+          (group) => !_sidebarHidden(group) && group.rect.contains(normalized),
+        )
+        .firstOrNull;
+    if (payload.fromMainWindow) {
+      _setTabMergeCandidate(target?.id == payload.groupId ? null : target?.id);
+    } else {
+      _tabDrag.highlightDetachedGroup(target?.id);
+    }
+  }
+
   Future<void> _floatPanel(
     WorkspaceGroup group,
     WorkspacePanelId panel,
@@ -1485,6 +1678,13 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     DraggableDetails details,
     Size workspaceSize,
   ) {
+    if (TalDragPreview.nativeWayland) {
+      _resetTabDragState();
+      if (!details.wasAccepted && source.panels.contains(data.panel)) {
+        unawaited(_floatSinglePanel(source, data.panel, workspaceSize));
+      }
+      return;
+    }
     final mergeTargetId = _tabDrag.armedMergeTarget;
     final previewPosition = _lastTabDragPreviewPosition;
     final sidebar = _tabDrag.dockCandidate;
@@ -1559,7 +1759,8 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     _layout.automatic = false;
     _tabDrag.beginLocal(source.id);
     setState(() {
-      if (!usesWorkbenchLayout &&
+      if (!TalDragPreview.nativeWayland &&
+          !usesWorkbenchLayout &&
           source.activePanel == data.panel &&
           source.panels.length > 1) {
         final draggedIndex = source.panels.indexOf(data.panel);
@@ -1567,6 +1768,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         source.activePanel = source.panels[fallbackIndex];
       }
     });
+    if (TalDragPreview.nativeWayland) return;
     final sourceSize = _toPixelRect(source.rect, workspaceSize).size;
     final previewSize = Size(
       sourceSize.width,
@@ -1590,6 +1792,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   }
 
   Future<void> _captureMainWindowOrigin() async {
+    if (TalDragPreview.nativeWayland) return;
     try {
       _mainWindowOrigin = await windowManager.getPosition();
     } on Object {

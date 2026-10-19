@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 
 import 'package:flutter/services.dart';
 import 'package:desktop_drop/desktop_drop.dart';
+import 'package:tal_drag_preview/tal_drag_preview.dart';
 
 import '../chart/chart.dart';
 import '../chart/cartesian_renderer.dart';
@@ -20,6 +21,7 @@ import '../analysis/analysis_worker.dart';
 import '../controller/controller.dart';
 import '../app/file_pickers.dart';
 import '../workspace/keyboard_shortcuts.dart';
+import '../workspace/native_panel_drag.dart';
 import '../models/models.dart';
 import '../models/watch_tree.dart';
 import '../workspace/panel_types.dart';

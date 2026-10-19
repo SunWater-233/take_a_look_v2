@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../controller/controller.dart';
 import 'panel_types.dart';
+import 'panel_transfer.dart';
 import 'window_sync_target.dart';
 import '../protocol/commands.dart';
 
@@ -23,6 +24,7 @@ const detachedTabDragStartMethod = 'detachedTabDragStart';
 const detachedTabDragUpdateMethod = 'detachedTabDragUpdate';
 const detachedTabDragEndMethod = 'detachedTabDragEnd';
 const getDetachedWindowBoundsMethod = 'getDetachedWindowBounds';
+const nativePanelTransferMethod = 'nativePanelTransfer';
 
 enum DetachedTabDragPhase { start, update, end }
 
@@ -46,6 +48,10 @@ class MainWindowSync {
   MainWindowSync(this.controller);
 
   final TakeALookController controller;
+  Future<bool> Function(NativePanelTransfer)? onPanelTransfer;
+
+  Future<bool> transferPanel(NativePanelTransfer transfer) async =>
+      await onPanelTransfer?.call(transfer) ?? false;
   final Map<WorkspacePanelId, WindowController> _windows =
       <WorkspacePanelId, WindowController>{};
   final Map<String, WindowSyncTarget> _targets = {};
@@ -97,7 +103,8 @@ class MainWindowSync {
     _scheduleTelemetryBroadcast();
   }
 
-  void unregisterWindow(WorkspacePanelId panel) {
+  void unregisterWindow(WorkspacePanelId panel, {String? windowId}) {
+    if (windowId != null && _windows[panel]?.windowId != windowId) return;
     final window = _windows.remove(panel);
     if (window != null &&
         !_windows.values.any((w) => w.windowId == window.windowId)) {
@@ -109,6 +116,10 @@ class MainWindowSync {
       prepareWindow(window, const [WorkspacePanelId.analysis]);
 
   Future<dynamic> _handleCall(MethodCall call) async {
+    if (call.method == nativePanelTransferMethod) {
+      final transfer = NativePanelTransfer.parse(call.arguments);
+      return transfer != null && await transferPanel(transfer);
+    }
     if (call.method == 'targetCatalog') {
       final envelope = Map<String, dynamic>.from(call.arguments as Map);
       return controller.requestTargetCatalog(
@@ -251,7 +262,8 @@ Future<void> initializeDetachedWindow(
   Future<void> Function(Offset screenPosition, int session)?
   onShowTabDragPreview,
   Future<void> Function(int session)? onHideTabDragPreview,
-  Future<Rect> Function()? onGetWindowBounds,
+  Future<Rect?> Function()? onGetWindowBounds,
+  Future<Size> Function()? onGetWindowSize,
 }) async {
   final currentWindow = await WindowController.fromCurrentEngine();
   await currentWindow.setWindowMethodHandler((call) async {
@@ -310,6 +322,10 @@ Future<void> initializeDetachedWindow(
       );
     } else if (call.method == getDetachedWindowBoundsMethod) {
       final bounds = await onGetWindowBounds?.call();
+      if (bounds == null && onGetWindowSize != null) {
+        final size = await onGetWindowSize();
+        return <String, double>{'width': size.width, 'height': size.height};
+      }
       return bounds == null
           ? null
           : <String, double>{
@@ -354,6 +370,13 @@ Future<void> sendDetachedTabDrag({
     },
   });
 }
+
+Future<bool> requestNativePanelTransfer(NativePanelTransfer transfer) async =>
+    await _mainChannel.invokeMethod<bool>(
+      nativePanelTransferMethod,
+      transfer.toJson(),
+    ) ??
+    false;
 
 Future<void> releaseDetachedWindow() async {
   final currentWindow = await WindowController.fromCurrentEngine();

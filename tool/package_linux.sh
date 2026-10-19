@@ -99,6 +99,7 @@ package_root="$work_root/$package_name"
 cp -a "build/linux/$flutter_arch/release/bundle" "$package_root"
 cp packaging/linux/take-a-look packaging/linux/*.sh packaging/linux/*.rules "$package_root/"
 cp docs/linux-install.md "$package_root/INSTALL.md"
+cp docs/linux-wayland.md "$package_root/linux-wayland.md"
 cp macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_256.png "$package_root/take-a-look.png"
 find "$package_root" -type d -exec chmod 755 {} +
 find "$package_root" -type f -exec chmod 644 {} +

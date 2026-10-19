@@ -25,6 +25,10 @@ static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
+  // The secondary-engine pool contains hidden GtkApplicationWindows. Closing
+  // the main window must exit the application even while that pool is alive.
+  g_signal_connect_swapped(window, "destroy", G_CALLBACK(g_application_quit),
+                           application);
 
   // Use a header bar when running in GNOME as this is the common style used
   // by applications and is the setup most users will be using (e.g. Ubuntu

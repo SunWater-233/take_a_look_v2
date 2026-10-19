@@ -64,10 +64,19 @@ Windows/macOS 需要分别在对应系统构建前端和 Python 后端。
 
 ## 显示与 GPU
 
-推荐 X11 或带 XWayland 的 Wayland 桌面；多窗口插件包含 X11 操作，因此启动器在
-存在 `DISPLAY` 时默认使用 XWayland/X11。Arch Wayland 用户请确保已安装
-`xorg-xwayland`，且合成器启用了 XWayland。原生 Wayland 可以用
-`GDK_BACKEND=wayland ./take-a-look` 尝试，但不承诺全部窗口管理功能可用。
+Wayland 桌面（包括 niri）默认优先使用 GTK 原生 Wayland，无需为本程序安装 XWayland。
+面板跨窗口拖动使用系统拖放协议；窗口初始位置由合成器决定。标签排序、组合、拆分和
+侧栏／底部停靠继续可用，拖动预览由合成器显示。X11 会话继续使用原有窗口交互。
+
+可用下面的命令明确选择后端进行对照排查；这些设置只影响本次启动：
+
+```bash
+GDK_BACKEND=wayland ./take-a-look
+GDK_BACKEND=x11 ./take-a-look
+```
+
+在 Wayland 桌面选择 X11 后端时，仍需桌面提供 XWayland；niri 使用 xwayland-satellite。
+启动器保留显式设置的 `GDK_BACKEND`。原生适配与验证范围见 [Wayland 说明](linux-wayland.md)。
 
 图形驱动由系统提供，不打包 glibc 或显卡驱动，以便使用系统的 Mesa/NVIDIA 驱动。
 请在有窗口管理器的正常桌面会话中运行；只启动 X server 的裸环境不作为支持的桌面配置。

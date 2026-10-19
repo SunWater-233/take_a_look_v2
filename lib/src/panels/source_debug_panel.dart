@@ -424,6 +424,9 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
       accepted.add(path);
     }
     if (!mounted) return;
+    if (TalDragPreview.debugNativeDrag) {
+      debugPrint('Source file drop accepted: ${accepted.length}');
+    }
     setState(() => _draggingFiles = false);
     if (accepted.isNotEmpty) {
       await _loadSource(accepted.first);
@@ -951,9 +954,12 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
           onDragExited: (_) {
             if (mounted) setState(() => _draggingFiles = false);
           },
-          onDragDone: (details) => unawaited(
-            _openDroppedFiles(details.files.map((file) => file.path)),
-          ),
+          onDragDone: (details) {
+            if (TalDragPreview.debugNativeDrag) {
+              debugPrint('Source file drop candidates: ${details.files.length}');
+            }
+            unawaited(_openDroppedFiles(details.files.map((file) => file.path)));
+          },
           child: Stack(
             children: [
               LayoutBuilder(

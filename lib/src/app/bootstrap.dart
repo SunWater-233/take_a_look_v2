@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:tal_drag_preview/tal_drag_preview.dart';
 
 import '../theme/theme.dart';
 import '../workspace/panel_types.dart';
@@ -16,6 +17,11 @@ Future<void> launchWorkbench(
   String title = 'Take A Look - Take A Look 调参上位机',
 }) async {
   WidgetsFlutterBinding.ensureInitialized();
+  TalDragPreview.debugNativeDrag =
+      Platform.environment['TAL_WAYLAND_DRAG_DEBUG'] == '1';
+  TalDragPreview.currentWindowId =
+      args.length >= 2 && args.first == 'multi_window' ? args[1] : 'main';
+  if (Platform.isLinux) await TalDragPreview.initializeLinux();
   final launch = detachedPanelLaunchFromEntrypointArguments(args);
   final panel = launch?.panel;
   Completer<void>? firstFrameReady;

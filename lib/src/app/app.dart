@@ -14,6 +14,7 @@ import '../backend/backend_client.dart';
 import '../controller/controller.dart';
 import '../telemetry/recording_storage.dart';
 import '../workspace/keyboard_shortcuts.dart';
+import '../workspace/native_panel_drag.dart';
 import '../workspace/panel_types.dart';
 import '../panels/panels.dart';
 import '../theme/theme.dart';
@@ -130,6 +131,7 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
               widget.secondaryWindowRole == SecondaryWindowRole.detachedPanel
               ? _getDetachedWindowBounds
               : null,
+          onGetWindowSize: windowManager.getSize,
         ),
       );
     }
@@ -140,7 +142,9 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
   ) async {
     if (!mounted) return;
     _detachedAssignmentRevision++;
-    await windowManager.hide();
+    if (!TalDragPreview.nativeWayland || !detachedWindowAssigned) {
+      await windowManager.hide();
+    }
     await windowManager.setTitleBarStyle(
       TitleBarStyle.hidden,
       windowButtonVisibility: false,
@@ -148,10 +152,12 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
     await windowManager.setBackgroundColor(TalColors.background);
     await windowManager.setMinimumSize(Size.zero);
     await TalDragPreview.setClickThrough(false);
-    await windowManager.setAlwaysOnTop(false);
-    await windowManager.setSkipTaskbar(false);
+    if (!TalDragPreview.nativeWayland) {
+      await windowManager.setAlwaysOnTop(false);
+      await windowManager.setSkipTaskbar(false);
+    }
     await windowManager.setResizable(true);
-    await windowManager.setOpacity(1);
+    if (!TalDragPreview.nativeWayland) await windowManager.setOpacity(1);
     setState(() {
       detachedPanel = configuration.panel;
       detachedPanels = configuration.panels;
@@ -159,7 +165,7 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
     });
     await windowManager.setSize(configuration.initialSize);
     final initialPosition = configuration.initialPosition;
-    if (initialPosition != null) {
+    if (initialPosition != null && !TalDragPreview.nativeWayland) {
       await windowManager.setPosition(initialPosition);
     }
     final panels = configuration.groupPanels;
@@ -236,7 +242,8 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
     }
   }
 
-  Future<Rect> _getDetachedWindowBounds() async {
+  Future<Rect?> _getDetachedWindowBounds() async {
+    if (TalDragPreview.nativeWayland) return null;
     final position = await windowManager.getPosition();
     final size = await windowManager.getSize();
     return position & size;
@@ -296,8 +303,14 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
           return ValueListenableBuilder<double>(
             valueListenable: controller.uiScaleListenable,
             child: child ?? const SizedBox.shrink(),
-            builder: (context, scale, child) =>
-                TalUiScaleViewport(scale: scale, child: child!),
+            builder: (context, scale, child) => NativePanelDragHost(
+              windowId: TalDragPreview.currentWindowId,
+              isMainWindow: widget.detachedPanel == null,
+              onTransfer: widget.detachedPanel == null
+                  ? (transfer) => windowSync!.transferPanel(transfer)
+                  : requestNativePanelTransfer,
+              child: TalUiScaleViewport(scale: scale, child: child!),
+            ),
           );
         },
         home: widget.detachedPanel == null
@@ -574,6 +587,7 @@ class DetachedPanelWindow extends StatefulWidget {
 
 class _DetachedPanelWindowState extends State<DetachedPanelWindow> {
   late WorkspacePanelId activePanel;
+  bool _nativeDropHover = false;
   WorkspacePanelId? _draggedPanel;
   Offset? _dragWindowOrigin;
   Offset? _lastDragPosition;
@@ -606,7 +620,7 @@ class _DetachedPanelWindowState extends State<DetachedPanelWindow> {
     final chrome = PanelChrome(
       tabs: List.unmodifiable(panels),
       activePanel: activePanel,
-      highlighted: false,
+      highlighted: _nativeDropHover,
       onSelect: (panel) => setState(() => activePanel = panel),
       onFloat: () {},
       onClose: () {},
@@ -615,51 +629,78 @@ class _DetachedPanelWindowState extends State<DetachedPanelWindow> {
       onDragUpdate: _updatePanelDrag,
       onDragEnd: (_) => _endPanelDrag(),
       showActions: false,
-      draggable: panels.length == 1,
+      draggable: panels.length == 1 && !TalDragPreview.nativeWayland,
       groupId: 'detached-window',
-      tabsDraggable: panels.length > 1,
+      tabsDraggable: panels.length > 1 || TalDragPreview.nativeWayland,
       onTabDragStart: (data) => _startPanelDrag(data.panel),
       onTabDragUpdate: (_, details) => _updatePanelDrag(details),
-      onTabDragEnd: (_, _) => _endPanelDrag(),
+      onTabDragEnd: (_, details) =>
+          _endPanelDrag(accepted: details.wasAccepted),
     );
-    return WorkbenchFeedback(
-      controller: widget.controller,
-      child: WorkspaceKeyboardShortcuts(
-        onKeyEvent: (event) {
-          if (WorkspaceShortcut.resetUiScale.matches(event)) {
-            widget.controller.setUiScale(1);
-            return KeyEventResult.handled;
-          }
-          return KeyEventResult.ignored;
-        },
-        child: Scaffold(
-          body: Column(
-            children: [
-              TalWindowTitleBar(
-                subtitle: panels.length > 1
-                    ? '${activePanel.title} 组合'
-                    : activePanel.title,
-              ),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.all(4),
-                  child: buildWorkspacePanel(
-                    activePanel,
-                    widget.controller,
-                    chrome: chrome,
-                    sourcePreview: !widget.assigned,
+    return _nativeDropTarget(
+      WorkbenchFeedback(
+        controller: widget.controller,
+        child: WorkspaceKeyboardShortcuts(
+          onKeyEvent: (event) {
+            if (WorkspaceShortcut.resetUiScale.matches(event)) {
+              widget.controller.setUiScale(1);
+              return KeyEventResult.handled;
+            }
+            return KeyEventResult.ignored;
+          },
+          child: Scaffold(
+            body: Column(
+              children: [
+                TalWindowTitleBar(
+                  subtitle: panels.length > 1
+                      ? '${activePanel.title} 组合'
+                      : activePanel.title,
+                ),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: buildWorkspacePanel(
+                      activePanel,
+                      widget.controller,
+                      chrome: chrome,
+                      sourcePreview: !widget.assigned,
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
+  Widget _nativeDropTarget(Widget child) {
+    final host = nativePanelDragHostOf(context);
+    if (host == null || !widget.assigned) return child;
+    return NativePanelDropRegion(
+      onMove: (_, _) {
+        if (!_nativeDropHover) setState(() => _nativeDropHover = true);
+      },
+      onLeave: () {
+        if (mounted && _nativeDropHover) {
+          setState(() => _nativeDropHover = false);
+        }
+      },
+      onDrop: (payload, _) async {
+        if (!payload.fromMainWindow &&
+            payload.windowId == await host.windowId) {
+          return true;
+        }
+        return host.transfer(payload, groupId: 'detached-window');
+      },
+      child: child,
+    );
+  }
+
   void _startPanelDrag(WorkspacePanelId panel) {
     _draggedPanel = panel;
+    if (TalDragPreview.nativeWayland) return;
     _dragWindowOrigin = null;
     _lastDragPosition = null;
     _sourceWindowId = null;
@@ -697,9 +738,30 @@ class _DetachedPanelWindowState extends State<DetachedPanelWindow> {
     });
   }
 
-  void _endPanelDrag() {
+  void _endPanelDrag({bool accepted = false}) {
     final panel = _draggedPanel;
     if (panel == null) return;
+    if (TalDragPreview.nativeWayland) {
+      _draggedPanel = null;
+      if (!accepted && groupPanels.length > 1) {
+        unawaited(() async {
+          final window = await WindowController.fromCurrentEngine();
+          await requestNativePanelTransfer(
+            NativePanelTransfer(
+              source: NativePanelPayload(
+                windowId: window.windowId,
+                fromMainWindow: false,
+                groupId: 'detached-window',
+                panel: panel,
+              ),
+              targetWindowId: 'new',
+              targetIsMainWindow: false,
+            ),
+          );
+        }());
+      }
+      return;
+    }
     final localPosition = _lastDragPosition;
     _queueDragCommand(() async {
       final windowId = _sourceWindowId;

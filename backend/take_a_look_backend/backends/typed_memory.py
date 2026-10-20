@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import math
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from functools import lru_cache
+from collections.abc import Sequence
 from typing import Any
 
 from take_a_look_backend.models import SymbolInfo
@@ -22,8 +24,10 @@ class TypedMemoryBackend:
         self.last_read_metrics: dict[str, int] = {
             "symbol_count": 0, "block_count": 0, "byte_count": 0,
         }
-        self._read_plan_signature: tuple[tuple[int, int, str], ...] | None = None
+        self._read_plan_signature: tuple[SymbolInfo, ...] | None = None
         self._read_plan: tuple[_ReadBlock, ...] = ()
+        self._read_keys: tuple[str, ...] = ()
+        self._read_plans: list[tuple[tuple[SymbolInfo, ...], tuple[_ReadBlock, ...]]] = []
 
     @property
     def probe(self) -> Any | None:
@@ -61,10 +65,11 @@ class TypedMemoryBackend:
         target = self._require_target()
         size = _access_size(symbol)
         data = bytes(target.read_memory_block8(symbol.address, size))
+        _check_read_size(data, size)
         return decode_symbol_value(symbol, data)
 
-    def read_symbols(self, symbols: list[SymbolInfo]) -> dict[str, object]:
-        target = self._require_target()
+    def read_symbols(self, symbols: Sequence[SymbolInfo]) -> dict[str, object]:
+        self._require_target()
         if not symbols:
             self.last_read_metrics = {
                 "symbol_count": 0,
@@ -74,22 +79,25 @@ class TypedMemoryBackend:
             return {}
 
         plan = self._read_plan_for(symbols)
-        values_by_key: dict[str, object] = {}
+        # Seeding once preserves caller order without rebuilding a second dict.
+        values_by_key = dict.fromkeys(self._read_keys)
         byte_count = 0
-        for block in plan:
-            data = bytes(target.read_memory_block8(block.address, block.size))
+        for block, data in zip(plan, self._read_blocks(plan), strict=True):
+            _check_read_size(data, block.size)
             byte_count += len(data)
-            for block_slice in block.slices:
-                start = block_slice.offset
-                end = start + block_slice.size
-                values_by_key[block_slice.symbol.key] = decode_symbol_value(block_slice.symbol, data[start:end])
+            block.decode(data, values_by_key)
 
         self.last_read_metrics = {
             "symbol_count": len(symbols),
             "block_count": len(plan),
             "byte_count": byte_count,
         }
-        return {symbol.key: values_by_key[symbol.key] for symbol in symbols if symbol.key in values_by_key}
+        return values_by_key
+
+    def _read_blocks(self, plan: tuple[_ReadBlock, ...]):
+        target = self._require_target()
+        for block in plan:
+            yield bytes(target.read_memory_block8(block.address, block.size))
 
     def write_symbol(self, symbol: SymbolInfo, value_text: str) -> object:
         if _is_readonly_symbol(symbol):
@@ -99,6 +107,32 @@ class TypedMemoryBackend:
         data = encode_symbol_value(symbol, value_text)
         target.write_memory_block8(symbol.address, list(data))
         return self.read_symbol(symbol)
+
+    def write_symbols(self, writes: Sequence[tuple[SymbolInfo, str]]) -> dict[str, object]:
+        """Validate first; merge only adjacent bytes in the requested write order."""
+        prepared = []
+        keys = set()
+        for symbol, value_text in writes:
+            if _is_readonly_symbol(symbol):
+                raise ValueError(f"{symbol.name} 位于 {symbol.section}，默认按只读变量处理。")
+            if symbol.key in keys:
+                raise ValueError("一次批量写入不能包含重复变量。")
+            keys.add(symbol.key)
+            prepared.append((symbol, encode_symbol_value(symbol, value_text)))
+        target = self._require_target()
+        address = 0
+        data = bytearray()
+        for symbol, encoded in prepared:
+            if data and (address + len(data) != symbol.address or
+                         len(data) + len(encoded) > self.MAX_COALESCED_READ_BYTES):
+                target.write_memory_block8(address, list(data))
+                data.clear()
+            if not data:
+                address = symbol.address
+            data.extend(encoded)
+        if data:
+            target.write_memory_block8(address, list(data))
+        return self.read_symbols(tuple(symbol for symbol, _ in prepared))
 
     def reset(self, halt: bool = False) -> None:
         target = self._require_target()
@@ -126,15 +160,28 @@ class TypedMemoryBackend:
         values = target.read_core_registers_raw(names)
         return {name: int(value) for name, value in zip(names, values)}
 
-    def _read_plan_for(self, symbols: list[SymbolInfo]) -> tuple[_ReadBlock, ...]:
-        signature = _read_plan_signature(symbols)
+    def _clear_read_plans(self) -> None:
+        self._read_plan_signature = None
+        self._read_plan = ()
+        self._read_keys = ()
+        self._read_plans.clear()
+
+    def _read_plan_for(self, symbols: Sequence[SymbolInfo]) -> tuple[_ReadBlock, ...]:
+        signature = tuple(symbols)
         if signature != self._read_plan_signature:
             self._read_plan_signature = signature
-            self._read_plan = _build_coalesced_read_plan(
-                symbols,
-                max_gap_bytes=self.MAX_COALESCED_GAP_BYTES,
-                max_block_bytes=self.MAX_COALESCED_READ_BYTES,
-            )
+            self._read_keys = tuple(symbol.key for symbol in signature)
+            for index, (cached, plan) in enumerate(self._read_plans):
+                if signature == cached:
+                    self._read_plan = plan
+                    self._read_plans.insert(0, self._read_plans.pop(index))
+                    break
+            else:
+                self._read_plan = _build_coalesced_read_plan(
+                    signature, max_gap_bytes=self.MAX_COALESCED_GAP_BYTES,
+                    max_block_bytes=self.MAX_COALESCED_READ_BYTES)
+                self._read_plans.insert(0, (signature, self._read_plan))
+                del self._read_plans[8:]
         return self._read_plan
 
 
@@ -150,6 +197,32 @@ class _ReadBlock:
     address: int
     size: int
     slices: tuple[_ReadSlice, ...]
+    _codec: struct.Struct | None = field(init=False, repr=False, compare=False)
+    _fields: tuple = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self):
+        formats, fields, cursor = [], [], 0
+        overlap = False
+        for part in self.slices:
+            codec, conversion = _value_codec(part.symbol, part.size)
+            if part.offset < cursor:
+                overlap = True
+            formats.append(f"{max(0, part.offset - cursor)}x" + codec.format[1:])
+            cursor = part.offset + part.size
+            fields.append((part.symbol.key, part.offset, codec, conversion))
+        formats.append(f"{max(0, self.size - cursor)}x")
+        object.__setattr__(self, "_codec", None if overlap else struct.Struct("<" + "".join(formats)))
+        object.__setattr__(self, "_fields", tuple(fields))
+
+    def decode(self, data: bytes, values: dict) -> None:
+        if self._codec is not None:
+            decoded = self._codec.unpack(data)
+            for (key, _, _, conversion), value in zip(self._fields, decoded):
+                values[key] = conversion(value) if conversion else value
+        else:
+            for key, offset, codec, conversion in self._fields:
+                value = codec.unpack_from(data, offset)[0]
+                values[key] = conversion(value) if conversion else value
 
 
 def _read_plan_signature(symbols: list[SymbolInfo]) -> tuple[tuple[int, int, str], ...]:
@@ -157,7 +230,7 @@ def _read_plan_signature(symbols: list[SymbolInfo]) -> tuple[tuple[int, int, str
 
 
 def _build_coalesced_read_plan(
-    symbols: list[SymbolInfo],
+    symbols: Sequence[SymbolInfo],
     *,
     max_gap_bytes: int,
     max_block_bytes: int,
@@ -214,18 +287,40 @@ def _build_coalesced_read_plan(
 
 
 def decode_symbol_value(symbol: SymbolInfo, data: bytes) -> object:
+    codec, conversion = _value_codec(symbol, len(data))
+    value = codec.unpack(data)[0]
+    return conversion(value) if conversion else value
+
+
+def _hex_value(data: bytes) -> str:
+    return data.hex(" ").upper()
+
+
+def _unsigned_value(data: bytes) -> int:
+    return int.from_bytes(data, "little")
+
+
+@lru_cache(maxsize=2048)
+def _value_codec(symbol: SymbolInfo, size: int):
     type_name = _normalized_type(symbol)
-    size = len(data)
     if _is_float_type(type_name, size):
-        return struct.unpack("<f", data)[0]
+        return struct.Struct("<f"), None
     if _is_double_type(type_name, size):
-        return struct.unpack("<d", data)[0]
+        return struct.Struct("<d"), None
     if _is_bool_type(type_name) and size == 1:
-        return bool(data[0])
+        return struct.Struct("<?"), None
     if symbol.is_pointer or _is_integer_like_type(type_name, size):
         signed = False if symbol.is_pointer else _is_signed_integer_type(type_name)
-        return int.from_bytes(data, "little", signed=signed)
-    return " ".join(f"{byte:02X}" for byte in data)
+        if size in (1, 2, 4, 8):
+            code = {1: "b", 2: "h", 4: "i", 8: "q"}[size]
+            return struct.Struct("<" + (code if signed else code.upper())), None
+        return struct.Struct(f"<{size}s"), _unsigned_value
+    return struct.Struct(f"<{size}s"), _hex_value
+
+
+def _check_read_size(data: bytes, expected: int) -> None:
+    if len(data) != expected:
+        raise ValueError(f"内存读取不完整：需要 {expected} 字节，实际收到 {len(data)} 字节。")
 
 
 def encode_symbol_value(symbol: SymbolInfo, value_text: str) -> bytes:

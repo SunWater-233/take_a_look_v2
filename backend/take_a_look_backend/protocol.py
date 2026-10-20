@@ -23,6 +23,7 @@ class RpcMethod(StrEnum):
     SET_CONFIG = "setConfig"
     SET_WATCHES = "setWatches"
     WRITE_WATCH = "writeWatch"
+    WRITE_WATCHES = "writeWatches"
     READ_WATCH = "readWatch"
     SET_SAMPLING_PAUSED = "setSamplingPaused"
     SET_RTT = "setRtt"

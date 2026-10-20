@@ -24,6 +24,14 @@ class OrderedWorker:
 
     def submit(self, action: Callable[[], T], *, weight: int = 0,
                block: bool = True) -> Future[T] | None:
+        return self._submit(action, None, weight=weight, block=block)
+
+    def submit_batch(self, action, payload, *, weight: int = 0,
+                     block: bool = True) -> Future | None:
+        """Merge adjacent accepted jobs with the same consumer; drains are barriers."""
+        return self._submit(action, (payload,), weight=weight, block=block)
+
+    def _submit(self, action, batch, *, weight, block):
         future: Future[T] = Future()
         with self._condition:
             # A single oversized item can run alone; never truncate a message.
@@ -36,7 +44,7 @@ class OrderedWorker:
                 self._condition.wait()
             if self._closing:
                 raise RuntimeError("Worker is closed.")
-            self._jobs.append((action, future, weight))
+            self._jobs.append((action, future, weight, batch))
             self._weight += weight
             self._count += 1
             self._condition.notify_all()
@@ -59,13 +67,27 @@ class OrderedWorker:
                     self._condition.wait()
                 if not self._jobs:
                     return
-                action, future, weight = self._jobs.popleft()
+                action, future, weight, batch = self._jobs.popleft()
+                futures = [future]
+                if batch is not None:
+                    batch = list(batch)
+                    while self._jobs and len(futures) < 32 and weight < 1024 * 1024:
+                        following, pending, size, payload = self._jobs[0]
+                        if following != action or payload is None or weight + size > 1024 * 1024:
+                            break
+                        self._jobs.popleft()
+                        batch.extend(payload)
+                        futures.append(pending)
+                        weight += size
             try:
-                future.set_result(action())
+                result = action() if batch is None else action(batch)
+                for future in futures:
+                    future.set_result(result)
             except BaseException as error:
-                future.set_exception(error)
+                for future in futures:
+                    future.set_exception(error)
             finally:
                 with self._condition:
                     self._weight -= weight
-                    self._count -= 1
+                    self._count -= len(futures)
                     self._condition.notify_all()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import threading
+import struct
 import zipfile
 from dataclasses import dataclass
 from time import perf_counter
@@ -103,8 +104,7 @@ class PyOcdMemoryBackend(TypedMemoryBackend):
         session = self.session
         self.session = None
         self.target = None
-        self._read_plan_signature = None
-        self._read_plan = ()
+        self._clear_read_plans()
         try:
             if session is not None:
                 session.close()
@@ -197,8 +197,30 @@ class PyOcdMemoryBackend(TypedMemoryBackend):
                     verified += len(expected)
                     progress(0.8 + 0.2 * verified / total)
         finally:
-            self._read_plan_signature = None
-            self._read_plan = ()
+            self._clear_read_plans()
+
+    def _read_blocks(self, plan):
+        target = self._require_target()
+        # A native memory interface may return deferred-looking callbacks after
+        # already performing synchronous I/O. Keep its accelerated block reads.
+        core = getattr(target, "selected_core", target)
+        accelerated = getattr(getattr(core, "ap", None), "_accelerated_memory_interface", None)
+        # Queue single-word scatter reads; never split a coalesced block into
+        # scalar operations, which would regress native J-Link/ST-Link paths.
+        if (accelerated is not None or len(plan) < 2 or
+                not callable(getattr(target, "read_memory", None)) or
+                any(block.address % 4 or block.size != 4 for block in plan)):
+            yield from super()._read_blocks(plan)
+            return
+        for start in range(0, len(plan), 32):
+            queued = []
+            for block in plan[start:start + 32]:
+                callbacks = [target.read_memory(address, transfer_size=32, now=False)
+                             for address in range(block.address, block.address + block.size, 4)]
+                queued.append(callbacks)
+            for callbacks in queued:
+                values = [callback() if callable(callback) else callback for callback in callbacks]
+                yield struct.pack(f"<{len(values)}I", *values)
 
     def set_breakpoint(self, address: int) -> bool:
         target = self._require_target()

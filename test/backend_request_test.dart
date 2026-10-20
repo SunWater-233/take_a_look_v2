@@ -47,6 +47,141 @@ for line in sys.stdin:
     return client;
   }
 
+  Future<BackendClient> startBatchClient() async {
+    final client = BackendClient(
+      processStarter: () => Process.start(python.path, [
+        '-u',
+        '-c',
+        '''
+import json, sys
+history = []
+for line in sys.stdin:
+    request = json.loads(line)
+    method, params = request['method'], request['params']
+    history.append({'method': method, 'params': params})
+    entries = params.get('writes', [params]) if method in ('writeWatch', 'writeWatches') else []
+    if any(entry.get('value') == 'fail' for entry in entries):
+        reply = {'error': {'code': 'write_failed', 'message': 'readback failed'}}
+    else:
+        reply = {'result': {'capabilities': ['memoryWriteBatch'], 'state': {}, 'history': history}}
+    print(json.dumps({'v': 2, 'id': request['id'], **reply}), flush=True)
+    if method == 'shutdown':
+        break
+''',
+      ]),
+    );
+    addTearDown(() => client.close(force: true));
+    await client.start();
+    return client;
+  }
+
+  test(
+    'concurrent explicit writes use one batch and retain each value',
+    () async {
+      final client = await startBatchClient();
+      await Future.wait([
+        client.command(ControllerCommand.writeWatch, {
+          'key': 'a',
+          'value': '1',
+        }),
+        client.command(ControllerCommand.writeWatch, {
+          'key': 'b',
+          'value': '2',
+        }),
+      ]);
+      final result = await client.request(BackendMethod.getState);
+      final history = result['history'] as List;
+      expect(history.map((item) => item['method']), [
+        'handshake',
+        'writeWatches',
+        'getState',
+      ]);
+      expect(history[1]['params']['writes'], [
+        {'key': 'a', 'value': '1'},
+        {'key': 'b', 'value': '2'},
+      ]);
+    },
+    skip: skip,
+  );
+
+  test(
+    'repeated explicit writes are never discarded and controls cannot overtake them',
+    () async {
+      final client = await startBatchClient();
+      final first = client.command(ControllerCommand.writeWatch, {
+        'key': 'a',
+        'value': '1',
+      });
+      final second = client.command(ControllerCommand.writeWatch, {
+        'key': 'a',
+        'value': '1',
+      });
+      final state = client.request(BackendMethod.getState);
+      await Future.wait([first, second]);
+      final history = (await state)['history'] as List;
+      expect(history.map((item) => item['method']), [
+        'handshake',
+        'writeWatch',
+        'writeWatch',
+        'getState',
+      ]);
+    },
+    skip: skip,
+  );
+
+  test(
+    'a rejected batch fails every caller and later explicit writes still work',
+    () async {
+      final client = await startBatchClient();
+      await expectLater(
+        Future.wait([
+          client.command(ControllerCommand.writeWatch, {
+            'key': 'a',
+            'value': '1',
+          }),
+          client.command(ControllerCommand.writeWatch, {
+            'key': 'b',
+            'value': 'fail',
+          }),
+        ]),
+        throwsA(isA<BackendException>()),
+      );
+      await client.command(ControllerCommand.writeWatch, {
+        'key': 'c',
+        'value': '3',
+      });
+      final result = await client.request(BackendMethod.getState);
+      expect((result['history'] as List).map((item) => item['method']), [
+        'handshake',
+        'writeWatches',
+        'writeWatch',
+        'getState',
+      ]);
+    },
+    skip: skip,
+  );
+
+  test('large bursts are bounded to 64 writes per batch', () async {
+    final client = await startBatchClient();
+    await Future.wait([
+      for (var i = 0; i < 65; i++)
+        client.command(ControllerCommand.writeWatch, {
+          'key': 'v$i',
+          'value': '$i',
+        }),
+    ]);
+    final result = await client.request(BackendMethod.getState);
+    final history = result['history'] as List;
+    expect(history.map((item) => item['method']), [
+      'handshake',
+      'writeWatches',
+      'writeWatch',
+      'getState',
+    ]);
+    expect(history[1]['params']['writes'], hasLength(64));
+    expect(history[2]['params'], {'key': 'v64', 'value': '64'});
+  }, skip: skip);
+
   test(
     'concurrent requests all reach stdin and receive their own response',
     () async {

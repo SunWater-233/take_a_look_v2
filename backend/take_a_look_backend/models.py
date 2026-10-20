@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from functools import cached_property
 
 
 @dataclass(frozen=True)
@@ -16,7 +17,7 @@ class SymbolInfo:
     data_source: str = "memory"
     source_id: str = ""
 
-    @property
+    @cached_property
     def key(self) -> str:
         if self.is_rtt:
             return f"rtt:{self.source_id or self.name}"

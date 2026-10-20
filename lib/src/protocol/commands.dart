@@ -100,6 +100,7 @@ enum BackendMethod {
   setConfig,
   setWatches,
   writeWatch,
+  writeWatches,
   readWatch,
   setSamplingPaused,
   setRtt,

@@ -47,6 +47,72 @@ def test_deadlines_skip_missed_reads_without_drift_or_a_one_ms_floor(monkeypatch
     assert len(sleeps) == 1 and 0 < sleeps[0] < 0.001
 
 
+def test_precise_wait_yields_and_observes_command_wakeup(monkeypatch):
+    clock, sleeps, wake = [1.0], [], threading.Event()
+    def sleep(delay):
+        sleeps.append(delay)
+        clock[0] += 0.00001
+        wake.set()
+    monkeypatch.setattr("take_a_look_backend.services.sampling_clock.time.perf_counter", lambda: clock[0])
+    monkeypatch.setattr("take_a_look_backend.services.sampling_clock.time.sleep", sleep)
+    wait_until(wake, 1.0001, precise=True)
+    assert sleeps == [0]
+    assert not wake.is_set()
+
+
+def test_worker_coalesces_adjacent_batches_without_crossing_export_barriers():
+    entered, release = threading.Event(), threading.Event()
+    worker = OrderedWorker("batch-worker")
+    seen = []
+    def block():
+        entered.set()
+        assert release.wait(2)
+    def consume(items):
+        seen.append(items)
+    try:
+        worker.submit(block)
+        assert entered.wait(1)
+        futures = [worker.submit_batch(consume, i) for i in range(3)]
+        fence = worker.submit(lambda: seen.append("fence"))
+        futures.append(worker.submit_batch(consume, 3))
+        release.set()
+        for future in [*futures, fence]:
+            future.result(2)
+        assert seen == [[0, 1, 2], "fence", [3]]
+        worker.drain()
+        assert worker._count == 0 and worker._weight == 0
+    finally:
+        release.set()
+        worker.close()
+
+
+def test_failed_coalesced_work_completes_every_future_and_keeps_the_worker_usable():
+    entered, release = threading.Event(), threading.Event()
+    worker = OrderedWorker("failed-batch-worker")
+    def block():
+        entered.set()
+        release.wait(2)
+    def fail(items):
+        raise OSError("disk full")
+    try:
+        worker.submit(block)
+        assert entered.wait(1)
+        futures = [worker.submit_batch(fail, i, weight=4) for i in range(3)]
+        release.set()
+        for future in futures:
+            try:
+                future.result(1)
+                raise AssertionError("Expected recording failure")
+            except OSError as error:
+                assert str(error) == "disk full"
+        assert worker.submit(lambda: 42).result(1) == 42
+        worker.drain()
+        assert worker._count == 0 and worker._weight == 0
+    finally:
+        release.set()
+        worker.close()
+
+
 def test_csv_export_does_not_block_following_control_requests():
     entered, release = threading.Event(), threading.Event()
     output = io.BytesIO()

@@ -14,6 +14,13 @@ export '../app/file_pickers.dart';
 typedef BackendEventHandler =
     void Function(BackendEventType event, Object? params);
 
+class _QueuedWatchWrite {
+  _QueuedWatchWrite(this.params);
+
+  final Map<String, Object?> params;
+  final completion = Completer<void>();
+}
+
 class BackendException implements Exception {
   const BackendException(this.code, this.message, [this.details]);
 
@@ -47,6 +54,8 @@ class BackendClient {
   BackendStreamDecoder? _streamDecoder;
   Future<void> _writeTail = Future<void>.value();
   final Map<int, Completer<Map<String, dynamic>>> _pending = {};
+  final List<_QueuedWatchWrite> _watchWrites = [];
+  bool _supportsBatchWrites = false;
   final Map<int, List<String>> _sampleSchemas = {};
   final Set<int> _captureOnlySchemas = {};
   Map<String, dynamic> _state = {};
@@ -122,6 +131,9 @@ class BackendClient {
           });
       unawaited(process.exitCode.then(_handleExit));
       final handshake = await request(BackendMethod.handshake);
+      _supportsBatchWrites =
+          (handshake['capabilities'] as List?)?.contains('memoryWriteBatch') ==
+          true;
       final state = _map(handshake['state']);
       if (state != null) {
         _state = state;
@@ -145,7 +157,14 @@ class BackendClient {
     try {
       final call = BackendCommandMapper.translate(command, arguments, _state);
       if (call == null) return;
-      await request(call.method, call.params);
+      if (command == ControllerCommand.writeWatch && _supportsBatchWrites) {
+        final write = _QueuedWatchWrite(Map.of(call.params));
+        _watchWrites.add(write);
+        if (_watchWrites.length == 1) scheduleMicrotask(_flushWatchWrites);
+        await write.completion.future;
+      } else {
+        await request(call.method, call.params);
+      }
     } catch (error) {
       // These operations await completion and own error feedback in the controller.
       if (const {
@@ -187,7 +206,57 @@ class BackendClient {
   Future<Map<String, dynamic>> request(
     BackendMethod method, [
     Map<String, Object?> params = const {},
-  ]) async {
+  ]) {
+    // Flush synchronously into the existing stdin queue so a following pause,
+    // reset or configuration command cannot overtake an explicit write.
+    _flushWatchWrites();
+    return _request(method, params);
+  }
+
+  void _flushWatchWrites() {
+    if (_watchWrites.isEmpty) return;
+    final writes = List<_QueuedWatchWrite>.of(_watchWrites);
+    _watchWrites.clear();
+    var start = 0;
+    while (start < writes.length) {
+      final keys = <Object?>{};
+      var end = start;
+      while (end < writes.length &&
+          end - start < 64 &&
+          keys.add(writes[end].params['key'])) {
+        end++;
+      }
+      final group = writes.sublist(start, end);
+      final method = group.length == 1
+          ? BackendMethod.writeWatch
+          : BackendMethod.writeWatches;
+      final params = group.length == 1
+          ? group.single.params
+          : <String, Object?>{
+              'writes': [for (final write in group) write.params],
+            };
+      unawaited(
+        _request(method, params).then<void>(
+          (_) {
+            for (final write in group) {
+              write.completion.complete();
+            }
+          },
+          onError: (Object error, StackTrace stack) {
+            for (final write in group) {
+              write.completion.completeError(error, stack);
+            }
+          },
+        ),
+      );
+      start = end;
+    }
+  }
+
+  Future<Map<String, dynamic>> _request(
+    BackendMethod method,
+    Map<String, Object?> params,
+  ) async {
     final process = _process;
     if (process == null) {
       throw const BackendException('not_running', '本机硬件后端尚未启动。');
@@ -261,6 +330,7 @@ class BackendClient {
     _stdoutSubscription = null;
     _stderrSubscription = null;
     _sampleSchemas.clear();
+    _supportsBatchWrites = false;
     _captureOnlySchemas.clear();
     _lastSampleSequence = null;
     for (final pending in _pending.values) {

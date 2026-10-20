@@ -17,8 +17,12 @@ class SamplingServiceMixin:
         previous_periods = None
         monitor_revision = -1
         while not self._shutdown.is_set():
+            if not self._controls_idle.is_set():
+                self._controls_idle.wait(0.05)
+                continue
             now = time.perf_counter()
             deadlines = [now + 0.05]
+            precise = False
             try:
                 with self._lock:
                     connected = self._connection_status == "connected" and not self._firmware_busy
@@ -48,10 +52,11 @@ class SamplingServiceMixin:
                             next_monitor_at = self._poll_monitors_locked(now)
                         deadlines.append(next_monitor_at)
                     if connected and not self._pipeline_backpressure:
-                        memory_enabled = (active and any(w.captures and not w.symbol.is_rtt for w in self._watches.values()) and
+                        memory_enabled = (active and bool(self._capture_symbols_locked()) and
                             backend_capabilities(self._memory).memory_sampling and
                             not (rtt_enabled and rtt_protocol == "plus" and self._plus_rtt.is_started))
                         if memory_enabled:
+                            precise = memory_period < 0.001
                             if now >= next_memory_at:
                                 values = self._read_memory_locked(rtt_enabled, rtt_protocol)
                                 if values:
@@ -82,7 +87,7 @@ class SamplingServiceMixin:
             now = time.perf_counter()
             if now - self._last_perf_at >= 1.0:
                 self._publish_perf(now)
-            wait_until(self._wake, min(deadlines))
+            wait_until(self._wake, min(deadlines), precise=precise)
 
     @staticmethod
     def _watch_value_json(watch: WatchedVariable) -> dict[str, object]:
@@ -134,13 +139,20 @@ class SamplingServiceMixin:
             self._emit(EventName.WATCH_VALUES, {"values": [self._watch_value_json(w) for w, _ in pushed]})
         return max(now + 0.001, next_at)
 
+    def _capture_symbols_locked(self) -> tuple:
+        if self._capture_source is not self._watches or self._capture_source_count != len(self._watches):
+            self._capture_source = self._watches
+            self._capture_source_count = len(self._watches)
+            self._capture_symbols = tuple(watch.symbol for watch in self._watches.values()
+                                          if not watch.symbol.is_rtt and watch.captures)
+        return self._capture_symbols
+
     def _read_memory_locked(self, rtt_enabled: bool, rtt_protocol: str) -> dict[str, object]:
         if not backend_capabilities(self._memory).memory_sampling:
             return {}
         if rtt_enabled and rtt_protocol == "plus" and self._plus_rtt.is_started:
             return {}
-        symbols = [watch.symbol for watch in self._watches.values()
-                   if not watch.symbol.is_rtt and watch.captures]
+        symbols = self._capture_symbols_locked()
         if not symbols:
             return {}
         values = self._memory.read_symbols(symbols)
@@ -207,20 +219,18 @@ class SamplingServiceMixin:
         # Capture the sampling switches/labels at acquisition, before a watch
         # can be disabled or removed while this batch waits for publication.
         for elapsed, values in frames:
-            normalized = {key: json_value(value) for key, value in values.items()
-                          if key in self._watches and self._watches[key].captures}
+            normalized = {}
+            for key, value in values.items():
+                watch = self._watches.get(key)
+                if watch is not None and watch.captures:
+                    normalized[key] = json_value(value)
+                    self._pending_recording_labels[key] = watch.symbol.name
             if not normalized:
                 continue
-            self._pending_frames.append((elapsed, normalized))
+            frame = (elapsed, normalized)
+            self._pending_frames.append(frame)
             self._pending_updated_at_ms = time.time_ns() // 1_000_000
-            recorded = {}
-            for key, value in normalized.items():
-                watch = self._watches.get(key)
-                if watch and watch.captures:
-                    recorded[key] = value
-                    self._pending_recording_labels[key] = watch.symbol.name
-            if recorded:
-                self._pending_recording_frames.append((elapsed, recorded))
+            self._pending_recording_frames.append(frame)
 
     def _flush_pending_samples_locked(self, *, wait: bool = True, block: bool | None = None) -> bool:
         if self._recording.failure is not None:
@@ -234,8 +244,8 @@ class SamplingServiceMixin:
         labels = self._pending_recording_labels
         updated_at_ms = self._pending_updated_at_ms
         weight = len(frames) * 128 + sum(len(values) for _, values in frames) * 96
-        future = self._recording_worker.submit(
-            lambda: self._commit_sample_batch(frames, recorded, labels, updated_at_ms),
+        future = self._recording_worker.submit_batch(
+            self._commit_sample_batches, (frames, recorded, labels, updated_at_ms),
             weight=weight, block=wait if block is None else block)
         if future is None:
             # Retain the acquired batch and stop further reads until admitted.
@@ -252,8 +262,15 @@ class SamplingServiceMixin:
         return True
 
     def _commit_sample_batch(self, frames, recorded, labels, updated_at_ms=None) -> None:
+        self._commit_sample_batches([(frames, recorded, labels, updated_at_ms)])
+
+    def _commit_sample_batches(self, batches) -> None:
         previous_path = self._recording.path
         try:
+            recorded, labels = [], {}
+            for _, batch_recorded, batch_labels, _ in batches:
+                recorded.extend(batch_recorded)
+                labels.update(batch_labels)
             self._recording.append(recorded, labels)
         except Exception as error:
             first_failure = not self._recording_error_reported
@@ -268,12 +285,14 @@ class SamplingServiceMixin:
                            "rawRecording": self._recording.status()})
             return
         with self._perf_lock:
-            self._sample_count_since_perf += len(frames)
+            self._sample_count_since_perf += sum(len(frames) for frames, _, _, _ in batches)
         if self._recording.path != previous_path:
             self._emit(EventName.LOG, {"level": "info", "message": f"原始采样持续保存：{self._recording.path}"})
             self._emit(EventName.STATE, {"rawRecording": self._recording.status()})
-        self._emit(EventName.SAMPLES, {"captureOnly": True, "updatedAtMs": updated_at_ms, "frames": [
-            {"elapsed": elapsed, "values": values} for elapsed, values in frames]})
+        # Preserve each acquisition timestamp, including pending pre-write data.
+        for frames, _, _, updated_at_ms in batches:
+            self._emit(EventName.SAMPLES, {"captureOnly": True, "updatedAtMs": updated_at_ms, "frames": [
+                {"elapsed": elapsed, "values": values} for elapsed, values in frames]})
         self._wake.set()
 
     def _publish_perf(self, now: float) -> None:

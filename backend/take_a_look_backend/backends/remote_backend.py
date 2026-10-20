@@ -120,8 +120,7 @@ class RemoteMemoryBackend(TypedMemoryBackend):
             self.client = None
             self.ember = None
             self.rtt_target = None
-            self._read_plan_signature = None
-            self._read_plan = ()
+            self._clear_read_plans()
 
     def set_breakpoint(self, address: int) -> bool:
         # Remote adapters apply changes through their own protocol, without a

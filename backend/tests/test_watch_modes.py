@@ -145,6 +145,38 @@ def test_halted_plus_monitor_reads_memory_instead_of_frozen_cache(rig):
     assert service._watches[key].value == 1
 
 
+def test_batch_write_acknowledges_only_after_readback_without_capture(rig):
+    service, memory, symbols, events = rig
+    entries = [{'key': symbols[name].key, 'value': '42'} for name in ('watch', 'manual')]
+    events.clear()
+    result = service.handle(RpcMethod.WRITE_WATCHES, {'writes': entries})
+    assert [value['value'] for value in result['values']] == [42, 42]
+    assert [value['key'] for value in result['values']] == [entry['key'] for entry in entries]
+    assert service._recording.sample_count == 0
+    assert [name for name, _ in events] == [EventName.WATCH_VALUES, EventName.LOG]
+    assert service._controls_idle.is_set()
+
+
+def test_batch_error_releases_command_priority_and_rejects_unknown_watch_before_writes(rig):
+    service, memory, symbols, events = rig
+    before = dict(memory.values)
+    with pytest.raises(ProtocolError):
+        service.handle(RpcMethod.WRITE_WATCHES, {'writes': [
+            {'key': symbols['watch'].key, 'value': '42'}, {'key': 'missing', 'value': '1'}]})
+    assert memory.values == before
+    assert service._controls_idle.is_set()
+
+
+def test_invalid_batch_value_cannot_partially_write_an_injected_adapter(rig):
+    service, memory, symbols, _ = rig
+    before = dict(memory.values)
+    with pytest.raises(ProtocolError):
+        service.handle(RpcMethod.WRITE_WATCHES, {'writes': [
+            {'key': symbols['watch'].key, 'value': '42'},
+            {'key': symbols['manual'].key, 'value': '999999999999999999999'}]})
+    assert memory.values == before
+
+
 def test_timestamped_capture_wire_payload_preserves_event_time():
     import struct
     from take_a_look_backend.protocol import encode_sample_batch

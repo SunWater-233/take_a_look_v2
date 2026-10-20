@@ -73,6 +73,8 @@ def run() -> int:
         }
         if responses[1]["result"]["protocolVersion"] != 2:
             raise RuntimeError("Unexpected protocol version")
+        if "memoryWriteBatch" not in responses[1]["result"]["capabilities"]:
+            raise RuntimeError("Batch memory-write support is missing")
         if len(responses[2]["result"]["targets"]) < 100:
             raise RuntimeError("Builtin target catalogue is missing")
         if responses[3]["result"]["state"]["connectionStatus"] != "disconnected":

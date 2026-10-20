@@ -154,6 +154,49 @@ class BackendServiceTests(unittest.TestCase):
         finally:
             release.set()
 
+    def test_pending_explicit_write_precedes_the_next_high_frequency_read(self) -> None:
+        entered, release, written = threading.Event(), threading.Event(), threading.Event()
+        sequence = []
+        original_read, original_write = self.memory.read_symbols, self.memory.write_symbol
+        def read(symbols):
+            sequence.append("read")
+            if len(sequence) == 1:
+                entered.set()
+                self.assertTrue(release.wait(2))
+            return original_read(symbols)
+        def write(symbol, value):
+            sequence.append("write")
+            return original_write(symbol, value)
+        key = self.symbols[0].key
+        with self.service._lock:
+            self.service._symbols = {item.key: item for item in self.symbols}
+        self.service.handle(RpcMethod.SET_WATCHES, {"watches": [{"key": key}]})
+        self.service.handle(RpcMethod.SET_CONFIG, {"sampleRateHz": 10000})
+        def command():
+            try:
+                self.service.handle(RpcMethod.WRITE_WATCH, {"key": key, "value": "42"})
+            finally:
+                written.set()
+        worker = threading.Thread(target=command)
+        try:
+            with patch.object(self.memory, "read_symbols", side_effect=read), \
+                 patch.object(self.memory, "write_symbol", side_effect=write):
+                self.service.handle(RpcMethod.CONNECT, {})
+                self.assertTrue(entered.wait(1))
+                worker.start()
+                deadline = time.perf_counter() + 1
+                while self.service._controls_idle.is_set() and time.perf_counter() < deadline:
+                    time.sleep(.001)
+                self.assertFalse(self.service._controls_idle.is_set())
+                release.set()
+                self.assertTrue(written.wait(1))
+                self.service.handle(RpcMethod.SET_SAMPLING_PAUSED, {"paused": True})
+            self.assertEqual(sequence[:2], ["read", "write"])
+        finally:
+            release.set()
+            if worker.ident is not None:
+                worker.join(2)
+
     def test_export_fence_survives_later_samples_and_clear(self) -> None:
         key = self.symbols[0].key
         with tempfile.TemporaryDirectory() as directory:

@@ -19,6 +19,47 @@ not inherit pyOCD connection, target-registry or flash-programming behavior;
 those remain in the local adapter. Adapter calls retain the service's existing
 serialization and ownership rules.
 
+High-frequency acquisition compiles typed block decoders and retains up to eight
+read plans, including separate capture/monitor sets. Symbol keys and capture
+membership are cached; reloading symbols or changing watches invalidates the
+relevant plan. Mixed numeric types, pointers, overlapping aliases and raw-byte
+values retain their existing representations. Incomplete reads fail explicitly.
+Local pyOCD queues aligned single-word scatter reads with its deferred API;
+native accelerated memory interfaces and multiword/unaligned blocks keep the
+normal block-read path. Remote adapters
+keep their supported protocol and never assume a gateway batch API exists.
+
+Selecting a memory capture rate above 1000 Hz enables short-tail yielding in the
+deadline waiter. Lower rates, paused capture and inactive/backpressured capture
+retain the lower-CPU waiter. This mode costs more CPU and is not a real-time
+guarantee. Waiting explicit controls take priority over the next sampler loop;
+an in-progress target operation cannot be preempted.
+
+The `memoryWriteBatch` capability adds `writeWatches {writes: [{key, value}]}`
+(1..64 distinct keys). All values are validated before writes begin. Only
+adjacent actual write bytes in request order are merged; gaps are never written.
+The response and `watchValues` event contain only the affected values after
+readback. A target failure can leave a partially applied batch and is never
+retried automatically. The existing `writeWatch` contract remains available.
+Flutter batches concurrent explicit writes within one microtask, splits repeated
+keys in order, and preserves each caller's acknowledgement/error and draft.
+
+The recording worker merges already queued adjacent batches, without waiting to
+fill a batch. Drain/export/rotation barriers stop merging, and sample events
+retain their original acquisition timestamps. Journals and history are committed
+before events are published, including under backpressure and recording failure.
+
+Reproduce host measurements (raw-byte fake target, decoding and recording
+included, no physical probe/network/UI):
+
+```powershell
+.\backend\.venv\Scripts\python.exe tool/benchmarks/backend_throughput.py --source-root . --output build/performance_review/backend.json
+```
+
+Use `--layout mixed` for mixed numeric types; `--source-root` can point to a
+baseline checkout. Results include acquisition/recording/delivery frame counts,
+CPU cost, sample interval P95/P99 and concurrent explicit-write/readback latency.
+
 The GDB adapter starts an installed, architecture-appropriate GDB with MI3;
 `pygdbmi` parses the machine output. GDB itself must be installed separately.
 The current register interface supports ARM/Cortex-M. The private adapter

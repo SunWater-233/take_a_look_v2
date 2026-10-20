@@ -62,6 +62,10 @@ class BackendService(SamplingServiceMixin):
         self._symbol_loader = symbol_loader
         self._debug_info_loader = debug_info_loader
         self._lock = threading.RLock()
+        self._control_lock = threading.Lock()
+        self._control_count = 0
+        self._controls_idle = threading.Event()
+        self._controls_idle.set()
         self._perf_lock = threading.Lock()
         self._closed = False
         self._wake = threading.Event()
@@ -89,6 +93,9 @@ class BackendService(SamplingServiceMixin):
         self._connection_started_at: float | None = None
         self._symbols: dict[str, SymbolInfo] = {}
         self._watches: dict[str, WatchedVariable] = {}
+        self._capture_source = None
+        self._capture_source_count = -1
+        self._capture_symbols: tuple[SymbolInfo, ...] = ()
         self._recording = RawRecording(recording_directory)
         self._recording_worker = OrderedWorker('tal-recording')
         self._pipeline_backpressure = False
@@ -138,6 +145,27 @@ class BackendService(SamplingServiceMixin):
             self._targets.close()
 
     def handle(self, method: RpcMethod, params: Mapping[str, object]) -> dict[str, object]:
+        priority = method in {
+            RpcMethod.WRITE_WATCH, RpcMethod.WRITE_WATCHES, RpcMethod.READ_WATCH,
+            RpcMethod.SET_SAMPLING_PAUSED, RpcMethod.DEBUG_CONTROL, RpcMethod.RESET_TARGET,
+            RpcMethod.DISCONNECT, RpcMethod.TOGGLE_CONNECTION, RpcMethod.SET_WATCHES,
+            RpcMethod.SET_CONFIG, RpcMethod.SET_RTT, RpcMethod.CLEAR_SAMPLES,
+        }
+        if not priority:
+            return self._handle(method, params)
+        with self._control_lock:
+            self._control_count += 1
+            self._controls_idle.clear()
+        self._wake.set()
+        try:
+            return self._handle(method, params)
+        finally:
+            with self._control_lock:
+                self._control_count -= 1
+                if not self._control_count:
+                    self._controls_idle.set()
+
+    def _handle(self, method: RpcMethod, params: Mapping[str, object]) -> dict[str, object]:
         if method is RpcMethod.LIST_TARGETS:
             return {**self._targets.snapshot(), "state": self._targets.selection_state()}
         if method is RpcMethod.INSPECT_TARGET_PACK:
@@ -189,7 +217,7 @@ class BackendService(SamplingServiceMixin):
             if method is RpcMethod.LOAD_SYMBOLS or (self._source_tasks.reserves_probe and method in {
                 RpcMethod.CONNECT, RpcMethod.DISCONNECT, RpcMethod.TOGGLE_CONNECTION, RpcMethod.SET_CONFIG,
             }) or (self._firmware_busy and method in {
-                RpcMethod.WRITE_WATCH, RpcMethod.READ_WATCH, RpcMethod.SET_WATCHES, RpcMethod.DEBUG_CONTROL, RpcMethod.SET_BREAKPOINTS,
+                RpcMethod.WRITE_WATCH, RpcMethod.WRITE_WATCHES, RpcMethod.READ_WATCH, RpcMethod.SET_WATCHES, RpcMethod.DEBUG_CONTROL, RpcMethod.SET_BREAKPOINTS,
                 RpcMethod.SET_RTT, RpcMethod.SET_SAMPLING_PAUSED, RpcMethod.RESET_TARGET, RpcMethod.CLEAR_SAMPLES,
             }):
                 raise ProtocolError("source_task_busy", "编译或下载任务执行中，请等待任务完成。")
@@ -201,6 +229,7 @@ class BackendService(SamplingServiceMixin):
                     "memorySampling",
                     "watchReadModes",
                     "memoryWrite",
+                    "memoryWriteBatch",
                     "rttNormal",
                     "rttPlus",
                     "csvExport",
@@ -232,6 +261,8 @@ class BackendService(SamplingServiceMixin):
             return self._set_watches(params)
         if method is RpcMethod.WRITE_WATCH:
             return self._write_watch(params)
+        if method is RpcMethod.WRITE_WATCHES:
+            return self._write_watches(params)
         if method is RpcMethod.READ_WATCH:
             return self._read_watch(params)
         if method is RpcMethod.SET_SAMPLING_PAUSED:
@@ -792,6 +823,53 @@ class BackendService(SamplingServiceMixin):
         self._emit(EventName.LOG, {"level": "info", "message": f"已写入 {watch.symbol.name} 并完成回读验证。"})
         self._emit(EventName.STATE, state)
         return {"state": state}
+
+    def _write_watches(self, params: Mapping[str, object]) -> dict[str, object]:
+        raw = params.get("writes")
+        if not isinstance(raw, list) or not 1 <= len(raw) <= 64:
+            raise ProtocolError("invalid_request", "writes must contain 1..64 entries.")
+        with self._lock:
+            if self._connection_status != "connected":
+                raise ProtocolError("not_connected", "Connect a debug probe before writing variables.")
+            if not backend_capabilities(self._memory).memory_write:
+                raise ProtocolError("unsupported_operation", "当前连接不支持内存写入。")
+            watches, writes, keys = [], [], set()
+            for entry in raw:
+                if not isinstance(entry, Mapping):
+                    raise ProtocolError("invalid_request", "Each write must be an object.")
+                key, value = _required_string(entry, "key"), _required_string(entry, "value")
+                if key in keys:
+                    raise ProtocolError("invalid_request", "Batch writes cannot repeat a variable.")
+                keys.add(key)
+                watch = self._watches.get(key)
+                if watch is None:
+                    raise ProtocolError("unknown_watch", "Watch does not exist.", key)
+                if not watch.symbol.is_writable:
+                    raise ProtocolError("readonly_symbol", "This symbol is read-only.", watch.symbol.name)
+                watches.append(watch)
+                writes.append((watch.symbol, value))
+            try:
+                writer = getattr(self._memory, "write_symbols", None)
+                if callable(writer):
+                    values = writer(writes)
+                else:
+                    # Preserve the injected target adapter contract.
+                    from take_a_look_backend.backends.typed_memory import encode_symbol_value
+                    for symbol, value in writes:
+                        encode_symbol_value(symbol, value)
+                    values = {symbol.key: self._memory.write_symbol(symbol, value)
+                              for symbol, value in writes}
+                if set(values) != keys:
+                    raise RuntimeError("批量回读未返回全部变量。")
+                stamp = time.time_ns() // 1_000_000
+                self._remember_values_locked(values, updated_at_ms=stamp)
+                payload = {"values": [self._watch_value_json(watch) for watch in watches]}
+            except Exception as error:
+                # No retry: a failed batch can have already changed the target.
+                raise ProtocolError("write_failed", "Unable to write and verify the variables.", str(error)) from error
+        self._emit(EventName.WATCH_VALUES, payload)
+        self._emit(EventName.LOG, {"level": "info", "message": f"已写入 {len(watches)} 个变量并完成回读验证。"})
+        return payload
 
     def _read_watch(self, params: Mapping[str, object]) -> dict[str, object]:
         key = _required_string(params, "key")

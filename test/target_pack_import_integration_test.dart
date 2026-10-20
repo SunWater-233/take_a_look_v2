@@ -73,6 +73,31 @@ void main() {
         );
         expect((catalog['packs'] as List).single['id'], preview['id']);
       }
+      final targets = (catalogs.first['targets'] as List).cast<Map>().where(
+        (target) => target['packId'] == preview['id'],
+      );
+      // Exercise the user's real pack, not only the synthetic import fixture:
+      // saving a selection must complete, and no archive handle may block removal.
+      for (final target in targets) {
+        await controller
+            .requestTargetCatalog('selectTarget', {
+              'name': target['name'],
+              'packId': preview['id'],
+            })
+            .timeout(const Duration(seconds: 5));
+        expect(controller.targetName, target['name']);
+        expect(controller.targetPackId, preview['id']);
+      }
+      await controller
+          .requestTargetCatalog('removeTargetPack', {'packId': preview['id']})
+          .timeout(const Duration(seconds: 5));
+      expect(controller.targetPackMissing, isTrue);
+      final removed = await controller.requestTargetCatalog('listTargets');
+      expect(removed['packs'], isEmpty);
+      expect(
+        (removed['targets'] as List).length,
+        (initial['targets'] as List).length,
+      );
       expect(controller.lastBackendError, isNull);
     },
     skip: packPath == null

@@ -48,10 +48,18 @@ class CatalogHarness {
   final recent = <String>[];
   int revision = 0;
   bool failInspect = false;
+  bool denyStorage = false;
   Completer<JsonObject>? inspection;
 
   Future<JsonObject> request(String operation, JsonObject arguments) async {
     calls.add((operation, arguments));
+    if (denyStorage &&
+        const {'selectTarget', 'removeTargetPack'}.contains(operation)) {
+      throw const BackendException(
+        'target_catalog_access_denied',
+        '无法修改芯片库：当前启动环境没有写入权限。',
+      );
+    }
     switch (operation) {
       case 'listTargets':
         return {
@@ -364,6 +372,58 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('denied selection clears busy state and allows another attempt', (
+    tester,
+  ) async {
+    final harness = CatalogHarness()..denyStorage = true;
+    final controller = harness.controller();
+    addTearDown(controller.dispose);
+    await openDialog(tester, controller);
+    await tester.enterText(find.byKey(const ValueKey('target-search')), 'nRF');
+    await tester.pumpAndSettle();
+    final use = find.byKey(const ValueKey('use-target-chip'));
+    await tester.tap(use);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('没有写入权限'), findsOneWidget);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+    expect(tester.widget<TalButton>(use).onPressed, isNotNull);
+    harness.denyStorage = false;
+    await tester.tap(use);
+    await tester.pumpAndSettle();
+    expect(find.byType(TargetChipDialog), findsNothing);
+    expect(controller.targetName, 'nrf52840');
+  });
+
+  testWidgets('denied removal keeps the pack visible and permits retry', (
+    tester,
+  ) async {
+    final harness = CatalogHarness();
+    await harness.request('importTargetPack', {});
+    harness.denyStorage = true;
+    final controller = harness.controller();
+    addTearDown(controller.dispose);
+    await openDialog(tester, controller);
+    await tester.tap(find.byKey(const ValueKey('manage-target-packs')));
+    await tester.pumpAndSettle();
+    final remove = find.byKey(const ValueKey('remove-target-pack-user-pack'));
+    Future<void> confirmRemoval() async {
+      await tester.tap(remove);
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(TalButton, '删除').last);
+      await tester.pumpAndSettle();
+    }
+
+    await confirmRemoval();
+    expect(find.textContaining('没有写入权限'), findsOneWidget);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+    expect(tester.widget<TalButton>(remove).onPressed, isNotNull);
+    expect(harness.packs, hasLength(1));
+    harness.denyStorage = false;
+    await confirmRemoval();
+    expect(harness.packs, isEmpty);
+    expect(remove, findsNothing);
+  });
 
   testWidgets('catalog revision refreshes an already open dialog', (
     tester,

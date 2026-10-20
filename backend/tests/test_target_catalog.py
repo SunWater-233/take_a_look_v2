@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import threading
 import zipfile
 from pathlib import Path
@@ -227,6 +228,96 @@ def test_manifest_write_failure_does_not_publish_an_import(tmp_path, catalog):
             catalog.import_pack(preview["previewId"])
     assert catalog.snapshot()["packs"] == []
     assert not list(catalog.directory.glob("*.pack"))
+
+
+def test_denied_index_creation_fails_once_and_keeps_saved_selection(tmp_path, catalog):
+    pack_id = install(catalog, make_pack(tmp_path))
+    before = (catalog.directory / "index.json").read_bytes()
+    revision = catalog.revision
+    original_open = Path.open
+    attempts = []
+
+    def deny_index(path, *args, **kwargs):
+        if path.name.startswith("index-"):
+            attempts.append(path)
+            raise PermissionError("directory is not writable")
+        return original_open(path, *args, **kwargs)
+
+    # Windows mkstemp mistakes denied directory access for a name collision
+    # and retries up to TMP_MAX times. Never enter that retry loop.
+    with patch("tempfile.mkstemp", side_effect=AssertionError("unbounded retry")), \
+            patch.object(Path, "open", deny_index):
+        with pytest.raises(ProtocolError, match="target_catalog_access_denied"):
+            catalog.select("nrf52840", pack_id)
+    assert len(attempts) == 1
+    assert catalog.revision == revision
+    assert catalog.selected["name"] == "auto"
+    assert (catalog.directory / "index.json").read_bytes() == before
+    assert not list(catalog.directory.glob("index-*.tmp"))
+    catalog.select("nrf52840", pack_id)
+    assert catalog.selected["packId"] == pack_id
+
+
+def test_denied_index_replace_preserves_index_and_cleans_temporary(tmp_path, catalog):
+    pack_id = install(catalog, make_pack(tmp_path))
+    before = (catalog.directory / "index.json").read_bytes()
+    with patch("os.replace", side_effect=PermissionError("index is locked")):
+        with pytest.raises(ProtocolError, match="target_catalog_access_denied"):
+            catalog.select("nrf52840", pack_id)
+    assert (catalog.directory / "index.json").read_bytes() == before
+    assert catalog.selected["name"] == "auto"
+    assert not list(catalog.directory.glob("index-*.tmp"))
+
+
+def test_denied_pack_removal_preserves_library_and_reports_storage_error(tmp_path, catalog):
+    pack_id = install(catalog, make_pack(tmp_path))
+    catalog.select("nrf52840", pack_id)
+    before = (catalog.directory / "index.json").read_bytes()
+    with patch("os.replace", side_effect=PermissionError("pack is locked")):
+        with pytest.raises(ProtocolError, match="target_catalog_access_denied"):
+            catalog.remove(pack_id)
+    assert (catalog.directory / "index.json").read_bytes() == before
+    assert catalog.selection_state()["targetPackMissing"] is False
+    assert len(catalog.snapshot()["packs"]) == 1
+    assert Path(catalog.connection_pack()).is_file()
+
+
+def test_failed_removal_index_write_restores_the_pack(tmp_path, catalog):
+    pack_id = install(catalog, make_pack(tmp_path))
+    catalog.select("nrf52840", pack_id)
+    before = (catalog.directory / "index.json").read_bytes()
+    replace = os.replace
+
+    def deny_index(source, destination):
+        if Path(destination).name == "index.json":
+            raise PermissionError("index is locked")
+        return replace(source, destination)
+
+    with patch("os.replace", side_effect=deny_index):
+        with pytest.raises(ProtocolError, match="target_catalog_access_denied"):
+            catalog.remove(pack_id)
+    assert (catalog.directory / "index.json").read_bytes() == before
+    assert Path(catalog.connection_pack()).is_file()
+    assert not list(catalog.directory.glob("removed-*.tmp"))
+
+
+def test_denied_selection_returns_rpc_error_and_keeps_backend_responsive(tmp_path, monkeypatch):
+    monkeypatch.setenv("TAL_PACKS_DIR", str(tmp_path / "library"))
+    output = io.BytesIO()
+    server = StdioServer(io.StringIO(), output)
+    try:
+        with patch("tempfile.mkstemp", side_effect=AssertionError("unbounded retry")), \
+                patch.object(Path, "open", side_effect=PermissionError("directory is not writable")):
+            server._handle_line('{"v":2,"id":1,"method":"selectTarget","params":{"name":"auto"}}')
+            server._catalog_worker.submit(lambda: None).result(timeout=2)
+        server._handle_line('{"v":2,"id":2,"method":"getState"}')
+        server._output_worker.drain()
+        replies = {message["id"]: message for line in output.getvalue().splitlines()
+                   if "id" in (message := json.loads(line))}
+        assert replies[1]["error"]["code"] == "target_catalog_access_denied"
+        assert replies[2]["result"]["state"]["targetName"] == "auto"
+    finally:
+        server.close()
 
 
 def test_builtin_catalog_is_independent_of_previous_dynamic_targets():

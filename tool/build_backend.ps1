@@ -19,6 +19,12 @@ if (-not (Test-Path -LiteralPath $PythonExecutable)) {
     throw "Backend Python was not found at $PythonExecutable. Run tool/setup_backend.ps1 first."
 }
 
+# The development interpreter can also inherit Low integrity from the checkout.
+$ManagedVirtualEnv = [IO.Path]::GetFullPath((Join-Path $BackendRoot '.venv')) + [IO.Path]::DirectorySeparatorChar
+if ([IO.Path]::GetFullPath($PythonExecutable).StartsWith($ManagedVirtualEnv, [StringComparison]::OrdinalIgnoreCase)) {
+    & (Join-Path $ProjectRoot 'windows\normalise_runtime_integrity.ps1') -Executable $PythonExecutable
+}
+
 & $PythonExecutable -m PyInstaller `
     --clean `
     --noconfirm `
@@ -37,5 +43,8 @@ if (-not (Test-Path -LiteralPath $PythonExecutable)) {
 if ($LASTEXITCODE -ne 0) {
     throw "Backend packaging failed (exit $LASTEXITCODE)."
 }
+
+& (Join-Path $ProjectRoot 'windows\normalise_runtime_integrity.ps1') `
+    -Executable (Join-Path $DistRoot 'take_a_look_backend\take_a_look_backend.exe')
 
 Write-Host "Packaged backend: $(Join-Path $DistRoot 'take_a_look_backend')"

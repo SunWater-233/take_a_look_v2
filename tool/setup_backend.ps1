@@ -14,6 +14,12 @@ $BackendPython = if ($IsWindows -or $env:OS -eq "Windows_NT") {
 
 & $Python -m venv $VirtualEnv
 if ($LASTEXITCODE -ne 0) { throw 'Unable to create the backend Python environment.' }
+if ($IsWindows -or $env:OS -eq "Windows_NT") {
+    foreach ($name in @('python.exe', 'pythonw.exe')) {
+        & (Join-Path $ProjectRoot 'windows\normalise_runtime_integrity.ps1') `
+            -Executable (Join-Path $VirtualEnv "Scripts\$name")
+    }
+}
 & $BackendPython -m pip install --upgrade pip
 if ($LASTEXITCODE -ne 0) { throw 'Unable to update pip.' }
 & $BackendPython -m pip install -e "$BackendRoot[dev]"

@@ -184,17 +184,39 @@ class TargetCatalog:
     def _commit(self, data: dict) -> None:
         if self.directory is not None:
             directory = self._workspace()
-            descriptor, temporary = tempfile.mkstemp(prefix="index-", suffix=".tmp", dir=directory)
+            temporary = directory / f"index-{uuid.uuid4().hex}.tmp"
+            created = False
             try:
-                with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                # On Windows, mkstemp retries PermissionError while os.access()
+                # reports the directory as writable (e.g. a low-integrity
+                # process). That can loop for billions of attempts. A unique,
+                # exclusively created sibling still supports atomic replacement
+                # and reports denied access immediately.
+                with temporary.open("x", encoding="utf-8") as stream:
+                    created = True
                     json.dump(data, stream, ensure_ascii=False, separators=(",", ":"))
                     stream.flush()
                     os.fsync(stream.fileno())
                 os.replace(temporary, directory / "index.json")
+            except OSError as error:
+                raise self._storage_error(error) from error
             finally:
-                Path(temporary).unlink(missing_ok=True)
+                if created:
+                    try:
+                        temporary.unlink(missing_ok=True)
+                    except OSError:
+                        pass  # Preserve the original write/replace error.
         self._data = data
         self.revision += 1
+
+    def _storage_error(self, error: OSError) -> ProtocolError:
+        denied = isinstance(error, PermissionError)
+        return ProtocolError(
+            "target_catalog_access_denied" if denied else "target_catalog_io_error",
+            "无法修改芯片库：文件被占用或当前启动环境没有写入权限。"
+            "请关闭其他应用实例并检查目录权限。" if denied else "无法保存芯片库，请检查磁盘空间和目录状态。",
+            f"目录：{self.directory}\n{error}",
+        )
 
     @property
     def selected(self) -> dict[str, object]:
@@ -326,7 +348,10 @@ class TargetCatalog:
             trash = path.with_name(f"removed-{uuid.uuid4().hex}.tmp")
             renamed = path.is_file()
             if renamed:
-                os.replace(path, trash)
+                try:
+                    os.replace(path, trash)
+                except OSError as error:
+                    raise self._storage_error(error) from error
             try:
                 self._commit(data)
             except Exception:

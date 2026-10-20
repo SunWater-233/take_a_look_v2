@@ -117,6 +117,23 @@ if(EXISTS "${TAL_BACKEND_SOURCE_DIR}/runtime/take_a_look_backend")
     DESTINATION "${CMAKE_INSTALL_PREFIX}/backend/runtime" COMPONENT Runtime)
 endif()
 
+# Build directories may inherit a Low mandatory label from a checkout. Both
+# desktop processes need normal user integrity to maintain the AppData catalog.
+foreach(TAL_RUNTIME_EXECUTABLE
+    "${CMAKE_INSTALL_PREFIX}/${BINARY_NAME}.exe"
+    "${CMAKE_INSTALL_PREFIX}/backend/runtime/take_a_look_backend/take_a_look_backend.exe")
+  install(CODE "
+    if(EXISTS \"${TAL_RUNTIME_EXECUTABLE}\")
+      execute_process(COMMAND icacls.exe \"${TAL_RUNTIME_EXECUTABLE}\"
+        /setintegritylevel M
+        OUTPUT_QUIET RESULT_VARIABLE TAL_INTEGRITY_RESULT)
+      if(NOT TAL_INTEGRITY_RESULT EQUAL 0)
+        message(FATAL_ERROR \"Unable to normalise Windows runtime integrity.\")
+      endif()
+    endif()
+    " COMPONENT Runtime)
+endforeach()
+
 # Install the AOT library on non-Debug builds only.
 install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   CONFIGURATIONS Profile;Release

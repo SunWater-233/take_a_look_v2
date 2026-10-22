@@ -330,7 +330,12 @@ class Memory:
     target = None
     probe = None
     config = None
+    fail_connect = False
+    connections = 0
     def connect(self, config):
+        self.connections += 1
+        if self.fail_connect:
+            raise RuntimeError("probe unavailable")
         self.config = config
     def disconnect(self):
         self.config = None
@@ -338,7 +343,7 @@ class Memory:
         return "running"
 
 
-def test_rpc_selection_connection_guard_and_restarting_backend(tmp_path):
+def test_rpc_selection_reconnects_and_restarting_backend(tmp_path):
     events = []
     memory = Memory()
     directory = tmp_path / "library"
@@ -351,12 +356,23 @@ def test_rpc_selection_connection_guard_and_restarting_backend(tmp_path):
         service.handle(RpcMethod.CONNECT, {})
         assert memory.config.target == "nrf52840"
         assert Path(memory.config.pack_path).name == f"{pack_id}.pack"
-        with pytest.raises(ProtocolError, match="already_connected"):
-            service.handle(RpcMethod.SELECT_TARGET, {"name": "auto"})
         with pytest.raises(ProtocolError, match="pack_in_use"):
             service.handle(RpcMethod.REMOVE_TARGET_PACK, {"packId": pack_id})
-        with pytest.raises(ProtocolError, match="already_connected"):
-            service.handle(RpcMethod.SET_CONFIG, {"targetName": "auto"})
+        service.handle(RpcMethod.SET_SAMPLING_PAUSED, {"paused": True})
+        result = service.handle(RpcMethod.SELECT_TARGET, {"name": "auto"})
+        assert result["state"]["connectionStatus"] == "connected"
+        assert result["state"]["samplingPaused"] is True
+        assert memory.config.target is None
+        assert memory.config.pack_path is None
+        assert memory.connections == 2
+        service.handle(RpcMethod.SELECT_TARGET, {"name": "auto"})
+        assert memory.connections == 2  # Reselecting does not interrupt acquisition.
+        service.handle(RpcMethod.SELECT_TARGET, {"name": "nrf52840", "packId": pack_id})
+        assert memory.config.target == "nrf52840"
+        service.handle(RpcMethod.SET_CONFIG, {"targetName": "auto"})
+        assert memory.config.target is None
+        assert service.state_snapshot()["samplingPaused"] is True
+        service.handle(RpcMethod.SELECT_TARGET, {"name": "nrf52840", "packId": pack_id})
         assert any(name is EventName.STATE and value.get("targetPackId") == pack_id for name, value in events)
     finally:
         service.close()
@@ -367,6 +383,66 @@ def test_rpc_selection_connection_guard_and_restarting_backend(tmp_path):
         assert restored.state_snapshot()["targetName"] == "nrf52840"
     finally:
         restored.close()
+
+
+def test_invalid_selection_keeps_live_connection_and_failed_reconnect_is_retryable(tmp_path):
+    memory = Memory()
+    service = BackendService(lambda *_: None, memory_backend=memory,
+                             target_directory=tmp_path / "library",
+                             recording_directory=tmp_path / "recording")
+    try:
+        service.handle(RpcMethod.CONNECT, {})
+        with pytest.raises(ProtocolError, match="unknown_target"):
+            service.handle(RpcMethod.SELECT_TARGET, {"name": "nonexistent-chip"})
+        assert memory.connections == 1
+        assert memory.config is not None
+        assert service.state_snapshot()["connectionStatus"] == "connected"
+        memory.fail_connect = True
+        with pytest.raises(ProtocolError, match="connect_failed"):
+            service.handle(RpcMethod.SELECT_TARGET, {"name": "nrf52840"})
+        state = service.state_snapshot()
+        assert state["connectionStatus"] == "disconnected"
+        assert state["targetName"] == "nrf52840"
+        memory.fail_connect = False
+        service.handle(RpcMethod.CONNECT, {})
+        assert memory.config.target == "nrf52840"
+    finally:
+        service.close()
+
+
+def test_switch_waits_for_an_inflight_connection(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    entered, release = threading.Event(), threading.Event()
+
+    class BlockingMemory(Memory):
+        def connect(self, config):
+            if not self.connections:
+                entered.set()
+                assert release.wait(3)
+            super().connect(config)
+
+    memory = BlockingMemory()
+    service = BackendService(lambda *_: None, memory_backend=memory,
+                             target_directory=tmp_path / "library",
+                             recording_directory=tmp_path / "recording")
+    try:
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            connecting = workers.submit(service.handle, RpcMethod.CONNECT, {})
+            try:
+                assert entered.wait(1)
+                switching = workers.submit(service.handle, RpcMethod.SELECT_TARGET, {"name": "nrf52840"})
+                assert not switching.done()
+            finally:
+                release.set()
+            connecting.result(timeout=3)
+            result = switching.result(timeout=3)
+        assert memory.connections == 2
+        assert memory.config.target == "nrf52840"
+        assert result["state"]["connectionStatus"] == "connected"
+    finally:
+        release.set()
+        service.close()
 
 
 def test_pack_worker_does_not_block_control_requests(tmp_path, monkeypatch):

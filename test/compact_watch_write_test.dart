@@ -1,18 +1,17 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:take_a_look_v2/src/backend/backend_client.dart';
 import 'package:take_a_look_v2/src/controller/controller.dart';
 import 'package:take_a_look_v2/src/protocol/commands.dart';
 import 'package:take_a_look_v2/src/panels/panels.dart';
 import 'package:take_a_look_v2/src/theme/theme.dart';
 import 'package:take_a_look_v2/src/ui_test/ui_test_session.dart';
 import 'package:take_a_look_v2/src/workspace/panel_types.dart';
+
+import 'watch_value_test_helpers.dart';
 
 Future<UiTestSession> mountWatchPanel(
   WidgetTester tester,
@@ -55,164 +54,142 @@ Future<UiTestSession> mountWatchPanel(
 
 void main() {
   for (final mode in TalInputMode.values) {
-    testWidgets('$mode empty editors stay quiet during live sampling', (
-      tester,
-    ) async {
-      final session = await mountWatchPanel(tester, mode);
-      final controller = session.controller;
-      final watch = controller.watches.first;
-      final key = watch.symbol.key;
-      final input = find.byKey(ValueKey('compact-watch-input-$key'));
-      final write = find.byKey(ValueKey('compact-watch-write-$key'));
-      final initialValue = watch.value;
-
-      final group = find.byKey(ValueKey('compact-watch-write-group-$key'));
-      final height = TalUiTheme(inputMode: mode).controlHeight;
-      expect(tester.getSize(group).height, height);
-      expect(tester.getSize(input).height, height);
-      expect(tester.getSize(write).height, height);
-      expect(tester.getSize(input).width, 121);
-      final selector = find.byKey(ValueKey('watch-read-mode-$key'));
-      expect(tester.getSize(selector).height, height);
-      expect(tester.widget<TalDropdown>(selector).subtle, isTrue);
-      expect(
-        tester.getTopLeft(selector).dy,
-        lessThan(tester.getTopLeft(group).dy),
-      );
-      expect(find.text('变量详情'), findsNothing);
-      expect(tester.widget<TextField>(input).controller!.text, isEmpty);
-      expect(tester.widget<TalButton>(write).onPressed, isNull);
-
-      for (var frame = 0; frame < 120; frame++) {
-        await tester.pump(const Duration(milliseconds: 16));
+    testWidgets(
+      '$mode edits a current-value snapshot while telemetry continues',
+      (tester) async {
+        final session = await mountWatchPanel(tester, mode);
+        final c = session.controller, watch = session.controller.watches.first;
+        final key = watch.symbol.key;
+        expect(find.byKey(ValueKey('compact-watch-input-$key')), findsNothing);
+        expect(find.text('输入新值'), findsNothing);
+        expect(find.byKey(ValueKey('compact-watch-write-$key')), findsNothing);
+        final input = await editWatchValue(tester, key);
+        expect(input, findsOneWidget);
+        final field = tester.widget<TextField>(input);
+        expect(field.controller!.selection.baseOffset, 0);
         expect(
-          tester.widget<TalButton>(write).variant,
-          TalButtonVariant.text,
-          reason:
-              'Automatic readback must not change the button style ($frame).',
+          field.controller!.selection.extentOffset,
+          field.controller!.text.length,
         );
-      }
-      expect(watch.value, isNot(initialValue));
-      expect(controller.watchInputDrafts.containsKey(key), isFalse);
+        final initialText = field.controller!.text;
+        for (var i = 0; i < 20; i++) {
+          await tester.pump(const Duration(milliseconds: 20));
+        }
+        expect(tester.widget<TextField>(input).controller!.text, initialText);
+        expect(c.watchInputDrafts.containsKey(key), isFalse);
+        await tester.enterText(input, '42.5');
+        await tester.testTextInput.receiveAction(TextInputAction.done);
+        await tester.pump(const Duration(milliseconds: 100));
+        expect(input, findsNothing);
+        expect(watch.value, 42.5);
+        expect(c.watchInputDrafts.containsKey(key), isFalse);
+        expect(
+          c.logs.where((e) => e.message == '模拟写入 ${watch.symbol.name} = 42.5。'),
+          hasLength(1),
+        );
+        // Reopening uses the latest readback and permits an explicit equal-value write.
+        final again = await editWatchValue(tester, key);
+        expect(tester.widget<TextField>(again).controller!.text, '42.5000000');
+        await tester.testTextInput.receiveAction(TextInputAction.done);
+        await tester.pump(const Duration(milliseconds: 100));
+        expect(
+          c.logs.where((e) => e.message == '模拟写入 ${watch.symbol.name} = 42.5。'),
+          hasLength(2),
+        );
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+        session.dispose();
+      },
+    );
 
-      // Merely focusing an empty editor does not create a write draft.
-      await tester.tap(input);
+    testWidgets('$mode Escape cancels and blur never writes', (tester) async {
+      final session = await mountWatchPanel(tester, mode);
+      final c = session.controller,
+          key = session.controller.watches.first.symbol.key;
+      var input = await editWatchValue(tester, key);
+      await tester.enterText(input, '123');
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pump();
-      final focusedText = tester.widget<TextField>(input).controller!.text;
-      for (var frame = 0; frame < 30; frame++) {
-        await tester.pump(const Duration(milliseconds: 16));
-        expect(tester.widget<TextField>(input).controller!.text, focusedText);
-        expect(tester.widget<TalButton>(write).variant, TalButtonVariant.text);
-      }
-      expect(controller.watchInputDrafts.containsKey(key), isFalse);
-      expect(tester.takeException(), isNull);
+      expect(input, findsNothing);
+      expect(c.watchInputDrafts.containsKey(key), isFalse);
+      input = await editWatchValue(tester, key);
+      await tester.enterText(input, '456');
+      await tester.tap(find.byKey(const ValueKey('watch-member-search')));
+      await tester.pump();
+      expect(input, findsNothing);
+      expect(c.watchInputDrafts[key], '456');
+      expect(c.logs.where((e) => e.message.startsWith('模拟写入')), isEmpty);
+      input = await editWatchValue(tester, key);
+      expect(tester.widget<TextField>(input).controller!.text, '456');
       await tester.pumpWidget(const SizedBox.shrink());
       session.dispose();
     });
 
-    testWidgets('$mode preserves drafts and allows writing an equal value', (
+    testWidgets('$mode failed writes keep the inline draft for retry', (
       tester,
     ) async {
       final session = await mountWatchPanel(tester, mode);
-      final controller = session.controller;
-      final watch = controller.watches.first;
-      final key = watch.symbol.key;
-      final input = find.byKey(ValueKey('compact-watch-input-$key'));
-      final write = find.byKey(ValueKey('compact-watch-write-$key'));
-
-      await tester.enterText(input, '42.5');
-      tester.widget<TextField>(input).focusNode!.unfocus();
-      for (var frame = 0; frame < 30; frame++) {
-        await tester.pump(const Duration(milliseconds: 16));
-        expect(tester.widget<TextField>(input).controller!.text, '42.5');
-        expect(
-          tester.widget<TalButton>(write).variant,
-          TalButtonVariant.filled,
-        );
-      }
-      expect(controller.watchInputDrafts[key], '42.5');
-      final writeMessage = '模拟写入 ${watch.symbol.name} = 42.5。';
-      int writeCount() => controller.logs
-          .where((entry) => entry.message == writeMessage)
-          .length;
-      expect(writeCount(), 0);
-      await tester.tap(write);
-      await tester.pump(const Duration(milliseconds: 100));
-      expect(watch.value, 42.5);
-      expect(writeCount(), 1);
-      expect(tester.widget<TalButton>(write).variant, TalButtonVariant.text);
-      expect(
-        find.descendant(of: write, matching: find.text('已写入')),
-        findsOneWidget,
-      );
-      expect(tester.widget<TalButton>(write).onPressed, isNotNull);
-
-      // Matching readback does not suppress another explicit write command.
-      await tester.tap(write);
-      await tester.pump(const Duration(milliseconds: 100));
-      expect(writeCount(), 2);
-      expect(watch.value, 42.5);
-      expect(tester.widget<TalButton>(write).variant, TalButtonVariant.text);
-
-      await tester.enterText(input, '');
-      await tester.pump();
-      expect(tester.widget<TalButton>(write).variant, TalButtonVariant.text);
-      expect(tester.widget<TalButton>(write).onPressed, isNull);
-      expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const SizedBox.shrink());
-      session.dispose();
-    });
-    testWidgets('$mode failed writes keep drafts and Escape clears them', (
-      tester,
-    ) async {
-      final session = await mountWatchPanel(tester, mode);
-      final controller = session.controller;
-      final key = controller.watches.first.symbol.key;
-      final input = find.byKey(ValueKey('compact-watch-input-$key'));
-      final write = find.byKey(ValueKey('compact-watch-write-$key'));
+      final key = session.controller.watches.first.symbol.key;
+      final input = await editWatchValue(tester, key);
       await tester.enterText(input, 'bad-value');
-      await tester.pump();
-      await tester.tap(write);
+      await tester.testTextInput.receiveAction(TextInputAction.done);
       await tester.pump();
       expect(
         find.byKey(ValueKey('compact-watch-write-error-$key')),
         findsOneWidget,
       );
       expect(tester.widget<TextField>(input).controller!.text, 'bad-value');
-      expect(controller.watchInputDrafts[key], 'bad-value');
-      expect(
-        find.descendant(of: write, matching: find.text('已写入')),
-        findsNothing,
-      );
-      await tester.tap(input);
-      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-      await tester.pump();
-      expect(tester.widget<TextField>(input).controller!.text, isEmpty);
-      expect(
-        find.byKey(ValueKey('compact-watch-write-error-$key')),
-        findsNothing,
-      );
-      expect(tester.widget<TalButton>(write).onPressed, isNull);
+      expect(session.controller.watchInputDrafts[key], 'bad-value');
       await tester.enterText(input, '3.5');
-      controller.applySnapshot({'connectionStatus': 'disconnected'});
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(input, findsNothing);
+      expect(session.controller.watches.first.value, 3.5);
+      await tester.pumpWidget(const SizedBox.shrink());
+      session.dispose();
+    });
+
+    testWidgets('$mode pinned and ordinary cells share readback', (
+      tester,
+    ) async {
+      final session = await mountWatchPanel(tester, mode);
+      final c = session.controller,
+          key = session.controller.watches.first.symbol.key;
+      c.setWatchPinned(key, true);
       await tester.pump();
-      expect(tester.widget<TalButton>(write).onPressed, isNull);
-      expect(controller.watchInputDrafts[key], '3.5');
-      expect(tester.takeException(), isNull);
+      final input = await editWatchValue(tester, key, pinned: true);
+      await tester.enterText(input, '9.25');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(
+        tester
+            .widget<Text>(find.byKey(ValueKey('pinned-watch-value-$key')))
+            .data,
+        startsWith('9.2500'),
+      );
+      expect(
+        tester
+            .widget<Text>(find.byKey(ValueKey('compact-watch-value-$key')))
+            .data,
+        startsWith('9.2500'),
+      );
       await tester.pumpWidget(const SizedBox.shrink());
       session.dispose();
     });
 
     for (final width in [240.0, 280.0, 320.0]) {
-      testWidgets('$mode watch layout fits a $width dock', (tester) async {
+      testWidgets('$mode inline editing fits a $width dock', (tester) async {
         final session = await mountWatchPanel(tester, mode, width: width);
-        await tester.pump();
         final key = session.controller.watches.first.symbol.key;
-        final group = find.byKey(ValueKey('compact-watch-write-group-$key'));
+        final input = await editWatchValue(tester, key);
         final row = find.byKey(ValueKey('compact-watch-$key'));
         expect(
-          tester.getRect(group).right,
+          tester.getRect(input).right,
           lessThanOrEqualTo(tester.getRect(row).right),
+        );
+        expect(
+          tester.getSize(input).height,
+          lessThanOrEqualTo(tester.getSize(row).height),
         );
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox.shrink());
@@ -220,117 +197,103 @@ void main() {
       });
     }
   }
+
   testWidgets(
-    'write feedback waits for acknowledgement and ignores a superseded draft',
+    'Enter waits for acknowledgement, suppresses duplicates and preserves newer edits',
     (tester) async {
       final pending = Completer<void>();
-      final controller = TakeALookController(
+      var writes = 0;
+      final c = TakeALookController(
         backendCommand: (command, args) async {
-          if (command == ControllerCommand.writeWatch) await pending.future;
+          if (command == ControllerCommand.writeWatch) {
+            writes++;
+            await pending.future;
+          }
         },
       )..loadDemoSymbols();
-      controller.selectSymbols([controller.symbols.first.key]);
-      controller.addSelectedToWatch();
-      controller.applySnapshot({'connectionStatus': 'connected'});
-      final key = controller.watches.single.symbol.key;
+      c.selectSymbols([c.symbols.first.key]);
+      c.addSelectedToWatch();
+      c.applySnapshot({'connectionStatus': 'connected'});
+      final key = c.watches.single.symbol.key;
+
       await tester.pumpWidget(
         MaterialApp(
           theme: buildTalTheme(),
           home: Scaffold(
-            body: SizedBox(
-              width: 360,
-              height: 400,
-              child: buildWorkspacePanelBody(
-                WorkspacePanelId.watch,
-                controller,
-                workbench: true,
-              ),
+            body: buildWorkspacePanelBody(
+              WorkspacePanelId.watch,
+              c,
+              workbench: true,
             ),
           ),
         ),
       );
-      final input = find.byKey(ValueKey('compact-watch-input-$key'));
-      final write = find.byKey(ValueKey('compact-watch-write-$key'));
+      final input = await editWatchValue(tester, key);
       await tester.enterText(input, '5');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
       await tester.pump();
-      await tester.tap(write);
-      await tester.pump();
-      expect(
-        find.descendant(of: write, matching: find.text('写入中')),
-        findsOneWidget,
-      );
-      expect(tester.widget<TalButton>(write).onPressed, isNull);
+      expect(input, findsOneWidget);
+      expect(writes, 1);
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      expect(writes, 1);
       await tester.enterText(input, '6');
       pending.complete();
       await tester.pump();
       expect(tester.widget<TextField>(input).controller!.text, '6');
-      expect(
-        find.descendant(of: write, matching: find.text('已写入')),
-        findsNothing,
-      );
-      expect(tester.widget<TalButton>(write).onPressed, isNotNull);
+      expect(c.watchInputDrafts[key], '6');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
+      expect(writes, 2);
+      expect(input, findsNothing);
       await tester.pumpWidget(const SizedBox.shrink());
-      controller.dispose();
+      c.dispose();
     },
   );
 
-  test('write failures are returned to local and detached callers', () async {
-    final controller = TakeALookController(
-      backendCommand: (command, args) async {
-        if (command == ControllerCommand.writeWatch) {
-          throw const BackendException('write_failed', '回读失败。');
-        }
-      },
-    );
-    addTearDown(controller.dispose);
-    expect(await controller.writeWatch('key', '12'), isFalse);
-    expect(controller.watchInputDrafts['key'], '12');
-    await expectLater(
-      controller.handleCommand(ControllerCommand.writeWatch, {
-        'key': 'key',
-        'value': '12',
-      }),
-      throwsStateError,
-    );
-  });
-  const previewDirectory = String.fromEnvironment('TAL_WATCH_PREVIEW_DIR');
-  if (previewDirectory.isNotEmpty) {
-    testWidgets('render watch panel previews with production fonts', (
-      tester,
-    ) async {
-      for (final font in [
-        ('JetBrains Mono', 'assets/fonts/JetBrainsMono-Regular.ttf'),
-        ('MiSans', 'assets/fonts/MiSans-Regular.otf'),
-        ('MaterialIcons', 'fonts/MaterialIcons-Regular.otf'),
-      ]) {
-        final loader = FontLoader(font.$1)..addFont(rootBundle.load(font.$2));
-        await loader.load();
-      }
-      for (final mode in TalInputMode.values) {
-        final session = await mountWatchPanel(tester, mode, width: 392);
-        final key = session.controller.watches.first.symbol.key;
-        await tester.enterText(
-          find.byKey(ValueKey('compact-watch-input-$key')),
-          '1.5000',
-        );
-        await tester.pump();
-        FocusManager.instance.primaryFocus?.unfocus();
-        await tester.pump();
-        final boundary = tester.renderObject<RenderRepaintBoundary>(
-          find.byKey(const ValueKey('watch-preview-boundary')),
-        );
-        await tester.runAsync(() async {
-          final image = await boundary.toImage(pixelRatio: 1.5);
-          final data = await image.toByteData(format: ui.ImageByteFormat.png);
-          Directory(previewDirectory).createSync(recursive: true);
-          File(
-            '$previewDirectory/watch-panel-${mode.name}.png',
-          ).writeAsBytesSync(data!.buffer.asUint8List());
-          image.dispose();
-        });
-        await tester.pumpWidget(const SizedBox.shrink());
-        session.dispose();
-      }
+  testWidgets('read-only and disconnected variables never enter editing', (
+    tester,
+  ) async {
+    final c = TakeALookController(backendCommand: (_, _) async {});
+
+    c.applySnapshot({
+      'connectionStatus': 'connected',
+      'symbols': [
+        {
+          'key': 'read-only',
+          'source': 'test.c',
+          'name': 'constant',
+          'address': 0x20000000,
+          'type': 'float',
+          'size': 4,
+          'writable': false,
+        },
+      ],
     });
-  }
+    c.selectSymbols(['read-only']);
+    c.addSelectedToWatch();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTalTheme(),
+        home: Scaffold(
+          body: buildWorkspacePanelBody(
+            WorkspacePanelId.watch,
+            c,
+            workbench: true,
+          ),
+        ),
+      ),
+    );
+    expect(await editWatchValue(tester, 'read-only'), findsNothing);
+    c.applySnapshot({
+      'symbols': [for (final s in demoSymbols) s.toJson()],
+      'watches': [],
+    });
+    c.selectSymbols([demoSymbols.first.key]);
+    c.addSelectedToWatch();
+    c.applySnapshot({'connectionStatus': 'disconnected'});
+    await tester.pump();
+    expect(await editWatchValue(tester, demoSymbols.first.key), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+    c.dispose();
+  });
 }

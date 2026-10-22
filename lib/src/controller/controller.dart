@@ -125,6 +125,8 @@ class TakeALookController extends ChangeNotifier {
   final Map<String, String> watchInputDrafts = {};
   String? compactWatchSelection;
   final Set<String> compactExpandedWatches = {};
+  String watchSearchQuery = '';
+  final Map<String, Set<String>> _watchMonitorScopes = {};
   ({String path, int line})? sourceLocationRequest;
   int _analysisDataRevision = 0;
   final Set<String> _visibleSourceViews = <String>{};
@@ -376,6 +378,7 @@ class TakeALookController extends ChangeNotifier {
               'sampling': watch.samplingEnabled,
               'readMode': watch.readMode.name,
               'monitorRateHz': watch.monitorRateHz,
+              'monitorEnabled': isWatchMonitorActive(watch),
               'plotted':
                   !_removedWatchKeys.contains(watch.symbol.key) &&
                   watch.plotted,
@@ -409,6 +412,10 @@ class TakeALookController extends ChangeNotifier {
     for (var index = 0; index < acquiring.length; index += 1) {
       final watch = acquiring[index];
       if (watch.readMode == WatchReadMode.manual) continue;
+      if (watch.readMode == WatchReadMode.monitor &&
+          !isWatchMonitorActive(watch)) {
+        continue;
+      }
       if (watch.samplingEnabled && samplingPaused) continue;
       if (watch.readMode == WatchReadMode.monitor &&
           watch.updatedAtMs != null &&

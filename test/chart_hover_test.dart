@@ -92,6 +92,7 @@ TestRecordingCanvas recordPainter(TelemetryPainter painter, Size size) {
     TelemetryInspectionPainter(
       painter.controller,
       hoverPosition: painter.hoverPosition!,
+      hoverTracker: painter.hoverTracker,
       inspectionAnchorY: painter.inspectionAnchorY,
     ).paint(canvas, size);
   }
@@ -167,6 +168,75 @@ void main() {
     expect(hit.sample, const Offset(8, 8));
     expect(hit.position, pixelFor(viewport, hit.sample));
     expect(hit.valueText, 't = 8 s\n采样值 = 8');
+  });
+
+  test('hover acquires nearby curves and uses a wider release radius', () {
+    final controller = controllerWithSeries({
+      'signal': [const Offset(0, 3), const Offset(10, 3)],
+    });
+    addTearDown(controller.dispose);
+    final viewport = mappingFor(controller);
+    final series = telemetryPlotSeries(controller, viewport);
+    final tracker = TelemetryHoverTracker();
+    final onCurve = pixelFor(viewport, const Offset(5, 3));
+    TelemetryHoverHit? hover(double distance) => inspectTelemetrySeries(
+      series,
+      viewport,
+      position: onCurve + Offset(0, distance),
+      hoverTracker: tracker,
+    );
+
+    expect(hover(15), isNull);
+    expect(hover(10)!.series.watch.symbol.key, 'signal');
+    for (final distance in [13.0, 11.0, 19.0, 13.0]) {
+      expect(hover(distance)!.sample.dy, 3);
+    }
+    expect(hover(21), isNull);
+    expect(hover(15), isNull);
+    expect(hover(10), isNotNull);
+    tracker.clear();
+    expect(hover(15), isNull);
+    expect(hover(0), isNotNull);
+    expect(tracker.hitTest(series, viewport, null), isNull);
+    expect(hover(15), isNull);
+    expect(hover(0), isNotNull);
+    expect(tracker.hitTest(series, viewport, Offset.zero), isNull);
+    expect(hover(15), isNull);
+  });
+
+  test('retained hover switches to a nearby curve and respects selection', () {
+    final controller = controllerWithSeries({
+      'first': [const Offset(0, 3), const Offset(10, 3)],
+      'second': [const Offset(0, 4), const Offset(10, 4)],
+    });
+    addTearDown(controller.dispose);
+    final viewport = mappingFor(controller);
+    final series = telemetryPlotSeries(controller, viewport);
+    final tracker = TelemetryHoverTracker();
+    final first = pixelFor(viewport, const Offset(5, 3));
+    final second = pixelFor(viewport, const Offset(5, 4));
+    expect(
+      tracker.hitTest(series, viewport, first)!.series.watch.symbol.key,
+      'first',
+    );
+    expect(
+      tracker.hitTest(series, viewport, second)!.series.watch.symbol.key,
+      'second',
+    );
+    expect(
+      inspectTelemetrySeries(
+        series,
+        viewport,
+        position: second,
+        highlightedWatchKey: 'first',
+        hoverTracker: tracker,
+      )!.series.watch.symbol.key,
+      'first',
+    );
+    expect(
+      tracker.hitTest(series, viewport, second + const Offset(0, 15)),
+      isNull,
+    );
   });
 
   test('overlaps use the first curve; distinct curves use the nearest hit', () {
@@ -408,6 +478,70 @@ void main() {
       ),
       isEmpty,
     );
+    await mouse.removePointer();
+    controller.dispose();
+  });
+
+  testWidgets('live hover survives small curve movements and widget rebuilds', (
+    tester,
+  ) async {
+    final controller = controllerWithSeries({
+      'signal': [const Offset(0, 3), const Offset(10, 3)],
+    });
+    final chart = await pumpChart(tester, controller);
+    final size = tester.getSize(chart);
+    final viewport = mappingFor(controller, size);
+    final pointer = pixelFor(viewport, const Offset(5, 3));
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer();
+    await mouse.moveTo(tester.getTopLeft(chart) + pointer);
+    await tester.pump();
+
+    List<Paint> inspectionPaints() {
+      final inspection = find.byWidgetPredicate(
+        (widget) =>
+            widget is CustomPaint &&
+            widget.painter is TelemetryInspectionPainter,
+      );
+      final canvas = TestRecordingCanvas();
+      tester.widget<CustomPaint>(inspection).painter!.paint(canvas, size);
+      return curvePaints(canvas);
+    }
+
+    expect(inspectionPaints(), hasLength(2));
+    for (final distance in [15.0, 11.0, 19.0, 13.0]) {
+      final value = 3 + distance / viewport.plot.height * viewport.ySpan;
+      updateSamples(controller, {
+        'signal': [Offset(0, value), Offset(10, value)],
+      });
+      await tester.pump();
+      expect(inspectionPaints(), hasLength(2));
+    }
+    await pumpChart(tester, controller);
+    expect(inspectionPaints(), hasLength(2));
+
+    // Exit and return before painting: the previous hover must already be gone.
+    await mouse.moveTo(const Offset(790, 590));
+    await mouse.moveTo(tester.getTopLeft(chart) + pointer);
+    await tester.pump();
+    expect(inspectionPaints(), isEmpty);
+
+    final value = 3 + 10 / viewport.plot.height * viewport.ySpan;
+    updateSamples(controller, {
+      'signal': [Offset(0, value), Offset(10, value)],
+    });
+    await tester.pump();
+    expect(inspectionPaints(), hasLength(2));
+    controller.toggleWatchPlot('signal', false);
+    await tester.pump();
+    expect(inspectionPaints(), isEmpty);
+    controller.toggleWatchPlot('signal', true);
+    final farValue = 3 + 15 / viewport.plot.height * viewport.ySpan;
+    updateSamples(controller, {
+      'signal': [Offset(0, farValue), Offset(10, farValue)],
+    });
+    await tester.pump();
+    expect(inspectionPaints(), isEmpty);
     await mouse.removePointer();
     controller.dispose();
   });

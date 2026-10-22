@@ -12,10 +12,6 @@ extension TakeALookControllerTargets on TakeALookController {
     String operation, [
     JsonObject arguments = const {},
   ]) async {
-    if (operation == 'selectTarget' &&
-        connectionStatus != ConnectionStatus.disconnected) {
-      throw const BackendException('already_connected', '请先断开连接，再更换目标芯片。');
-    }
     final request = targetCatalogRequest;
     if (request == null) {
       throw const BackendException('backend_unavailable', '请启动本机硬件后端后再管理芯片。');

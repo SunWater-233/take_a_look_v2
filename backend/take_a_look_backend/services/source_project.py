@@ -130,9 +130,11 @@ class SourceProjects:
 def firmware_file(config: dict[str, object]) -> Path:
     text = str(config.get("firmwarePath", "")).strip()
     if not text:
-        raise ProtocolError("firmware_required", "请在工程设置中选择下载用的 ELF / AXF 文件。")
+        raise ProtocolError("firmware_required", "请打开 ELF / AXF 文件，或在工程设置中指定下载文件。")
     path = Path(text).expanduser()
     if not path.is_absolute():
+        if not str(config["sourceRoot"]).strip():
+            raise ProtocolError("source_root_required", "相对固件路径需要设置工程源码根目录。")
         path = Path(str(config["sourceRoot"])) / path
     path = path.resolve()
     if path.suffix.lower() not in {".elf", ".axf"} or not path.is_file():

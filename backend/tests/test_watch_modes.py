@@ -45,6 +45,25 @@ def test_fast_reads_exclude_monitors_and_manual_variables(rig):
     assert not any(name is EventName.WATCH_VALUES for name, _ in events)
 
 
+def test_collapsed_monitors_stop_polling_without_changing_mode_or_capture(rig):
+    service, memory, symbols, _ = rig
+    hidden = symbols['watch'].key
+    def configure(enabled):
+        service.handle(RpcMethod.SET_WATCHES, {'watches': [
+            {'key': w.symbol.key, 'readMode': w.mode,
+             'monitorEnabled': enabled if w.symbol.key == hidden else True}
+            for w in service._watches.values()]})
+    configure(False)
+    service._poll_monitors_locked(10)
+    assert hidden not in memory.values
+    assert service._watches[hidden].mode == 'monitor'
+    assert symbols['fast'].key in service._read_memory_locked(False, 'normal')
+    configure(True)
+    service._poll_monitors_locked(11)
+    assert hidden in memory.values
+    assert service._recording.sample_count == 0
+
+
 def test_monitor_cadence_and_overrides_continue_while_capture_is_paused(rig):
     service, memory, symbols, events = rig
     service.handle(RpcMethod.SET_SAMPLING_PAUSED, {'paused': True})

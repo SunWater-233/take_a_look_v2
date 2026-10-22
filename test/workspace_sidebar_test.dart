@@ -15,6 +15,7 @@ import 'package:take_a_look_v2/src/workspace/window_sync.dart';
 import 'package:take_a_look_v2/src/workspace/workspace.dart';
 import 'package:take_a_look_v2/src/workspace/workspace_layout.dart';
 import 'package:take_a_look_v2/src/workspace/workspace_widgets.dart';
+import 'watch_value_test_helpers.dart';
 
 class _Workbench {
   _Workbench(this.tester, {bool detachedEvents = false})
@@ -438,7 +439,11 @@ void main() {
       }
       await bench.move(WorkspacePanelId.watch, '移回工作区');
       expect(find.byKey(const ValueKey('watch-open-full-table')), findsNothing);
-      expect(find.text('绘制颜色'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('watch-member-details')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('watch-member-search')), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );
@@ -587,6 +592,7 @@ void main() {
         'compact-watch-input-${bench.controller.watches.single.symbol.key}',
       ),
     );
+    await editWatchValue(tester, bench.controller.watches.single.symbol.key);
     await tester.enterText(input, '123.75');
     final main = find.byKey(const ValueKey('workspace-group-plot'));
     final left = find.byKey(const ValueKey('workspace-group-resources'));
@@ -637,7 +643,15 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(bench.sidebarExpanded(WorkspaceSidebarSide.right), isTrue);
-    expect(tester.widget<TextField>(input).controller!.text, '123.75');
+    expect(
+      bench.controller.watchInputDrafts[bench
+          .controller
+          .watches
+          .single
+          .symbol
+          .key],
+      '123.75',
+    );
     expect(tester.takeException(), isNull);
     await bench.dispose();
   });

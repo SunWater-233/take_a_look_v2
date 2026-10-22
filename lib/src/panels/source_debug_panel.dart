@@ -939,95 +939,106 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
 
   @override
   Widget build(BuildContext context) {
-    return PanelKeyboardListener(
-      focusNode: _panelFocusNode,
-      autofocus: true,
-      onKeyEvent: _handlePanelKeyEvent,
-      onWindowKeyEvent: _handleSourceCommand,
-      child: Listener(
-        onPointerDown: (_) => _panelFocusNode.requestFocus(),
-        child: DropTarget(
-          key: const ValueKey('source-file-drop-target'),
-          onDragEntered: (_) {
-            if (mounted) setState(() => _draggingFiles = true);
-          },
-          onDragExited: (_) {
-            if (mounted) setState(() => _draggingFiles = false);
-          },
-          onDragDone: (details) {
-            if (TalDragPreview.debugNativeDrag) {
-              debugPrint(
-                'Source file drop candidates: ${details.files.length}',
+    return DragTarget<_SourceFileDragData>(
+      key: const ValueKey('source-symbol-drop-target'),
+      onWillAcceptWithDetails: (_) => !widget.readOnlyPreview && widget.visible,
+      onAcceptWithDetails: (details) =>
+          _openSource(controller.canonicalSourcePath(details.data.path)),
+      builder: (context, candidateData, rejectedData) => PanelKeyboardListener(
+        focusNode: _panelFocusNode,
+        autofocus: true,
+        onKeyEvent: _handlePanelKeyEvent,
+        onWindowKeyEvent: _handleSourceCommand,
+        child: Listener(
+          onPointerDown: (_) => _panelFocusNode.requestFocus(),
+          child: DropTarget(
+            key: const ValueKey('source-file-drop-target'),
+            onDragEntered: (_) {
+              if (mounted) setState(() => _draggingFiles = true);
+            },
+            onDragExited: (_) {
+              if (mounted) setState(() => _draggingFiles = false);
+            },
+            onDragDone: (details) {
+              if (TalDragPreview.debugNativeDrag) {
+                debugPrint(
+                  'Source file drop candidates: ${details.files.length}',
+                );
+              }
+              unawaited(
+                _openDroppedFiles(details.files.map((file) => file.path)),
               );
-            }
-            unawaited(
-              _openDroppedFiles(details.files.map((file) => file.path)),
-            );
-          },
-          child: Stack(
-            children: [
-              LayoutBuilder(
-                builder: (context, constraints) => Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _SourceBuildToolbar(
-                      controller: controller,
-                      compact: constraints.maxHeight < 260,
-                    ),
-                    AnimatedBuilder(
-                      animation: controller.sourceToolsChanges,
-                      builder: (context, _) => _buildToolbar(),
-                    ),
-                    if (_searchVisible) _buildSearchArea(),
-                    const Divider(height: 1, color: TalColors.borderSoft),
-                    Expanded(child: _buildBody()),
-                    _buildRegisterStrip(),
-                    if (!widget.externalOutput)
-                      _SourceTaskOutput(
+            },
+            child: Stack(
+              children: [
+                LayoutBuilder(
+                  builder: (context, constraints) => Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _SourceBuildToolbar(
                         controller: controller,
-                        maxHeight: constraints.maxHeight < 240
-                            ? 34
-                            : (constraints.maxHeight * .32).clamp(85.0, 264.0),
-                        onOpenLocation: (path, line) {
-                          _sourceDocuments.invalidate(path);
-                          _openSource(path);
-                          unawaited(_loadSource(path, revealLine: line));
-                        },
+                        compact: constraints.maxHeight < 260,
                       ),
-                  ],
+                      AnimatedBuilder(
+                        animation: controller.sourceToolsChanges,
+                        builder: (context, _) => _buildToolbar(),
+                      ),
+                      if (_searchVisible) _buildSearchArea(),
+                      const Divider(height: 1, color: TalColors.borderSoft),
+                      Expanded(child: _buildBody()),
+                      _buildRegisterStrip(),
+                      if (!widget.externalOutput)
+                        _SourceTaskOutput(
+                          controller: controller,
+                          maxHeight: constraints.maxHeight < 240
+                              ? 34
+                              : (constraints.maxHeight * .32).clamp(
+                                  85.0,
+                                  264.0,
+                                ),
+                          onOpenLocation: (path, line) {
+                            _sourceDocuments.invalidate(path);
+                            _openSource(path);
+                            unawaited(_loadSource(path, revealLine: line));
+                          },
+                        ),
+                    ],
+                  ),
                 ),
-              ),
-              if (_draggingFiles)
-                Positioned.fill(
-                  child: IgnorePointer(
-                    child: Container(
-                      key: const ValueKey('source-file-drop-overlay'),
-                      decoration: BoxDecoration(
-                        color: TalColors.accent.withValues(alpha: 0.08),
-                        border: Border.all(color: TalColors.accent, width: 2),
-                      ),
-                      child: const Center(
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: TalColors.surfaceAlt,
-                            borderRadius: BorderRadius.all(Radius.circular(6)),
-                          ),
-                          child: Padding(
-                            padding: EdgeInsets.symmetric(
-                              horizontal: 18,
-                              vertical: 10,
+                if (_draggingFiles || candidateData.isNotEmpty)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: Container(
+                        key: const ValueKey('source-file-drop-overlay'),
+                        decoration: BoxDecoration(
+                          color: TalColors.accent.withValues(alpha: 0.08),
+                          border: Border.all(color: TalColors.accent, width: 2),
+                        ),
+                        child: const Center(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: TalColors.surfaceAlt,
+                              borderRadius: BorderRadius.all(
+                                Radius.circular(6),
+                              ),
                             ),
-                            child: Text(
-                              '释放以打开文件',
-                              style: TextStyle(color: TalColors.text),
+                            child: Padding(
+                              padding: EdgeInsets.symmetric(
+                                horizontal: 18,
+                                vertical: 10,
+                              ),
+                              child: Text(
+                                '释放以打开文件',
+                                style: TextStyle(color: TalColors.text),
+                              ),
                             ),
                           ),
                         ),
                       ),
                     ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

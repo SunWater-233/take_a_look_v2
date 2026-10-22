@@ -48,6 +48,7 @@ class CatalogHarness {
   final recent = <String>[];
   int revision = 0;
   bool failInspect = false;
+  bool failList = false;
   bool denyStorage = false;
   Completer<JsonObject>? inspection;
 
@@ -62,6 +63,9 @@ class CatalogHarness {
     }
     switch (operation) {
       case 'listTargets':
+        if (failList) {
+          throw const BackendException('catalog_failed', '芯片库加载失败。');
+        }
         return {
           'targets': targets,
           'packs': packs,
@@ -240,10 +244,12 @@ void main() {
       expect(replica.targetPartNumber, 'STM32H723VGTx');
       expect(replica.targetCatalogRevision, main.targetCatalogRevision);
       main.connectionStatus = ConnectionStatus.connected;
-      await expectLater(
-        main.requestTargetCatalog('selectTarget', {'name': 'auto'}),
-        throwsA(isA<BackendException>()),
-      );
+      await main.requestTargetCatalog('selectTarget', {
+        'name': 'auto',
+        'packId': '',
+      });
+      expect(main.targetName, 'auto');
+      expect(main.connectionStatus, ConnectionStatus.connected);
     },
   );
 
@@ -274,6 +280,24 @@ void main() {
     await tester.pumpAndSettle();
     expect(controller.targetName, 'auto');
     expect(harness.calls.where((call) => call.$1 == 'selectTarget'), isEmpty);
+  });
+
+  testWidgets('retrying the catalog clears the previous load error', (
+    tester,
+  ) async {
+    final harness = CatalogHarness()..failList = true;
+    final controller = harness.controller();
+    addTearDown(controller.dispose);
+    await openDialog(tester, controller);
+    expect(find.text('芯片库加载失败。'), findsOneWidget);
+    harness.failList = false;
+    await tester.tap(find.text('重新加载芯片库'));
+    await tester.pumpAndSettle();
+    expect(find.text('芯片库加载失败。'), findsNothing);
+    expect(
+      find.byKey(const ValueKey('target-chip-builtin:nrf52840')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('import retains search and Enter saves the exact pack identity', (
@@ -320,7 +344,7 @@ void main() {
   });
 
   testWidgets(
-    'connected targets can browse packs but cannot select or delete the active pack',
+    'connected targets can switch chips but cannot delete the active pack',
     (tester) async {
       final harness = CatalogHarness();
       await harness.request('importTargetPack', {});
@@ -336,8 +360,9 @@ void main() {
         tester
             .widget<TalButton>(find.byKey(const ValueKey('use-target-chip')))
             .onPressed,
-        isNull,
+        isNotNull,
       );
+      expect(find.textContaining('更换芯片后将自动重新连接'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('manage-target-packs')));
       await tester.pumpAndSettle();
       expect(find.textContaining('正在使用'), findsOneWidget);
@@ -349,6 +374,18 @@ void main() {
             .onPressed,
         isNull,
       );
+      await tester.tap(find.byKey(const ValueKey('manage-target-packs')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('target-search')),
+        'Nordic',
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('use-target-chip')));
+      await tester.pumpAndSettle();
+      expect(find.byType(TargetChipDialog), findsNothing);
+      expect(controller.targetName, 'nrf52840');
+      expect(controller.connectionStatus, ConnectionStatus.connected);
     },
   );
 

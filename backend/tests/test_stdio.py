@@ -14,6 +14,22 @@ from take_a_look_backend.protocol import EventName
 
 
 class StdioIntegrationTests(unittest.TestCase):
+    def test_rejected_requests_keep_their_ids_and_later_requests_work(self) -> None:
+        output = io.BytesIO()
+        server = StdioServer(io.StringIO(), output)
+        try:
+            server._handle_line('{"v":2,"id":41,"method":"futureMethod"}')
+            server._handle_line('{"v":2,"id":42,"method":"getState","params":[]}')
+            server._handle_line('{"v":2,"id":43,"method":"getState"}')
+            server._output_worker.drain()
+            replies = {item["id"]: item for line in output.getvalue().splitlines()
+                       if "id" in (item := json.loads(line))}
+            self.assertEqual(replies[41]["error"]["code"], "unknown_method")
+            self.assertEqual(replies[42]["error"]["code"], "invalid_request")
+            self.assertIn("state", replies[43]["result"])
+        finally:
+            server.close()
+
     def test_batch_rpc_reaches_typed_writes_and_returns_readback_deltas(self) -> None:
         import tempfile
         from take_a_look_backend.backends.typed_memory import TypedMemoryBackend

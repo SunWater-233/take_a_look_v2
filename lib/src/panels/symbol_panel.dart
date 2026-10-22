@@ -2,6 +2,12 @@ part of 'panels.dart';
 
 enum _SymbolTreeNodeKind { folder, sourceFile, symbol }
 
+class _SourceFileDragData {
+  const _SourceFileDragData(this.path);
+
+  final String path;
+}
+
 class _SymbolTreeNode {
   _SymbolTreeNode({required this.key, required this.label, required this.kind});
 
@@ -35,10 +41,15 @@ final Expando<_SymbolTreeCache> _symbolTreeCaches = Expando<_SymbolTreeCache>(
 );
 
 class _SymbolPanel extends StatefulWidget {
-  const _SymbolPanel({required this.controller, this.defaultMonitor = false});
+  const _SymbolPanel({
+    required this.controller,
+    this.defaultMonitor = false,
+    this.onShowSource,
+  });
 
   final TakeALookController controller;
   final bool defaultMonitor;
+  final VoidCallback? onShowSource;
 
   @override
   State<_SymbolPanel> createState() => _SymbolPanelState();
@@ -372,6 +383,16 @@ class _SymbolPanelState extends State<_SymbolPanel> {
         now.difference(_lastTapAt!) < const Duration(milliseconds: 400);
     _lastTappedNodeKey = isDoubleTap ? null : node.key;
     _lastTapAt = isDoubleTap ? null : now;
+
+    if (isDoubleTap &&
+        node.kind == _SymbolTreeNodeKind.sourceFile &&
+        node.sourcePath != null) {
+      widget.controller.openSourceFile(
+        widget.controller.canonicalSourcePath(node.sourcePath!),
+      );
+      widget.onShowSource?.call();
+      return;
+    }
 
     if (node.expandable) {
       final symbol = node.symbol;
@@ -793,7 +814,32 @@ class _SymbolTreeRow extends StatelessWidget {
               if (context.mounted) onFileContextMenu(node, position);
             });
       },
-      child: row,
+      child: node.sourcePath == null
+          ? row
+          : Draggable<_SourceFileDragData>(
+              data: _SourceFileDragData(node.sourcePath!),
+              allowedButtonsFilter: (buttons) => buttons == kPrimaryMouseButton,
+              maxSimultaneousDrags: 1,
+              feedback: Material(
+                color: TalColors.surfaceAlt,
+                borderRadius: BorderRadius.circular(4),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.code, size: 16, color: TalColors.accent),
+                      const SizedBox(width: 6),
+                      Text(node.label, style: talStrong),
+                    ],
+                  ),
+                ),
+              ),
+              child: row,
+            ),
     );
   }
 }

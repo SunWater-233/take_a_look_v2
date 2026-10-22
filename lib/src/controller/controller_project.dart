@@ -72,6 +72,7 @@ extension TakeALookControllerProject on TakeALookController {
       if (watch['color'] is! int ||
           watch['sampling'] is! bool ||
           watch['plotted'] is! bool ||
+          (watch['pinned'] != null && watch['pinned'] is! bool) ||
           !WatchReadMode.values.any((mode) => mode.name == watch['readMode']) ||
           (rate != null &&
               (rate is! num || !rate.isFinite || rate < .5 || rate > 10))) {
@@ -110,11 +111,8 @@ extension TakeALookControllerProject on TakeALookController {
 
   Future<void> restoreProjectSettings(Map<String, dynamic> data) async {
     validateProjectSettings(data);
-    if (_restoringProject ||
-        sourceTask.running ||
-        isSymbolLoading ||
-        connectionStatus != ConnectionStatus.disconnected) {
-      throw const FormatException('请先断开目标并等待当前任务完成，再打开项目。');
+    if (_restoringProject || sourceTask.running || isSymbolLoading) {
+      throw const FormatException('请等待当前项目或文件任务完成，再打开项目。');
     }
     _restoringProject = true;
     signals.connection.emit();
@@ -131,13 +129,30 @@ extension TakeALookControllerProject on TakeALookController {
       for (final key in ControllerSnapshotSchema.projectFields)
         if (data.containsKey(key)) key: data[key],
     };
+    // Project contents can change while a probe is attached. Keep the active
+    // hardware session instead of applying connection defaults from the file.
+    final preserveConnection =
+        connectionStatus != ConnectionStatus.disconnected;
+    if (preserveConnection) {
+      for (final key in const [
+        'probeType',
+        'targetName',
+        'targetPackId',
+        'swdClock',
+        'serialNumber',
+        'connectionKind',
+        'remoteConfig',
+      ]) {
+        settings.remove(key);
+      }
+    }
     final sender = projectBackendCommand ?? backendCommand;
     if (sender != null) {
       final path = data['symbolFile'] as String? ?? '';
       if (path.isNotEmpty && !await File(path).exists()) {
         throw FormatException('项目符号文件不存在：$path');
       }
-      if (targetCatalogRequest != null) {
+      if (!preserveConnection && targetCatalogRequest != null) {
         await requestTargetCatalog('selectTarget', {
           'name': data['targetName'],
           'packId': data['targetPackId'] ?? '',
@@ -155,7 +170,7 @@ extension TakeALookControllerProject on TakeALookController {
           'monitorRateHz',
           'rttSampleRateHz',
         ])
-          if (data.containsKey(key)) key: data[key],
+          if (settings.containsKey(key)) key: settings[key],
       });
       await sender(ControllerCommand.setSamplingPaused, true);
       await sender(ControllerCommand.clearSamples, null);

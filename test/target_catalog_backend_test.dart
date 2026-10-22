@@ -12,6 +12,15 @@ void main() {
         : 'backend/.venv/bin/python',
   ).absolute;
   final runtimeOverride = Platform.environment['TAL_TARGET_TEST_BACKEND'];
+  test('default checkout launch serves the current target catalog', () async {
+    final client = BackendClient();
+    addTearDown(() => client.close(force: true));
+    await client.start();
+    expect(client.isRunning, isTrue);
+    final result = await client.targetCatalogRequest('listTargets', {});
+    expect(result['targets'], isNotEmpty);
+    expect((result['state'] as Map).containsKey('targetPackId'), isTrue);
+  }, skip: !python.existsSync() ? 'Run tool/setup_backend first.' : false);
   test(
     'real stdio import, selection, process restart and missing-pack rejection',
     () async {

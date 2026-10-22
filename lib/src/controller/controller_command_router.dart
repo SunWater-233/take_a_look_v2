@@ -188,6 +188,18 @@ Future<JsonObject> executeControllerCommand(
       );
     case ControllerCommand.readWatch:
       controller.readWatch(arguments as String);
+    case ControllerCommand.setWatchPinned:
+      final values = Map<String, Object?>.from(arguments! as Map);
+      controller.setWatchPinned(
+        values['key'] as String,
+        values['value'] as bool,
+      );
+    case ControllerCommand.setWatchMonitorScope:
+      final values = Map<String, Object?>.from(arguments! as Map);
+      controller.setWatchMonitorScope(
+        values['scope'] as String,
+        (values['keys'] as List?)?.cast<String>(),
+      );
     case ControllerCommand.setWatchColor:
       final values = Map<String, Object?>.from(arguments! as Map);
       controller.setWatchColor(

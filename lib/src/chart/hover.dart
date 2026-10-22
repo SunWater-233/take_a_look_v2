@@ -96,6 +96,40 @@ class TelemetryHoverHit {
       't = ${_formatValue(sample.dx)} s\n采样值 = ${_formatValue(sample.dy)}';
 }
 
+/// Keep a hovered curve through small pointer or live-data movements. New
+/// targets still use proximity and watch-table order; only the current target
+/// gets the wider release radius.
+class TelemetryHoverTracker {
+  String? _watchKey;
+
+  void clear() => _watchKey = null;
+
+  TelemetryHoverHit? hitTest(
+    List<TelemetryPlotSeries> series,
+    CartesianPlotViewport viewport,
+    Offset? position,
+  ) {
+    if (position == null || !viewport.plot.contains(position)) {
+      clear();
+      return null;
+    }
+    var hit = hitTestTelemetrySeries(series, viewport, position, tolerance: 12);
+    if (hit == null && _watchKey != null) {
+      hit = hitTestTelemetrySeries(
+        [
+          for (final candidate in series)
+            if (candidate.watch.symbol.key == _watchKey) candidate,
+        ],
+        viewport,
+        position,
+        tolerance: 20,
+      );
+    }
+    _watchKey = hit?.series.watch.symbol.key;
+    return hit;
+  }
+}
+
 /// A table selection takes precedence over proximity to any other curve.
 /// Without a pointer, inspect the selected curve's latest visible sample.
 TelemetryHoverHit? inspectTelemetrySeries(
@@ -103,12 +137,17 @@ TelemetryHoverHit? inspectTelemetrySeries(
   CartesianPlotViewport viewport, {
   Offset? position,
   String? highlightedWatchKey,
+  TelemetryHoverTracker? hoverTracker,
 }) {
   if (highlightedWatchKey == null) {
+    if (hoverTracker != null) {
+      return hoverTracker.hitTest(series, viewport, position);
+    }
     return position == null
         ? null
-        : hitTestTelemetrySeries(series, viewport, position);
+        : hitTestTelemetrySeries(series, viewport, position, tolerance: 12);
   }
+  hoverTracker?.clear();
   for (final candidate in series) {
     if (candidate.watch.symbol.key != highlightedWatchKey) continue;
     final target = position != null && viewport.plot.contains(position)

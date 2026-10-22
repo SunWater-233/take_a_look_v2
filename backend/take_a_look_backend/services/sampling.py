@@ -145,7 +145,7 @@ class SamplingServiceMixin:
                            or self._target_execution_state == "halted")
         plus = self._rtt_enabled and self._rtt_protocol == "plus"
         for watch in self._watches.values():
-            if watch.mode != "monitor":
+            if watch.mode != "monitor" or not watch.monitor_enabled:
                 continue
             period = 1.0 / (watch.monitor_rate_hz or self._monitor_rate_hz)
             if watch.next_monitor_at <= now:

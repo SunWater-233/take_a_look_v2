@@ -34,8 +34,19 @@ Drag any panel tab to a workspace edge to dock it on that side. The edge lights
 immediately and shows a placement preview after 300 ms; movement within the
 same edge does not restart the delay. Dropping applies the layout with a 220 ms
 transition; Esc cancels a drag. Tabs can return to the center or move between
-sides through dragging or the header menu. A wide variable-monitoring panel
-automatically shows the full table. Sidebar changes preserve panel state,
+sides through dragging or the header menu. Variable monitoring uses a compact
+member tree with path search and pinned members. Selecting a member shows its
+value, read policy and plot controls in one details area. Double-click a member's
+current value to edit it in place, press Enter to write and verify by readback,
+or Esc to cancel. The editor uses round-trip precision for the target type
+(9 significant digits for float32, 17 for float64). Drag the divider to the
+left of the current-value header to resize the column; displayed decimal places
+adapt to the available width. Leaving the editor retains its draft without
+writing. Wide panels put details beside the tree.
+Structures initially expand one level, large arrays expand in ranges of 32,
+and clearing a search restores the previous expansion state. Collapsed monitors
+stop automatic reads unless pinned or displayed in another inspector; capture
+continues independently. Pins are saved in projects. Sidebar changes preserve panel state,
 including input drafts and source-view position, and hidden source panels do
 not consume window shortcuts or mark files as read. Detached windows, the
 independent log/build/register panels, UI scaling and project settings remain

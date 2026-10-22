@@ -196,7 +196,8 @@ void main() {
   _testWithController(
     'scrolling moves the anchor while clipped or removed rows fall back',
     (tester, controller) async {
-      await tester.binding.setSurfaceSize(const Size(1400, 900));
+      // Compact single-line rows need a shorter viewport to exercise scrolling.
+      await tester.binding.setSurfaceSize(const Size(1400, 600));
       controller.setPlotHighlightedWatch('signal_3', selectWatchRow: true);
       await _pumpPanels(tester, controller);
       _expectAligned(tester, 'signal_3');

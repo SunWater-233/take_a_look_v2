@@ -48,10 +48,7 @@ class _TargetChipDialogState extends State<TargetChipDialog> {
   List<TargetChip> _searchResult = const [];
 
   TakeALookController get controller => widget.controller;
-  bool get _canSelect =>
-      controller.connectionStatus == ConnectionStatus.disconnected &&
-      _busy == null &&
-      _preview == null;
+  bool get _canSelect => _busy == null && _preview == null;
   List<TargetChip> get _chips {
     final key = (
       _catalog,
@@ -122,6 +119,7 @@ class _TargetChipDialogState extends State<TargetChipDialog> {
       if (!mounted || loadId != _loadId) return;
       setState(() {
         _catalog = TargetCatalogData.fromJson(result);
+        _error = null;
         _loading = false;
         _selectedId ??= _catalog!.targets
             .where(
@@ -408,7 +406,7 @@ class _TargetChipDialogState extends State<TargetChipDialog> {
                           ConnectionStatus.disconnected)
                     const Padding(
                       padding: EdgeInsets.only(bottom: 8),
-                      child: Text('请先断开连接，再更换目标芯片。', style: talMuted),
+                      child: Text('更换芯片后将自动重新连接，开始新的采样记录。', style: talMuted),
                     ),
                   Row(
                     children: [

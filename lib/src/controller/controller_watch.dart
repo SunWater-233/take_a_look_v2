@@ -151,6 +151,7 @@ extension TakeALookControllerWatches on TakeALookController {
       );
     }
     _selectedSymbols.clear();
+    compactExpandedWatches.addAll(aggregateRootKeys);
     _configurePlotRetention();
     _syncWatchesBackend();
     _appendLog('已加入 ${selected.length} 个变量到变量监视列表。');
@@ -339,6 +340,51 @@ extension TakeALookControllerWatches on TakeALookController {
 
   bool usesDevicePush(WatchItem watch) =>
       watch.symbol.dataSource == 'rtt' || (rttEnabled && rttProtocol == 'plus');
+
+  bool isWatchMonitorActive(WatchItem watch) =>
+      watch.pinned ||
+      _watchMonitorScopes.isEmpty ||
+      _watchMonitorScopes.values.any((keys) => keys.contains(watch.symbol.key));
+
+  /// Union the members displayed by all open inspectors, including detached ones.
+  /// This is a temporary read policy; it never changes a variable's chosen mode.
+  void setWatchMonitorScope(String scope, Iterable<String>? keys) {
+    if (_disposed) return;
+    final next = keys?.toSet();
+    if (next == null
+        ? !_watchMonitorScopes.containsKey(scope)
+        : setEquals(_watchMonitorScopes[scope], next)) {
+      return;
+    }
+    if (next == null) {
+      _watchMonitorScopes.remove(scope);
+    } else {
+      _watchMonitorScopes[scope] = next;
+    }
+    if (_isDetachedRemote) {
+      _dispatchRemote(ControllerCommand.setWatchMonitorScope, {
+        'scope': scope,
+        'keys': next?.toList(),
+      });
+    } else {
+      _syncWatchesBackend();
+    }
+  }
+
+  void setWatchPinned(String key, bool value) {
+    if (_isDetachedRemote &&
+        _dispatchRemote(ControllerCommand.setWatchPinned, {
+          'key': key,
+          'value': value,
+        })) {
+      return;
+    }
+    final watch = _watchByKey(key);
+    if (watch == null || watch.pinned == value) return;
+    watch.pinned = value;
+    _syncWatchesBackend();
+    _emitState([signals.watches]);
+  }
 
   double monitorRateFor(WatchItem watch) =>
       watch.monitorRateHz ?? monitorRateHz;

@@ -61,6 +61,7 @@ class WatchedVariable:
     monitor_rate_hz: float | None = None
     updated_at_ms: int | None = None
     next_monitor_at: float = 0.0
+    monitor_enabled: bool = True
 
     @property
     def mode(self) -> str:

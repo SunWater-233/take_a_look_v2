@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -12,6 +13,59 @@ void main() {
         : 'backend/.venv/bin/python',
   ).absolute;
   final skip = !python.existsSync() ? 'Run tool/setup_backend first.' : false;
+
+  test('startup requests wait for one process and its handshake', () async {
+    final launch = Completer<void>();
+    final errors = <Object?>[];
+    var starts = 0;
+    final client = BackendClient(
+      eventHandler: (event, params) {
+        if (event.name == 'error') errors.add(params);
+      },
+      processStarter: () async {
+        starts++;
+        await launch.future;
+        return Process.start(python.path, [
+          '-u',
+          '-c',
+          '''
+import json, sys, time
+history = []
+for line in sys.stdin:
+    request = json.loads(line)
+    history.append(request['method'])
+    if request['method'] == 'handshake':
+        time.sleep(0.1)
+    print(json.dumps({'v': 2, 'id': request['id'], 'result': {
+        'state': {}, 'history': history}}), flush=True)
+    if request['method'] == 'shutdown':
+        break
+''',
+        ]);
+      },
+    );
+    addTearDown(() => client.close(force: true));
+    final first = client.start();
+    final second = client.start();
+    final catalog = client.targetCatalogRequest('listTargets', {});
+    final command = client.command(ControllerCommand.setSampleRate, 200);
+    final project = client.projectCommand(ControllerCommand.configureProject, {
+      'monitorRateHz': 5,
+    });
+    expect(starts, 1);
+    launch.complete();
+    await Future.wait([first, second, catalog, command, project]);
+    final state = await client.request(BackendMethod.getState);
+    expect(state['history'], [
+      'handshake',
+      'listTargets',
+      'setConfig',
+      'setConfig',
+      'getState',
+    ]);
+    expect(errors, isEmpty);
+    expect(starts, 1);
+  }, skip: skip);
 
   Future<BackendClient> startClient() async {
     final client = BackendClient(

@@ -343,6 +343,10 @@ extension TakeALookControllerSnapshot on TakeALookController {
                       (item['updatedAtMs'] as num?)?.toInt() ??
                       previousWatches[symbol.key]?.updatedAtMs
                   ..plotted = item['plotted'] == true
+                  ..pinned =
+                      item['pinned'] as bool? ??
+                      previousWatches[symbol.key]?.pinned ??
+                      false
                   ..value = _numericValue(
                     item['value'],
                     fallback: previousWatches[symbol.key]?.value ?? 0,

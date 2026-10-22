@@ -42,6 +42,8 @@ part 'control_panels.dart';
 part 'symbol_panel.dart';
 part 'watch_panel.dart';
 part 'compact_watch_panel.dart';
+part 'watch_browser.dart';
+part 'watch_value_cell.dart';
 part 'workbench_output.dart';
 part 'connection_panel.dart';
 part 'plot_log_panels.dart';
@@ -102,17 +104,14 @@ Widget buildWorkspacePanelBody(
     WorkspacePanelId.symbols => _SymbolPanel(
       controller: controller,
       defaultMonitor: workbench,
+      onShowSource: onShowSource,
     ),
     WorkspacePanelId.watch =>
       workbench
-          ? LayoutBuilder(
-              builder: (context, constraints) =>
-                  adaptiveWorkbench && constraints.maxWidth >= 640
-                  ? _WatchPanel(controller: controller)
-                  : _CompactWatchPanel(
-                      controller: controller,
-                      onShowSymbols: onShowSymbols,
-                    ),
+          ? _CompactWatchPanel(
+              controller: controller,
+              onShowSymbols: onShowSymbols,
+              visible: visible,
             )
           : _WatchPanel(controller: controller),
     WorkspacePanelId.connection => _ConnectionPanel(controller: controller),

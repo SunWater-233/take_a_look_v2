@@ -315,7 +315,6 @@ extension TakeALookControllerConnection on TakeALookController {
   }
 
   void setTargetName(String value) {
-    if (connectionStatus != ConnectionStatus.disconnected) return;
     if (_dispatchCommand(ControllerCommand.setTargetName, value)) return;
     targetName = value;
     state.connection.targetPackId = '';

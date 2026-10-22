@@ -21,6 +21,7 @@ from take_a_look_backend.protocol import (
 from take_a_look_backend.service import BackendService
 from take_a_look_backend.models import SampleFrame
 from take_a_look_backend.services.ordered_worker import OrderedWorker
+from take_a_look_backend.services.parent_lifetime import watch_desktop_process
 from take_a_look_backend.services.source_project import default_settings_file
 from take_a_look_backend.services.target_catalog import default_pack_directory
 
@@ -87,7 +88,7 @@ class StdioServer:
             result = self._service.handle(method, params)
             self._write(response(request_id, result))
         except ProtocolError as error:
-            self._write(error_response(request_id, error))
+            self._write(error_response(request_id if request_id is not None else error.request_id, error))
         except Exception as error:  # Never corrupt the protocol stream with a traceback.
             self._write(error_response(request_id, error))
 
@@ -222,7 +223,12 @@ def main() -> None:
         from take_a_look_backend.self_check import run
 
         raise SystemExit(run())
-    raise SystemExit(StdioServer(sys.stdin, sys.stdout.buffer).run())
+    server = StdioServer(sys.stdin, sys.stdout.buffer)
+    stopped = watch_desktop_process(server.close)
+    try:
+        raise SystemExit(server.run())
+    finally:
+        stopped.set()
 
 
 class _StderrLogFormatter(logging.Formatter):

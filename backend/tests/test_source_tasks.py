@@ -212,6 +212,75 @@ def test_flash_reserves_probe_keeps_rpc_responsive_and_rebinds_symbols(tmp_path,
         service.close()
 
 
+@pytest.mark.parametrize('configured', [False, True])
+@pytest.mark.parametrize('root', ['', 'missing-source-root'])
+def test_download_uses_loaded_elf_without_source_settings_and_prefers_explicit_firmware(tmp_path, configured, root):
+    loaded = tmp_path / 'loaded.elf'
+    explicit = tmp_path / 'configured.axf'
+    loaded.write_bytes(b'loaded firmware')
+    explicit.write_bytes(b'configured firmware')
+    downloads = []
+    memory = _FakeMemory()
+    memory.program_firmware = lambda path, progress: downloads.append(Path(path).read_bytes())
+    service = BackendService(lambda *_: None, memory_backend=memory,
+        normal_rtt_backend=_FakeRtt(), plus_rtt_backend=_FakeRtt(),
+        recording_directory=tmp_path / 'records', symbol_loader=lambda *a, **k: [],
+        debug_info_loader=lambda *a, **k: DebugInfoIndex())
+    try:
+        service.handle(RpcMethod.CONNECT, {})
+        service.handle(RpcMethod.LOAD_SYMBOLS, {'path': str(loaded)})
+        service._source_projects.current.update(sourceRoot=root,
+            firmwarePath=str(explicit) if configured else '')
+        original_config = dict(service._source_projects.current)
+        service.handle(RpcMethod.START_SOURCE_TASK, {'kind': 'download'})
+        wait_for(lambda: not service._source_tasks.running)
+        assert service._source_tasks.snapshot()['status'] == 'succeeded', service._source_tasks.snapshot()
+        assert downloads == [b'configured firmware' if configured else b'loaded firmware']
+        assert service._symbol_file == str(explicit if configured else loaded)
+        assert service._source_projects.current == original_config
+    finally:
+        service.close()
+
+
+def test_download_fallback_requires_an_existing_selected_elf(tmp_path):
+    service = BackendService(lambda *_: None, recording_directory=tmp_path / 'records',
+        symbol_loader=lambda *a, **k: [], debug_info_loader=lambda *a, **k: DebugInfoIndex())
+    try:
+        service._connection_status = 'connected'
+        with pytest.raises(ProtocolError) as error:
+            service.handle(RpcMethod.START_SOURCE_TASK, {'kind': 'download'})
+        assert error.value.code == 'firmware_required'
+        selected = tmp_path / 'selected.elf'
+        selected.write_bytes(b'firmware')
+        service.handle(RpcMethod.LOAD_SYMBOLS, {'path': str(selected)})
+        selected.unlink()
+        with pytest.raises(ProtocolError) as error:
+            service.handle(RpcMethod.START_SOURCE_TASK, {'kind': 'download'})
+        assert error.value.code == 'firmware_missing'
+        assert not service._source_tasks.running
+    finally:
+        service.close()
+
+
+@pytest.mark.parametrize('kind', ['build', 'buildAndDownload'])
+def test_build_still_requires_a_source_root(tmp_path, kind):
+    task = SourceTasks(lambda _: None, lambda *_: None)
+    try:
+        with pytest.raises(ProtocolError) as error:
+            task.start(kind, {**default_config(), 'buildCommand': 'echo build',
+                              'firmwarePath': str(tmp_path / 'motor.elf')})
+        assert error.value.code == 'source_root_required'
+        assert not task.running
+    finally:
+        task.close()
+
+
+def test_relative_firmware_still_requires_a_source_root():
+    with pytest.raises(ProtocolError) as error:
+        firmware_file({**default_config(), 'firmwarePath': 'motor.elf'})
+    assert error.value.code == 'source_root_required'
+
+
 def test_missing_firmware_and_remote_download_are_explicit(tmp_path):
     with pytest.raises(ProtocolError):
         firmware_file({**default_config(str(tmp_path)), 'firmwarePath': 'missing.elf'})

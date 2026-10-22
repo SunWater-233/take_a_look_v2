@@ -29,6 +29,7 @@ class TelemetryChart extends StatefulWidget {
 class _TelemetryChartState extends State<TelemetryChart> {
   final MenuController _desktopMenuController = MenuController();
   final ValueNotifier<Offset?> _hoverPosition = ValueNotifier(null);
+  final TelemetryHoverTracker _hoverTracker = TelemetryHoverTracker();
   final ValueNotifier<double?> _inspectionAnchorY = ValueNotifier(null);
   int? _dragPointer;
   Offset? _lastDragPosition;
@@ -50,7 +51,12 @@ class _TelemetryChartState extends State<TelemetryChart> {
   @override
   void initState() {
     super.initState();
+    _hoverPosition.addListener(_clearHoverTracker);
     WidgetsBinding.instance.addPostFrameCallback(_updateInspectionAnchor);
+  }
+
+  void _clearHoverTracker() {
+    if (_hoverPosition.value == null) _hoverTracker.clear();
   }
 
   void _updateInspectionAnchor(Duration _) {
@@ -114,6 +120,7 @@ class _TelemetryChartState extends State<TelemetryChart> {
                       controller,
                       paintInspection: false,
                       hoverPosition: _hoverPosition,
+                      hoverTracker: _hoverTracker,
                       inspectionAnchorY: _inspectionAnchorY,
                     ),
                     isComplex: true,
@@ -127,6 +134,7 @@ class _TelemetryChartState extends State<TelemetryChart> {
                               painter: TelemetryInspectionPainter(
                                 controller,
                                 hoverPosition: _hoverPosition,
+                                hoverTracker: _hoverTracker,
                                 inspectionAnchorY: _inspectionAnchorY,
                               ),
                             ),

@@ -49,6 +49,7 @@ class BackendClient {
   final Duration symbolLoadTimeout;
   final Future<Process> Function()? processStarter;
   Process? _process;
+  Future<void>? _starting;
   StreamSubscription<List<int>>? _stdoutSubscription;
   StreamSubscription<String>? _stderrSubscription;
   BackendStreamDecoder? _streamDecoder;
@@ -85,8 +86,13 @@ class BackendClient {
     return request(method, arguments);
   }
 
-  Future<void> start() async {
-    if (_process != null) return;
+  Future<void> start() {
+    if (_starting case final starting?) return starting;
+    if (_process != null) return Future<void>.value();
+    return _starting = _start().whenComplete(() => _starting = null);
+  }
+
+  Future<void> _start() async {
     _closed = false;
     try {
       final backendDirectory = _findBackendDirectory();
@@ -101,6 +107,7 @@ class BackendClient {
                   ...Platform.environment,
                   'PYTHONPATH': backendDirectory.path,
                   'PYTHONUTF8': '1',
+                  'TAL_PARENT_PID': '$pid',
                   'TAL_HOST_PYTHONPATH':
                       Platform.environment['PYTHONPATH'] ?? '',
                   'TAL_HOST_PYTHONUTF8':
@@ -158,6 +165,7 @@ class BackendClient {
 
   Future<void> command(ControllerCommand command, Object? arguments) async {
     try {
+      if (_starting case final starting?) await starting;
       final call = BackendCommandMapper.translate(command, arguments, _state);
       if (call == null) return;
       if (command == ControllerCommand.writeWatch && _supportsBatchWrites) {
@@ -201,6 +209,7 @@ class BackendClient {
     ControllerCommand command,
     Object? arguments,
   ) async {
+    if (_starting case final starting?) await starting;
     final call = BackendCommandMapper.translate(command, arguments, _state);
     if (call == null) throw StateError('Unsupported project command: $command');
     await request(call.method, call.params);
@@ -260,6 +269,10 @@ class BackendClient {
     BackendMethod method,
     Map<String, Object?> params,
   ) async {
+    // Handshake establishes readiness; shutdown must also work during startup.
+    if (method != BackendMethod.handshake && method != BackendMethod.shutdown) {
+      if (_starting case final starting?) await starting;
+    }
     final process = _process;
     if (process == null) {
       throw const BackendException('not_running', '本机硬件后端尚未启动。');
@@ -520,6 +533,23 @@ class BackendClient {
     final backendExecutable = Platform.isWindows
         ? 'take_a_look_backend.exe'
         : 'take_a_look_backend';
+    // A checkout runs current sources; ignored frozen output may be older.
+    // Packaged applications have no development virtual environment.
+    final sourceCandidates = <File>[
+      if (override != null && override.isNotEmpty) File(override),
+      File(
+        '${backendDirectory.path}${Platform.pathSeparator}.venv${Platform.pathSeparator}'
+        '${Platform.isWindows ? 'Scripts' : 'bin'}${Platform.pathSeparator}$executable',
+      ),
+    ];
+    for (final candidate in sourceCandidates) {
+      if (candidate.existsSync()) {
+        return _PythonLaunch(
+          candidate.absolute.path,
+          arguments: const ['-m', 'take_a_look_backend.stdio'],
+        );
+      }
+    }
     final standaloneCandidates = <File>[
       File(
         '${backendDirectory.path}${Platform.pathSeparator}runtime'
@@ -534,13 +564,8 @@ class BackendClient {
       if (candidate.existsSync()) return _PythonLaunch(candidate.absolute.path);
     }
     final candidates = <File>[
-      if (override != null && override.isNotEmpty) File(override),
       File(
         '${backendDirectory.path}${Platform.pathSeparator}runtime${Platform.pathSeparator}$executable',
-      ),
-      File(
-        '${backendDirectory.path}${Platform.pathSeparator}.venv${Platform.pathSeparator}'
-        '${Platform.isWindows ? 'Scripts' : 'bin'}${Platform.pathSeparator}$executable',
       ),
     ];
     for (final candidate in candidates) {

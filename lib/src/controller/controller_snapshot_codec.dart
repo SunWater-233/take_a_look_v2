@@ -126,6 +126,7 @@ class ControllerSnapshotCodec {
           'monitorRateHz': watch.monitorRateHz,
           'updatedAtMs': watch.updatedAtMs,
           'plotted': watch.plotted,
+          'pinned': watch.pinned,
           'value': watch.value,
           'sampleCursor': watch.totalSampleCount,
           'historyStartSeconds': watch.historyStartSeconds,

@@ -11,6 +11,7 @@ class _SourceBuildToolbar extends StatelessWidget {
       controller.sourceToolsChanges,
       controller.connectionChanges,
       controller.debugChanges,
+      controller.symbolChanges,
     ]),
     builder: (context, _) => LayoutBuilder(
       builder: (context, constraints) {
@@ -20,11 +21,11 @@ class _SourceBuildToolbar extends StatelessWidget {
         final connected =
             controller.connectionStatus == ConnectionStatus.connected;
         final configured = project.canBuild;
+        final firmwarePath = project.firmwarePath.trim().isNotEmpty
+            ? project.firmwarePath.trim()
+            : controller.symbolFile.trim();
         final canDownload =
-            supportsDownload &&
-            connected &&
-            project.sourceRoot.isNotEmpty &&
-            project.firmwarePath.isNotEmpty;
+            supportsDownload && connected && firmwarePath.isNotEmpty;
         final iconsOnly = compact || constraints.maxWidth < 440;
         Future<void> settings() => showDialog<void>(
           context: context,
@@ -67,7 +68,7 @@ class _SourceBuildToolbar extends StatelessWidget {
             ? '当前连接不支持下载，请使用本地 pyOCD 或 EmberMobile 连接'
             : !connected
             ? '请先连接调试目标'
-            : '请设置源码目录和固件文件';
+            : '请打开 ELF / AXF 文件，或在工程设置中指定固件文件';
         final actions = Row(
           mainAxisSize: MainAxisSize.min,
           children: [

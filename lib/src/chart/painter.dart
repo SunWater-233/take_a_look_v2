@@ -15,7 +15,9 @@ class TelemetryPainter extends CustomPainter {
     this.hoverPosition,
     this.inspectionAnchorY,
     this.paintInspection = true,
-  }) : super(
+    TelemetryHoverTracker? hoverTracker,
+  }) : hoverTracker = hoverTracker ?? TelemetryHoverTracker(),
+       super(
          repaint: Listenable.merge([
            controller.plotChanges,
            if (paintInspection) hoverPosition,
@@ -27,6 +29,7 @@ class TelemetryPainter extends CustomPainter {
   final ValueListenable<Offset?>? hoverPosition;
   final ValueListenable<double?>? inspectionAnchorY;
   final bool paintInspection;
+  final TelemetryHoverTracker hoverTracker;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -59,6 +62,7 @@ class TelemetryPainter extends CustomPainter {
             viewport,
             position: pointer,
             highlightedWatchKey: controller.plotHighlightedWatchKey,
+            hoverTracker: hoverTracker,
           );
     if (plotted.isNotEmpty) {
       canvas.save();
@@ -215,6 +219,7 @@ class TelemetryPainter extends CustomPainter {
   bool shouldRepaint(covariant TelemetryPainter oldDelegate) {
     return oldDelegate.controller != controller ||
         oldDelegate.hoverPosition != hoverPosition ||
+        oldDelegate.hoverTracker != hoverTracker ||
         oldDelegate.inspectionAnchorY != inspectionAnchorY ||
         oldDelegate.paintInspection != paintInspection;
   }
@@ -225,7 +230,9 @@ class TelemetryInspectionPainter extends CustomPainter {
     this.controller, {
     required this.hoverPosition,
     this.inspectionAnchorY,
-  }) : super(
+    TelemetryHoverTracker? hoverTracker,
+  }) : hoverTracker = hoverTracker ?? TelemetryHoverTracker(),
+       super(
          repaint: Listenable.merge([
            controller.plotChanges,
            hoverPosition,
@@ -236,6 +243,7 @@ class TelemetryInspectionPainter extends CustomPainter {
   final TakeALookController controller;
   final ValueListenable<Offset?> hoverPosition;
   final ValueListenable<double?>? inspectionAnchorY;
+  final TelemetryHoverTracker hoverTracker;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -257,6 +265,7 @@ class TelemetryInspectionPainter extends CustomPainter {
       viewport,
       position: pointer,
       highlightedWatchKey: controller.plotHighlightedWatchKey,
+      hoverTracker: hoverTracker,
     );
     final renderer = CartesianChartRenderer(
       canvas: canvas,
@@ -283,5 +292,6 @@ class TelemetryInspectionPainter extends CustomPainter {
   bool shouldRepaint(covariant TelemetryInspectionPainter oldDelegate) =>
       oldDelegate.controller != controller ||
       oldDelegate.hoverPosition != hoverPosition ||
+      oldDelegate.hoverTracker != hoverTracker ||
       oldDelegate.inspectionAnchorY != inspectionAnchorY;
 }

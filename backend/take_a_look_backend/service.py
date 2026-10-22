@@ -63,6 +63,7 @@ class BackendService(SamplingServiceMixin):
         self._symbol_loader = symbol_loader
         self._debug_info_loader = debug_info_loader
         self._lock = threading.RLock()
+        self._connection_lock = threading.RLock()
         self._control_lock = threading.Lock()
         self._control_count = 0
         self._controls_idle = threading.Event()
@@ -153,6 +154,7 @@ class BackendService(SamplingServiceMixin):
             RpcMethod.SET_SAMPLING_PAUSED, RpcMethod.DEBUG_CONTROL, RpcMethod.RESET_TARGET,
             RpcMethod.DISCONNECT, RpcMethod.TOGGLE_CONNECTION, RpcMethod.SET_WATCHES,
             RpcMethod.SET_CONFIG, RpcMethod.SET_RTT, RpcMethod.CLEAR_SAMPLES,
+            RpcMethod.SELECT_TARGET,
         }
         if not priority:
             return self._handle(method, params)
@@ -169,6 +171,15 @@ class BackendService(SamplingServiceMixin):
                     self._controls_idle.set()
 
     def _handle(self, method: RpcMethod, params: Mapping[str, object]) -> dict[str, object]:
+        # Catalog requests run on a worker while connection controls arrive on
+        # stdin. Keep reconnect and configuration changes in one transaction.
+        if method in {RpcMethod.CONNECT, RpcMethod.DISCONNECT, RpcMethod.TOGGLE_CONNECTION,
+                      RpcMethod.SET_CONFIG, RpcMethod.SELECT_TARGET}:
+            with self._connection_lock:
+                return self._handle_command(method, params)
+        return self._handle_command(method, params)
+
+    def _handle_command(self, method: RpcMethod, params: Mapping[str, object]) -> dict[str, object]:
         if method is RpcMethod.EMBER:
             operation = params.get("operation")
             if operation in {"pair", "forget"} and self._connection_status != "disconnected":
@@ -220,11 +231,16 @@ class BackendService(SamplingServiceMixin):
             if not isinstance(pack_id, str):
                 raise ProtocolError("invalid_request", "packId must be a string.")
             with self._lock:
-                if self._connection_status != "disconnected":
-                    raise ProtocolError("already_connected", "请先断开连接，再更换目标芯片。")
+                if self._source_tasks.running and self._source_tasks.reserves_probe:
+                    raise ProtocolError("source_task_busy", "下载任务执行中，请等待任务完成后更换芯片。")
+                previous = self._targets.selected
                 self._targets.select(name, pack_id)
                 self._target_name = str(self._targets.selected["name"])
-            return {"state": self._publish_target_state()}
+                changed = previous != self._targets.selected
+                self._publish_target_state()
+                if changed:
+                    self._reconnect_target_locked()
+                return {"state": self._runtime_state_locked()}
         if method is RpcMethod.CANCEL_SOURCE_TASK:
             result = self._source_tasks.cancel()
             self._emit(EventName.SOURCE_TASK, result)
@@ -237,12 +253,15 @@ class BackendService(SamplingServiceMixin):
             return {"state": {"sourceProject": project}}
         if method is RpcMethod.START_SOURCE_TASK:
             kind = _required_string(params, "kind")
+            config = dict(self._source_projects.current)
             if kind != "build":
                 if not capabilities_for_connection(self._connection_kind).firmware_download:
                     raise ProtocolError("download_unsupported", "当前连接不支持固件下载，请使用本地 pyOCD 或 EmberMobile 连接。")
                 if self._connection_status != "connected":
                     raise ProtocolError("not_connected", "请先连接调试目标。")
-            return {"sourceTask": self._source_tasks.start(kind, self._source_projects.current)}
+                if not str(config["firmwarePath"]).strip():
+                    config["firmwarePath"] = self._symbol_file
+            return {"sourceTask": self._source_tasks.start(kind, config)}
         if self._source_tasks.running:
             if method is RpcMethod.LOAD_SYMBOLS or (self._source_tasks.reserves_probe and method in {
                 RpcMethod.CONNECT, RpcMethod.DISCONNECT, RpcMethod.TOGGLE_CONNECTION, RpcMethod.SET_CONFIG,
@@ -509,6 +528,7 @@ class BackendService(SamplingServiceMixin):
                 result[symbol.key] = WatchedVariable(
                     symbol, watch.color, watch.plot_enabled, watch.sampling_enabled,
                     read_mode=watch.mode, monitor_rate_hz=watch.monitor_rate_hz,
+                    monitor_enabled=watch.monitor_enabled,
                 )
         return result
 
@@ -716,7 +736,8 @@ class BackendService(SamplingServiceMixin):
                 self._stopped_location.update({"path": location.path, "line": location.line})
             if not backend_capabilities(self._memory).memory_sampling:
                 symbols = [watch.symbol for watch in self._watches.values()
-                           if not watch.symbol.is_rtt and watch.mode != "manual"]
+                           if not watch.symbol.is_rtt and watch.mode != "manual"
+                           and (watch.mode != "monitor" or watch.monitor_enabled)]
                 if symbols:
                     self._publish_watch_values_locked(self._memory.read_symbols(symbols))
         else:
@@ -778,11 +799,26 @@ class BackendService(SamplingServiceMixin):
 
     def _set_config(self, params: Mapping[str, object]) -> dict[str, object]:
         with self._lock:
+            previous = self._targets.selected
             self._apply_config_locked(params)
+            if previous != self._targets.selected:
+                self._publish_target_state()
+                self._reconnect_target_locked()
             state = self._runtime_state_locked()
         self._emit(EventName.STATE, state)
         self._wake.set()
         return {"state": state}
+
+    def _reconnect_target_locked(self) -> None:
+        if self._connection_status != "connected":
+            return
+        paused = self._sampling_paused
+        self._disconnect()
+        try:
+            self._connect({})
+        finally:
+            self._sampling_paused = paused
+            self._emit(EventName.STATE, self._runtime_state_locked())
 
     def _set_watches(self, params: Mapping[str, object]) -> dict[str, object]:
         raw_watches = params.get("watches")
@@ -804,6 +840,8 @@ class BackendService(SamplingServiceMixin):
                 if not isinstance(read_mode, str) or read_mode not in {"capture", "monitor", "manual"}:
                     raise ProtocolError("invalid_request", "readMode must be capture, monitor or manual.")
                 monitor_rate = raw.get("monitorRateHz", old.monitor_rate_hz if old else None)
+                if not isinstance(raw.get("monitorEnabled", True), bool):
+                    raise ProtocolError("invalid_request", "monitorEnabled must be a boolean.")
                 if monitor_rate is not None:
                     monitor_rate = _monitor_frequency(monitor_rate)
                 new_watches[key] = WatchedVariable(
@@ -814,6 +852,7 @@ class BackendService(SamplingServiceMixin):
                     value=old.value if old else "",
                     read_mode=str(read_mode),
                     monitor_rate_hz=monitor_rate,
+                    monitor_enabled=raw.get("monitorEnabled", True) is not False,
                     updated_at_ms=old.updated_at_ms if old else None,
                     next_monitor_at=(old.next_monitor_at if old and old.mode == read_mode
                                      and old.monitor_rate_hz == monitor_rate else 0.0),
@@ -1053,8 +1092,6 @@ class BackendService(SamplingServiceMixin):
         if "targetName" in params:
             name = _required_string(params, "targetName")
             if name != self._target_name:
-                if self._connection_status != "disconnected":
-                    raise ProtocolError("already_connected", "请先断开连接，再更换目标芯片。")
                 self._targets.select(name, legacy=True)
                 self._target_name = str(self._targets.selected["name"])
         if "swdClock" in params:

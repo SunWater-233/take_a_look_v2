@@ -13,6 +13,63 @@ import 'package:take_a_look_v2/src/theme/theme.dart';
 import 'package:take_a_look_v2/src/workspace/panel_types.dart';
 
 void main() {
+  testWidgets('opening an ELF enables download without project settings', (
+    tester,
+  ) async {
+    final calls = <Object?>[];
+    final controller = TakeALookController(
+      backendCommand: (command, args) async {
+        if (command == ControllerCommand.startSourceTask) calls.add(args);
+      },
+    );
+    addTearDown(controller.dispose);
+    controller.applySnapshot({'connectionStatus': 'connected'});
+    await tester.pumpWidget(_projectSettingsHarness(controller));
+    final download = find.byKey(const ValueKey('source-download'));
+    expect(tester.widget<TalButton>(download).onPressed, isNull);
+
+    controller.applyBackendEvent(BackendEventType.state, {
+      'symbolFile': '${Directory.current.path}/motor.elf',
+      'symbols': [_projectSymbol],
+    });
+    await tester.pump();
+    expect(controller.sourceProject.sourceRoot, isEmpty);
+    expect(controller.sourceProject.firmwarePath, isEmpty);
+    expect(tester.widget<TalButton>(download).onPressed, isNotNull);
+    expect(
+      tester
+          .widget<TalButton>(find.byKey(const ValueKey('source-build')))
+          .onPressed,
+      isNull,
+    );
+    expect(
+      tester
+          .widget<TalButton>(
+            find.byKey(const ValueKey('source-build-download')),
+          )
+          .onPressed,
+      isNull,
+    );
+    await tester.tap(download);
+    await tester.pump();
+    expect(calls, [
+      {'kind': 'download'},
+    ]);
+
+    controller.applySnapshot({
+      'sourceTask': {'id': 'flash', 'status': 'running', 'phase': 'download'},
+    });
+    await tester.pump();
+    expect(tester.widget<TalButton>(download).onPressed, isNull);
+    controller.applySnapshot({
+      'sourceTask': {'id': 'flash', 'status': 'succeeded'},
+      'connectionStatus': 'disconnected',
+    });
+    await tester.pump();
+    expect(tester.widget<TalButton>(download).onPressed, isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   for (final kind in ['local', 'ember', 'emberGdb', 'gdb']) {
     testWidgets('$kind download follows the adapter capability', (
       tester,

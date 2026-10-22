@@ -194,10 +194,19 @@ void main() {
       original.symbolFile = file.path;
       final settings = original.projectSettings();
       final commands = <ControllerCommand>[];
+      final configurations = <Map>[];
+      final catalogCalls = <String>[];
       late TakeALookController restored;
       restored = TakeALookController(
+        targetCatalogRequest: (operation, args) async {
+          catalogCalls.add(operation);
+          return {};
+        },
         backendCommand: (command, args) async {
           commands.add(command);
+          if (command == ControllerCommand.configureProject) {
+            configurations.add(args as Map);
+          }
           if (command == ControllerCommand.loadSymbols) {
             restored.applySnapshot({
               'symbols': settings['symbols'],
@@ -225,13 +234,42 @@ void main() {
       );
       expect(commands, isNot(contains(ControllerCommand.writeWatch)));
       expect(commands, isNot(contains(ControllerCommand.startSourceTask)));
-      restored.connectionStatus = ConnectionStatus.connected;
-      final before = commands.length;
-      await expectLater(
-        restored.restoreProjectSettings(settings),
-        throwsFormatException,
-      );
-      expect(commands, hasLength(before));
+      for (final status in [
+        ConnectionStatus.connected,
+        ConnectionStatus.connecting,
+      ]) {
+        commands.clear();
+        catalogCalls.clear();
+        restored.applySnapshot({
+          'connectionStatus': status.name,
+          'probeType': 'J-Link',
+          'targetName': 'stm32h743zitx',
+          'targetPackId': 'live-pack',
+          'swdClock': '4 MHz',
+          'serialNumber': '63728607',
+          'connectionKind': 'emberGdb',
+          'remoteConfig': {'deviceId': 'live-device'},
+        });
+        final liveConnection = restored.snapshot();
+        await tester.runAsync(() => restored.restoreProjectSettings(settings));
+        expect(restored.connectionStatus, status);
+        final after = restored.snapshot();
+        for (final key in [
+          'probeType',
+          'targetName',
+          'targetPackId',
+          'swdClock',
+          'serialNumber',
+          'connectionKind',
+          'remoteConfig',
+        ]) {
+          expect(after[key], liveConnection[key], reason: key);
+          expect(configurations.last, isNot(contains(key)));
+        }
+        expect(catalogCalls, isEmpty);
+        expect(commands, isNot(contains(ControllerCommand.toggleConnection)));
+        expect(restored.watches.single.symbol.key, demoSymbols.first.key);
+      }
     },
   );
 }

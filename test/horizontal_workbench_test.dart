@@ -11,6 +11,7 @@ import 'package:take_a_look_v2/src/theme/theme.dart';
 import 'package:take_a_look_v2/src/workspace/panel_types.dart';
 import 'package:take_a_look_v2/src/workspace/window_sync.dart';
 import 'package:take_a_look_v2/src/workspace/workspace.dart';
+import 'watch_value_test_helpers.dart';
 
 void main() {
   for (final mode in TalInputMode.values) {
@@ -69,6 +70,7 @@ void main() {
       final input = find.byKey(
         ValueKey('compact-watch-input-${watch.symbol.key}'),
       );
+      await editWatchValue(tester, watch.symbol.key);
       await tester.enterText(input, '123.5');
       final selector = find.byKey(
         ValueKey('watch-read-mode-${watch.symbol.key}'),
@@ -105,11 +107,11 @@ void main() {
       expect(find.text('区间统计'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('panel-tab-sourceDebug')));
       await tester.pumpAndSettle();
-      expect(tester.widget<TextField>(input).controller!.text, '123.5');
+      expect(controller.watchInputDrafts[watch.symbol.key], '123.5');
       await tester.tap(find.byKey(const ValueKey('panel-tab-plot')));
       await tester.pumpAndSettle();
       expect(controller.analysisSession.selectedRange, (0.0, 2.0));
-      expect(tester.widget<TextField>(input).controller!.text, '123.5');
+      expect(controller.watchInputDrafts[watch.symbol.key], '123.5');
       final workspace = tester.state<DockingWorkspaceState>(
         find.byType(DockingWorkspace),
       );

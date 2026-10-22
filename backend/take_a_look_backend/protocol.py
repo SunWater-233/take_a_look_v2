@@ -65,6 +65,7 @@ class ProtocolError(Exception):
     code: str
     message: str
     details: object | None = None
+    request_id: object | None = None
 
 
 def parse_request(line: str) -> tuple[object, RpcMethod, dict[str, object]]:
@@ -74,25 +75,27 @@ def parse_request(line: str) -> tuple[object, RpcMethod, dict[str, object]]:
         raise ProtocolError("invalid_json", "Request is not valid JSON.", str(error)) from error
     if not isinstance(raw, Mapping):
         raise ProtocolError("invalid_request", "Request must be a JSON object.")
+    request_id = raw.get("id")
     if raw.get("v") != PROTOCOL_VERSION:
         raise ProtocolError(
             "unsupported_version",
             f"Protocol version must be {PROTOCOL_VERSION}.",
             raw.get("v"),
+            request_id=request_id,
         )
-    request_id = raw.get("id")
     if request_id is None:
         raise ProtocolError("invalid_request", "Request id is required.")
     raw_method = raw.get("method")
     if not isinstance(raw_method, str) or not raw_method:
-        raise ProtocolError("invalid_request", "Method must be a non-empty string.")
+        raise ProtocolError("invalid_request", "Method must be a non-empty string.", request_id=request_id)
     try:
         method = RpcMethod(raw_method)
     except ValueError as error:
-        raise ProtocolError("unknown_method", f"Unknown backend method: {raw_method}") from error
+        raise ProtocolError("unknown_method", f"Unknown backend method: {raw_method}",
+                            request_id=request_id) from error
     params = raw.get("params", {})
     if not isinstance(params, Mapping):
-        raise ProtocolError("invalid_request", "Params must be an object.")
+        raise ProtocolError("invalid_request", "Params must be an object.", request_id=request_id)
     return request_id, method, dict(params)
 
 

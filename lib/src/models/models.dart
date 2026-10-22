@@ -1,4 +1,5 @@
 import 'dart:ui';
+import 'dart:typed_data';
 
 import '../telemetry/sample_buffer.dart';
 
@@ -142,13 +143,28 @@ class WatchItem {
   set samplingEnabled(bool value) =>
       readMode = value ? WatchReadMode.capture : WatchReadMode.monitor;
   bool plotted = true;
+  bool pinned = false;
   double value = 0;
+
+  bool get isFloatingPoint =>
+      symbol.type.contains('float') || symbol.type.contains('double');
+
+  /// Decimal digits sufficient to round-trip the target's IEEE floating type.
+  int get valuePrecision => symbol.size == 8 ? 17 : 9;
+
+  String get editValueLabel {
+    if (!isFloatingPoint) return valueLabel;
+    final typedValue = symbol.size == 4
+        ? Float32List.fromList([value]).single
+        : value;
+    return typedValue.toStringAsPrecision(valuePrecision);
+  }
 
   String get valueLabel {
     if (symbol.type == 'bool') {
       return value >= 0.5 ? 'true' : 'false';
     }
-    if (symbol.type.contains('float') || symbol.type.contains('double')) {
+    if (isFloatingPoint) {
       return value.toStringAsFixed(4);
     }
     return value.round().toString();

@@ -14,6 +14,7 @@ SAMPLE_FRAME_MARKER = 0
 
 
 class RpcMethod(StrEnum):
+    EMBER = "ember"
     HANDSHAKE = "handshake"
     GET_STATE = "getState"
     CONNECT = "connect"

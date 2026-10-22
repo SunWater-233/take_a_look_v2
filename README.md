@@ -254,15 +254,36 @@ constraints and native validation commands.
 
 ## Source debugging
 
-The connection panel supports **本地 USB / pyOCD**, **EmberMobile 私有协议**,
-**EmberMobile + GDB**, and **远程 GDB**. For the phone workflow, authorize the
-USB probe, attach the target, and start the gateway in EmberMobile first. Enter
-the phone address, gateway port (4242), and the current access token in Take A
-Look. The symbol file remains on the computer.
+The connection panel supports **本地 USB / pyOCD**, **EmberMobile**,
+**EmberMobile + GDB**, and **远程 GDB**. For the phone workflow, start the Ember
+service on the phone, choose **配对 / 管理手机**, and **搜索手机**. Select **配对**,
+compare the eight-digit code on both screens, then approve on the phone within
+120 seconds. Saved phones can be selected with **使用**; leave the access token
+empty to use the saved pairing. Pairing does not require a probe. Before connecting
+the workstation, authorize the phone's USB probe and attach its target. The symbol
+file remains on the computer.
 
-**EmberMobile 私有协议** supports live memory reads, run control, registers,
+When discovery is unavailable, enter the phone's IP and gateway port (4242) in
+the pairing window. The existing temporary-token field remains supported and
+an explicit token takes precedence over a saved pairing. **忘记** deletes the
+local credential and revokes it on an available phone; offline removal reports
+that the phone's **已配对电脑** list still needs cleanup. Closing the pairing
+window cancels a pending request. Saved phones are rediscovered by stable ID
+after an address change; authentication always checks the pinned certificate.
+
+Pairing credentials are local to Take A Look, independent of emberctl's store.
+They are encrypted with the current user's DPAPI on Windows, and use private
+directories/files on Unix. Projects retain only the selected device ID; the
+pairing secret is never sent to Flutter or exported into projects. Override the
+store directory with `TAL_EMBER_CONFIG_DIR` for isolated tests.
+
+**EmberMobile** supports live memory reads, run control, registers,
 address breakpoints, and both RTT sampling formats. The v1 gateway does not
 provide arbitrary memory writes, so variable write controls are disabled.
+Source **下载** / **编译并下载** upload the staged ELF/AXF to the phone (binary
+QUIC upload, or bounded v1 chunks), validate its SHA-256, start a phone flash
+job, and wait for verified completion. Upload success alone never completes a
+download task; failures and unknown outcomes appear in source-task feedback.
 
 **EmberMobile + GDB** uses the private gateway for RTT and an installed GDB for
 debug control and memory writes. Enter the GDB port (3333) and the path to an
@@ -272,11 +293,21 @@ PATH. The application starts the phone GDB listener if needed; an existing
 listener must match the port/core and have no connected client. GDB attaches
 with the target halted. Resume it to capture RTT; halt it to inspect or write
 variables. Full-stop GDB is not used for running-target memory polling.
+Source downloads in this mode use GDB `-target-download` through Ember's vFlash
+support, then read back the loadable sections at their physical load addresses.
+Only after verification are symbols/breakpoints refreshed and the requested
+halt/run action applied. This keeps the GDB session in control of the probe.
 
 **远程 GDB** connects to an already running RSP server without requiring an
-EmberMobile token. The current register panel targets ARM/Cortex-M. This mode
-does not supply RTT. GDB is an external executable and is not included in the
-application bundle; `pygdbmi` is included in the Python backend dependencies.
+EmberMobile token. Choose **断点调试** for the installed GDB/MI adapter and
+ARM/Cortex-M register panel, or **高速内存采样（只读）** for direct standard RSP
+memory reads without an external GDB executable. The sampling mode supports
+explicit pause/continue, negotiates NoAck and packet size, and merges gaps only
+inside server-declared RAM. It does not provide writes, step, reset, breakpoints,
+firmware download, or RTT. Servers may halt the core on connection; use continue
+explicitly when required. Server/target support for background memory access
+and fresh server-side reads is required. See [GDB memory sampling](docs/gdb-memory-performance.md).
+GDB itself is not bundled; `pygdbmi` is included for the debugger mode.
 
 On disconnect, the application detaches GDB and closes only the phone GDB/RTT
 services it started. It preserves an adopted phone listener or RTT capture.
@@ -296,7 +327,8 @@ negotiated version. Install `aioquic` through the backend setup script; it is
 included in packaged builds.
 
 TCP-only ADB forwarding cannot carry QUIC. Use the phone's LAN address for v2,
-or explicitly launch with `EMBER_PROTOCOL=1` for the v1 TCP compatibility path.
+or explicitly launch with `EMBER_PROTOCOL=1` and a temporary token for the v1 TCP compatibility path.
+Saved pairing credentials require QUIC and are never sent through the v1 path.
 This is an explicit legacy choice, not an automatic fallback after TLS failure.
 
 RTT v2 data is pushed as raw binary on a separate authenticated data connection,
@@ -309,6 +341,11 @@ untimestamped samples still use a nominal, approximate time axis. The reliable
 client cache is limited to 1 MiB and reports overflow; realtime preview uses
 64 KiB and an approximately 20 ms local queue budget. Reset/epoch changes stop
 the old stream. v2 memory blocks can carry 64 KiB without JSON byte arrays.
+Gateways advertising `memory_batch=1` receive exact watch ranges in binary batches
+(up to 128 ranges / 64 KiB each). The phone decides safe merges from its target
+memory map, without PC-side gap filling. Older gateways retain their existing
+read path. Capture/monitor scheduling remains on the PC; phone-side periodic
+memory subscriptions are not enabled by this change.
 
 Sampling rate remains limited by the probe, phone capture loop, and network;
 the UI's requested frequency does not guarantee physical throughput. See

@@ -47,6 +47,8 @@ class EmberClient:
 
     def call(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         with self._lock:
+            if self.token.startswith("pair:") and os.environ.get("EMBER_PROTOCOL") == "1":
+                raise ValueError("长期配对凭据只能通过 QUIC 使用，请取消 EMBER_PROTOCOL=1。")
             if self._v2 is None and "." in self.token and os.environ.get("EMBER_PROTOCOL") != "1":
                 from take_a_look_backend.backends.ember_v2 import QuicClient
                 info = self._legacy_call("v2_info", {})
@@ -67,6 +69,42 @@ class EmberClient:
 
     def subscribe(self, params: dict):
         return self._v2.subscribe(params) if self._v2 is not None else None
+
+    def upload_bytes(self, upload_id: int, data: bytes, *, progress=None):
+        if self._v2 is not None:
+            return self._v2.upload_bytes(upload_id, data, progress=progress)
+        import base64
+        for offset in range(0, len(data), 4096):
+            self.call("firmware_chunk", {"upload_id": upload_id, "offset": offset,
+                      "data": base64.b64encode(data[offset:offset + 4096]).decode("ascii")})
+            if progress is not None:
+                progress(min(1.0, (offset + 4096) / len(data)))
+        return {"received": len(data)}
+
+    @property
+    def supports_memory_batch(self):
+        return self._v2 is not None and self._v2._address[1].get("memory_batch") == 1
+
+    @property
+    def supports_memory_sampling(self):
+        return self._v2 is not None and self._v2._address[1].get("memory_sampling") == 1
+
+    @property
+    def supports_memory_microseconds(self):
+        return self._v2 is not None and self._v2._address[1].get("memory_sampling_us") == 1
+
+    @property
+    def supports_memory_max_speed(self):
+        return self._v2 is not None and self._v2._address[1].get("memory_sampling_max_speed") == 1
+
+    def sample_memory(self, request):
+        if not self.supports_memory_sampling:
+            raise ValueError("请更新手机网关以启用持续内存采样。")
+        from .ember_v2 import V2Error
+        try:
+            return self._v2.sample_memory(request)
+        except V2Error as error:
+            raise EmberError(error.code, str(error)) from error
 
     def _legacy_call(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         # A timed-out mutation is never replayed: the phone may have executed it.

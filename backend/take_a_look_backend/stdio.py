@@ -37,6 +37,7 @@ class StdioServer:
         self._output_worker = OrderedWorker('tal-pipe-output')
         self._export_worker = OrderedWorker('tal-csv-export', max_jobs=8)
         self._catalog_worker = OrderedWorker('tal-target-catalog', max_jobs=16)
+        self._ember_worker = OrderedWorker('tal-ember-discovery', max_jobs=4)
         self._output_error: Exception | None = None
         self._closed = False
         self._sample_schema_id = 0
@@ -61,6 +62,12 @@ class StdioServer:
         request_id: object | None = None
         try:
             request_id, method, params = parse_request(line)
+            if method is RpcMethod.EMBER and params.get("operation") in {"discover", "forget"}:
+                task = self._ember_worker.submit(
+                    lambda: self._complete_catalog(request_id, method, params), block=False)
+                if task is None:
+                    raise ProtocolError("busy", "手机发现任务正在进行，请稍后重试。")
+                return
             if method in TARGET_METHODS:
                 task = self._catalog_worker.submit(
                     lambda: self._complete_catalog(request_id, method, params), block=False)
@@ -101,6 +108,7 @@ class StdioServer:
         self._closed = True
         try:
             self._catalog_worker.close()
+            self._ember_worker.close()
             self._export_worker.close()
             self._service.close()
         finally:

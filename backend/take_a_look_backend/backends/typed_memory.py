@@ -179,10 +179,14 @@ class TypedMemoryBackend:
             else:
                 self._read_plan = _build_coalesced_read_plan(
                     signature, max_gap_bytes=self.MAX_COALESCED_GAP_BYTES,
-                    max_block_bytes=self.MAX_COALESCED_READ_BYTES)
+                    max_block_bytes=self.MAX_COALESCED_READ_BYTES,
+                    can_merge=self._can_merge_read_range)
                 self._read_plans.insert(0, (signature, self._read_plan))
                 del self._read_plans[8:]
         return self._read_plan
+
+    def _can_merge_read_range(self, address: int, end: int) -> bool:
+        return True
 
 
 @dataclass(frozen=True)
@@ -234,6 +238,7 @@ def _build_coalesced_read_plan(
     *,
     max_gap_bytes: int,
     max_block_bytes: int,
+    can_merge=None,
 ) -> tuple[_ReadBlock, ...]:
     if not symbols:
         return ()
@@ -272,7 +277,8 @@ def _build_coalesced_read_plan(
         gap = start - current_end
         next_end = max(current_end, end)
         next_size = next_end - current_address
-        if gap > max_gap_bytes or next_size > max_block_bytes:
+        if (gap > max_gap_bytes or next_size > max_block_bytes or
+                (gap > 0 and can_merge is not None and not can_merge(current_address, next_end))):
             flush_current()
             current_address = start
             current_end = end

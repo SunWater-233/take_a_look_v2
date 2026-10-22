@@ -77,6 +77,7 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
           backendCommand: client.command,
           projectBackendCommand: client.projectCommand,
           targetCatalogRequest: client.targetCatalogRequest,
+          emberRequest: client.emberRequest,
           targetPackPicker: pickTargetPack,
           symbolFilePicker: pickSymbolFile,
           sourceRootPicker: pickSourceRootDirectory,
@@ -100,6 +101,7 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
         remoteCommand: (method, arguments) =>
             sendCommandToMain(remoteController, method, arguments),
         targetCatalogRequest: requestTargetCatalogFromMain,
+        emberRequest: requestEmberFromMain,
         targetPackPicker: pickTargetPack,
         csvImportContentsPicker: pickCsvImportContents,
         csvImportPathPicker: kIsWeb ? null : pickCsvImportPath,

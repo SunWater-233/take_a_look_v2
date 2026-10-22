@@ -1,6 +1,7 @@
 {
   "version": 2,
   "methods": [
+    "ember",
     "listTargets",
     "inspectTargetPack",
     "importTargetPack",

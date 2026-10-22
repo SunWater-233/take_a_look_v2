@@ -13,6 +13,7 @@ from take_a_look_backend.backends.pyocd_memory import PyOcdConnectionConfig, PyO
 from take_a_look_backend.backends.rtt_plus import JScopeRttPlusBackend
 from take_a_look_backend.backends.remote_backend import CONNECTION_KINDS, REMOTE_DEFAULTS, RemoteMemoryBackend
 from take_a_look_backend.backends.ember_transport import EmberError
+from take_a_look_backend.backends.ember_pairing import PairingManager
 from take_a_look_backend.models import SymbolInfo, WatchedVariable, json_value
 from take_a_look_backend.protocol import EventName, PROTOCOL_VERSION, ProtocolError, RpcMethod
 from take_a_look_backend.services.sampling import SamplingServiceMixin
@@ -80,6 +81,7 @@ class BackendService(SamplingServiceMixin):
         self._serial_number = ""
         self._connection_kind = "local"
         self._remote_config = dict(REMOTE_DEFAULTS)
+        self._ember_pairing = PairingManager()
         self._sample_rate_hz = 50.0
         self._monitor_rate_hz = 10.0
         self._monitor_schedule_revision = 0
@@ -125,6 +127,7 @@ class BackendService(SamplingServiceMixin):
         if self._closed:
             return
         self._closed = True
+        self._ember_pairing.close()
         self._source_tasks.close()
         self._shutdown.set()
         self._wake.set()
@@ -166,6 +169,33 @@ class BackendService(SamplingServiceMixin):
                     self._controls_idle.set()
 
     def _handle(self, method: RpcMethod, params: Mapping[str, object]) -> dict[str, object]:
+        if method is RpcMethod.EMBER:
+            operation = params.get("operation")
+            if operation in {"pair", "forget"} and self._connection_status != "disconnected":
+                raise ProtocolError("already_connected", "请先断开目标连接，再管理手机配对。")
+            if operation in {"devices", "discover"}:
+                return self._ember_pairing.devices(scan=operation == "discover")
+            if operation == "status":
+                return self._ember_pairing.status()
+            if operation == "cancel":
+                return self._ember_pairing.cancel()
+            if operation == "pair":
+                host = _required_string(params, "host").strip()
+                port = int(str(params.get("port", "4242")))
+                if not host or not 1 <= port <= 65535:
+                    raise ProtocolError("invalid_request", "请填写有效的手机地址和端口。")
+                import socket
+                name = str(params.get("name") or socket.gethostname())
+                if not 1 <= len(name.encode()) <= 96 or any(ord(c) < 32 or ord(c) == 127 for c in name):
+                    raise ProtocolError("invalid_request", "电脑名称须为 1–96 字节且不含控制字符。")
+                return self._ember_pairing.start(host, port, str(params.get("deviceId") or ""), name)
+            if operation == "forget":
+                result = self._ember_pairing.forget(_required_string(params, "deviceId"))
+                if params["deviceId"] == self._remote_config.get("deviceId"):
+                    self._remote_config["deviceId"] = ""
+                    self._emit(EventName.STATE, {"remoteConfig": dict(self._remote_config)})
+                return result
+            raise ProtocolError("invalid_request", "未知的 EmberMobile 配对操作。")
         if method is RpcMethod.LIST_TARGETS:
             return {**self._targets.snapshot(), "state": self._targets.selection_state()}
         if method is RpcMethod.INSPECT_TARGET_PACK:
@@ -208,10 +238,10 @@ class BackendService(SamplingServiceMixin):
         if method is RpcMethod.START_SOURCE_TASK:
             kind = _required_string(params, "kind")
             if kind != "build":
-                if self._connection_kind != "local":
-                    raise ProtocolError("download_unsupported", "当前连接不支持固件下载，请使用本地 pyOCD 连接。")
+                if not capabilities_for_connection(self._connection_kind).firmware_download:
+                    raise ProtocolError("download_unsupported", "当前连接不支持固件下载，请使用本地 pyOCD 或 EmberMobile 连接。")
                 if self._connection_status != "connected":
-                    raise ProtocolError("not_connected", "请先连接本地调试探针。")
+                    raise ProtocolError("not_connected", "请先连接调试目标。")
             return {"sourceTask": self._source_tasks.start(kind, self._source_projects.current)}
         if self._source_tasks.running:
             if method is RpcMethod.LOAD_SYMBOLS or (self._source_tasks.reserves_probe and method in {
@@ -307,7 +337,7 @@ class BackendService(SamplingServiceMixin):
             "connectionKind": self._connection_kind,
             "remoteConfig": dict(self._remote_config),
             "gatewayProtocolVersion": getattr(getattr(self._memory, "client", None), "protocol_version", None),
-            "connectionCapabilities": capabilities_for_connection(self._connection_kind).to_json(),
+            "connectionCapabilities": capabilities_for_connection(self._connection_kind, self._remote_config).to_json(),
             "sampleRateHz": self._sample_rate_hz,
             "monitorRateHz": self._monitor_rate_hz,
             "rttSampleRateHz": self._rtt_sample_rate_hz,
@@ -654,7 +684,7 @@ class BackendService(SamplingServiceMixin):
 
     def _handle_remote_failure_locked(self, error: Exception) -> bool:
         fatal = isinstance(error, (ConnectionError, TimeoutError, OSError)) or (
-            isinstance(error, EmberError) and error.code in {"unauthorized", "stale_session", "not_attached"})
+            isinstance(error, EmberError) and error.code in {"unauthorized", "stale_session", "stale_memory", "not_attached"})
         if self._connection_kind == "local" or not fatal:
             return False
         self._stop_rtt_locked()
@@ -676,9 +706,9 @@ class BackendService(SamplingServiceMixin):
         self._target_execution_state = next_state
         if next_state == "halted":
             self._registers = self._memory.read_core_registers()
-            pc = self._registers.get("pc", 0)
-            location = self._debug_info.resolve_address(pc)
-            self._stopped_location = {"address": pc}
+            pc = self._registers.get("pc")
+            location = self._debug_info.resolve_address(pc) if pc is not None else None
+            self._stopped_location = {"address": pc} if pc is not None else None
             if location is not None:
                 self._stopped_location.update({"path": location.path, "line": location.line})
             if not backend_capabilities(self._memory).memory_sampling:
@@ -905,6 +935,8 @@ class BackendService(SamplingServiceMixin):
                 self._emit(EventName.STATE, {"samplingPaused": True})
                 raise ProtocolError("raw_recording_failed", "请解决记录写入错误后清空采样，开启新记录。")
             self._sampling_paused = paused
+            if paused:
+                self._stop_memory_sampling_locked()
             state = {
                 "samplingPaused": self._sampling_paused,
                 "elapsedSeconds": self._elapsed_locked(),
@@ -938,6 +970,7 @@ class BackendService(SamplingServiceMixin):
 
     def _clear_samples(self) -> dict[str, object]:
         with self._lock:
+            self._stop_memory_sampling_locked()
             self._flush_pending_samples_locked()
             self._pending_frames.clear()
             self._pending_recording_frames.clear()

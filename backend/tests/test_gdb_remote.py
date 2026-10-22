@@ -6,6 +6,9 @@ The fake target never touches a physical MCU or probe.
 from __future__ import annotations
 
 import os
+from pathlib import Path
+import subprocess
+import struct
 import socket
 import threading
 import time
@@ -16,13 +19,16 @@ import pytest
 from take_a_look_backend.backends.gdb_mi import GdbTarget, find_gdb, normalize_host
 from take_a_look_backend.backends.remote_backend import RemoteMemoryBackend
 from take_a_look_backend.models import SymbolInfo
-from take_a_look_backend.protocol import EventName, RpcMethod
+from take_a_look_backend.protocol import EventName, RpcMethod, ProtocolError
 from take_a_look_backend.service import BackendService
 from test_ember_remote import Phone, phone_server
 
 
 class CortexMServer:
-    def __init__(self) -> None:
+    def __init__(self, *, flash=False, fail_flash=False, corrupt=False) -> None:
+        self.flash = flash
+        self.fail_flash = fail_flash
+        self.corrupt = corrupt
         self.listener = socket.socket()
         self.listener.bind(("127.0.0.1", 0))
         self.listener.listen(1)
@@ -57,7 +63,25 @@ class CortexMServer:
     def dispatch(self, command: str) -> str | None:
         self.commands.append(command)
         if command.startswith("qSupported"):
-            return "PacketSize=4000;qXfer:features:read+;hwbreak+"
+            return "PacketSize=4000;qXfer:features:read+;hwbreak+" + (";qXfer:memory-map:read+" if self.flash else "")
+        if self.flash and command.startswith("qXfer:memory-map:read::"):
+            offset, length = (int(v, 16) for v in command.rsplit(":", 1)[1].split(","))
+            xml = ('<?xml version="1.0"?><!DOCTYPE memory-map SYSTEM "memory-map.dtd"><memory-map>'
+                '<memory type="flash" start="0x08000000" length="0x10000"><property name="blocksize">0x100</property></memory>'
+                '<memory type="ram" start="0x20000000" length="0x1000"/></memory-map>')
+            return ("l" if offset + length >= len(xml) else "m") + xml[offset:offset + length]
+        if command.startswith("vFlashErase:"):
+            address, size = (int(v, 16) for v in command.split(":")[1].split(","))
+            self.memory.update({address + i: 255 for i in range(size)})
+            return "OK"
+        if command.startswith("vFlashWrite:"):
+            _, address, data = command.split(":", 2)
+            self.memory.update({int(address, 16) + i: value for i, value in enumerate(data.encode('latin1'))})
+            return "OK"
+        if command == "vFlashDone":
+            if self.corrupt:
+                self.memory[0x08000000] ^= 255
+            return "E01" if self.fail_flash else "OK"
         if command.startswith("qXfer:features:read:target.xml:"):
             offset, length = (int(v, 16) for v in command.rsplit(":", 1)[1].split(","))
             xml = self.xml()
@@ -88,6 +112,17 @@ class CortexMServer:
             decoded = bytes.fromhex(data)
             assert len(decoded) == count
             self.memory.update({address + i: value for i, value in enumerate(decoded)})
+            return "OK"
+        if command.startswith("X"):
+            header, data = command[1:].split(":", 1)
+            address, count = (int(v, 16) for v in header.split(","))
+            decoded = data.encode('latin1')
+            assert len(decoded) == count
+            self.memory.update({address + i: value for i, value in enumerate(decoded)})
+            return "OK"
+        if command.startswith("P"):
+            number, value = command[1:].split("=")
+            self.registers[int(number, 16)] = int.from_bytes(bytes.fromhex(value), 'little')
             return "OK"
         if command.startswith(("Z1,", "z1,")):
             address = int(command.split(",")[1], 16)
@@ -141,7 +176,16 @@ class CortexMServer:
                         end = buffer.find(b"#")
                         if end < 0 or len(buffer) < end + 3:
                             break
-                        command = bytes(buffer[1:end]).decode("ascii")
+                        packet = bytes(buffer[1:end])
+                        decoded, cursor = bytearray(), 0
+                        while cursor < len(packet):
+                            value = packet[cursor]
+                            if value == ord('}'):
+                                cursor += 1
+                                value = packet[cursor] ^ 0x20
+                            decoded.append(value)
+                            cursor += 1
+                        command = decoded.decode("latin1")
                         del buffer[:end + 3]
                         self.socket.sendall(b"+")
                         response = self.dispatch(command)
@@ -260,6 +304,13 @@ def test_ember_private_rtt_and_real_gdb_run_together(tmp_path):
                 service.handle(RpcMethod.DEBUG_CONTROL, {"action": "resume"})
                 service.handle(RpcMethod.SET_RTT, {"enabled": True, "protocol": "normal"})
                 deadline = time.monotonic() + 3
+                while not service._normal_rtt.is_started and time.monotonic() < deadline:
+                    time.sleep(.01)
+                assert service._normal_rtt.symbols
+                service.handle(RpcMethod.SET_WATCHES, {'watches': [
+                    {'key': item.key, 'readMode': 'capture'} for item in service._normal_rtt.symbols]})
+                phone.data += struct.pack('<If', 2000, 2.5)
+                deadline = time.monotonic() + 3
                 while not any(event == EventName.SAMPLES for event, _ in events) and time.monotonic() < deadline:
                     time.sleep(0.01)
                 frames = [payload["frames"] for event, payload in events if event == EventName.SAMPLES]
@@ -272,3 +323,54 @@ def test_ember_private_rtt_and_real_gdb_run_together(tmp_path):
                 assert not phone.rtt_running
             finally:
                 service.close()
+
+
+@pytest.fixture(scope='module')
+def arm_firmware(tmp_path_factory):
+    executable = os.environ.get('TAKE_A_LOOK_TEST_GDB')
+    if not executable:
+        pytest.skip('Set TAKE_A_LOOK_TEST_GDB for real GDB download tests')
+    compiler = Path(executable).with_name('arm-none-eabi-gcc.exe' if os.name == 'nt' else 'arm-none-eabi-gcc')
+    if not compiler.is_file():
+        pytest.skip('ARM GCC next to the selected GDB is needed to create the fixture')
+    root = tmp_path_factory.mktemp('gdb firmware')
+    source, script, output = root / 'app.c', root / 'app.ld', root / '固件 app.axf'
+    source.write_text('volatile unsigned counter = 0x7d23242a; void Reset_Handler(void) { for (;;) { counter++; } }')
+    script.write_text('''ENTRY(Reset_Handler)
+MEMORY { FLASH (rx) : ORIGIN = 0x08000000, LENGTH = 64K
+RAM (rwx) : ORIGIN = 0x20000000, LENGTH = 4K }
+SECTIONS { .text : { *(.text*) *(.rodata*) } > FLASH
+.data : { *(.data*) } > RAM AT> FLASH
+.bss (NOLOAD) : { *(.bss*) *(COMMON) } > RAM }
+''')
+    subprocess.run([str(compiler), '-nostdlib', '-mcpu=cortex-m3', '-mthumb', '-g', '-Wl,--build-id=none',
+                    '-T', str(script), str(source), '-o', str(output)], check=True, capture_output=True)
+    return executable, output
+
+
+@pytest.mark.parametrize('failure', ['', 'commit', 'readback'])
+def test_real_ember_gdb_downloads_flash_and_verifies_lma_sections(arm_firmware, failure):
+    from take_a_look_backend.backends.remote_firmware import firmware_image
+    executable, path = arm_firmware
+    server = CortexMServer(flash=True, fail_flash=failure == 'commit', corrupt=failure == 'readback')
+    backend = RemoteMemoryBackend('emberGdb', {})
+    target = GdbTarget('127.0.0.1', server.port, executable)
+    backend.target = target
+    try:
+        progress = []
+        if failure:
+            with pytest.raises((RuntimeError, ProtocolError)):
+                backend.program_firmware(str(path), progress.append)
+            assert 1 not in progress
+        else:
+            backend.program_firmware(str(path), progress.append)
+            assert progress[-1] == 1
+            _, sections = firmware_image(str(path))
+            assert len(sections) >= 2  # Includes initialized RAM at its flash LMA.
+            for address, content in sections:
+                assert bytes(server.memory.get(address + i, 0) for i in range(len(content))) == content
+        assert 'vFlashDone' in server.commands
+        assert not any(command.startswith('c') for command in server.commands)
+    finally:
+        target.close()
+        server.close()

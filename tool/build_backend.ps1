@@ -39,6 +39,7 @@ if ([IO.Path]::GetFullPath($PythonExecutable).StartsWith($ManagedVirtualEnv, [St
     --collect-all cmsis_pack_manager `
     --collect-all elftools `
     --collect-submodules pylink `
+    --collect-all zeroconf `
     (Join-Path $BackendRoot "take_a_look_backend\stdio.py")
 if ($LASTEXITCODE -ne 0) {
     throw "Backend packaging failed (exit $LASTEXITCODE)."

@@ -4,6 +4,7 @@ import time
 from typing import Any
 
 from take_a_look_backend.models import WatchedVariable, json_value
+from take_a_look_backend.backends.ember_transport import EmberError
 from take_a_look_backend.backends.target_backend import backend_capabilities, backend_rtt_binding
 from take_a_look_backend.protocol import EventName
 from take_a_look_backend.services.sampling_clock import advance_deadline, wait_until
@@ -28,7 +29,12 @@ class SamplingServiceMixin:
                     connected = self._connection_status == "connected" and not self._firmware_busy
                     if connected and now >= self._next_debug_poll_at:
                         self._poll_debug_state_locked()
-                        self._next_debug_poll_at = now + 0.05
+                        # The phone services every probe request on one worker, so a
+                        # status poll steals read time from capture. Poll slowly while
+                        # a running target is being sampled quickly.
+                        fast_capture = (self._target_execution_state != "halted"
+                                        and self._sample_rate_hz >= 200)
+                        self._next_debug_poll_at = now + (0.25 if fast_capture else 0.05)
                         connected = self._connection_status == "connected"
                     if connected:
                         deadlines.append(self._next_debug_poll_at)
@@ -51,18 +57,30 @@ class SamplingServiceMixin:
                         if now >= next_monitor_at:
                             next_monitor_at = self._poll_monitors_locked(now)
                         deadlines.append(next_monitor_at)
-                    if connected and not self._pipeline_backpressure:
-                        memory_enabled = (active and bool(self._capture_symbols_locked()) and
+                    memory_enabled = (active and bool(self._capture_symbols_locked()) and
                             backend_capabilities(self._memory).memory_sampling and
                             not (rtt_enabled and rtt_protocol == "plus" and self._plus_rtt.is_started))
+                    if not memory_enabled or self._pipeline_backpressure:
+                        self._stop_memory_sampling_locked()
+                    if connected and not self._pipeline_backpressure:
                         if memory_enabled:
-                            precise = memory_period < 0.001
-                            if now >= next_memory_at:
+                            push_read = getattr(self._memory, "read_sample_frames", None)
+                            frames = (push_read(self._capture_symbols_locked(), self._sample_rate_hz, elapsed)
+                                      if push_read is not None else None)
+                            if frames is not None:
+                                if frames:
+                                    self._remember_values_locked(frames[-1][1])
+                                    self._queue_samples_locked(frames)
+                                # Drain in batches; acquisition is clocked on the phone.
+                                deadlines.append(time.perf_counter() + 0.002)
+                            elif now >= next_memory_at:
+                                precise = memory_period < 0.001
                                 values = self._read_memory_locked(rtt_enabled, rtt_protocol)
                                 if values:
                                     self._queue_samples_locked([(elapsed, values)])
                                 next_memory_at = advance_deadline(next_memory_at, time.perf_counter(), memory_period)
-                            deadlines.append(next_memory_at)
+                            if frames is None:
+                                deadlines.append(next_memory_at)
                         # Drain push streams while capture is paused. Monitors use
                         # fresh cached values; old RTT frames must never be replayed.
                         if rtt_enabled and self._target_execution_state != "halted":
@@ -80,7 +98,12 @@ class SamplingServiceMixin:
                             deadlines.append(last_emit_at + 0.006)
             except Exception as error:
                 with self._lock:
+                    self._stop_memory_sampling_locked()
                     self._handle_remote_failure_locked(error)
+                    if isinstance(error, EmberError) and error.code == "client_overflow":
+                        self._sampling_paused = True
+                        self._emit(EventName.ERROR, {"code": error.code, "message": str(error)})
+                        self._emit(EventName.STATE, {"samplingPaused": True})
                 self._emit(EventName.LOG, {"level": "error", "message": f"采样失败：{error}"})
                 next_memory_at = time.perf_counter() + 0.25
                 deadlines = [next_memory_at]
@@ -93,6 +116,11 @@ class SamplingServiceMixin:
     def _watch_value_json(watch: WatchedVariable) -> dict[str, object]:
         return {"key": watch.symbol.key, "value": json_value(watch.value),
                 "updatedAtMs": watch.updated_at_ms}
+
+    def _stop_memory_sampling_locked(self):
+        stop = getattr(self._memory, "stop_sampling", None)
+        if stop is not None:
+            stop()
 
     def _remember_values_locked(self, values: dict[str, object], *, updated_at_ms: int | None = None) -> None:
         stamp = updated_at_ms if updated_at_ms is not None else time.time_ns() // 1_000_000
@@ -312,6 +340,11 @@ class SamplingServiceMixin:
                 "watchCount": len(self._watches),
                 "readBlockCount": metrics.get("block_count", 0),
                 "readByteCount": metrics.get("byte_count", 0),
+                "memoryDroppedSamples": metrics.get("dropped_samples", 0),
+                "memorySkippedTicks": metrics.get("skipped_ticks", 0),
+                "memoryReadDurationUs": metrics.get("duration_us", 0),
+                "memorySamplingMode": getattr(self._memory, "sampling_mode", "timed"),
+                "memoryPhoneReadUs": getattr(self._memory, "phone_read_us", 0),
                 "rttDroppedBytes": dropped,
                 "rttTransport": (
                     self._normal_rtt.transport_name if self._rtt_protocol == "normal" else self._plus_rtt.transport_name
@@ -321,6 +354,7 @@ class SamplingServiceMixin:
         self._emit(EventName.PERF, payload)
 
     def _stop_rtt_locked(self) -> None:
+        self._stop_memory_sampling_locked()
         self._normal_rtt.stop()
         self._plus_rtt.stop()
         self._last_rtt_error = ""

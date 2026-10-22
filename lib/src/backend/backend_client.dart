@@ -66,6 +66,9 @@ class BackendClient {
 
   bool get isRunning => _process != null;
 
+  Future<JsonObject> emberRequest(String operation, JsonObject arguments) =>
+      request(BackendMethod.ember, {...arguments, 'operation': operation});
+
   Future<Map<String, Object?>> targetCatalogRequest(
     String operation,
     Map<String, Object?> arguments,

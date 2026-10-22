@@ -8,7 +8,15 @@ It is a local stdio process, not a TCP server. It can connect as a client to
 EmberMobile (v2 QUIC with v1 JSON-lines compatibility) and GDB Server. The Flutter connection settings map
 to `setConfig.connectionKind` (`local`, `ember`, `emberGdb`, or `gdb`) and
 `setConfig.remoteConfig` (`host`, `gatewayPort`, `gdbPort`, `token`, `gdbPath`,
-`core`, and `rttDelivery` (`reliable` or `latest`, all strings). Connection settings can be changed while disconnected.
+`core`, `deviceId`, and `rttDelivery` (`reliable` or `latest`, all strings). Connection settings can be changed while disconnected.
+`ember {operation: devices|discover|pair|status|cancel|forget}` exposes discovery
+and phone-approved pairing. `pair` accepts `host, port, deviceId?, name?` and
+returns immediately; poll `status` for the TLS comparison code and completion.
+Discovery/forget run on a separate stdio worker, leaving cancellation and other
+commands responsive. Results expose phone metadata only. Credentials are stored
+under the local TakeALook configuration directory (`ember/paired-devices.dat`),
+with Windows DPAPI or Unix 0700/0600 permissions; `TAL_EMBER_CONFIG_DIR` isolates
+the store for tests. A nonempty explicit token overrides `deviceId` authentication.
 `connectionCapabilities` reports memory polling, memory writes, and RTT support.
 
 `backends/target_backend.py` defines the target-operation protocol, connection
@@ -18,6 +26,12 @@ codecs, register access and write/readback verification. The remote adapter does
 not inherit pyOCD connection, target-registry or flash-programming behavior;
 those remain in the local adapter. Adapter calls retain the service's existing
 serialization and ownership rules.
+Both Ember modes support source firmware downloads. `ember` uses phone firmware
+staging and flash-job polling; `emberGdb` uses MI download with independent
+section readback. Generic `gdb` retains its existing capability restrictions.
+The shared source-task lifecycle pauses acquisition, removes breakpoints, waits
+for verified programming, then reloads symbols and applies halt/run settings.
+Failed/unknown flash jobs never reset/resume the target or report success.
 
 High-frequency acquisition compiles typed block decoders and retains up to eight
 read plans, including separate capture/monitor sets. Symbol keys and capture
@@ -27,7 +41,8 @@ values retain their existing representations. Incomplete reads fail explicitly.
 Local pyOCD queues aligned single-word scatter reads with its deferred API;
 native accelerated memory interfaces and multiword/unaligned blocks keep the
 normal block-read path. Remote adapters
-keep their supported protocol and never assume a gateway batch API exists.
+negotiate `memory_batch=1` before using kind 13. Exact variable ranges go to the
+phone's memory-map-aware merger; absent that capability, existing reads remain.
 
 Selecting a memory capture rate above 1000 Hz enables short-tail yielding in the
 deadline waiter. Lower rates, paused capture and inactive/backpressured capture
@@ -66,6 +81,15 @@ The current register interface supports ARM/Cortex-M. The private adapter
 retains session and RTT IDs, reports byte loss, and never retries an ambiguous
 write or reset after a network error. See the root README for ownership and
 running-target sampling behavior.
+
+For remote GDB, `remoteConfig.gdbMode="memory"` selects a direct standard RSP
+memory sampler; the default `"debug"` retains GDB/MI debugging. The sampler
+requires no installed GDB and shares the production typed decoding, capture,
+recording and publication pipeline. It performs fresh requests without a client
+value cache, negotiates NoAck, honors PacketSize, and bounds packets, decoded
+RLE and request deadlines. Only server-declared RAM permits gap coalescing;
+unknown areas use exact ranges. Server caches must be configured separately.
+Pause/continue are explicit; no fallback halts/resets the core on a failed read.
 
 Development setup:
 

@@ -13,6 +13,51 @@ import 'package:take_a_look_v2/src/theme/theme.dart';
 import 'package:take_a_look_v2/src/workspace/panel_types.dart';
 
 void main() {
+  for (final kind in ['local', 'ember', 'emberGdb', 'gdb']) {
+    testWidgets('$kind download follows the adapter capability', (
+      tester,
+    ) async {
+      final calls = <Object?>[];
+      final controller = TakeALookController(
+        backendCommand: (command, args) async {
+          if (command == ControllerCommand.startSourceTask) calls.add(args);
+        },
+      );
+      controller.applySnapshot({
+        'connectionKind': kind,
+        'connectionStatus': 'connected',
+        'sourceProject': {
+          'sourceRoot': Directory.current.path,
+          'buildCommand': 'cmake --build build',
+          'firmwarePath': 'build/app.axf',
+        },
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: buildWorkspacePanelBody(
+              WorkspacePanelId.sourceDebug,
+              controller,
+            ),
+          ),
+        ),
+      );
+      final download = find.byKey(const ValueKey('source-download'));
+      final enabled = kind != 'gdb';
+      expect(controller.supportsFirmwareDownload, enabled);
+      expect(tester.widget<TalButton>(download).onPressed != null, enabled);
+      if (enabled) {
+        await tester.tap(download);
+        await tester.pump();
+        expect(calls.first, {'kind': 'download'});
+        await tester.tap(find.byKey(const ValueKey('source-build-download')));
+        await tester.pump();
+        expect(calls.last, {'kind': 'buildAndDownload'});
+      }
+      await tester.pumpWidget(const SizedBox());
+      controller.dispose();
+    });
+  }
   test(
     'async task failures report errors once and sync to detached windows',
     () {

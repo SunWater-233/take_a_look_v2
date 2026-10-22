@@ -116,6 +116,13 @@ class MainWindowSync {
       prepareWindow(window, const [WorkspacePanelId.analysis]);
 
   Future<dynamic> _handleCall(MethodCall call) async {
+    if (call.method == 'ember') {
+      final envelope = Map<String, dynamic>.from(call.arguments as Map);
+      return controller.requestEmber(
+        envelope['operation'] as String,
+        Map<String, Object?>.from(envelope['arguments'] as Map),
+      );
+    }
     if (call.method == nativePanelTransferMethod) {
       final transfer = NativePanelTransfer.parse(call.arguments);
       return transfer != null && await transferPanel(transfer);
@@ -391,6 +398,17 @@ Future<JsonObject> requestTargetCatalogFromMain(
 ) async {
   final result = await _mainChannel.invokeMethod<Map<Object?, Object?>>(
     'targetCatalog',
+    {'operation': operation, 'arguments': arguments},
+  );
+  return Map<String, Object?>.from(result ?? const {});
+}
+
+Future<JsonObject> requestEmberFromMain(
+  String operation,
+  JsonObject arguments,
+) async {
+  final result = await _mainChannel.invokeMethod<Map<Object?, Object?>>(
+    'ember',
     {'operation': operation, 'arguments': arguments},
   );
   return Map<String, Object?>.from(result ?? const {});

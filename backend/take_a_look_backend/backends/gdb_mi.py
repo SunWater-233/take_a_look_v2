@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import os
+import json
+from pathlib import Path
 import queue
 import re
 import shutil
+import tempfile
 import subprocess
 import threading
 import time
@@ -76,10 +79,20 @@ class GdbTarget:
                 if not line or len(line) > 1024 * 1024:
                     break
                 try:
-                    record = parse_response(line.decode("utf-8", "replace").strip())
+                    text = line.decode("utf-8", "replace").strip()
+                    status = re.match(r"^(\d*)\+download,(.*)$", text)
+                    if status:
+                        body = status[2]
+                        if body.startswith("{") and body.endswith("}"):
+                            body = body[1:-1]
+                        # pygdbmi 0.11 does not recognize '+' status records.
+                        text = f"{status[1]}=download,{body}"
+                    record = parse_response(text)
+                    if status:
+                        record["type"] = "status"
                 except Exception:
                     continue
-                if record.get("type") in {"result", "notify"}:
+                if record.get("type") in {"result", "notify", "status"}:
                     self._messages.put(record, timeout=1)
         except (OSError, ValueError, queue.Full):
             # A stalled consumer must not create an unbounded MI output queue.
@@ -105,7 +118,7 @@ class GdbTarget:
             elif message == "thread-group-exited":
                 self._state = "unavailable"
 
-    def _request(self, command: str) -> dict[str, Any]:
+    def _request(self, command: str, *, timeout: float | None = None, on_status=None) -> dict[str, Any]:
         if self._closed.is_set():
             raise ConnectionError("GDB 连接已关闭。")
         self._token += 1
@@ -114,11 +127,13 @@ class GdbTarget:
         try:
             self._process.stdin.write(f"{token}{command}\n".encode("utf-8"))
             self._process.stdin.flush()
-            deadline = time.monotonic() + self.timeout
+            deadline = time.monotonic() + (self.timeout if timeout is None else timeout)
             while True:
                 record = self._messages.get(timeout=max(0.001, deadline - time.monotonic()))
                 self._consume(record)
                 assert record is not None
+                if on_status is not None and record.get("type") == "status":
+                    on_status(record)
                 if record.get("type") == "result" and record.get("token") == token:
                     payload = record.get("payload") or {}
                     if record.get("message") == "error":
@@ -203,6 +218,74 @@ class GdbTarget:
     def write_memory_block8(self, address: int, values: list[int]) -> None:
         self._require_halted()
         self._request(f"-data-write-memory-bytes 0x{address:x} {bytes(values).hex()}")
+
+    def program_firmware(self, path: str, sections: list[tuple[int, bytes]], progress) -> None:
+        # ARM GDB's Windows file APIs do not consistently accept UTF-8 names.
+        # Keep a private ASCII-named copy for the complete load/verify operation.
+        with tempfile.TemporaryDirectory(prefix="tal-gdb-") as directory:
+            staged = Path(directory) / "firmware.elf"
+            shutil.copyfile(path, staged)
+            try:
+                self._program_firmware(str(staged), sections, progress)
+            finally:
+                if not self._closed.is_set():
+                    # Flutter owns source symbols; release GDB's file handles
+                    # before removing the staging copy, including after failure.
+                    self._request("-file-exec-and-symbols")
+
+    def _program_firmware(self, path: str, sections: list[tuple[int, bytes]], progress) -> None:
+        from take_a_look_backend.protocol import ProtocolError
+        if not sections:
+            raise ProtocolError("invalid_firmware", "固件中没有可由 GDB 下载的数据节。")
+        self._require_halted()
+        progress(0)
+        filename_path = str(Path(path).absolute())
+        if os.name == "nt" and not filename_path.isascii():
+            # Some Windows ARM GDB builds use narrow CRT filenames even on MI.
+            # Windows' existing short path keeps Unicode source projects usable.
+            import ctypes
+            function = ctypes.windll.kernel32.GetShortPathNameW
+            function.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32]
+            function.restype = ctypes.c_uint32
+            size = function(filename_path, None, 0)
+            if size:
+                buffer = ctypes.create_unicode_buffer(size)
+                if function(filename_path, buffer, size):
+                    filename_path = buffer.value
+        filename = json.dumps(filename_path.replace('\\', '/'), ensure_ascii=False)
+        self._request(f"-file-exec-and-symbols {filename}")
+        def on_status(record):
+            payload = record.get("payload") or {}
+            # pygdbmi exposes GDB's +download,{...} as a list on some versions.
+            if isinstance(payload, list):
+                payload = next((item for item in payload if isinstance(item, dict)), {})
+            if isinstance(payload, dict):
+                try:
+                    total, done = int(payload.get("total-size", 0)), int(payload.get("total-sent", 0))
+                except (TypeError, ValueError):
+                    return
+                if total > 0:
+                    progress(max(0.0, min(.79, .8 * done / total)))
+        self._request("-gdb-set remotetimeout 900")
+        try:
+            result = self._request("-target-download", timeout=900, on_status=on_status)
+            if int(result.get("load-size", 0)) <= 0:
+                raise ProtocolError("firmware_empty", "GDB 未下载任何固件数据。")
+            # Ember's vFlash commit verifies Flash. Also verify each loadable
+            # section here, including RAM, before allowing reset/resume.
+            total, verified = sum(len(data) for _, data in sections), 0
+            for address, data in sections:
+                for offset in range(0, len(data), 4096):
+                    expected = data[offset:offset + 4096]
+                    actual = self.read_memory_block8(address + offset, len(expected))
+                    if actual != expected:
+                        raise ProtocolError("firmware_verify_failed", "GDB 下载后回读校验失败。",
+                                            f"地址 0x{address + offset:08X}")
+                    verified += len(expected)
+                    progress(.8 + .2 * verified / total)
+        finally:
+            if not self._closed.is_set():
+                self._request("-gdb-set remotetimeout 3")
 
     def read_core_registers_raw(self, names: list[str]) -> list[int]:
         self._require_halted()

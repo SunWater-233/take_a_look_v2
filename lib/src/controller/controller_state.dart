@@ -98,7 +98,9 @@ class ConnectionState {
     'gatewayPort': '4242',
     'gdbPort': '3333',
     'token': '',
+    'deviceId': '',
     'gdbPath': '',
+    'gdbMode': 'debug',
     'core': '0',
     'rttDelivery': 'reliable',
   };

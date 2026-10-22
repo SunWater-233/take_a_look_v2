@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import base64
+import math
 import time
 from typing import Any
 
 from take_a_look_backend.backends.ember_transport import EmberClient
 from take_a_look_backend.backends.gdb_mi import GdbTarget, normalize_host
-from take_a_look_backend.backends.typed_memory import TypedMemoryBackend
+from take_a_look_backend.backends.gdb_rsp import GdbRspMemoryTarget
+from take_a_look_backend.backends.typed_memory import TypedMemoryBackend, _access_size, decode_symbol_value
 from take_a_look_backend.backends.target_backend import capabilities_for_connection
 
 
@@ -15,8 +17,17 @@ REMOTE_DEFAULTS: dict[str, object] = {
     "host": "127.0.0.1", "gatewayPort": "4242", "gdbPort": "3333",
     "token": "", "gdbPath": "", "core": "0",
     "rttDelivery": "reliable",
+    "deviceId": "", "gdbMode": "debug",
 }
 CONNECTION_KINDS = {"local", "ember", "emberGdb", "gdb"}
+# Below this rate the phone's timer is accurate enough and keeps the probe idle
+# between samples; above it, back-to-back reads are what the user is asking for.
+FAST_SAMPLING_MIN_HZ = 60.0
+# Long enough to measure a delivered rate, short enough to settle per rate change.
+SAMPLING_MODE_WINDOW_S = 0.75
+# Switch to full speed when the timer delivers less than this share of the
+# request: at that point back-to-back reads are the closer answer.
+ESCALATE_BELOW_FRACTION = 2 / 3
 
 
 def _integer(config: dict[str, object], key: str, minimum: int, maximum: int) -> int:
@@ -42,8 +53,22 @@ class RemoteMemoryBackend(TypedMemoryBackend):
         self.client: EmberClient | None = None
         self.ember: EmberTarget | None = None
         self.rtt_target: Any | None = None
-        self.capabilities = capabilities_for_connection(kind)
+        self.capabilities = capabilities_for_connection(kind, self.options)
+        if kind == "gdb" and self.options["gdbMode"] == "memory":
+            self.MAX_COALESCED_GAP_BYTES = 128
         self._owns_gdb = False
+        self._memory_samples = None
+        self._sampling_signature = None
+        self._sampling_origin = None
+        self._sampling_elapsed = 0.0
+        self._sampling_full_speed = False
+        self._phone_read_us = 0.0
+        self._phone_read_us_values: list[float] = []
+        self._mode_rate = 0.0
+        self._mode_settle_windows = 0
+        self._mode_window_frames = 0
+        self._mode_window_started = time.perf_counter()
+        self.sampling_mode = "timed"
 
     @property
     def is_connected(self) -> bool:
@@ -59,9 +84,28 @@ class RemoteMemoryBackend(TypedMemoryBackend):
         gdb_port = _integer(self.options, "gdbPort", 1, 65535)
         started = time.perf_counter()
         try:
+            if self.options["gdbMode"] not in {"debug", "memory"}:
+                raise ValueError("gdbMode 必须是 debug 或 memory。")
+            if self.kind == "gdb" and self.options["gdbMode"] == "memory":
+                self.target = GdbRspMemoryTarget(host, gdb_port)
+                self.last_connect_timings = {"total_s": time.perf_counter() - started}
+                return
             if self.kind in {"ember", "emberGdb"}:
                 gateway_port = _integer(self.options, "gatewayPort", 1, 65535)
-                self.client = EmberClient(host, gateway_port, str(self.options["token"]))
+                token = str(self.options["token"])
+                if not token and self.options["deviceId"]:
+                    from .ember_pairing import PairingStore, discover
+                    phone = PairingStore().find(str(self.options["deviceId"]))
+                    try:
+                        nearby = discover(1)
+                    except OSError:
+                        nearby = []  # Direct saved endpoints still work without multicast.
+                    for found in nearby:
+                        if found["id"] == phone["id"]:
+                            phone = {**phone, **found}
+                            break
+                    host, gateway_port, token = phone["host"], int(phone["port"]), phone["token"]
+                self.client = EmberClient(host, gateway_port, token)
                 self.client.call("hello")
                 if self.options["rttDelivery"] not in {"reliable", "latest"}:
                     raise ValueError("RTT delivery must be reliable or latest")
@@ -99,9 +143,10 @@ class RemoteMemoryBackend(TypedMemoryBackend):
             raise
 
     def disconnect(self) -> None:
+        self.stop_sampling()
         target, self.target = self.target, None
         try:
-            if target is not None and self.manages_breakpoint_step:
+            if target is not None and (self.manages_breakpoint_step or isinstance(target, GdbRspMemoryTarget)):
                 try:
                     target.close()
                 except (ConnectionError, RuntimeError, TimeoutError):
@@ -122,10 +167,191 @@ class RemoteMemoryBackend(TypedMemoryBackend):
             self.rtt_target = None
             self._clear_read_plans()
 
+    def stop_sampling(self):
+        samples, self._memory_samples = self._memory_samples, None
+        self._sampling_signature = self._sampling_origin = None
+        if samples is not None:
+            samples.close()
+
+    def _can_merge_read_range(self, address, end):
+        if isinstance(self.target, GdbRspMemoryTarget):
+            return self.target.range_is_ram(address, end)
+        return True
+
+    def read_core_registers(self):
+        if isinstance(self.target, GdbRspMemoryTarget):
+            return {}  # Memory-only RSP does not assume a CPU register layout.
+        return super().read_core_registers()
+
+    @property
+    def phone_read_us(self) -> int:
+        """Smoothed cost of one phone-side read of the current capture set."""
+        return int(self._phone_read_us)
+
+    def _sampling_period(self, rate_hz: float) -> dict:
+        """Map the current cadence mode to the phone's SampleRequest.
+
+        The phone's timer is coarser than one probe read on this link and also
+        sleeps the remainder of every period, so it can deliver less than half of
+        what back-to-back reads achieve. ``_evaluate_sampling_mode`` decides which
+        one is delivering closer to the requested rate.
+        """
+        requested_us = 1e6 / rate_hz if rate_hz > 0 else 0.0
+        self.sampling_mode = "full" if self._sampling_full_speed else "timed"
+        if self._sampling_full_speed:
+            return {"interval_ms": 0}
+        if requested_us < 1000 and self.client.supports_memory_microseconds:
+            # Sub-millisecond periods are what the microsecond field is for; the
+            # millisecond path is the phone's long-standing, better-tested timer.
+            return {"interval_ms": 0, "interval_us": max(1, min(60_000_000, math.ceil(requested_us)))}
+        return {"interval_ms": max(1, min(60000, math.ceil(requested_us / 1000)))}
+
+    def _evaluate_sampling_mode(self, rate_hz: float, delivered_hz: float) -> None:
+        """Pick full speed or a timer from what each mode actually delivers.
+
+        A timer that cannot meet the request is worse than back-to-back reads on
+        both counts: fewer samples and irregular ones. The decision is made once
+        per requested rate -- escalating is one-way for that rate, so the two
+        modes cannot oscillate -- and slow rates keep the timer so the probe is
+        not pinned at maximum speed for no benefit.
+        """
+        if not self.client.supports_memory_max_speed or rate_hz <= 0:
+            self._sampling_full_speed = False
+            self._mode_rate = rate_hz
+            return
+        if delivered_hz <= 0:
+            return
+        if self._mode_rate <= 0 or abs(rate_hz - self._mode_rate) > rate_hz * 0.2:
+            # New rate: measure the timer again before preferring full speed, and
+            # discard the window that still contains the resubscription.
+            self._mode_rate = rate_hz
+            self._sampling_full_speed = False
+            self._mode_settle_windows = 1
+            return
+        if self._mode_settle_windows > 0:
+            self._mode_settle_windows -= 1
+            return
+        if self._sampling_full_speed:
+            return
+        # Prefer whichever mode lands closer to the requested rate: the timer is
+        # accurate at low rates but tops out around one read plus its own coarse
+        # scheduling, so a big miss means back-to-back reads are the better answer.
+        if rate_hz >= FAST_SAMPLING_MIN_HZ and delivered_hz < rate_hz * ESCALATE_BELOW_FRACTION:
+            self._sampling_full_speed = True
+
+    def read_sample_frames(self, symbols, rate_hz, elapsed):
+        if self.kind != "ember" or not self.client or not self.client.supports_memory_sampling:
+            return None
+        symbols = tuple(symbols)
+        sizes = tuple(_access_size(symbol) for symbol in symbols)
+        if not symbols or len(symbols) > 128 or sum(sizes) > 65536:
+            self.stop_sampling()
+            return None
+        period = self._sampling_period(rate_hz)
+        signature = (symbols, tuple(period.items()))
+        if signature != self._sampling_signature:
+            self.stop_sampling()
+            self._memory_samples = self.client.sample_memory({
+                "read": {"session_id": self.ember.session_id, "core": self.ember.core,
+                         "ranges": [{"address": s.address, "length": n} for s, n in zip(symbols, sizes)],
+                         "merge": True}, **period})
+            self._sampling_signature = signature
+            self._sampling_elapsed = elapsed
+        samples = self._memory_samples
+        from .ember_v2 import V2Error
+        from .ember_transport import EmberError
+        try:
+            packets = samples.read()
+        except V2Error as error:
+            raise EmberError(error.code, str(error)) from error
+        measured = samples.duration_us
+        if measured:
+            # A median ignores the occasional wedged USB read, which says nothing
+            # about the cadence the probe can sustain.
+            self._phone_read_us_values.append(float(measured))
+            del self._phone_read_us_values[:-16]
+            ordered = sorted(self._phone_read_us_values)
+            self._phone_read_us = ordered[len(ordered) // 2] if len(ordered) >= 4 else 0.0
+        self._mode_window_frames += len(packets)
+        window = time.perf_counter() - self._mode_window_started
+        if window >= SAMPLING_MODE_WINDOW_S:
+            delivered = self._mode_window_frames / window
+            self._mode_window_frames = 0
+            self._mode_window_started = time.perf_counter()
+            self._evaluate_sampling_mode(rate_hz, delivered)
+        frames = []
+        for stamp, data in packets:
+            if self._sampling_origin is None:
+                self._sampling_origin = stamp
+            offset, values = 0, {}
+            for symbol, size in zip(symbols, sizes):
+                values[symbol.key] = decode_symbol_value(symbol, data[offset:offset + size])
+                offset += size
+            frames.append((self._sampling_elapsed + (stamp - self._sampling_origin) / 1e6, values))
+        self.last_read_metrics = {"symbol_count": len(symbols), "block_count": samples.reads,
+            "byte_count": sum(sizes), "dropped_samples": samples.dropped,
+            "skipped_ticks": samples.skipped_ticks, "duration_us": samples.duration_us}
+        return frames
+
+    def reset(self, halt=False):
+        self.stop_sampling()
+        super().reset(halt)
+
+    def halt(self):
+        self.stop_sampling()
+        super().halt()
+
+    def read_symbols(self, symbols):
+        if self.kind != "ember" or not self.client or not self.client.supports_memory_batch:
+            return super().read_symbols(symbols)
+        # Give the phone exact symbol ranges. Its memory map decides which reads
+        # can merge; do not fill gaps or coalesce MMIO on the PC.
+        symbols = tuple(symbols)
+        batches, reads, byte_count = [], 0, 0
+        buffers = [bytearray() for _ in symbols]
+        batch, size = [], 0
+        for index, symbol in enumerate(symbols):
+            length = _access_size(symbol)
+            for offset in range(0, length, 65536):
+                count = min(length - offset, 65536)
+                if batch and (len(batch) == 128 or size + count > 65536):
+                    batches.append(batch)
+                    batch, size = [], 0
+                batch.append((index, symbol.address + offset, count))
+                size += count
+        if batch:
+            batches.append(batch)
+        epoch = None
+        for batch in batches:
+            result = self.ember.call("read_memory_batch", ranges=[
+                {"address": address, "length": count} for _, address, count in batch], merge=True)
+            if epoch is not None and epoch != result["epoch"]:
+                raise ConnectionError("批量读取期间目标已复位，请重新连接。")
+            epoch = result["epoch"]
+            reads += result["reads"]
+            for (index, address, count), block in zip(batch, result["ranges"], strict=True):
+                if len(block["data"]) != count or block["address"] != address:
+                    raise ConnectionError("EmberMobile 未返回完整的批量内存数据。")
+                buffers[index].extend(block["data"])
+                byte_count += count
+        self.last_read_metrics = {"symbol_count": len(symbols), "block_count": reads, "byte_count": byte_count}
+        return {symbol.key: decode_symbol_value(symbol, bytes(data)) for symbol, data in zip(symbols, buffers)}
+
     def set_breakpoint(self, address: int) -> bool:
         # Remote adapters apply changes through their own protocol, without a
         # local pyOCD breakpoint manager or probe write queue.
         return bool(self._require_target().set_breakpoint(address))
+
+    def program_firmware(self, path: str, progress) -> None:
+        if not self.capabilities.firmware_download:
+            return super().program_firmware(path, progress)
+        from .remote_firmware import firmware_image, flash_phone
+        data, sections = firmware_image(path)
+        target = self._require_target()
+        if self.kind == "emberGdb":
+            target.program_firmware(path, sections, progress)
+        else:
+            flash_phone(self.client, self.ember.session_id, path, data, progress)
 
     def remove_breakpoint(self, address: int) -> None:
         self._require_target().remove_breakpoint(address)

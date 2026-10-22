@@ -24,12 +24,15 @@ class TargetCapabilities:
         }
 
 
-def capabilities_for_connection(kind: str) -> TargetCapabilities:
+def capabilities_for_connection(kind: str, options: dict | None = None) -> TargetCapabilities:
+    if kind == "gdb" and (options or {}).get("gdbMode") == "memory":
+        return TargetCapabilities(memory_sampling=True, memory_write=False, rtt=False,
+                                  manages_breakpoint_step=True)
     return TargetCapabilities(
         memory_sampling=kind in {"local", "ember"},
         memory_write=kind != "ember",
         rtt=kind != "gdb",
-        firmware_download=kind == "local",
+        firmware_download=kind in {"local", "ember", "emberGdb"},
         manages_breakpoint_step=kind in {"emberGdb", "gdb"},
     )
 

@@ -350,7 +350,22 @@ extension TakeALookControllerConnection on TakeALookController {
     if (connectionStatus != ConnectionStatus.disconnected) return;
     if (_dispatchCommand(ControllerCommand.setRemoteConfig, values)) return;
     remoteConfig.addAll(values);
-    _emitState([signals.connection]);
+    _emitState([signals.connection, signals.watches, signals.debug]);
+  }
+
+  Future<JsonObject> requestEmber(
+    String operation, [
+    JsonObject arguments = const {},
+  ]) async {
+    final request = emberRequest;
+    if (request == null) {
+      throw const BackendException('backend_unavailable', '请启动本机硬件后端后再配对手机。');
+    }
+    if (const {'pair', 'forget'}.contains(operation) &&
+        connectionStatus != ConnectionStatus.disconnected) {
+      throw const BackendException('already_connected', '请先断开目标连接，再管理手机配对。');
+    }
+    return request(operation, arguments);
   }
 
   void toggleSampling() {

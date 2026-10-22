@@ -26,6 +26,7 @@ fi
   --collect-all cmsis_pack_manager \
   --collect-all elftools \
   --collect-submodules pylink \
+  --collect-all zeroconf \
   "$backend_root/take_a_look_backend/stdio.py"
 
 echo "Packaged backend: $dist_root/take_a_look_backend"

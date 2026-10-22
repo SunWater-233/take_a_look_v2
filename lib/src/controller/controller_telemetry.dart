@@ -111,11 +111,26 @@ extension TakeALookControllerTelemetry on TakeALookController {
           final watchCount = (payload['watchCount'] as num?)?.toInt() ?? 0;
           final blockCount = (payload['readBlockCount'] as num?)?.toInt() ?? 0;
           final byteCount = (payload['readByteCount'] as num?)?.toInt() ?? 0;
+          final memoryDropped =
+              (payload['memoryDroppedSamples'] as num?)?.toInt() ?? 0;
+          final memorySkipped =
+              (payload['memorySkippedTicks'] as num?)?.toInt() ?? 0;
+          final memoryTiming = connectionKind == 'ember'
+              ? '，传输跳样 $memoryDropped，采样错过周期 $memorySkipped'
+              : '';
+          final phoneReadUs =
+              (payload['memoryPhoneReadUs'] as num?)?.toInt() ?? 0;
+          final samplingMode = payload['memorySamplingMode'] as String?;
+          final modeLabel = samplingMode == 'full' ? '全速' : '定时';
+          final ceiling = samplingMode != null && phoneReadUs > 0
+              ? '，手机单次读取 ${(phoneReadUs / 1000).toStringAsFixed(1)} ms'
+                    '（$modeLabel）'
+              : '';
           _appendLog(
             '采样性能：目标 ${sampleRateHz.toStringAsFixed(0)} Hz，'
             '实际 ${effectiveHz.toStringAsFixed(1)} Hz，'
             '样本 $sampleCount，变量 $watchCount，'
-            '读块 $blockCount，字节 $byteCount。',
+            '读块 $blockCount，字节 $byteCount$memoryTiming$ceiling。',
           );
           _emitState([signals.logs]);
         }

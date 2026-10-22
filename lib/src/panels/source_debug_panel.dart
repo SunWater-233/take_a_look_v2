@@ -956,9 +956,13 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
           },
           onDragDone: (details) {
             if (TalDragPreview.debugNativeDrag) {
-              debugPrint('Source file drop candidates: ${details.files.length}');
+              debugPrint(
+                'Source file drop candidates: ${details.files.length}',
+              );
             }
-            unawaited(_openDroppedFiles(details.files.map((file) => file.path)));
+            unawaited(
+              _openDroppedFiles(details.files.map((file) => file.path)),
+            );
           },
           child: Stack(
             children: [
@@ -1213,14 +1217,20 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
                 : switch (state) {
                     DebugExecutionState.running => controller.haltTarget,
                     DebugExecutionState.halted => controller.resumeTarget,
-                    _ => null,
+                    _ =>
+                      controller.isGdbMemoryMode
+                          ? controller.resumeTarget
+                          : null,
                   },
           ),
           _DebugToolbarButton(
             key: const ValueKey('debug-step'),
             tooltip: '单条指令步进',
             icon: Icons.skip_next,
-            onPressed: connected && state == DebugExecutionState.halted
+            onPressed:
+                connected &&
+                    controller.supportsTargetControl &&
+                    state == DebugExecutionState.halted
                 ? controller.stepTarget
                 : null,
           ),

@@ -17,6 +17,9 @@ def run() -> int:
         "aioquic._crypto", "aioquic._buffer",
         "take_a_look_backend.backends.remote_backend",
         "take_a_look_backend.backends.ember_v2",
+        "take_a_look_backend.backends.ember_pairing", "zeroconf",
+        "take_a_look_backend.backends.remote_firmware",
+        "take_a_look_backend.backends.gdb_rsp",
     ]
     # Linux CMSIS-DAP v1 uses PyUSB; hidapi is a Windows/macOS dependency.
     if sys.platform in ("win32", "darwin"):

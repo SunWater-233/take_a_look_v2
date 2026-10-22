@@ -150,11 +150,15 @@ class _RunControlPanel extends StatelessWidget {
                 child: Text(controller.connectionLabel),
               ),
               TalButton(
-                onPressed: () => controller.resetTarget(halt: false),
+                onPressed: controller.supportsTargetControl
+                    ? () => controller.resetTarget(halt: false)
+                    : null,
                 child: const Text('复位运行'),
               ),
               TalButton(
-                onPressed: () => controller.resetTarget(halt: true),
+                onPressed: controller.supportsTargetControl
+                    ? () => controller.resetTarget(halt: true)
+                    : null,
                 child: const Text('复位暂停'),
               ),
             ],

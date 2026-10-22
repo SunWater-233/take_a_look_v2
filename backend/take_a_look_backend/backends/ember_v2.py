@@ -19,7 +19,9 @@ from aioquic.quic.events import ConnectionTerminated, DatagramFrameReceived, Str
 
 HEADER = struct.Struct("<4sB3xI")
 CHUNK = struct.Struct("<8Q")
+MEMORY_CHUNK = struct.Struct("<6Q")
 AUTH, RPC, SUBSCRIBE, UPLOAD, RTT_WRITE, MEMORY_READ = range(1, 7)
+PAIR, FORGET, MEMORY_BATCH, MEMORY_SAMPLE = 11, 12, 13, 14
 OK, DATA, END, ERROR = 128, 129, 130, 255
 BLOCK = 65536
 MAX_FRAME = BLOCK + 128
@@ -209,6 +211,75 @@ class Subscription:
             self.owner.submit(self.owner._cancel_subscription(self))
 
 
+class MemorySamples:
+    """Bounded capture queue; timestamps and sequence gaps come from the phone."""
+
+    def __init__(self, owner, request, stream_id):
+        self.owner, self.request, self.stream_id = owner, request, stream_id
+        self._length = sum(item["length"] for item in request["read"]["ranges"])
+        self._lock = threading.Lock()
+        self._queue = collections.deque()
+        self._bytes = 0
+        self._error = None
+        self._task = None
+        self.sequence = self.dropped = self.skipped_ticks = 0
+        self.duration_us = self.reads = 0
+        self._epoch = self._timestamp = None
+
+    def fail(self, error):
+        with self._lock:
+            self._error = error
+            self._queue.clear()
+            self._bytes = 0
+
+    def receive(self, payload):
+        if len(payload) != MEMORY_CHUNK.size + self._length:
+            raise ConnectionError("Invalid memory sample length")
+        sequence, stamp, duration, skipped, epoch, reads = MEMORY_CHUNK.unpack_from(payload)
+        with self._lock:
+            if self._error:
+                return
+            if (sequence <= self.sequence or
+                    self._timestamp is not None and stamp < self._timestamp or
+                    self._epoch is not None and epoch != self._epoch):
+                raise ConnectionError("Memory sample sequence, time or epoch changed")
+            if self._bytes + len(payload) > 1024 * 1024 or len(self._queue) >= 4096:
+                raise V2Error("client_overflow", "电脑内存采样缓存已满，请降低采样率。")
+            self.dropped += sequence - self.sequence - 1
+            self.sequence, self._timestamp, self._epoch = sequence, stamp, epoch
+            self.skipped_ticks, self.duration_us, self.reads = skipped, duration, reads
+            self._queue.append((stamp, payload[MEMORY_CHUNK.size:]))
+            self._bytes += len(payload)
+
+    async def consume(self, reader):
+        try:
+            while True:
+                kind, payload = await asyncio.wait_for(
+                    read_frame(reader), self.owner.timeout +
+                    (self.request.get("interval_us") or self.request["interval_ms"] * 1000) / 1e6)
+                if kind != DATA:
+                    raise ConnectionError("Memory sampling stopped")
+                self.receive(payload)
+        except asyncio.CancelledError:
+            pass
+        except Exception as error:
+            self.fail(error)
+            await self.owner._cancel_subscription(self)
+
+    def read(self):
+        with self._lock:
+            if self._error:
+                raise self._error
+            result = list(self._queue)
+            self._queue.clear()
+            self._bytes = 0
+            return result
+
+    def close(self):
+        if self.owner._loop.is_running():
+            self.owner.submit(self.owner._cancel_subscription(self))
+
+
 class QuicClient:
     def __init__(self, host: str, advertisement: dict, token: str, timeout: float = 5.0, *, data_connection=False):
         certificate = base64.b64decode(advertisement["certificate_der"], validate=True)
@@ -233,10 +304,10 @@ class QuicClient:
             self.close()
             raise
 
-    def submit(self, coroutine):
+    def submit(self, coroutine, *, timeout=None):
         future = asyncio.run_coroutine_threadsafe(coroutine, self._loop)
         try:
-            return future.result(timeout=self.timeout + 1)
+            return future.result(timeout=(self.timeout if timeout is None else timeout) + 1)
         except TimeoutError as error:
             future.cancel()
             raise ConnectionError("QUIC 响应超时；操作结果可能未知，未自动重发。") from error
@@ -272,6 +343,18 @@ class QuicClient:
 
     def call(self, method: str, params: dict) -> dict:
         async def operation():
+            if method == "read_memory_batch":
+                kind, payload = await self._exchange(MEMORY_BATCH, encoded(params))
+                ranges = params["ranges"]
+                if kind != DATA or len(payload) != 16 + sum(item["length"] for item in ranges):
+                    raise ConnectionError("Invalid batch memory response")
+                epoch, reads = struct.unpack_from("<QQ", payload)
+                offset, result = 16, []
+                for item in ranges:
+                    size = item["length"]
+                    result.append({"address": item["address"], "data": payload[offset:offset + size]})
+                    offset += size
+                return {"epoch": epoch, "reads": reads, "ranges": result}
             if method == "read_memory":
                 kind, payload = await self._exchange(MEMORY_READ, encoded(params))
                 if kind != DATA:
@@ -292,6 +375,11 @@ class QuicClient:
         if self._closed:
             raise ConnectionError("QUIC client is closed")
         return self.submit(operation())
+
+    def forget_pairing(self):
+        kind, _ = self.submit(self._exchange(FORGET, b""))
+        if kind != OK:
+            raise ConnectionError("Invalid forget response")
 
     def subscribe(self, request: dict) -> Subscription:
         if not self._data_connection:
@@ -315,9 +403,31 @@ class QuicClient:
                 raise
         return self.submit(operation())
 
-    def upload_bytes(self, upload_id: int, data: bytes, offset: int = 0) -> dict:
+    def sample_memory(self, request: dict) -> MemorySamples:
         if not self._data_connection:
-            return self._data().upload_bytes(upload_id, data, offset)
+            return self._data().sample_memory(request)
+        async def operation():
+            reader, writer = await self._protocol.create_stream()
+            stream_id = writer.get_extra_info("stream_id")
+            samples = MemorySamples(self, request, stream_id)
+            self._protocol.subscriptions[stream_id] = samples
+            try:
+                writer.write(frame(MEMORY_SAMPLE, encoded(request)))
+                writer.write_eof()
+                self._protocol.transmit()
+                kind, _ = await asyncio.wait_for(read_frame(reader), self.timeout)
+                if kind != OK:
+                    raise ConnectionError("Invalid memory sampling response")
+                samples._task = asyncio.create_task(samples.consume(reader))
+                return samples
+            except BaseException:
+                await self._cancel_subscription(samples)
+                raise
+        return self.submit(operation())
+
+    def upload_bytes(self, upload_id: int, data: bytes, offset: int = 0, *, progress=None, timeout=120.0) -> dict:
+        if not self._data_connection:
+            return self._data().upload_bytes(upload_id, data, offset, progress=progress, timeout=timeout)
         if not data or len(data) > 64 * 1024 * 1024 or offset < 0:
             raise ValueError("Invalid firmware upload size or offset")
         async def operation():
@@ -327,11 +437,13 @@ class QuicClient:
                 for start in range(0, len(data), BLOCK):
                     writer.write(frame(DATA, data[start:start + BLOCK]))
                     self._protocol.transmit()
+                    if progress is not None:
+                        progress(min(1.0, (start + BLOCK) / len(data)))
                     await asyncio.sleep(0)
                 writer.write(frame(END, b""))
                 writer.write_eof()
                 self._protocol.transmit()
-                kind, result = await asyncio.wait_for(read_frame(reader), self.timeout)
+                kind, result = await asyncio.wait_for(read_frame(reader), timeout)
                 if kind != OK:
                     raise ConnectionError("Invalid upload completion")
                 return json.loads(result)
@@ -340,7 +452,7 @@ class QuicClient:
                     self._protocol._quic.stop_stream(writer.get_extra_info("stream_id"), 0)
                 self._protocol.release_reader(writer.get_extra_info("stream_id"))
                 self._protocol.transmit()
-        return self.submit(operation())
+        return self.submit(operation(), timeout=timeout)
 
     def _data(self) -> QuicClient:
         # Isolate congestion/backpressure from interactive control requests.

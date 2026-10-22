@@ -82,6 +82,7 @@ enum ControllerCommand {
 
 /// Commands implemented by the Python hardware process.
 enum BackendMethod {
+  ember,
   listTargets,
   inspectTargetPack,
   importTargetPack,

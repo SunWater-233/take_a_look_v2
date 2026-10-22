@@ -33,6 +33,7 @@ import '../theme/theme.dart';
 import 'table_layout.dart';
 import 'watch_color_dialog.dart';
 import 'target_chip_dialog.dart';
+import 'ember_pairing_dialog.dart';
 
 export '../theme/theme.dart' show TalDropdown;
 

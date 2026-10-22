@@ -63,6 +63,7 @@ class TakeALookController extends ChangeNotifier {
     this.csvImportContentsPicker,
     this.csvImportPathPicker,
     this.targetCatalogRequest,
+    this.emberRequest,
     this.targetPackPicker,
     HistoryReader? historyReader,
   }) {
@@ -88,6 +89,7 @@ class TakeALookController extends ChangeNotifier {
   final TextFilePicker? csvImportContentsPicker;
   final PathPicker? csvImportPathPicker;
   final TargetCatalogRequest? targetCatalogRequest;
+  final TargetCatalogRequest? emberRequest;
   final PathPicker? targetPackPicker;
   final List<SymbolItem> _symbols = <SymbolItem>[];
   final List<WatchItem> _watches = <WatchItem>[];
@@ -148,7 +150,12 @@ class TakeALookController extends ChangeNotifier {
   String get connectionKind => state.connection.connectionKind;
   set connectionKind(String value) => state.connection.connectionKind = value;
   Map<String, String> get remoteConfig => state.connection.remoteConfig;
-  bool get supportsMemoryWrite => connectionKind != 'ember';
+  bool get isGdbMemoryMode =>
+      connectionKind == 'gdb' && remoteConfig['gdbMode'] == 'memory';
+  bool get supportsMemoryWrite => connectionKind != 'ember' && !isGdbMemoryMode;
+  bool get supportsTargetControl => !isGdbMemoryMode;
+  bool get supportsFirmwareDownload =>
+      const {'local', 'ember', 'emberGdb'}.contains(connectionKind);
   String get symbolFile => state.connection.symbolFile;
   set symbolFile(String value) => state.connection.symbolFile = value;
   Map<String, dynamic>? get lastBackendError => state.connection.lastError;

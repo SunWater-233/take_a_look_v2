@@ -13,8 +13,8 @@ from take_a_look_backend.protocol import ProtocolError
 
 @pytest.mark.parametrize("kind,polling,writes,rtt,flash", [
     ("local", True, True, True, True),
-    ("ember", True, False, True, False),
-    ("emberGdb", False, True, True, False),
+    ("ember", True, False, True, True),
+    ("emberGdb", False, True, True, True),
     ("gdb", False, True, False, False),
 ])
 def test_connection_capabilities_preserve_the_wire_contract(kind, polling, writes, rtt, flash):

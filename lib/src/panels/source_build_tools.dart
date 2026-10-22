@@ -16,12 +16,12 @@ class _SourceBuildToolbar extends StatelessWidget {
       builder: (context, constraints) {
         final project = controller.sourceProject;
         final task = controller.sourceTask;
-        final local = controller.connectionKind == 'local';
+        final supportsDownload = controller.supportsFirmwareDownload;
         final connected =
             controller.connectionStatus == ConnectionStatus.connected;
         final configured = project.canBuild;
         final canDownload =
-            local &&
+            supportsDownload &&
             connected &&
             project.sourceRoot.isNotEmpty &&
             project.firmwarePath.isNotEmpty;
@@ -63,10 +63,10 @@ class _SourceBuildToolbar extends StatelessWidget {
           );
         }
 
-        final downloadReason = !local
-            ? '当前连接不支持下载，请使用本地 pyOCD 连接'
+        final downloadReason = !supportsDownload
+            ? '当前连接不支持下载，请使用本地 pyOCD 或 EmberMobile 连接'
             : !connected
-            ? '请先连接本地调试探针'
+            ? '请先连接调试目标'
             : '请设置源码目录和固件文件';
         final actions = Row(
           mainAxisSize: MainAxisSize.min,

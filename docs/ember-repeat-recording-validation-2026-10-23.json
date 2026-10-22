@@ -1,0 +1,18 @@
+[
+  {
+    "raw_path": "D:\\ProjectGarage\\take_a_look_v2\\build\\windows\\x64\\runner\\Release\\backend\\runtime\\take_a_look_backend\\recordings\\session-h5j_5j4q\\samples.talraw",
+    "csv_path": "D:\\ProjectGarage\\take_a_look_v2\\build\\validation\\ember-repeat-0.csv",
+    "frames": 27215,
+    "frames_with_timing": 27214,
+    "csv_rows": 27215,
+    "raw_sha256": "a8f62a1ce128c81eecbbfffcbcc79fdd243bc2081f221ceb06108f914bdb9828"
+  },
+  {
+    "raw_path": "D:\\ProjectGarage\\take_a_look_v2\\build\\windows\\x64\\runner\\Release\\backend\\runtime\\take_a_look_backend\\recordings\\session-_6fan38u\\samples.talraw",
+    "csv_path": "D:\\ProjectGarage\\take_a_look_v2\\build\\validation\\ember-repeat-1.csv",
+    "frames": 40499,
+    "frames_with_timing": 40498,
+    "csv_rows": 40499,
+    "raw_sha256": "8d7edf667468e234d1caa26a477f3a2246121968776ce0887e764e92c4c7d4c2"
+  }
+]

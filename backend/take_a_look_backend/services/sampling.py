@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from take_a_look_backend.models import WatchedVariable, json_value
+from take_a_look_backend.models import SampleFrame, WatchedVariable, json_value
 from take_a_look_backend.backends.ember_transport import EmberError
 from take_a_look_backend.backends.target_backend import backend_capabilities, backend_rtt_binding
 from take_a_look_backend.protocol import EventName
@@ -246,7 +246,8 @@ class SamplingServiceMixin:
     def _queue_samples_locked(self, frames: list[tuple[float, dict[str, object]]]) -> None:
         # Capture the sampling switches/labels at acquisition, before a watch
         # can be disabled or removed while this batch waits for publication.
-        for elapsed, values in frames:
+        for acquired in frames:
+            elapsed, values = acquired
             normalized = {}
             for key, value in values.items():
                 watch = self._watches.get(key)
@@ -255,7 +256,7 @@ class SamplingServiceMixin:
                     self._pending_recording_labels[key] = watch.symbol.name
             if not normalized:
                 continue
-            frame = (elapsed, normalized)
+            frame = SampleFrame(elapsed, normalized, getattr(acquired, "timing", None))
             self._pending_frames.append(frame)
             self._pending_updated_at_ms = time.time_ns() // 1_000_000
             self._pending_recording_frames.append(frame)
@@ -271,7 +272,8 @@ class SamplingServiceMixin:
         recorded = self._pending_recording_frames
         labels = self._pending_recording_labels
         updated_at_ms = self._pending_updated_at_ms
-        weight = len(frames) * 128 + sum(len(values) for _, values in frames) * 96
+        weight = (len(frames) * 128 + sum(len(values) for _, values in frames) * 96
+                  + sum(256 for frame in frames if getattr(frame, "timing", None) is not None))
         future = self._recording_worker.submit_batch(
             self._commit_sample_batches, (frames, recorded, labels, updated_at_ms),
             weight=weight, block=wait if block is None else block)
@@ -320,7 +322,8 @@ class SamplingServiceMixin:
         # Preserve each acquisition timestamp, including pending pre-write data.
         for frames, _, _, updated_at_ms in batches:
             self._emit(EventName.SAMPLES, {"captureOnly": True, "updatedAtMs": updated_at_ms, "frames": [
-                {"elapsed": elapsed, "values": values} for elapsed, values in frames]})
+                (frame.to_json() if isinstance(frame, SampleFrame)
+                 else {"elapsed": frame[0], "values": frame[1]}) for frame in frames]})
         self._wake.set()
 
     def _publish_perf(self, now: float) -> None:
@@ -341,9 +344,12 @@ class SamplingServiceMixin:
                 "readBlockCount": metrics.get("block_count", 0),
                 "readByteCount": metrics.get("byte_count", 0),
                 "memoryDroppedSamples": metrics.get("dropped_samples", 0),
+                "memoryDroppedBatches": metrics.get("dropped_batches", 0),
                 "memorySkippedTicks": metrics.get("skipped_ticks", 0),
                 "memoryReadDurationUs": metrics.get("duration_us", 0),
                 "memorySamplingMode": getattr(self._memory, "sampling_mode", "timed"),
+                "memoryBurst": metrics.get("burst", 1),
+                "memoryTimeQuality": metrics.get("time_quality", "phone_submission"),
                 "memoryPhoneReadUs": getattr(self._memory, "phone_read_us", 0),
                 "rttDroppedBytes": dropped,
                 "rttTransport": (

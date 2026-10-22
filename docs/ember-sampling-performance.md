@@ -1,5 +1,30 @@
 # EmberMobile 私有协议采样性能
 
+## 突发采样（repeat）：一个 USB 事务取回多个样本
+
+原来的单变量路径每次 USB 事务只返回一个样本（实测约 0.6–0.7 ms）。重复读取可以
+让**同一条 `DAP_Transfer`** 重复读同一批地址——多读几次只花 SWD 时间（4 MHz 下
+一次 32 位读约 17–18 μs），不再多付一次 USB 往返。
+
+- 协议：新流 `MEMORY_BURST_SAMPLE`（kind 15），请求体在 `SampleRequest` 之外多一个
+  `repeat`；网关在 `hello` 里声明 `memory_sampling_repeat`（上限 8）。
+- 同时计算 64 字节 DAP 包双向预算：请求 `3 + 6N`（每字 TAR 写 + DRW 读），预留
+  SELECT/CSW 两次写的 10 字节；响应 `3 + 4N`，因此 `repeat × 每次字数 ≤ 8`。
+  `memory_sampling_max_words` 宣告该预算；配置/初始化可能额外往返。只对齐的普通 RAM
+  使用 repeat；首批前的范围校验失败回退普通采样，其他错误不重试。
+- 时间轴：手机只给每批**一个**时间戳（批开始）和**一个**实测 `duration_us`（整批
+  重复读的耗时，包含排队/USB），电脑为同批子读保留相同 elapsed，不均摊时间。
+  `timing={quality:transaction_window,batchSequence,index,repeat,start,end}` 保留顺序和范围，
+  start/end 为秒，index 从 0 起。JSON 采样事件、原始记录、CSV 和二进制 v3 都保留这些字段。
+  `perf.memoryBurst` 显示倍数，`memoryTimeQuality` 说明时间质量，`effectiveHz` 为读取吞吐。
+  自适应也按 `批数 × repeat` 比较；突发模式稳定窗口低于目标 90% 时单向切全速，普通模式保留 2/3 门槛。`memoryDroppedBatches` 和 `memoryDroppedSamples` 分开报告。
+- 代价：同一批内的样本在总线上背靠背（几十 μs 量级），批与批之间仍是定时器间隔。
+  也就是说它提高的是**吞吐与批内时间分辨率**，不是把 500 μs 均匀采样变成可能。
+  对慢变量会采到重复值；对快到能在一个事务窗口里变化的量才有额外信息。
+
+打包倍数选择是启发式，不承诺目标速率；实际以收到并记录的读取数为准。吞吐达到
+2k 次/秒也不表示等间隔 500 μs，不能直接视为具有该采样频率的均匀信号。
+
 ## 2026-10-22 后续优化与当前实测
 
 370 Hz 是下文记录的旧实现结果，不能作为 USB 或当前实现的上限。本轮未修改、下载或复位 MCU 固件，保留电脑端自适应定时/全速逻辑，在 EmberMobile/probe-rs 中完成：

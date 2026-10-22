@@ -97,14 +97,30 @@ class EmberClient:
     def supports_memory_max_speed(self):
         return self._v2 is not None and self._v2._address[1].get("memory_sampling_max_speed") == 1
 
-    def sample_memory(self, request):
+    @property
+    def memory_repeat_limit(self) -> int:
+        """Reads of the same ranges the gateway can pack into one transaction."""
+        if self._v2 is None:
+            return 0
+        return int(self._v2._address[1].get("memory_sampling_repeat") or 0)
+
+    def sample_memory(self, request, repeat: int = 1):
         if not self.supports_memory_sampling:
             raise ValueError("请更新手机网关以启用持续内存采样。")
+        if repeat > 1 and self.memory_repeat_limit < repeat:
+            raise ValueError("请更新手机网关以启用突发采样。")
         from .ember_v2 import V2Error
         try:
-            return self._v2.sample_memory(request)
+            return self._v2.sample_memory(request, repeat=repeat)
         except V2Error as error:
             raise EmberError(error.code, str(error)) from error
+
+    @property
+    def memory_burst_word_limit(self) -> int:
+        if self._v2 is None:
+            return 0
+        # Old repeat gateways did not account for TAR writes. Stay conservative.
+        return min(8, int(self._v2._address[1].get("memory_sampling_max_words") or 8))
 
     def _legacy_call(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         # A timed-out mutation is never replayed: the phone may have executed it.

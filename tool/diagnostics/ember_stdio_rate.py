@@ -24,6 +24,8 @@ class Backend:
             stderr=subprocess.DEVNULL, bufsize=0)
         self.events: list[tuple[str, object]] = []
         self.frames = 0
+        self.timed_frames = 0
+        self.read_error = None
         self._id = 0
         self._lock = threading.Lock()
         threading.Thread(target=self._read, daemon=True).start()
@@ -49,9 +51,14 @@ class Backend:
             if head == b"\x00":
                 size = struct.unpack("<I", exact(4))[0]
                 payload = exact(size)
-                frames = struct.unpack_from("<I", payload, 9)[0] if len(payload) > 13 else 0
+                try:
+                    frames, timed_frames = validate_sample_payload(payload)
+                except Exception as error:
+                    self.read_error = error
+                    return
                 with self._lock:
                     self.frames += frames
+                    self.timed_frames += timed_frames
                 continue
             line = head + stream.readline()
             try:
@@ -73,6 +80,8 @@ class Backend:
         self.process.stdin.flush()
         deadline = time.perf_counter() + timeout
         while time.perf_counter() < deadline:
+            if self.read_error is not None:
+                raise self.read_error
             with self._lock:
                 for name, payload in self.events:
                     if name == f"reply:{request_id}":
@@ -87,6 +96,33 @@ class Backend:
             events, self.events = self.events, []
             frames, self.frames = self.frames, 0
             return events, frames
+
+
+def validate_sample_payload(payload: bytes) -> tuple[int, int]:
+    """Validate the production pipe, including v3 unknown-subread provenance."""
+    version, _, _, count, variables = struct.unpack_from("<BIIIH", payload)
+    if version not in (1, 2, 3):
+        raise ValueError(f"Unsupported pipe sample version: {version}")
+    offset, timed = (23 if version >= 2 else 15), 0
+    validity_bytes = (variables + 7) // 8
+    for _ in range(count):
+        elapsed = struct.unpack_from("<d", payload, offset)[0]
+        offset += 8
+        validity = payload[offset:offset + validity_bytes]
+        assert len(validity) == validity_bytes
+        offset += validity_bytes + sum(byte.bit_count() for byte in validity) * 8
+        if version == 3:
+            quality = payload[offset]
+            offset += 1
+            if quality == 1:
+                _, index, repeat, start, end = struct.unpack_from("<QHHdd", payload, offset)
+                assert repeat >= 2 and index < repeat and start == elapsed and end >= start
+                offset += 28
+                timed += 1
+            elif quality != 0:
+                raise ValueError(f"Unsupported time quality: {quality}")
+    assert offset == len(payload), (offset, len(payload))
+    return count, timed
 
 
 def pick(symbols: list[dict]) -> dict:
@@ -105,6 +141,8 @@ def main() -> int:
     parser.add_argument("--elf", type=Path, required=True)
     parser.add_argument("--rates", default="100,1000,2000")
     parser.add_argument("--seconds", type=float, default=5.0)
+    parser.add_argument("--warmup", type=float, default=5.0,
+                        help="allow adaptive full-speed selection to settle before counting")
     parser.add_argument("--variables", type=int, default=1)
     parser.add_argument("--min-gap", type=lambda value: int(value, 0), default=0)
     parser.add_argument("--token-from-pairing", action="store_true", default=True)
@@ -143,9 +181,11 @@ def main() -> int:
             for symbol in selected]})
         for rate in (int(value) for value in args.rates.split(",") if value):
             backend.call("setConfig", {"sampleRateHz": rate})
-            time.sleep(0.5)
+            time.sleep(args.warmup)
             backend.drain()
+            timed_start = backend.timed_frames
             deadline = time.perf_counter() + args.seconds
+            measured_at = time.perf_counter()
             last, total = {}, 0
             while time.perf_counter() < deadline:
                 events, frames = backend.drain()
@@ -158,7 +198,11 @@ def main() -> int:
                   f"mode={last.get('memorySamplingMode', '-')} "
                   f"phoneReadUs={last.get('memoryPhoneReadUs', 0):5d} "
                   f"skipped={last.get('memorySkippedTicks', 0):5d} "
-                  f"framesSeen={total}")
+                  f"framesSeen={total} deliveredHz={total / (time.perf_counter() - measured_at):.1f} "
+                  f"burst={last.get('memoryBurst', 1)} "
+                  f"timeQuality={last.get('memoryTimeQuality', '-')} "
+                  f"validatedTimingFrames={backend.timed_frames - timed_start}")
+            assert backend.read_error is None, backend.read_error
         return 0
     finally:
         try:

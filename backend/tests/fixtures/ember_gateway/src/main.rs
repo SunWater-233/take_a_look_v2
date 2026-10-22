@@ -82,6 +82,14 @@ impl Backend for Fixture {
             data: request.ranges.iter().flat_map(|r| (0..r.length).map(move |i| (r.address + i as u64) as u8)).collect(),
         })
     }
+    /// Repeat the same bytes so a client can see how many reads one tick carried.
+    fn memory_burst(&self, request: ember_v2::memory::ReadRequest, context: ember_v2::memory::ReadContext,
+                    repeat: usize) -> BackendResult<ember_v2::memory::Batch> {
+        let batch = self.memory_batch(request, context)?;
+        let mut data = Vec::with_capacity(batch.data.len() * repeat);
+        for _ in 0..repeat { data.extend_from_slice(&batch.data); }
+        Ok(ember_v2::memory::Batch { epoch: batch.epoch, reads: batch.reads * repeat as u64, data })
+    }
     fn rtt_read(&self, _: &Subscription, _: usize) -> BackendResult<Chunk> { unavailable() }
     fn rtt_write(&self, _: Value, _: Vec<u8>) -> BackendResult<Value> { unavailable() }
     fn upload(&self, id: u64, offset: usize, bytes: &[u8]) -> BackendResult<Value> {

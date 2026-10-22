@@ -344,12 +344,18 @@ the old stream. v2 memory blocks can carry 64 KiB without JSON byte arrays.
 Gateways advertising `memory_batch=1` receive exact watch ranges in binary batches
 (up to 128 ranges / 64 KiB each). The phone decides safe merges from its target
 memory map, without PC-side gap filling. Older gateways retain their existing
-read path. Capture/monitor scheduling remains on the PC; phone-side periodic
-memory subscriptions are not enabled by this change.
+read path. Capture/monitor scheduling stays on the PC, which chooses between
+periodic phone-side memory subscriptions and one read per tick.
 
 Sampling rate remains limited by the probe, phone capture loop, and network;
-the UI's requested frequency does not guarantee physical throughput. See
-EmberMobile's `docs/protocol-v2.md` for the wire contract and benchmark scope.
+the UI's requested frequency does not guarantee physical throughput. Gateways
+advertising `memory_sampling_repeat` pack repeated reads of the same ranges into
+one probe transaction, which raises the sample rate above one transaction per
+sample: the phone returns several reads per tick with one timestamp and one
+measured burst duration, and the PC places them inside that measured window.
+Those samples sit back to back at bus speed, so the tick spacing still comes
+from the phone timer. See EmberMobile's `docs/protocol-v2.md` for the wire
+contract and benchmark scope.
 
 Load an ELF/AXF file built with DWARF debug information (`-Og -g3` is
 recommended for GCC/Clang), then open the **源码调试** tab beside the realtime

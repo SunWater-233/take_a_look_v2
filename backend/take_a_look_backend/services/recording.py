@@ -49,8 +49,9 @@ class RawRecording:
             raise RuntimeError(f"Raw recording stopped: {self.failure}") from self.failure
         try:
             previous_channels = len(self._channels)
-            rows = []
-            for elapsed, values in frames:
+            rows, timings = [], []
+            for frame in frames:
+                elapsed, values = frame
                 if not values:
                     continue
                 row: list[object] = [elapsed]
@@ -60,6 +61,7 @@ class RawRecording:
                         self._channels.append({"key": key, "name": labels.get(key, key)})
                     row.extend((self._ids[key], value))
                 rows.append(row)
+                timings.append(getattr(frame, "timing", None))
             if not rows:
                 return
             if self._file is None:
@@ -72,7 +74,8 @@ class RawRecording:
                 records.append({"format": "take-a-look-raw", "version": 1})
             if len(self._channels) != previous_channels:
                 records.append({"channels": self._channels})
-            records.append({"frames": rows})
+            records.append({"frames": rows,
+                            **({"timing": timings} if any(timings) else {})})
             data = "".join(json.dumps(record, ensure_ascii=False, separators=(",", ":"), allow_nan=False) + "\n"
                            for record in records).encode("utf-8")
             self._file.write(data)
@@ -130,9 +133,11 @@ def export_recording_csv(source: Path, destination: Path, byte_length: int | Non
         raise ValueError("CSV destination cannot overwrite the raw recording.")
     boundary = source.stat().st_size if byte_length is None else byte_length
     channels: list[dict[str, str]] = []
+    has_timing = False
     for record in _records(source, boundary):
         if "channels" in record:
             channels = record["channels"]
+        has_timing |= "timing" in record
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     count = 0
@@ -141,14 +146,18 @@ def export_recording_csv(source: Path, destination: Path, byte_length: int | Non
                                          dir=destination.parent, suffix=".tmp", delete=False) as output:
             temporary = Path(output.name)
             writer = csv.writer(output)
-            writer.writerow(["elapsed_seconds", *[channel["name"] for channel in channels]])
+            timing_keys = ["quality", "batchSequence", "index", "repeat", "start", "end"]
+            writer.writerow(["elapsed_seconds", *[channel["name"] for channel in channels],
+                             *(["timing_" + key for key in timing_keys] if has_timing else [])])
             for record in _records(source, boundary):
-                for frame in record.get("frames", []):
+                for frame_index, frame in enumerate(record.get("frames", [])):
                     values: list[object] = [""] * len(channels)
                     for index in range(1, len(frame), 2):
                         value = frame[index + 1]
                         values[frame[index]] = int(value) if isinstance(value, bool) else value
-                    writer.writerow([f"{frame[0]:.9f}", *values])
+                    timing = (record.get("timing", [])[frame_index] or {}) if "timing" in record else {}
+                    writer.writerow([f"{frame[0]:.9f}", *values,
+                                     *([timing.get(key, "") for key in timing_keys] if has_timing else [])])
                     count += 1
             output.flush()
             os.fsync(output.fileno())

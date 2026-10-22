@@ -11,6 +11,7 @@ from take_a_look_backend.backends.gdb_mi import GdbTarget, normalize_host
 from take_a_look_backend.backends.gdb_rsp import GdbRspMemoryTarget
 from take_a_look_backend.backends.typed_memory import TypedMemoryBackend, _access_size, decode_symbol_value
 from take_a_look_backend.backends.target_backend import capabilities_for_connection
+from take_a_look_backend.models import SampleFrame
 
 
 REMOTE_DEFAULTS: dict[str, object] = {
@@ -28,6 +29,15 @@ SAMPLING_MODE_WINDOW_S = 0.75
 # Switch to full speed when the timer delivers less than this share of the
 # request: at that point back-to-back reads are the closer answer.
 ESCALATE_BELOW_FRACTION = 2 / 3
+# Burst mode is intended to meet the read-throughput target. Do not leave a
+# capable probe on a coarse timer that delivers only ~70% of that target.
+BURST_ESCALATE_BELOW_FRACTION = 0.9
+# 64-byte DAP packet, both directions, reserving SELECT+CSW writes:
+# request = 3 + 10 + 6*words; response = 3 + 4*words.
+MAX_BURST_WORDS = 8
+# What one probe transaction delivers without repeated reads. Only used to decide
+# how many repeats are worth packing into one transaction.
+SINGLE_READ_HZ = 1300.0
 
 
 def _integer(config: dict[str, object], key: str, minimum: int, maximum: int) -> int:
@@ -41,6 +51,26 @@ def _integer(config: dict[str, object], key: str, minimum: int, maximum: int) ->
     if not minimum <= value <= maximum:
         raise ValueError(f"{key} 必须在 {minimum}..{maximum} 之间。")
     return value
+
+
+def expand_burst_frames(symbols, sizes, burst_start, duration_us, data, repeat, sequence=0):
+    """Keep every real read, without inventing intra-transaction timestamps.
+
+    All subreads share the phone submission timestamp. Their order and the
+    enclosing transaction window are separate provenance, not measured instants.
+    """
+    frames = []
+    offset = 0
+    for index in range(repeat):
+        values = {}
+        for symbol, size in zip(symbols, sizes):
+            values[symbol.key] = decode_symbol_value(symbol, data[offset:offset + size])
+            offset += size
+        timing = ({"quality": "transaction_window", "batchSequence": sequence,
+                   "index": index, "repeat": repeat, "start": burst_start,
+                   "end": burst_start + duration_us / 1e6} if repeat > 1 else None)
+        frames.append(SampleFrame(burst_start, values, timing))
+    return frames
 
 
 class RemoteMemoryBackend(TypedMemoryBackend):
@@ -62,6 +92,7 @@ class RemoteMemoryBackend(TypedMemoryBackend):
         self._sampling_origin = None
         self._sampling_elapsed = 0.0
         self._sampling_full_speed = False
+        self._sampling_repeat = 1
         self._phone_read_us = 0.0
         self._phone_read_us_values: list[float] = []
         self._mode_rate = 0.0
@@ -69,6 +100,7 @@ class RemoteMemoryBackend(TypedMemoryBackend):
         self._mode_window_frames = 0
         self._mode_window_started = time.perf_counter()
         self.sampling_mode = "timed"
+        self._burst_unavailable = set()
 
     @property
     def is_connected(self) -> bool:
@@ -144,6 +176,7 @@ class RemoteMemoryBackend(TypedMemoryBackend):
 
     def disconnect(self) -> None:
         self.stop_sampling()
+        self._burst_unavailable.clear()
         target, self.target = self.target, None
         try:
             if target is not None and (self.manages_breakpoint_step or isinstance(target, GdbRspMemoryTarget)):
@@ -236,8 +269,35 @@ class RemoteMemoryBackend(TypedMemoryBackend):
         # Prefer whichever mode lands closer to the requested rate: the timer is
         # accurate at low rates but tops out around one read plus its own coarse
         # scheduling, so a big miss means back-to-back reads are the better answer.
-        if rate_hz >= FAST_SAMPLING_MIN_HZ and delivered_hz < rate_hz * ESCALATE_BELOW_FRACTION:
+        threshold = (BURST_ESCALATE_BELOW_FRACTION if self._sampling_repeat > 1
+                     else ESCALATE_BELOW_FRACTION)
+        if rate_hz >= FAST_SAMPLING_MIN_HZ and delivered_hz < rate_hz * threshold:
             self._sampling_full_speed = True
+
+    def _burst_repeat(self, symbols, sizes, rate_hz) -> int:
+        """How many reads of the same ranges to pack into one probe transaction.
+
+        One transaction returns one sample, so above what a single read can
+        deliver the only way to raise the sample rate is to repeat the read
+        inside the same `DAP_Transfer`. Subread timing is unknown; the phone's
+        duration includes USB and queueing and must not be used as spacing.
+        """
+        limit = self.client.memory_repeat_limit if self.client is not None else 0
+        if limit < 2 or rate_hz <= 0:
+            return 1
+        if tuple(symbols) in self._burst_unavailable:
+            return 1
+        if any(symbol.address % 4 or size % 4 for symbol, size in zip(symbols, sizes)):
+            return 1
+        words = sum(size // 4 for size in sizes)
+        if not words or words > MAX_BURST_WORDS:
+            return 1
+        budget = min(MAX_BURST_WORDS, getattr(self.client, "memory_burst_word_limit", MAX_BURST_WORDS))
+        room = budget // words
+        if room < 2:
+            return 1
+        wanted = math.ceil(rate_hz / SINGLE_READ_HZ)
+        return max(1, min(int(limit), room, wanted))
 
     def read_sample_frames(self, symbols, rate_hz, elapsed):
         if self.kind != "ember" or not self.client or not self.client.supports_memory_sampling:
@@ -247,21 +307,37 @@ class RemoteMemoryBackend(TypedMemoryBackend):
         if not symbols or len(symbols) > 128 or sum(sizes) > 65536:
             self.stop_sampling()
             return None
-        period = self._sampling_period(rate_hz)
-        signature = (symbols, tuple(period.items()))
+        # A burst tick returns `repeat` reads of the same ranges, so the timer
+        # only has to clock ticks at rate_hz / repeat.
+        repeat = self._burst_repeat(symbols, sizes, rate_hz)
+        self._sampling_repeat = repeat
+        tick_rate = rate_hz / repeat if repeat > 1 else rate_hz
+        period = self._sampling_period(tick_rate)
+        signature = (symbols, tuple(period.items()), repeat)
         if signature != self._sampling_signature:
             self.stop_sampling()
-            self._memory_samples = self.client.sample_memory({
+            request = {
                 "read": {"session_id": self.ember.session_id, "core": self.ember.core,
                          "ranges": [{"address": s.address, "length": n} for s, n in zip(symbols, sizes)],
-                         "merge": True}, **period})
+                         "merge": True}, **period}
+            if repeat > 1:
+                request["repeat"] = repeat
+            try:
+                self._memory_samples = self.client.sample_memory(request, repeat=repeat)
+            except Exception as error:
+                # The phone validates the memory map before its first burst IO.
+                # An aligned MMIO/unknown range may need the ordinary sampler.
+                if repeat == 1 or getattr(error, "code", None) != "invalid_params":
+                    raise
+                self._burst_unavailable.add(symbols)
+                return self.read_sample_frames(symbols, rate_hz, elapsed)
             self._sampling_signature = signature
             self._sampling_elapsed = elapsed
         samples = self._memory_samples
         from .ember_v2 import V2Error
         from .ember_transport import EmberError
         try:
-            packets = samples.read()
+            packets = samples.read_packets()
         except V2Error as error:
             raise EmberError(error.code, str(error)) from error
         measured = samples.duration_us
@@ -272,25 +348,25 @@ class RemoteMemoryBackend(TypedMemoryBackend):
             del self._phone_read_us_values[:-16]
             ordered = sorted(self._phone_read_us_values)
             self._phone_read_us = ordered[len(ordered) // 2] if len(ordered) >= 4 else 0.0
-        self._mode_window_frames += len(packets)
+        self._mode_window_frames += len(packets) * repeat
         window = time.perf_counter() - self._mode_window_started
         if window >= SAMPLING_MODE_WINDOW_S:
             delivered = self._mode_window_frames / window
             self._mode_window_frames = 0
             self._mode_window_started = time.perf_counter()
+            # Both values are samples/second, including every read in a burst.
             self._evaluate_sampling_mode(rate_hz, delivered)
         frames = []
-        for stamp, data in packets:
+        for sequence, stamp, tick_us, data in packets:
             if self._sampling_origin is None:
                 self._sampling_origin = stamp
-            offset, values = 0, {}
-            for symbol, size in zip(symbols, sizes):
-                values[symbol.key] = decode_symbol_value(symbol, data[offset:offset + size])
-                offset += size
-            frames.append((self._sampling_elapsed + (stamp - self._sampling_origin) / 1e6, values))
+            burst_start = self._sampling_elapsed + (stamp - self._sampling_origin) / 1e6
+            frames.extend(expand_burst_frames(symbols, sizes, burst_start, tick_us, data, repeat, sequence))
         self.last_read_metrics = {"symbol_count": len(symbols), "block_count": samples.reads,
-            "byte_count": sum(sizes), "dropped_samples": samples.dropped,
-            "skipped_ticks": samples.skipped_ticks, "duration_us": samples.duration_us}
+            "byte_count": sum(sizes) * repeat, "dropped_samples": samples.dropped * repeat,
+            "dropped_batches": samples.dropped,
+            "skipped_ticks": samples.skipped_ticks, "duration_us": samples.duration_us,
+            "burst": repeat, "time_quality": "transaction_window" if repeat > 1 else "phone_submission"}
         return frames
 
     def reset(self, halt=False):
@@ -343,15 +419,17 @@ class RemoteMemoryBackend(TypedMemoryBackend):
         return bool(self._require_target().set_breakpoint(address))
 
     def program_firmware(self, path: str, progress) -> None:
+        self.last_flash_timings = {}
         if not self.capabilities.firmware_download:
             return super().program_firmware(path, progress)
-        from .remote_firmware import firmware_image, flash_phone
+        from .remote_firmware import firmware_image, flash_phone, compact_flash_elf
         data, sections = firmware_image(path)
         target = self._require_target()
         if self.kind == "emberGdb":
             target.program_firmware(path, sections, progress)
         else:
-            flash_phone(self.client, self.ember.session_id, path, data, progress)
+            self.last_flash_timings = flash_phone(
+                self.client, self.ember.session_id, path, compact_flash_elf(data), progress)
 
     def remove_breakpoint(self, address: int) -> None:
         self._require_target().remove_breakpoint(address)

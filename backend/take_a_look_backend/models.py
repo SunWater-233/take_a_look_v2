@@ -5,6 +5,19 @@ from dataclasses import dataclass
 from functools import cached_property
 
 
+class SampleFrame(tuple):
+    """An (elapsed, values) pair with optional acquisition-time provenance."""
+
+    def __new__(cls, elapsed, values, timing=None):
+        frame = super().__new__(cls, (elapsed, values))
+        frame.timing = timing
+        return frame
+
+    def to_json(self):
+        return {"elapsed": self[0], "values": self[1],
+                **({"timing": self.timing} if self.timing is not None else {})}
+
+
 @dataclass(frozen=True)
 class SymbolInfo:
     name: str

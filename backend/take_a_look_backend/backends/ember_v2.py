@@ -22,6 +22,7 @@ CHUNK = struct.Struct("<8Q")
 MEMORY_CHUNK = struct.Struct("<6Q")
 AUTH, RPC, SUBSCRIBE, UPLOAD, RTT_WRITE, MEMORY_READ = range(1, 7)
 PAIR, FORGET, MEMORY_BATCH, MEMORY_SAMPLE = 11, 12, 13, 14
+MEMORY_BURST_SAMPLE = 15
 OK, DATA, END, ERROR = 128, 129, 130, 255
 BLOCK = 65536
 MAX_FRAME = BLOCK + 128
@@ -214,9 +215,10 @@ class Subscription:
 class MemorySamples:
     """Bounded capture queue; timestamps and sequence gaps come from the phone."""
 
-    def __init__(self, owner, request, stream_id):
+    def __init__(self, owner, request, stream_id, repeat=1):
         self.owner, self.request, self.stream_id = owner, request, stream_id
-        self._length = sum(item["length"] for item in request["read"]["ranges"])
+        self.repeat = repeat
+        self._length = sum(item["length"] for item in request["read"]["ranges"]) * repeat
         self._lock = threading.Lock()
         self._queue = collections.deque()
         self._bytes = 0
@@ -225,6 +227,14 @@ class MemorySamples:
         self.sequence = self.dropped = self.skipped_ticks = 0
         self.duration_us = self.reads = 0
         self._epoch = self._timestamp = None
+
+    @property
+    def dropped_batches(self):
+        return self.dropped
+
+    @property
+    def dropped_samples(self):
+        return self.dropped * self.repeat
 
     def fail(self, error):
         with self._lock:
@@ -248,7 +258,7 @@ class MemorySamples:
             self.dropped += sequence - self.sequence - 1
             self.sequence, self._timestamp, self._epoch = sequence, stamp, epoch
             self.skipped_ticks, self.duration_us, self.reads = skipped, duration, reads
-            self._queue.append((stamp, payload[MEMORY_CHUNK.size:]))
+            self._queue.append((sequence, stamp, duration, payload[MEMORY_CHUNK.size:]))
             self._bytes += len(payload)
 
     async def consume(self, reader):
@@ -267,6 +277,10 @@ class MemorySamples:
             await self.owner._cancel_subscription(self)
 
     def read(self):
+        """Compatibility view for callers that only need time, cost and bytes."""
+        return [(stamp, duration, data) for _, stamp, duration, data in self.read_packets()]
+
+    def read_packets(self):
         with self._lock:
             if self._error:
                 raise self._error
@@ -403,16 +417,20 @@ class QuicClient:
                 raise
         return self.submit(operation())
 
-    def sample_memory(self, request: dict) -> MemorySamples:
+    def sample_memory(self, request: dict, *, repeat: int = 1) -> MemorySamples:
         if not self._data_connection:
-            return self._data().sample_memory(request)
+            return self._data().sample_memory(request, repeat=repeat)
         async def operation():
             reader, writer = await self._protocol.create_stream()
             stream_id = writer.get_extra_info("stream_id")
-            samples = MemorySamples(self, request, stream_id)
+            samples = MemorySamples(self, request, stream_id, repeat)
             self._protocol.subscriptions[stream_id] = samples
             try:
-                writer.write(frame(MEMORY_SAMPLE, encoded(request)))
+                if repeat == 1:
+                    writer.write(frame(MEMORY_SAMPLE, encoded(request)))
+                else:
+                    # The burst kind is a BurstRequest: same fields plus `repeat`.
+                    writer.write(frame(MEMORY_BURST_SAMPLE, encoded({**request, "repeat": repeat})))
                 writer.write_eof()
                 self._protocol.transmit()
                 kind, _ = await asyncio.wait_for(read_frame(reader), self.timeout)

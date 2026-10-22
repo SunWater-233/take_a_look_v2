@@ -122,13 +122,19 @@ extension TakeALookControllerTelemetry on TakeALookController {
               (payload['memoryPhoneReadUs'] as num?)?.toInt() ?? 0;
           final samplingMode = payload['memorySamplingMode'] as String?;
           final modeLabel = samplingMode == 'full' ? '全速' : '定时';
+          final burst = (payload['memoryBurst'] as num?)?.toInt() ?? 1;
+          final burstTiming =
+              payload['memoryTimeQuality'] == 'transaction_window';
+          final deliveredLabel = burstTiming
+              ? '读取吞吐 ${effectiveHz.toStringAsFixed(1)} 次/秒（每批 $burst 次，子读时刻未知）'
+              : '实际 ${effectiveHz.toStringAsFixed(1)} Hz';
           final ceiling = samplingMode != null && phoneReadUs > 0
-              ? '，手机单次读取 ${(phoneReadUs / 1000).toStringAsFixed(1)} ms'
+              ? '，手机每批读取 ${(phoneReadUs / 1000).toStringAsFixed(1)} ms'
                     '（$modeLabel）'
               : '';
           _appendLog(
             '采样性能：目标 ${sampleRateHz.toStringAsFixed(0)} Hz，'
-            '实际 ${effectiveHz.toStringAsFixed(1)} Hz，'
+            '$deliveredLabel，'
             '样本 $sampleCount，变量 $watchCount，'
             '读块 $blockCount，字节 $byteCount$memoryTiming$ceiling。',
           );

@@ -134,20 +134,22 @@ def encode_sample_batch(
         raise ValueError("A sample schema cannot contain more than 65535 values.")
 
     key_indexes = {key: index for index, key in enumerate(keys)}
+    has_timing = any(getattr(frame, "timing", None) is not None for frame in frames)
     validity_size = (len(keys) + 7) // 8
     payload = bytearray(
         struct.pack(
             "<BIIIH",
-            2 if updated_at_ms is not None else SAMPLE_PAYLOAD_VERSION,
+            3 if has_timing else (2 if updated_at_ms is not None else SAMPLE_PAYLOAD_VERSION),
             schema_id,
             sequence,
             len(frames),
             len(keys),
         )
     )
-    if updated_at_ms is not None:
-        payload.extend(struct.pack("<Q", updated_at_ms))
-    for elapsed, values in frames:
+    if updated_at_ms is not None or has_timing:
+        payload.extend(struct.pack("<Q", updated_at_ms or 0))
+    for frame in frames:
+        elapsed, values = frame
         validity = bytearray(validity_size)
         numeric_values: dict[int, float] = {}
         for key, value in values.items():
@@ -161,6 +163,15 @@ def encode_sample_batch(
         for index in range(len(keys)):
             if index in numeric_values:
                 payload.extend(struct.pack("<d", numeric_values[index]))
+        if has_timing:
+            timing = getattr(frame, "timing", None)
+            if timing is None:
+                payload.append(0)
+            else:
+                if timing["quality"] != "transaction_window":
+                    raise ValueError("Unsupported acquisition time quality")
+                payload.extend(struct.pack("<BQHHdd", 1, timing["batchSequence"],
+                    timing["index"], timing["repeat"], timing["start"], timing["end"]))
     return bytes(payload)
 
 

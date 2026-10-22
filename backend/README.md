@@ -50,6 +50,17 @@ retain the lower-CPU waiter. This mode costs more CPU and is not a real-time
 guarantee. Waiting explicit controls take priority over the next sampler loop;
 an in-progress target operation cannot be preempted.
 
+Above what one probe transaction can deliver, the phone gateway advertises
+`memory_sampling_repeat` and the client packs repeated reads of the same ranges
+into a single `DAP_Transfer` (kind 15). One transaction then returns `repeat`
+reads, with one timestamp and one measured duration per tick; each tick's
+samples are placed inside that measured window rather than on a nominal grid, so
+`effectiveHz` counts samples while `memoryBurst` reports the packing. Repeated
+reads stay on 4-byte-aligned ordinary RAM inside a single 64-byte response
+packet; MMIO, unknown maps, unaligned ranges and wide capture sets keep one read
+per tick. Samples of one tick are back to back at bus speed, so this raises
+throughput and time resolution but not the spacing between ticks.
+
 The `memoryWriteBatch` capability adds `writeWatches {writes: [{key, value}]}`
 (1..64 distinct keys). All values are validated before writes begin. Only
 adjacent actual write bytes in request order are merged; gaps are never written.
@@ -102,6 +113,20 @@ python -m venv .venv
 
 Start it manually with `python -m take_a_look_backend.stdio`. Diagnostic output
 is written only to stderr, so stdout remains a valid protocol stream.
+
+Burst memory reads preserve every returned value but do not have measured
+subread times. All reads in a phone batch share its submission `elapsed` and
+carry `timing={quality:transaction_window,batchSequence,index,repeat,start,end}`.
+`index` is zero-based; `start/end` are the enclosing IO window in seconds on the
+same elapsed axis, including queue/USB time. These fields survive the raw journal
+(`timing` array parallel to `frames`) and CSV export (`timing_*` columns).
+
+The stdio numeric payload uses version 3 only when timing metadata is present.
+Its header is the v2 `<BIIIHQ>` header (zero updatedAtMs means absent). After each
+existing timestamp/validity/values frame comes a quality byte: 0 means no timing;
+1 is followed by `<QHHdd>` for batchSequence, index, repeat, start, end. Unknown
+qualities and truncated payloads are rejected. Ordinary batches retain v1/v2.
+The Flutter frontend and bundled backend must be updated together for v3.
 
 The `targetCatalog` capability exposes `listTargets`, `inspectTargetPack {path}`,
 `importTargetPack {previewId}`, `discardTargetPackPreview {previewId}`,

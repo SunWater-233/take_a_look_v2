@@ -19,6 +19,7 @@ from take_a_look_backend.protocol import (
     response,
 )
 from take_a_look_backend.service import BackendService
+from take_a_look_backend.models import SampleFrame
 from take_a_look_backend.services.ordered_worker import OrderedWorker
 from take_a_look_backend.services.source_project import default_settings_file
 from take_a_look_backend.services.target_catalog import default_pack_directory
@@ -154,7 +155,7 @@ class StdioServer:
                 continue
             normalized_values = values if all(isinstance(key, str) for key in values) else {
                 str(key): value for key, value in values.items()}
-            frames.append((float(elapsed), normalized_values))
+            frames.append(SampleFrame(float(elapsed), normalized_values, raw_frame.get("timing")))
             frame_keys.update(normalized_values)
         if not frames:
             return

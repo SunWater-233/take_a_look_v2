@@ -1,0 +1,155 @@
+{
+  "endpoint": "192.168.1.44:4242",
+  "cases": [
+    {
+      "words": 1,
+      "repeat": 1,
+      "interval_ms": 0,
+      "batches": 8048,
+      "read_count": 8048,
+      "batch_hz": 2010.2091746676174,
+      "read_throughput_hz": 2010.2091746676174,
+      "median_transaction_us": 343.0,
+      "median_batch_gap_us": 402,
+      "max_batch_gap_us": 16804,
+      "dropped_batches": 145,
+      "dropped_samples": 145,
+      "skipped_ticks": 0,
+      "subread_time_quality": "phone_submission"
+    },
+    {
+      "words": 1,
+      "repeat": 2,
+      "interval_ms": 0,
+      "batches": 5406,
+      "read_count": 10812,
+      "batch_hz": 1350.8660163348568,
+      "read_throughput_hz": 2701.7320326697136,
+      "median_transaction_us": 598.0,
+      "median_batch_gap_us": 700,
+      "max_batch_gap_us": 10647,
+      "dropped_batches": 49,
+      "dropped_samples": 98,
+      "skipped_ticks": 0,
+      "subread_time_quality": "transaction_window"
+    },
+    {
+      "words": 1,
+      "repeat": 4,
+      "interval_ms": 0,
+      "batches": 4888,
+      "read_count": 19552,
+      "batch_hz": 1221.9907321742382,
+      "read_throughput_hz": 4887.962928696953,
+      "median_transaction_us": 695.0,
+      "median_batch_gap_us": 773,
+      "max_batch_gap_us": 10064,
+      "dropped_batches": 44,
+      "dropped_samples": 176,
+      "skipped_ticks": 0,
+      "subread_time_quality": "transaction_window"
+    },
+    {
+      "words": 1,
+      "repeat": 8,
+      "interval_ms": 0,
+      "batches": 4221,
+      "read_count": 33768,
+      "batch_hz": 1052.9147024318338,
+      "read_throughput_hz": 8423.31761945467,
+      "median_transaction_us": 828,
+      "median_batch_gap_us": 895.0,
+      "max_batch_gap_us": 13329,
+      "dropped_batches": 41,
+      "dropped_samples": 328,
+      "skipped_ticks": 0,
+      "subread_time_quality": "transaction_window"
+    },
+    {
+      "words": 1,
+      "repeat": 2,
+      "interval_ms": 1,
+      "batches": 2862,
+      "read_count": 5724,
+      "batch_hz": 715.205120878665,
+      "read_throughput_hz": 1430.41024175733,
+      "median_transaction_us": 608.0,
+      "median_batch_gap_us": 1370,
+      "max_batch_gap_us": 6985,
+      "dropped_batches": 2,
+      "dropped_samples": 4,
+      "skipped_ticks": 1137,
+      "subread_time_quality": "transaction_window"
+    },
+    {
+      "words": 3,
+      "repeat": 2,
+      "interval_ms": 0,
+      "batches": 4468,
+      "read_count": 8936,
+      "batch_hz": 1115.3833765179213,
+      "read_throughput_hz": 2230.7667530358426,
+      "median_transaction_us": 777.0,
+      "median_batch_gap_us": 848,
+      "max_batch_gap_us": 6867,
+      "dropped_batches": 52,
+      "dropped_samples": 104,
+      "skipped_ticks": 0,
+      "subread_time_quality": "transaction_window"
+    }
+  ],
+  "target": {
+    "attached": true,
+    "breakpoints": [],
+    "chip": "STM32H723VG",
+    "core": {
+      "halted": false,
+      "id": 0,
+      "pc": null,
+      "reason": "Running",
+      "state": "running"
+    },
+    "cores": [
+      {
+        "id": 0,
+        "kind": "Armv7m"
+      }
+    ],
+    "probe_name": "CMSIS-DAP v2",
+    "probe_open": true,
+    "session_id": 1,
+    "transport": "cmsis-dap-v2"
+  },
+  "capabilities": {
+    "memory_batch": 1,
+    "memory_max_ranges": 128,
+    "memory_sampling": 1,
+    "memory_sampling_max_speed": 1,
+    "memory_sampling_max_words": 8,
+    "memory_sampling_repeat": 8,
+    "memory_sampling_us": 1
+  },
+  "nine_word_request": "rejected_before_read",
+  "after": {
+    "attached": true,
+    "breakpoints": [],
+    "chip": "STM32H723VG",
+    "core": {
+      "halted": false,
+      "id": 0,
+      "pc": null,
+      "reason": "Running",
+      "state": "running"
+    },
+    "cores": [
+      {
+        "id": 0,
+        "kind": "Armv7m"
+      }
+    ],
+    "probe_name": "CMSIS-DAP v2",
+    "probe_open": true,
+    "session_id": 1,
+    "transport": "cmsis-dap-v2"
+  }
+}

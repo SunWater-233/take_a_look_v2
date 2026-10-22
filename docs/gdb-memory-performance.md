@@ -43,6 +43,26 @@ Ember GDB Server 同时修复了接收侧：4 KiB 缓冲区接收并处理已有
 
 ## 验证与边界
 
+### 手机恢复连接后的实机补测
+
+2026-10-22，目标恢复为 STM32H723VG，探针为 Horco CMSIS-DAP v2，
+VID FAED / PID 4873，序列号 343420328170。安装本轮固件下载优化 APK 后，
+标准 RSP 协商得到 NoAck=true、PacketSize=4096，目标显式继续运行。
+每组 8 秒的完整采样、记录、发布链路，单变量 562 帧 / 70.2 Hz，
+三个间隔 64 字节的变量 366 帧 / 45.7 Hz，记录帧数完全一致、无错误。
+此前同一晚的另一组测量只有约 21.9 / 11.4 Hz，说明当前无线实测存在较大波动。
+不能用下面回环模拟 RAM 的 kHz 结果推断手机实机 GDB 能达到同样速率。
+
+私有协议另经最终 Windows 打包后端、真实 AXF 的三个分散 float 测试，
+预热 5 秒后测量 10 秒收到 12927 帧，约 1288.9 Hz，最后性能窗口 1308.1 Hz，
+手机单次批读约 661 us、skipped_ticks=0。单变量独立测量约 1380.1 Hz。
+本轮安装前后的采样实现未改，不能把不同窗口当成下载优化带来的采样增益。
+GDB 测试结束已停止服务并显式恢复目标运行。
+原始日志：`build/gdb-final-connected-rate.log`、`build/ember-final-three-steady.log`、
+`build/ember-connected-single-steady.log`。
+
+### 此前回环模拟测试及历史连接问题
+
 本机 Windows 回环 TCP + 模拟 RAM，同一服务端 fixture，每组 2 秒，3 个 uint32：
 
 | 布局 | GDB/MI 调试读取 | 直接 RSP 读取 |
@@ -66,10 +86,11 @@ Ember GDB Server 同时修复了接收侧：4 KiB 缓冲区接收并处理已有
 OpenOCD 的 dummy adapter + ARM 模拟目标在客户端接入时触发 OpenOCD 自身断言，
 因此该实验不计为兼容性通过；OpenOCD 的物理探针/目标验证仍待完成。
 
-本次手机 USB 探针为 Horco，VID FAED / PID 4870，序列号 102021330500，与上轮
+此前连接失败时的手机 USB 探针为 Horco，VID FAED / PID 4870，序列号 102021330500，与上轮
 私有协议测速使用的探针不同。旧版和新版恢复连接时均遇到
 `Arm(NoTargetResponse { source: Dap(NoAcknowledge) })`，4 MHz 和 1 MHz 旧版均复现。
-没有下载、复位或修改 MCU 固件。本次没有新的板上 GDB Hz 结论。
+当时没有下载、复位或修改 MCU 固件，也没有取得板上 GDB Hz 结论。
+后来恢复连接后的结果见本节开头；两次使用的探针不同。
 
 ## 复测
 

@@ -4,6 +4,8 @@ import hashlib
 import time
 from pathlib import Path
 import base64
+import io
+from elftools.elf.elffile import ELFFile
 
 import pytest
 
@@ -16,6 +18,30 @@ from test_ember_pairing import phone_factory  # Real Ember Rust QUIC fixture.
 from take_a_look_backend.models import SymbolInfo, WatchedVariable
 from take_a_look_backend.services.debug_info import DebugInfoIndex
 from test_ember_remote import Phone, phone_server
+from test_gdb_remote import arm_firmware
+
+
+def test_compact_upload_preserves_all_load_bytes_and_lmas(arm_firmware):
+    _, path = arm_firmware
+    original = Path(path).read_bytes()
+    compact = remote_firmware.compact_flash_elf(original)
+    assert len(compact) < len(original)
+    def loads(data):
+        elf = ELFFile(io.BytesIO(data))
+        return [(s['p_vaddr'], s['p_paddr'], s['p_filesz'], s['p_memsz'], s['p_flags'], s.data())
+                for s in elf.iter_segments() if s['p_type'] == 'PT_LOAD' and s['p_filesz']]
+    assert loads(compact) == loads(original)
+    elf = ELFFile(io.BytesIO(compact))
+    for segment in elf.iter_segments():
+        assert any(section['sh_flags'] & 2 and section['sh_offset'] == segment['p_offset']
+                   and section.data() == segment.data() for section in elf.iter_sections())
+    client = FlashPhone()
+    backend = RemoteMemoryBackend('ember', {})
+    backend.client, backend.ember, backend.target = client, type('Target', (), {'session_id': 7})(), object()
+    backend.program_firmware(str(path), lambda _: None)
+    assert client.uploaded == compact
+    assert client.expected['sha256'] == hashlib.sha256(compact).hexdigest()
+    assert Path(path).read_bytes() == original
 
 
 def test_legacy_ember_upload_uses_bounded_chunks_and_the_same_flash_lifecycle(tmp_path):

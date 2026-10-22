@@ -34,6 +34,11 @@ class _CompactWatchPanelState extends State<_CompactWatchPanel> {
   final _panelFocus = FocusNode(debugLabel: 'watch-browser');
   final _search = TextEditingController();
   final _scroll = ScrollController();
+  final Set<String> _selectedKeys = {};
+  List<(String, bool)> _selectionOrder = [];
+  String? _selectionAnchor;
+  bool _selectionAnchorPinned = false;
+  bool _selectionInitialized = false;
   Set<String> get _rangeExpansions => controller.compactExpandedWatches;
   late final String _scope =
       'watch-${DateTime.now().microsecondsSinceEpoch}-${identityHashCode(this)}';
@@ -54,6 +59,9 @@ class _CompactWatchPanelState extends State<_CompactWatchPanel> {
       oldWidget.controller.setWatchMonitorScope(_scope, null);
       _search.text = controller.watchSearchQuery;
       _plotRevision = -1;
+      _selectedKeys.clear();
+      _selectionAnchor = null;
+      _selectionInitialized = false;
     }
   }
 
@@ -66,13 +74,71 @@ class _CompactWatchPanelState extends State<_CompactWatchPanel> {
     super.dispose();
   }
 
-  void _select(String key) {
-    setState(() => controller.compactWatchSelection = key);
+  void _select(
+    String key, {
+    bool preserveSelection = false,
+    bool pinned = false,
+  }) {
+    final keyboard = HardwareKeyboard.instance;
+    final additive = keyboard.isControlPressed || keyboard.isMetaPressed;
+    final index = _selectionOrder.indexOf((key, pinned));
+    final anchor = _selectionOrder.indexOf((
+      _selectionAnchor ?? '',
+      _selectionAnchorPinned,
+    ));
+    setState(() {
+      if (preserveSelection && _selectedKeys.contains(key)) {
+        // Opening a menu on a selected row keeps the entire selection.
+      } else if (!preserveSelection &&
+          keyboard.isShiftPressed &&
+          index >= 0 &&
+          anchor >= 0) {
+        if (!additive) _selectedKeys.clear();
+        _selectedKeys.addAll(
+          _selectionOrder
+              .sublist(math.min(anchor, index), math.max(anchor, index) + 1)
+              .map((row) => row.$1),
+        );
+      } else if (!preserveSelection && additive) {
+        if (!_selectedKeys.add(key)) _selectedKeys.remove(key);
+        _selectionAnchor = key;
+        _selectionAnchorPinned = pinned;
+      } else {
+        _selectedKeys
+          ..clear()
+          ..add(key);
+        _selectionAnchor = key;
+        _selectionAnchorPinned = pinned;
+      }
+      controller.compactWatchSelection = _selectedKeys.contains(key)
+          ? key
+          : _selectedKeys.lastOrNull;
+    });
     controller.setPlotHighlightedWatch(key);
   }
 
+  void _selectAll() {
+    final keys = controller.watches.map((w) => w.symbol.key);
+    setState(() {
+      _selectedKeys
+        ..clear()
+        ..addAll(keys);
+      _selectionAnchor = _selectionOrder.firstOrNull?.$1;
+      _selectionAnchorPinned = _selectionOrder.firstOrNull?.$2 ?? false;
+      controller.compactWatchSelection ??= _selectionAnchor;
+    });
+    _panelFocus.requestFocus();
+  }
+
   void _toggle(_WatchBrowserEntry entry) {
-    if (entry.node != null) _select(entry.key);
+    if (entry.node != null) _select(entry.key, pinned: entry.pinned);
+    if (entry.node != null &&
+        (HardwareKeyboard.instance.isShiftPressed ||
+            HardwareKeyboard.instance.isControlPressed ||
+            HardwareKeyboard.instance.isMetaPressed)) {
+      _panelFocus.requestFocus();
+      return;
+    }
     setState(() {
       final expanded = entry.node == null
           ? _rangeExpansions
@@ -98,13 +164,17 @@ class _CompactWatchPanelState extends State<_CompactWatchPanel> {
       controller.redoWatchDeletion();
       return KeyEventResult.handled;
     }
+    if (WorkspaceShortcut.selectAllWatches.matches(event)) {
+      _selectAll();
+      return KeyEventResult.handled;
+    }
     if (event is KeyDownEvent &&
         event.logicalKey == LogicalKeyboardKey.delete &&
         !HardwareKeyboard.instance.isControlPressed &&
         !HardwareKeyboard.instance.isAltPressed &&
         !HardwareKeyboard.instance.isMetaPressed &&
-        controller.compactWatchSelection != null) {
-      controller.removeWatch(controller.compactWatchSelection!);
+        _selectedKeys.isNotEmpty) {
+      controller.removeWatches(_selectedKeys);
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
@@ -112,15 +182,36 @@ class _CompactWatchPanelState extends State<_CompactWatchPanel> {
 
   void _syncSelection(List<WatchTreeNode> roots) {
     final keys = controller.watches.map((w) => w.symbol.key).toSet();
-    if (!keys.contains(controller.compactWatchSelection)) {
+    final lostSelection = _selectedKeys.any((key) => !keys.contains(key));
+    _selectedKeys.removeWhere((key) => !keys.contains(key));
+    if (!keys.contains(_selectionAnchor)) _selectionAnchor = null;
+    if (!keys.contains(controller.compactWatchSelection) &&
+        (controller.compactWatchSelection != null ||
+            !_selectionInitialized ||
+            lostSelection)) {
       controller.compactWatchSelection =
+          _selectedKeys.firstOrNull ??
           controller.watches.firstOrNull?.symbol.key;
     }
+    final selected = controller.compactWatchSelection;
+    if (selected != null && !_selectedKeys.contains(selected)) {
+      _selectedKeys
+        ..clear()
+        ..add(selected);
+      _selectionAnchor = selected;
+      _selectionAnchorPinned = false;
+    }
+    _selectionInitialized = true;
     if (_plotRevision == controller.plotWatchSelectionRevision) return;
     _plotRevision = controller.plotWatchSelectionRevision;
     final key = controller.plotHighlightedWatchKey;
     if (key == null || !keys.contains(key)) return;
     controller.compactWatchSelection = key;
+    _selectedKeys
+      ..clear()
+      ..add(key);
+    _selectionAnchor = key;
+    _selectionAnchorPinned = false;
     // A curve selection reveals its source, including an array's range group.
     bool reveal(WatchTreeNode node) {
       if (node.watch.symbol.key == key) return true;
@@ -206,19 +297,39 @@ class _CompactWatchPanelState extends State<_CompactWatchPanel> {
   }
 
   Future<void> _adjustColor(WatchItem watch) async {
-    _select(watch.symbol.key);
+    _select(watch.symbol.key, preserveSelection: true);
+    final keys = _selectedKeys.toList();
     _panelFocus.requestFocus();
     final color = await showTalDialog<Color>(
       context: context,
       builder: (_) => WatchColorDialog(initialColor: watch.color),
     );
     if (mounted && color != null) {
-      controller.setWatchColor(watch.symbol.key, color);
+      controller.setWatchColors(keys, color);
     }
   }
 
-  Future<void> _menu(WatchItem watch, Offset position) async {
-    _select(watch.symbol.key);
+  Future<void> _menu(
+    WatchItem watch,
+    Offset position, {
+    bool pinned = false,
+  }) async {
+    _select(watch.symbol.key, preserveSelection: true, pinned: pinned);
+    final keys = _selectedKeys.toList();
+    final plotKeys = <String>{};
+    void collect(WatchTreeNode node) {
+      if (_selectedKeys.contains(node.watch.symbol.key)) {
+        plotKeys.addAll(node.watchesInDisplayOrder.map((w) => w.symbol.key));
+      } else {
+        for (final child in node.children) {
+          collect(child);
+        }
+      }
+    }
+
+    for (final root in buildWatchTree(controller.watches)) {
+      collect(root);
+    }
     _panelFocus.requestFocus();
     final overlay =
         Overlay.of(context).context.findRenderObject()! as RenderBox;
@@ -248,12 +359,21 @@ class _CompactWatchPanelState extends State<_CompactWatchPanel> {
           label: watch.plotted ? '隐藏曲线' : '显示曲线',
           enabled: watch.samplingEnabled,
         ),
+        _watchPopupItem(
+          touchOptimized: TalUiTheme.of(context).touchOptimized,
+          value: 'isolate',
+          icon: Icons.filter_center_focus,
+          label: '孤立',
+          enabled: controller.watches.any(
+            (w) => plotKeys.contains(w.symbol.key) && w.samplingEnabled,
+          ),
+        ),
         const PopupMenuDivider(),
         _watchPopupItem(
           touchOptimized: TalUiTheme.of(context).touchOptimized,
           value: 'delete',
           icon: Icons.delete_outline,
-          label: '删除变量',
+          label: keys.length > 1 ? '删除所选变量（${keys.length}）' : '删除变量',
         ),
         _watchPopupItem(
           touchOptimized: TalUiTheme.of(context).touchOptimized,
@@ -274,11 +394,19 @@ class _CompactWatchPanelState extends State<_CompactWatchPanel> {
     if (!mounted) return;
     switch (action) {
       case 'pin':
-        controller.setWatchPinned(watch.symbol.key, !watch.pinned);
+        final pinned = !watch.pinned;
+        for (final key in keys) {
+          controller.setWatchPinned(key, pinned);
+        }
       case 'visibility':
-        controller.toggleWatchPlot(watch.symbol.key, !watch.plotted);
+        final plotted = !watch.plotted;
+        for (final key in keys) {
+          controller.toggleWatchPlot(key, plotted);
+        }
+      case 'isolate':
+        controller.isolateWatchPlots(plotKeys);
       case 'delete':
-        controller.removeWatch(watch.symbol.key);
+        controller.removeWatches(keys);
       case 'undo':
         controller.undoWatchDeletion();
       case 'redo':
@@ -288,10 +416,89 @@ class _CompactWatchPanelState extends State<_CompactWatchPanel> {
     }
   }
 
+  Future<void> _blankMenu(Offset position) async {
+    _panelFocus.requestFocus();
+    final overlay =
+        Overlay.of(context).context.findRenderObject()! as RenderBox;
+    final touch = TalUiTheme.of(context).touchOptimized;
+    final action = await showTalContextMenu<String>(
+      context: context,
+      position: RelativeRect.fromSize(
+        overlay.globalToLocal(position) & Size.zero,
+        overlay.size,
+      ),
+      items: [
+        _watchPopupItem(
+          touchOptimized: touch,
+          value: 'collapse',
+          icon: Icons.unfold_less,
+          label: '折叠所有',
+          enabled:
+              controller.compactExpandedWatches.isNotEmpty ||
+              _search.text.isNotEmpty,
+        ),
+        _watchPopupItem(
+          touchOptimized: touch,
+          value: 'exitIsolation',
+          icon: Icons.filter_center_focus_outlined,
+          label: '退出孤立',
+          enabled: controller.watchPlotsIsolated,
+        ),
+        _watchPopupItem(
+          touchOptimized: touch,
+          value: 'selectAll',
+          icon: Icons.select_all,
+          label: '全选',
+          enabled: controller.watches.isNotEmpty,
+        ),
+        const PopupMenuDivider(),
+        _watchPopupItem(
+          touchOptimized: touch,
+          value: 'deleteAll',
+          icon: Icons.delete_sweep_outlined,
+          label: '删除全部',
+          enabled: controller.watches.isNotEmpty,
+        ),
+        _watchPopupItem(
+          touchOptimized: touch,
+          value: 'undo',
+          icon: Icons.undo,
+          label: '撤回删除',
+          enabled: controller.canUndoWatchDeletion,
+        ),
+        _watchPopupItem(
+          touchOptimized: touch,
+          value: 'redo',
+          icon: Icons.redo,
+          label: '重做删除 (Ctrl+Y)',
+          enabled: controller.canRedoWatchDeletion,
+        ),
+      ],
+    );
+    if (!mounted) return;
+    switch (action) {
+      case 'collapse':
+        setState(() {
+          controller.compactExpandedWatches.clear();
+          _search.clear();
+          controller.watchSearchQuery = '';
+        });
+      case 'exitIsolation':
+        controller.exitWatchPlotIsolation();
+      case 'selectAll':
+        _selectAll();
+      case 'deleteAll':
+        controller.clearWatches();
+      case 'undo':
+        controller.undoWatchDeletion();
+      case 'redo':
+        controller.redoWatchDeletion();
+    }
+  }
+
   Widget _row(_WatchBrowserEntry entry, bool wide, double valueWidth) {
     final node = entry.node, watch = node?.watch;
-    final selected =
-        watch != null && controller.compactWatchSelection == entry.key;
+    final selected = watch != null && _selectedKeys.contains(entry.key);
     final ui = TalUiTheme.of(context);
     final height = ui.targetExtent(32);
     final expanded =
@@ -303,7 +510,7 @@ class _CompactWatchPanelState extends State<_CompactWatchPanel> {
       if (entry.expandable) {
         _toggle(entry);
       } else {
-        _select(entry.key);
+        _select(entry.key, pinned: entry.pinned);
         _panelFocus.requestFocus();
       }
     }
@@ -312,12 +519,16 @@ class _CompactWatchPanelState extends State<_CompactWatchPanel> {
       onTap: activate,
       onSecondaryTapUp: watch == null
           ? null
-          : (d) => _menu(watch, d.globalPosition),
+          : (d) => _menu(watch, d.globalPosition, pinned: entry.pinned),
       onLongPress: watch == null
           ? null
           : () {
               final box = context.findRenderObject()! as RenderBox;
-              _menu(watch, box.localToGlobal(box.size.center(Offset.zero)));
+              _menu(
+                watch,
+                box.localToGlobal(box.size.center(Offset.zero)),
+                pinned: entry.pinned,
+              );
             },
       child: Container(
         height: height,
@@ -421,7 +632,7 @@ class _CompactWatchPanelState extends State<_CompactWatchPanel> {
                       controller: controller,
                       watch: watch!,
                       pinned: entry.pinned,
-                      onSelect: () => _select(entry.key),
+                      onSelect: () => _select(entry.key, pinned: entry.pinned),
                     ),
             ),
             if (entry.expandable)
@@ -562,6 +773,11 @@ class _CompactWatchPanelState extends State<_CompactWatchPanel> {
         final pinned = controller.watches
             .where((w) => w.pinned && allNodes[w.symbol.key]!.children.isEmpty)
             .toList();
+        _selectionOrder = [
+          for (final w in pinned) (w.symbol.key, true),
+          for (final row in rows)
+            if (row.node != null) (row.key, false),
+        ];
         final visible = <String>{
           for (final row in rows)
             if (row.node != null && !row.expandable) row.key,
@@ -596,117 +812,123 @@ class _CompactWatchPanelState extends State<_CompactWatchPanel> {
           64.0,
           maxValueWidth,
         );
-        final list = ListView(
-          controller: _scroll,
-          key: const ValueKey('compact-watch-list'),
-          children: [
-            if (pinned.isNotEmpty) ...[
-              const Padding(
-                padding: EdgeInsets.fromLTRB(12, 6, 12, 4),
+        final list = GestureDetector(
+          key: const ValueKey('compact-watch-list-context-area'),
+          behavior: HitTestBehavior.opaque,
+          onSecondaryTapUp: (details) => _blankMenu(details.globalPosition),
+          onLongPressStart: (details) => _blankMenu(details.globalPosition),
+          child: ListView(
+            controller: _scroll,
+            key: const ValueKey('compact-watch-list'),
+            children: [
+              if (pinned.isNotEmpty) ...[
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(12, 6, 12, 4),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.push_pin_outlined,
+                        size: 13,
+                        color: TalColors.muted,
+                      ),
+                      SizedBox(width: 5),
+                      Text('已固定', style: workbenchMuted),
+                      Spacer(),
+                      Text('折叠后仍刷新', style: workbenchMuted),
+                    ],
+                  ),
+                ),
+                for (final w in pinned)
+                  _row(
+                    _WatchBrowserEntry(
+                      key: w.symbol.key,
+                      label: w.symbol.name,
+                      depth: 0,
+                      node: allNodes[w.symbol.key],
+                      pinned: true,
+                    ),
+                    wide,
+                    valueWidth,
+                  ),
+                const Divider(height: 12, color: TalColors.borderSoft),
+              ],
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 5, 5, 5),
                 child: Row(
                   children: [
-                    Icon(
-                      Icons.push_pin_outlined,
-                      size: 13,
-                      color: TalColors.muted,
+                    Text(
+                      _search.text.trim().isEmpty ? '成员' : '搜索结果',
+                      style: workbenchMuted,
                     ),
-                    SizedBox(width: 5),
-                    Text('已固定', style: workbenchMuted),
-                    Spacer(),
-                    Text('折叠后仍刷新', style: workbenchMuted),
-                  ],
-                ),
-              ),
-              for (final w in pinned)
-                _row(
-                  _WatchBrowserEntry(
-                    key: w.symbol.key,
-                    label: w.symbol.name,
-                    depth: 0,
-                    node: allNodes[w.symbol.key],
-                    pinned: true,
-                  ),
-                  wide,
-                  valueWidth,
-                ),
-              const Divider(height: 12, color: TalColors.borderSoft),
-            ],
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 5, 5, 5),
-              child: Row(
-                children: [
-                  Text(
-                    _search.text.trim().isEmpty ? '成员' : '搜索结果',
-                    style: workbenchMuted,
-                  ),
-                  const Spacer(),
-                  Tooltip(
-                    message: '左右拖动调整当前值列宽',
-                    child: MouseRegion(
-                      cursor: SystemMouseCursors.resizeColumn,
-                      child: GestureDetector(
-                        key: const ValueKey('watch-value-column-resize'),
-                        behavior: HitTestBehavior.opaque,
-                        onHorizontalDragUpdate: (details) => setState(() {
-                          _valueColumnWidth = (valueWidth - details.delta.dx)
-                              .clamp(64.0, maxValueWidth);
-                        }),
-                        child: const SizedBox(
-                          width: 12,
-                          height: 24,
-                          child: Center(
-                            child: SizedBox(
-                              width: 1,
-                              height: 14,
-                              child: ColoredBox(color: TalColors.border),
+                    const Spacer(),
+                    Tooltip(
+                      message: '左右拖动调整当前值列宽',
+                      child: MouseRegion(
+                        cursor: SystemMouseCursors.resizeColumn,
+                        child: GestureDetector(
+                          key: const ValueKey('watch-value-column-resize'),
+                          behavior: HitTestBehavior.opaque,
+                          onHorizontalDragUpdate: (details) => setState(() {
+                            _valueColumnWidth = (valueWidth - details.delta.dx)
+                                .clamp(64.0, maxValueWidth);
+                          }),
+                          child: const SizedBox(
+                            width: 12,
+                            height: 24,
+                            child: Center(
+                              child: SizedBox(
+                                width: 1,
+                                height: 14,
+                                child: ColoredBox(color: TalColors.border),
+                              ),
                             ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                  SizedBox(
-                    width: valueWidth,
-                    child: const Text(
-                      '当前值',
-                      style: workbenchMuted,
-                      textAlign: TextAlign.right,
-                    ),
-                  ),
-                  SizedBox(
-                    width: TalUiTheme.of(context).compactIconButtonSize * 2,
-                  ),
-                ],
-              ),
-            ),
-            if (rows.isEmpty)
-              Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  children: [
-                    Text(
-                      controller.watches.isEmpty ? '从符号变量加入变量' : '没有匹配的成员',
-                      style: workbenchMuted,
-                    ),
-                    if (_search.text.isNotEmpty)
-                      TalButton(
-                        onPressed: () => setState(() {
-                          _search.clear();
-                          controller.watchSearchQuery = '';
-                        }),
-                        child: const Text('清空搜索'),
+                    SizedBox(
+                      width: valueWidth,
+                      child: const Text(
+                        '当前值',
+                        style: workbenchMuted,
+                        textAlign: TextAlign.right,
                       ),
-                    if (controller.watches.isEmpty &&
-                        widget.onShowSymbols != null)
-                      TalButton(
-                        onPressed: widget.onShowSymbols,
-                        child: const Text('打开符号变量'),
-                      ),
+                    ),
+                    SizedBox(
+                      width: TalUiTheme.of(context).compactIconButtonSize * 2,
+                    ),
                   ],
                 ),
               ),
-            for (final row in rows) _row(row, wide, valueWidth),
-          ],
+              if (rows.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    children: [
+                      Text(
+                        controller.watches.isEmpty ? '从符号变量加入变量' : '没有匹配的成员',
+                        style: workbenchMuted,
+                      ),
+                      if (_search.text.isNotEmpty)
+                        TalButton(
+                          onPressed: () => setState(() {
+                            _search.clear();
+                            controller.watchSearchQuery = '';
+                          }),
+                          child: const Text('清空搜索'),
+                        ),
+                      if (controller.watches.isEmpty &&
+                          widget.onShowSymbols != null)
+                        TalButton(
+                          onPressed: widget.onShowSymbols,
+                          child: const Text('打开符号变量'),
+                        ),
+                    ],
+                  ),
+                ),
+              for (final row in rows) _row(row, wide, valueWidth),
+            ],
+          ),
         );
         final details = selected == null
             ? const SizedBox.shrink()

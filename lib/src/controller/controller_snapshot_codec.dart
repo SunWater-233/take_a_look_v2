@@ -90,6 +90,10 @@ class ControllerSnapshotCodec {
     SnapshotField.samplingPaused => source.state.acquisition.samplingPaused,
     SnapshotField.rawRecording => source.state.acquisition.rawRecording,
     SnapshotField.plottingPaused => source.state.plot.plottingPaused,
+    SnapshotField.plotVisibilityBeforeIsolation =>
+      source.state.plot.visibilityBeforeIsolation == null
+          ? null
+          : Map<String, bool>.of(source.state.plot.visibilityBeforeIsolation!),
     SnapshotField.plotHighlightedWatchKey =>
       source.state.plot.highlightedWatchKey,
     SnapshotField.plotWatchSelectionRevision =>

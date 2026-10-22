@@ -149,6 +149,12 @@ extension TakeALookControllerWatches on TakeALookController {
           ..readMode = isAggregateMember ? WatchReadMode.monitor : mode
           ..plotted = !isAggregateMember && mode == WatchReadMode.capture,
       );
+      final previous = state.plot.visibilityBeforeIsolation;
+      if (previous != null) {
+        final added = _watches.last;
+        previous.putIfAbsent(added.symbol.key, () => added.plotted);
+        added.plotted = false;
+      }
     }
     _selectedSymbols.clear();
     compactExpandedWatches.addAll(aggregateRootKeys);
@@ -475,6 +481,50 @@ extension TakeALookControllerWatches on TakeALookController {
       plottedKeys.toList(),
       (watch) => plottedKeys.contains(watch.symbol.key),
     );
+  }
+
+  bool get watchPlotsIsolated => state.plot.visibilityBeforeIsolation != null;
+
+  void isolateWatchPlots(Iterable<String> keys) {
+    final isolatedKeys = keys.toSet();
+    if (_isDetachedRemote &&
+        _dispatchRemote(
+          ControllerCommand.isolateWatchPlots,
+          isolatedKeys.toList(),
+        )) {
+      return;
+    }
+    if (!_watches.any(
+      (watch) =>
+          isolatedKeys.contains(watch.symbol.key) && watch.samplingEnabled,
+    )) {
+      return;
+    }
+    final previous = state.plot.visibilityBeforeIsolation ??= {};
+    for (final watch in _watches) {
+      previous.putIfAbsent(watch.symbol.key, () => watch.plotted);
+      watch.plotted =
+          watch.samplingEnabled && isolatedKeys.contains(watch.symbol.key);
+    }
+    _syncWatchesBackend();
+    _emitState([signals.watches, signals.plot]);
+  }
+
+  void exitWatchPlotIsolation() {
+    if (_isDetachedRemote &&
+        _dispatchRemote(ControllerCommand.exitWatchPlotIsolation)) {
+      return;
+    }
+    final previous = state.plot.visibilityBeforeIsolation;
+    if (previous == null) return;
+    state.plot.visibilityBeforeIsolation = null;
+    // Retained deletions can be restored later through Undo as well.
+    for (final watch in _allRetainedWatches) {
+      final plotted = previous[watch.symbol.key];
+      if (plotted != null) watch.plotted = plotted && watch.samplingEnabled;
+    }
+    _syncWatchesBackend();
+    _emitState([signals.watches, signals.plot]);
   }
 
   void setAllWatchesPlotted(bool plotted) {

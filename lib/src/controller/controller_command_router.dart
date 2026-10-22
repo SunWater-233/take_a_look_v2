@@ -214,6 +214,10 @@ Future<JsonObject> executeControllerCommand(
       );
     case ControllerCommand.setOnlyWatchesPlotted:
       controller.setOnlyWatchesPlotted((arguments as List).cast<String>());
+    case ControllerCommand.isolateWatchPlots:
+      controller.isolateWatchPlots((arguments as List).cast<String>());
+    case ControllerCommand.exitWatchPlotIsolation:
+      controller.exitWatchPlotIsolation();
     case ControllerCommand.setAllWatchesPlotted:
       controller.setAllWatchesPlotted(arguments as bool);
     case ControllerCommand.invertWatchPlots:

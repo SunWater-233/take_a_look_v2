@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -165,6 +166,105 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
+
+  testWidgets('blank collapse clears searches and array range expansions', (
+    tester,
+  ) async {
+    final c = structureFixture();
+    addTearDown(c.dispose);
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    c.compactExpandedWatches.addAll([
+      'motor.current',
+      'motor.samples',
+      'motor.samples:range:0',
+    ]);
+    await mount(tester, c);
+    final search = find.byKey(const ValueKey('watch-member-search'));
+    await tester.enterText(search, 'current.q');
+    await tester.pump();
+    final area = tester.getRect(
+      find.byKey(const ValueKey('compact-watch-list-context-area')),
+    );
+    await tester.tapAt(
+      area.topLeft + const Offset(3, 3),
+      buttons: kSecondaryMouseButton,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('折叠所有'));
+    await tester.pumpAndSettle();
+    expect(c.compactExpandedWatches, isEmpty);
+    expect(c.watchSearchQuery, isEmpty);
+    expect(tester.widget<TextField>(search).controller!.text, isEmpty);
+    expect(find.byKey(const ValueKey('compact-watch-motor')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('compact-watch-motor.speed')),
+      findsNothing,
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets(
+    'Shift range skips collapsed children and keeps branches folded',
+    (tester) async {
+      final c = structureFixture();
+      addTearDown(c.dispose);
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await mount(tester, c);
+      await tester.tap(find.byKey(const ValueKey('compact-watch-motor.speed')));
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.tap(find.byKey(const ValueKey('compact-watch-motor.pid')));
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pump();
+      expect(c.compactExpandedWatches, {'motor'});
+      await tester.tap(
+        find.byKey(const ValueKey('compact-watch-motor.current')),
+        buttons: kSecondaryMouseButton,
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('删除所选变量（3）'), findsOneWidget);
+      await tester.tap(find.text('删除所选变量（3）'));
+      await tester.pumpAndSettle();
+      expect(
+        c.watches.map((w) => w.symbol.key),
+        isNot(contains(anyOf('motor.speed', 'motor.current', 'motor.pid'))),
+      );
+      expect(c.watches.map((w) => w.symbol.key), contains('motor.current.q'));
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
+    'isolating a branch plots its captured members without filtering rows',
+    (tester) async {
+      final c = structureFixture();
+      addTearDown(c.dispose);
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      c.setWatchReadMode('motor.speed', WatchReadMode.capture);
+      c.setWatchReadMode('motor.current.q', WatchReadMode.capture);
+      await mount(tester, c);
+      await tester.tap(
+        find.byKey(const ValueKey('compact-watch-motor.current')),
+        buttons: kSecondaryMouseButton,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('孤立'));
+      await tester.pumpAndSettle();
+      expect(c.watches.where((w) => w.plotted).map((w) => w.symbol.key), [
+        'motor.current.q',
+      ]);
+      expect(
+        find.byKey(const ValueKey('compact-watch-motor.speed')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('compact-watch-motor.pid')),
+        findsOneWidget,
+      );
+      expect(c.compactExpandedWatches, {'motor'});
+      c.exitWatchPlotIsolation();
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
 
   test(
     'read scopes union across views and pinned configuration round trips',

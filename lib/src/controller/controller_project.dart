@@ -10,6 +10,11 @@ extension TakeALookControllerProject on TakeALookController {
     // A project stores variable configuration and input drafts. Recorded values
     // belong to recordings and must never be replayed as target writes.
     for (final raw in data['watches'] as List) {
+      final originalVisibility =
+          state.plot.visibilityBeforeIsolation?[raw['key']];
+      if (originalVisibility != null) {
+        raw['plotted'] = originalVisibility && raw['sampling'] == true;
+      }
       (raw as Map).removeWhere(
         (key, _) => const {
           'value',
@@ -211,6 +216,7 @@ extension TakeALookControllerProject on TakeALookController {
     }
     _clearWatchDeletionHistory();
     _removedWatchKeys.clear();
+    state.plot.visibilityBeforeIsolation = null;
     _watches.clear();
     plotHistory.clear();
     _clearFrozenPlot();

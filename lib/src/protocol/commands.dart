@@ -66,6 +66,8 @@ enum ControllerCommand {
   setWatchColor,
   setWatchColors,
   setOnlyWatchesPlotted,
+  isolateWatchPlots,
+  exitWatchPlotIsolation,
   setAllWatchesPlotted,
   invertWatchPlots,
   updateAnalysisSession,
@@ -275,6 +277,8 @@ class BackendCommandMapper {
       case ControllerCommand.setWatchColor:
       case ControllerCommand.setWatchColors:
       case ControllerCommand.setOnlyWatchesPlotted:
+      case ControllerCommand.isolateWatchPlots:
+      case ControllerCommand.exitWatchPlotIsolation:
       case ControllerCommand.setAllWatchesPlotted:
       case ControllerCommand.invertWatchPlots:
       case ControllerCommand.updateAnalysisSession:

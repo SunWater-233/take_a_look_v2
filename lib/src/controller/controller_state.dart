@@ -122,6 +122,7 @@ class AcquisitionState {
 }
 
 class PlotState {
+  Map<String, bool>? visibilityBeforeIsolation;
   String? highlightedWatchKey;
   int watchSelectionRevision = 0;
   bool plottingPaused = false;

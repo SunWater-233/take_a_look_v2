@@ -36,10 +36,13 @@ void main() {
     WidgetTester tester, {
     TalInputMode mode = TalInputMode.mouseKeyboard,
     double width = 390,
+    int watchCount = 2,
   }) async {
     final controller = TakeALookController(backendCommand: (_, _) async {})
       ..loadDemoSymbols();
-    controller.selectSymbols(demoSymbols.take(2).map((symbol) => symbol.key));
+    controller.selectSymbols(
+      demoSymbols.take(watchCount).map((symbol) => symbol.key),
+    );
     controller.addSelectedToWatch();
     addTearDown(controller.dispose);
     await tester.pumpWidget(
@@ -71,6 +74,167 @@ void main() {
     await tester.tap(finder, buttons: kSecondaryMouseButton);
     await tester.pumpAndSettle();
   }
+
+  Future<void> rightClickBlank(WidgetTester tester) async {
+    final area = tester.getRect(
+      find.byKey(const ValueKey('compact-watch-list-context-area')),
+    );
+    await tester.tapAt(
+      Offset(area.left + 10, area.bottom - 10),
+      buttons: kSecondaryMouseButton,
+    );
+    await tester.pumpAndSettle();
+  }
+
+  bool isSelected(WidgetTester tester, String name) {
+    final row = find.byKey(
+      ValueKey(
+        'compact-watch-${demoSymbols.firstWhere((s) => s.name == name).key}',
+      ),
+    );
+    final ink = tester.widget<InkWell>(
+      find.descendant(of: row, matching: find.byType(InkWell)).first,
+    );
+    return ((ink.child! as Container).decoration! as BoxDecoration).color ==
+        TalColors.selection;
+  }
+
+  testWidgets('Shift selects a range and row deletion is one undoable batch', (
+    tester,
+  ) async {
+    final controller = await mount(tester, watchCount: 4);
+    await tester.tap(rowName('iq_ref'));
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.tap(rowName('speed_rpm'));
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.pump();
+    for (final name in ['iq_ref', 'id_ref', 'speed_rpm']) {
+      expect(isSelected(tester, name), isTrue);
+    }
+    expect(isSelected(tester, 'speed_pid_kp'), isFalse);
+    await rightClick(tester, rowName('id_ref'));
+    expect(find.text('折叠所有'), findsNothing);
+    await tester.tap(find.text('删除所选变量（3）'));
+    await tester.pumpAndSettle();
+    expect(controller.watches.map((w) => w.symbol.name), ['speed_pid_kp']);
+    await rightClickBlank(tester);
+    await tester.tap(find.text('撤回删除'));
+    await tester.pumpAndSettle();
+    expect(controller.watches, hasLength(4));
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('blank menu selects and deletes all, including empty-list undo', (
+    tester,
+  ) async {
+    final controller = await mount(tester, watchCount: 4);
+    await rightClickBlank(tester);
+    for (final label in ['折叠所有', '退出孤立', '全选', '删除全部']) {
+      expect(find.text(label), findsOneWidget);
+    }
+    await tester.tap(find.text('全选'));
+    await tester.pumpAndSettle();
+    for (final symbol in demoSymbols.take(4)) {
+      expect(isSelected(tester, symbol.name), isTrue);
+    }
+    await tester.sendKeyEvent(LogicalKeyboardKey.delete);
+    await tester.pumpAndSettle();
+    expect(controller.watches, isEmpty);
+    await rightClickBlank(tester);
+    await tester.tap(find.text('撤回删除'));
+    await tester.pumpAndSettle();
+    expect(controller.watches, hasLength(4));
+    await rightClickBlank(tester);
+    await tester.tap(find.text('删除全部'));
+    await tester.pumpAndSettle();
+    expect(controller.watches, isEmpty);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+    expect(controller.watches, hasLength(4));
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('isolation only changes curves and restores prior visibility', (
+    tester,
+  ) async {
+    final controller = await mount(tester, watchCount: 4);
+    controller.toggleWatchPlot(controller.watches.last.symbol.key, false);
+    await tester.pump();
+    await tester.tap(rowName('id_ref'));
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.tap(rowName('speed_rpm'));
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.pump();
+    await rightClick(tester, rowName('id_ref'));
+    await tester.tap(find.text('孤立'));
+    await tester.pumpAndSettle();
+    expect(controller.watchPlotsIsolated, isTrue);
+    expect(controller.watches.map((w) => w.plotted), [
+      false,
+      true,
+      true,
+      false,
+    ]);
+    for (final symbol in demoSymbols.take(4)) {
+      expect(rowName(symbol.name), findsOneWidget);
+    }
+    await rightClickBlank(tester);
+    await tester.tap(find.text('退出孤立'));
+    await tester.pumpAndSettle();
+    expect(controller.watchPlotsIsolated, isFalse);
+    expect(controller.watches.map((w) => w.plotted), [true, true, true, false]);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('Ctrl+A selects all and Ctrl click can clear the selection', (
+    tester,
+  ) async {
+    final controller = await mount(tester);
+    await tester.tap(rowName('iq_ref'));
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.tap(rowName('iq_ref'));
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+    expect(isSelected(tester, 'iq_ref'), isFalse);
+    await tester.sendKeyEvent(LogicalKeyboardKey.delete);
+    await tester.pump();
+    expect(controller.watches, hasLength(2));
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+    expect(isSelected(tester, 'iq_ref'), isTrue);
+    expect(isSelected(tester, 'id_ref'), isTrue);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets(
+    'pinned duplicates keep tree range order and batch actions agree',
+    (tester) async {
+      final controller = await mount(tester, watchCount: 4);
+      controller.setWatchPinned(controller.watches.last.symbol.key, true);
+      await tester.pump();
+      await tester.tap(rowName('iq_ref'));
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.tap(rowName('speed_pid_kp'));
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pump();
+      for (final symbol in demoSymbols.take(4)) {
+        expect(isSelected(tester, symbol.name), isTrue);
+      }
+      await rightClick(tester, rowName('id_ref'));
+      await tester.tap(find.text('固定成员').last);
+      await tester.pumpAndSettle();
+      expect(controller.watches.every((w) => w.pinned), isTrue);
+      await rightClick(tester, rowName('id_ref'));
+      await tester.tap(find.text('隐藏曲线').last);
+      await tester.pumpAndSettle();
+      expect(controller.watches.every((w) => !w.plotted), isTrue);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
 
   for (final mode in TalInputMode.values) {
     testWidgets('$mode plotted color strips edit and synchronize pinned rows', (

@@ -368,6 +368,10 @@ extension TakeALookControllerSnapshot on TakeALookController {
       _frozenPlotSamples.clear();
     }
 
+    if (data.containsKey('plotVisibilityBeforeIsolation')) {
+      state.plot.visibilityBeforeIsolation =
+          (data['plotVisibilityBeforeIsolation'] as Map?)?.cast<String, bool>();
+    }
     if (hasPlotHighlightState) {
       state.plot.highlightedWatchKey =
           data['plotHighlightedWatchKey'] as String?;

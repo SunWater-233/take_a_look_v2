@@ -43,6 +43,7 @@ enum SnapshotField {
   samplingPaused({SnapshotDomain.sampling}, persistInProject: true),
   rawRecording({SnapshotDomain.sampling}),
   plottingPaused({SnapshotDomain.plot}, persistInProject: true),
+  plotVisibilityBeforeIsolation({SnapshotDomain.watches}),
   plotHighlightedWatchKey({SnapshotDomain.plot}),
   plotWatchSelectionRevision({SnapshotDomain.plot}),
   rttEnabled({SnapshotDomain.sampling}, persistInProject: true),

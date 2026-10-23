@@ -89,7 +89,7 @@ class DebugSession:
             target.resume()
 
 
-    def snapshot(self) -> dict[str, object]:
+    def snapshot(self, *, include_definitions: bool = False) -> dict[str, object]:
         return {
             "executionState": self.execution_state,
             "sourceFiles": self.info.source_files,
@@ -97,6 +97,7 @@ class DebugSession:
             "breakpoints": list(self.resolved_breakpoints),
             "registers": dict(self.registers),
             "stoppedLocation": self.stopped_location,
+            **({"sourceDefinitions": self.info.source_definitions} if include_definitions else {}),
         }
 
 

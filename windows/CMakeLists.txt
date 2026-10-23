@@ -107,6 +107,21 @@ install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
 # collector skips ignored PyInstaller output, so the native install step owns
 # the platform runtime.
 set(TAL_BACKEND_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../backend")
+# Flutter does not rebuild PyInstaller output. Reject a stale frozen backend in
+# release bundles instead of silently shipping a newer UI with older RPC data.
+install(CODE "
+  if(CMAKE_INSTALL_CONFIG_NAME MATCHES \"^(Release|Profile)$\")
+    set(TAL_FROZEN_BACKEND \"${TAL_BACKEND_SOURCE_DIR}/runtime/take_a_look_backend/take_a_look_backend.exe\")
+    if(EXISTS \"\${TAL_FROZEN_BACKEND}\")
+      file(GLOB_RECURSE TAL_BACKEND_INPUTS \"${TAL_BACKEND_SOURCE_DIR}/take_a_look_backend/*.py\")
+      foreach(TAL_BACKEND_INPUT IN LISTS TAL_BACKEND_INPUTS)
+        if(\"\${TAL_BACKEND_INPUT}\" IS_NEWER_THAN \"\${TAL_FROZEN_BACKEND}\")
+          message(FATAL_ERROR \"The packaged backend is older than its sources. Run tool/build_backend.ps1 before building the Windows release. Newer source: \${TAL_BACKEND_INPUT}\")
+        endif()
+      endforeach()
+    endif()
+  endif()
+  " COMPONENT Runtime)
 install(FILES "${TAL_BACKEND_SOURCE_DIR}/pyproject.toml"
   DESTINATION "${CMAKE_INSTALL_PREFIX}/backend" COMPONENT Runtime)
 install(DIRECTORY "${TAL_BACKEND_SOURCE_DIR}/take_a_look_backend"

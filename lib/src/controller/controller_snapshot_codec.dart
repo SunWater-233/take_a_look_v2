@@ -158,6 +158,12 @@ class ControllerSnapshotCodec {
       'stopRevision': source.state.debug.stopRevision,
       'executionState': source.state.debug.executionState.name,
       'sourceFiles': source.state.debug.sourceFiles,
+      'sourceDefinitions': !source.state.debug.hasSourceDefinitionIndex
+          ? null
+          : [
+              for (final definition in source.state.debug.sourceDefinitions)
+                definition.toJson(),
+            ],
       'sourceRoot': source.state.debug.sourceRoot,
       'executableLines': {
         for (final entry in source.state.debug.executableLines.entries)

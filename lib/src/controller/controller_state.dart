@@ -70,6 +70,8 @@ class SourceWorkspaceState {
 class DebugState {
   DebugExecutionState executionState = DebugExecutionState.unavailable;
   final List<String> sourceFiles = <String>[];
+  final List<SourceDefinition> sourceDefinitions = <SourceDefinition>[];
+  bool hasSourceDefinitionIndex = false;
   final Map<String, Set<int>> executableLines = <String, Set<int>>{};
   final Map<String, Set<int>> requestedBreakpoints = <String, Set<int>>{};
   final List<DebugBreakpoint> resolvedBreakpoints = <DebugBreakpoint>[];

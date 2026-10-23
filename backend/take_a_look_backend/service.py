@@ -339,6 +339,7 @@ class BackendService(SamplingServiceMixin):
                 "watches": [self._watch_json(watch) for watch in self._watches.values()],
                 "sourceProject": self._source_projects.snapshot(),
                 "sourceTask": self._source_tasks.snapshot(),
+                "debug": self._debug.snapshot(include_definitions=True),
             }
 
     def _runtime_state_locked(self) -> dict[str, object]:
@@ -586,7 +587,7 @@ class BackendService(SamplingServiceMixin):
             return {
                 "sourceFiles": self._debug.info.source_files,
                 "executableLines": self._debug.info.executable_lines,
-                "debug": self._debug.snapshot(),
+                "debug": self._debug.snapshot(include_definitions=True),
             }
 
     def _set_breakpoints(self, params: Mapping[str, object]) -> dict[str, object]:

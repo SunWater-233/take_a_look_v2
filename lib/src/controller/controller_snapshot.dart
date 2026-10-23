@@ -421,10 +421,13 @@ extension TakeALookControllerSnapshot on TakeALookController {
       );
     }
     if (hasDebugState && data['debug'] is Map) {
-      applyDebugState(
-        Map<String, dynamic>.from(data['debug'] as Map),
-        emit: false,
-      );
+      final debug = Map<String, dynamic>.from(data['debug'] as Map);
+      if (data.containsKey('symbols') &&
+          !debug.containsKey('sourceDefinitions')) {
+        // Full legacy-backend snapshots cannot retain a previous ELF's index.
+        debug['sourceDefinitions'] = null;
+      }
+      applyDebugState(debug, emit: false);
     }
     if (hasSourceWorkspace) {
       sourceWorkspace.applyJson(

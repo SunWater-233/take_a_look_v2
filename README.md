@@ -404,6 +404,28 @@ first while content results load. File paths and prepared text are cached across
 queries, and binary build outputs are only matched by name. Content search uses
 literal text. Use `Up`/`Down` to select a result and `Enter` to open it and close
 search; `Esc` closes search without opening the selection.
+Use `Ctrl+Click` on a function or variable to jump to its definition, or select
+the identifier and press `F12`. The source context menu also offers **跳转到定义**.
+Holding Ctrl (Command on macOS) while hovering a resolvable identifier highlights
+and underlines it, with a hand cursor. `Alt+F12` or **预览定义** opens an inline
+definition preview; `Shift+F12` or **查看引用** finds matching identifiers across
+the local C/C++ project. The preview shows code beside results grouped by file,
+and stacks them vertically in narrow panels. Click a result to preview it,
+double-click or press Enter to open it, use Up/Down to select, or Esc to close.
+Drag the preview's bottom edge to resize it. Reference lookup matches whole,
+case-sensitive identifier names, excluding comments, quoted strings, raw strings
+and include paths; it includes declarations/definitions and may include unrelated
+symbols with the same name. Searches stop at 2,000 results and show `+` when capped.
+Locations come from the loaded ELF/AXF's DWARF information, including parameters
+and structure members. Definitions in other files open automatically and the
+destination line is highlighted; ambiguous names open the inline preview with
+scopes and file/line locations. If only a declaration is available, navigation uses it.
+Use `Alt+Left` / `Alt+Right` or the source toolbar arrows to go back / forward.
+Reload the ELF/AXF after rebuilding to update these locations; identifiers absent
+from its debug information cannot be resolved.
+Windows release builds use a frozen Python backend. After changing backend
+sources, run `tool/build_backend.ps1` before `flutter build windows --release`;
+the release build rejects a bundled runtime older than its Python sources.
 Use the folder button in the source toolbar to set the project source root;
 build-machine paths recorded in the ELF are then
 matched to local files automatically. **定位本地源码** remains available as a
@@ -416,6 +438,8 @@ working directory. Building does not require a connected board or an existing
 ELF. Commands, firmware paths, shell selection, extra toolchain directories and
 output encoding are saved per project and operating system in the app's local
 `source-projects.json` configuration file.
+The source root starts unselected on each launch. Select a directory to reuse
+its saved build settings, or explicitly open a saved `.talproj` project.
 
 Windows defaults to PowerShell (`pwsh.exe`, falling back to Windows PowerShell);
 CMD is optional. macOS defaults to zsh and Linux to Bash, using an available
@@ -450,6 +474,10 @@ can be used in place of Ctrl.
 | `Ctrl+Shift+S` | Save workspace layout | Main window |
 | `Ctrl+F` | Open file/content search | Window with a visible source debugger |
 | `Ctrl+W` | Close the active source file tab | Window with a visible source debugger |
+| `Ctrl+Click` / `F12` | Jump to a function or variable definition | Source code / selected identifier |
+| `Alt+F12` / `Shift+F12` | Preview a definition / view references | Selected source identifier |
+| `Up` / `Down`, `Enter`, `Esc` | Select, open, close | Inline source preview |
+| `Alt+Left` / `Alt+Right` | Go back / forward through source locations | Source debugger |
 | `Up` / `Down` | Select a search result | Source search |
 | `Enter` / `Esc` | Open the selection and close search / cancel search | Source search |
 | `Ctrl+A` | Select all watched variables | Active watch panel |

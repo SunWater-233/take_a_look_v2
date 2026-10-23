@@ -49,10 +49,39 @@ def test_profiles_restore_by_full_project_root_without_executing(tmp_path):
     projects.select({'sourceRoot': str(roots[0]), 'buildCommand': 'project A'})
     projects.select({'sourceRoot': str(roots[1]), 'buildCommand': 'project B'})
     assert projects.select({'sourceRoot': str(roots[0])})['buildCommand'] == 'project A'
-    assert SourceProjects(file).current['buildCommand'] == 'project A'
+    restored = SourceProjects(file)
+    assert restored.current == default_config()
+    assert restored.select({'sourceRoot': str(roots[1])})['buildCommand'] == 'project B'
     with pytest.raises(ProtocolError):
-        projects.select({'sourceRoot': str(tmp_path / 'missing')})
-    assert SourceProjects(file).current['buildCommand'] == 'project A'
+        restored.select({'sourceRoot': str(tmp_path / 'missing')})
+    assert restored.current['buildCommand'] == 'project B'
+    assert SourceProjects(file).current == default_config()
+    saved = json.loads(file.read_text(encoding='utf-8'))
+    assert 'lastRoot' not in saved['platforms'][projects.platform]
+
+
+@pytest.mark.parametrize('legacy_layout', [False, True])
+@pytest.mark.parametrize('root_exists', [False, True])
+def test_startup_ignores_saved_last_root_but_keeps_project_profiles(tmp_path, legacy_layout, root_exists):
+    root = tmp_path / 'project'
+    if root_exists:
+        root.mkdir()
+    file = tmp_path / 'settings.json'
+    projects = SourceProjects(file)
+    key = os.path.normcase(str(root.resolve()))
+    profile = {**default_config(str(root)), 'buildCommand': 'saved build command'}
+    local = {'lastRoot': key, 'projects': {key: profile}}
+    data = ({'version': 1, 'platform': projects.platform, **local} if legacy_layout else
+            {'version': 1, 'platforms': {projects.platform: local}})
+    original = json.dumps(data)
+    file.write_text(original, encoding='utf-8')
+
+    restored = SourceProjects(file)
+    assert restored.snapshot()['sourceRoot'] == ''
+    assert restored.current == default_config()
+    assert file.read_text(encoding='utf-8') == original
+    if root_exists:
+        assert restored.select({'sourceRoot': str(root)})['buildCommand'] == 'saved build command'
 
 
 def test_platform_defaults_and_shell_arguments(tmp_path):

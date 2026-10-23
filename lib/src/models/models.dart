@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import '../telemetry/sample_buffer.dart';
 
 export 'symbol_load_progress.dart';
+export 'source_definition.dart';
 
 enum ConnectionStatus { disconnected, connecting, connected }
 

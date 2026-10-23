@@ -70,12 +70,11 @@ class SourceProjects:
                 if data.get("version") == 1:
                     self._platforms = data.get("platforms", {})
                     if data.get("platform") in {"windows", "macos", "linux"}:
-                        self._platforms[data["platform"]] = {"projects": data.get("projects", {}), "lastRoot": data.get("lastRoot", "")}
+                        self._platforms[data["platform"]] = {"projects": data.get("projects", {})}
                     local = self._platforms.get(self.platform, {})
                     self._profiles = local.get("projects", {})
-                    previous = self._profiles.get(local.get("lastRoot", ""))
-                    if isinstance(previous, dict):
-                        self.current = self._validate(previous, check_directory=False)
+                    # Profiles are reused only after an explicit selection.
+                    # Ignore lastRoot from older settings and start unselected.
             except (OSError, ValueError, TypeError, AttributeError, ProtocolError):
                 self._profiles = {}
                 self._platforms = {}
@@ -96,7 +95,7 @@ class SourceProjects:
         draft["sourceRoot"] = normalized
         candidate = self._validate(draft)
         profiles = {**self._profiles, os.path.normcase(normalized): candidate}
-        platforms = {**self._platforms, self.platform: {"lastRoot": os.path.normcase(normalized), "projects": profiles}}
+        platforms = {**self._platforms, self.platform: {"projects": profiles}}
         if self.file is not None:
             self.file.parent.mkdir(parents=True, exist_ok=True)
             descriptor, temporary = tempfile.mkstemp(prefix="source-projects-", suffix=".json", dir=self.file.parent)
@@ -111,14 +110,14 @@ class SourceProjects:
         self._platforms = platforms
         return self.snapshot()
 
-    def _validate(self, values: dict[str, object], *, check_directory: bool = True) -> dict[str, object]:
+    def _validate(self, values: dict[str, object]) -> dict[str, object]:
         result = default_config()
         for key in result:
             value = values.get(key, result[key])
             if not isinstance(value, str) or "\x00" in value or len(value) > 32768:
                 raise ProtocolError("invalid_source_config", f"无效的工程配置：{key}")
             result[key] = value.strip()
-        if check_directory and not Path(str(result["sourceRoot"])).is_dir():
+        if not Path(str(result["sourceRoot"])).is_dir():
             raise ProtocolError("source_root_missing", "源码根目录不存在或不是文件夹。", result["sourceRoot"])
         if result["shell"] not in {item["id"] for item in shell_options()}:
             raise ProtocolError("unsupported_shell", "当前平台不支持此命令解释器。")

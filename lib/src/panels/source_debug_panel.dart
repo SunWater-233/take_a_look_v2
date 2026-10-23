@@ -18,6 +18,8 @@ import 'source_search.dart';
 import 'source_search_controller.dart';
 import 'source_highlighter.dart';
 import 'source_documents.dart';
+import 'source_references.dart';
+import 'source_peek.dart';
 import '../theme/theme.dart';
 
 import 'shared_controls.dart';
@@ -25,6 +27,8 @@ import 'panel_frame.dart';
 import 'source_file_drag_data.dart';
 
 part 'source_build_tools.dart';
+part 'source_navigation.dart';
+part 'source_peek_actions.dart';
 part 'workbench_output.dart';
 
 class SourceDebugPanel extends StatefulWidget {
@@ -83,6 +87,17 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
   int _activeSearchIndex = -1;
   int? _revealedSearchLine;
   _SourceTokenSelection? _sourceSelection;
+  final List<_SourceNavigationLocation> _navigationBack = [];
+  final List<_SourceNavigationLocation> _navigationForward = [];
+  bool _sourceTapWithModifier = false;
+  _SourceTokenSelection? _hoveredToken;
+  bool _hoveredTokenCanNavigate = false;
+  bool _navigationModifierPressed = false;
+  _SourcePeekSession? _sourcePeek;
+  double? _sourcePeekHeight;
+  double _visiblePeekHeight = 0;
+  late final SourceReferencesController _references =
+      SourceReferencesController(_sourceDocuments);
   List<SourceSearchResult> _searchResults = const [];
   Map<String, String> get _resolvedSourcePaths =>
       _sourceDocuments.resolvedPaths;
@@ -100,6 +115,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
   @override
   void initState() {
     super.initState();
+    HardwareKeyboard.instance.addHandler(_handleNavigationModifier);
     _tabController.addListener(_updateTabOverflow);
     controller.debugChanges.addListener(_handleDebugChange);
     controller.symbolChanges.addListener(_handleDebugChange);
@@ -115,6 +131,11 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
   @override
   void didUpdateWidget(covariant SourceDebugPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!widget.visible) {
+      _hoveredToken = null;
+      _hoveredTokenCanNavigate = false;
+      _navigationModifierPressed = false;
+    }
     if (oldWidget.visible != widget.visible &&
         oldWidget.controller == controller &&
         !widget.readOnlyPreview) {
@@ -159,6 +180,11 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     _searchController.clear();
     _searchResults = const [];
     _sourceSelection = null;
+    _hoveredToken = null;
+    _sourcePeek = null;
+    _references.cancel();
+    _navigationBack.clear();
+    _navigationForward.clear();
     _searchVisible = false;
     _searching = false;
     _activeSearchIndex = -1;
@@ -171,6 +197,8 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleNavigationModifier);
+    _references.dispose();
     controller.debugChanges.removeListener(_handleDebugChange);
     controller.symbolChanges.removeListener(_handleDebugChange);
     controller.sourceToolsChanges.removeListener(_handleFirmwareTask);
@@ -239,6 +267,10 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     final sourceRootChanged =
         _observedSourceRoot != controller.debugState.sourceRoot;
     if (sourceRootChanged) {
+      _sourcePeek = null;
+      _references.cancel();
+      _navigationBack.clear();
+      _navigationForward.clear();
       _observedSourceRoot = controller.debugState.sourceRoot;
       _resolvedSourcePaths.clear();
       _sourceDocuments.clear();
@@ -310,6 +342,10 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     final generation = ++_loadGeneration;
     setState(() {
       _selectedPath = path;
+      _sourceSelection = null;
+      _hoveredToken = null;
+      _sourcePeek = null;
+      _references.cancel();
       _revealedSearchLine = revealLine;
       _lines = const [];
       _loadError = null;
@@ -430,6 +466,46 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
   }
 
   KeyEventResult _handleSourceCommand(KeyEvent event) {
+    if (!_searchVisible &&
+        event is KeyDownEvent &&
+        !event.synthesized &&
+        !widget.readOnlyPreview &&
+        widget.visible) {
+      final keyboard = HardwareKeyboard.instance;
+      if (event.logicalKey == LogicalKeyboardKey.escape &&
+          _sourcePeek != null) {
+        _closeSourcePeek();
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.f12 &&
+          !keyboard.isControlPressed &&
+          !keyboard.isMetaPressed) {
+        final selection = _selectedSourceToken;
+        if (selection == null) return KeyEventResult.ignored;
+        if (keyboard.isShiftPressed && !keyboard.isAltPressed) {
+          _openReferences(selection);
+        } else if (keyboard.isAltPressed && !keyboard.isShiftPressed) {
+          _openDefinitionPeek(selection);
+        } else if (!keyboard.isShiftPressed && !keyboard.isAltPressed) {
+          unawaited(_goToDefinition(selection));
+        } else {
+          return KeyEventResult.ignored;
+        }
+        return KeyEventResult.handled;
+      }
+      if (!keyboard.isControlPressed &&
+          !keyboard.isMetaPressed &&
+          !keyboard.isShiftPressed) {
+        if (keyboard.isAltPressed &&
+            (event.logicalKey == LogicalKeyboardKey.arrowLeft ||
+                event.logicalKey == LogicalKeyboardKey.arrowRight)) {
+          _navigateHistory(
+            back: event.logicalKey == LogicalKeyboardKey.arrowLeft,
+          );
+          return KeyEventResult.handled;
+        }
+      }
+    }
     if (WorkspaceShortcut.closeSource.matches(event)) {
       _closeSelectedSource();
       return KeyEventResult.handled;
@@ -689,7 +765,9 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     final position = painter.getPositionForOffset(
       Offset(offset.dx, _lineHeight / 2),
     );
-    if (offset.dx > painter.width) return null;
+    final width = painter.width;
+    painter.dispose();
+    if (offset.dx > width) return null;
     var index = position.offset.clamp(0, line.rawText.length);
     if (index == line.rawText.length && index > 0) index -= 1;
     if (index >= line.rawText.length ||
@@ -705,6 +783,11 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
       end += 1;
     }
     if (!_isIdentifierStart(line.rawText[start])) return null;
+    if (!line.identifiers.any(
+      (range) => range.start == start && range.end == end,
+    )) {
+      return null;
+    }
     return _SourceTokenSelection(
       path: path,
       lineIndex: lineIndex,
@@ -721,58 +804,91 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
       _lines[lineIndex],
       localPosition,
     );
-    if (selection == null) return;
-    setState(() => _sourceSelection = selection);
+    _updateSourceSelection(selection);
+  }
+
+  void _updateSourceSelection(_SourceTokenSelection? selection) =>
+      setState(() => _sourceSelection = selection);
+
+  void _updateSourceView(VoidCallback update) => setState(update);
+
+  bool _handleNavigationModifier(KeyEvent event) {
+    final keyboard = HardwareKeyboard.instance;
+    final pressed =
+        widget.visible &&
+        !widget.readOnlyPreview &&
+        (keyboard.isControlPressed || keyboard.isMetaPressed) &&
+        !keyboard.isAltPressed;
+    if (mounted && pressed != _navigationModifierPressed) {
+      setState(() {
+        _navigationModifierPressed = pressed;
+        _hoveredTokenCanNavigate =
+            pressed &&
+            _hoveredToken != null &&
+            _definitionsFor(_hoveredToken!).isNotEmpty;
+      });
+    }
+    return false;
+  }
+
+  void _hoverSourceToken(String path, int index, Offset position) {
+    if (!widget.visible || widget.readOnlyPreview) return;
+    final token = _tokenAtOffset(path, index, _lines[index], position);
+    if (_hoveredToken?.path == token?.path &&
+        _hoveredToken?.lineIndex == token?.lineIndex &&
+        _hoveredToken?.start == token?.start) {
+      return;
+    }
+    setState(() {
+      _hoveredToken = token;
+      _hoveredTokenCanNavigate =
+          _navigationModifierPressed &&
+          token != null &&
+          _definitionsFor(token).isNotEmpty;
+    });
+  }
+
+  void _exitSourceToken(String path, int index) {
+    if (!mounted ||
+        _hoveredToken?.path != path ||
+        _hoveredToken?.lineIndex != index) {
+      return;
+    }
+    setState(() {
+      _hoveredToken = null;
+      _hoveredTokenCanNavigate = false;
+    });
   }
 
   List<TextSpan> _spansForSourceLine(String path, int lineIndex) {
     final line = _lines[lineIndex];
     final selection = _sourceSelection;
-    if (selection == null ||
-        selection.lineIndex != lineIndex ||
-        !controller.sourcePathsMatch(selection.path, path)) {
-      return line.spans;
-    }
-    final result = <TextSpan>[];
-    var offset = 0;
-    for (final span in line.spans) {
-      final text = span.text ?? '';
-      final spanStart = offset;
-      final spanEnd = offset + text.length;
-      final selectedStart = math.max(spanStart, selection.start);
-      final selectedEnd = math.min(spanEnd, selection.end);
-      if (selectedStart >= selectedEnd) {
-        result.add(span);
-      } else {
-        if (spanStart < selectedStart) {
-          result.add(
-            TextSpan(
-              text: text.substring(0, selectedStart - spanStart),
-              style: span.style,
-            ),
-          );
-        }
-        result.add(
-          TextSpan(
-            text: text.substring(
-              selectedStart - spanStart,
-              selectedEnd - spanStart,
-            ),
-            style: span.style?.copyWith(backgroundColor: TalColors.selection),
+    final hovered = _hoveredToken;
+    return decorateSourceSpans(line.spans, [
+      if (selection != null &&
+          selection.lineIndex == lineIndex &&
+          controller.sourcePathsMatch(selection.path, path))
+        (
+          start: selection.start,
+          end: selection.end,
+          style: const TextStyle(backgroundColor: TalColors.selection),
+        ),
+      if (_navigationModifierPressed &&
+          _hoveredTokenCanNavigate &&
+          hovered != null &&
+          hovered.lineIndex == lineIndex &&
+          hovered.path == path)
+        (
+          start: hovered.start,
+          end: hovered.end,
+          style: TextStyle(
+            color: TalColors.info,
+            backgroundColor: TalColors.info.withValues(alpha: .14),
+            decoration: TextDecoration.underline,
+            decorationColor: TalColors.info,
           ),
-        );
-        if (selectedEnd < spanEnd) {
-          result.add(
-            TextSpan(
-              text: text.substring(selectedEnd - spanStart),
-              style: span.style,
-            ),
-          );
-        }
-      }
-      offset = spanEnd;
-    }
-    return result;
+        ),
+    ]);
   }
 
   Future<String?> _resolveIncludedSource(String sourcePath, String line) async {
@@ -852,22 +968,39 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     Offset localPosition,
   ) async {
     final line = _lines[lineIndex];
-    final selected = _sourceSelection;
-    final hit =
-        selected != null &&
-            selected.lineIndex == lineIndex &&
-            controller.sourcePathsMatch(selected.path, sourcePath)
-        ? selected
-        : _tokenAtOffset(sourcePath, lineIndex, line, localPosition);
+    final generation = _loadGeneration;
+    final hit = _tokenAtOffset(sourcePath, lineIndex, line, localPosition);
+    setState(() => _sourceSelection = hit);
     final token = hit?.token;
     final symbols = token == null
         ? const <SymbolItem>[]
         : _symbolsForToken(token, sourcePath);
     final includeName = _includeNameFromLine(line.rawText);
     final includePath = await _resolveIncludedSource(sourcePath, line.rawText);
-    if (!context.mounted) return;
+    if (!context.mounted || generation != _loadGeneration) return;
 
     final items = <PopupMenuEntry<String>>[];
+    if (hit != null) {
+      items.add(
+        PopupMenuItem<String>(
+          key: const ValueKey('source-menu-definition'),
+          value: 'definition',
+          child: Text('跳转到定义  ${hit.token}    F12'),
+        ),
+      );
+      items.addAll([
+        PopupMenuItem<String>(
+          key: const ValueKey('source-menu-peek-definition'),
+          value: 'peek-definition',
+          child: Text('预览定义  ${hit.token}    Alt+F12'),
+        ),
+        PopupMenuItem<String>(
+          key: const ValueKey('source-menu-references'),
+          value: 'references',
+          child: Text('查看引用  ${hit.token}    Shift+F12'),
+        ),
+      ]);
+    }
     for (final symbol in symbols) {
       final symbolLabel = symbol.name == token ? token : symbol.name;
       final suffix = symbols.length > 1 ? '  ${symbol.addressLabel}' : '';
@@ -911,7 +1044,13 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
       items: items,
     );
     if (!context.mounted || action == null) return;
-    if (action.startsWith('watch:')) {
+    if (action == 'definition' && hit != null) {
+      await _goToDefinition(hit);
+    } else if (action == 'peek-definition' && hit != null) {
+      _openDefinitionPeek(hit);
+    } else if (action == 'references' && hit != null) {
+      _openReferences(hit);
+    } else if (action.startsWith('watch:')) {
       final key = action.substring('watch:'.length);
       if (widget.externalOutput) {
         controller.selectSymbols([key]);
@@ -947,10 +1086,11 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_verticalController.hasClients) return;
       final viewport = _verticalController.position.viewportDimension;
-      final target = ((line - 1) * _lineHeight - viewport * 0.38).clamp(
-        0.0,
-        _verticalController.position.maxScrollExtent,
-      );
+      final peekOffset = _sourcePeek != null && line > _sourcePeek!.anchorLine
+          ? _visiblePeekHeight
+          : 0.0;
+      final target = ((line - 1) * _lineHeight + peekOffset - viewport * 0.38)
+          .clamp(0.0, _verticalController.position.maxScrollExtent);
       if (immediate) {
         _verticalController.jumpTo(target);
       } else {
@@ -1242,56 +1382,113 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
         controller.connectionStatus == ConnectionStatus.connected &&
         !controller.sourceTask.blocksProbe;
     final isRunning = state == DebugExecutionState.running;
-    return SizedBox(
-      height: TalUiTheme.of(context).targetExtent(42),
-      child: Row(
-        children: [
-          const SizedBox(width: 8),
-          _DebugToolbarButton(
-            key: const ValueKey('debug-run-control'),
-            tooltip: isRunning ? '暂停目标' : '继续运行',
-            icon: isRunning ? Icons.pause : Icons.play_arrow,
-            onPressed: !connected
-                ? null
-                : switch (state) {
-                    DebugExecutionState.running => controller.haltTarget,
-                    DebugExecutionState.halted => controller.resumeTarget,
-                    _ =>
-                      controller.isGdbMemoryMode
-                          ? controller.resumeTarget
-                          : null,
-                  },
-          ),
-          _DebugToolbarButton(
-            key: const ValueKey('debug-step'),
-            tooltip: '单条指令步进',
-            icon: Icons.skip_next,
-            onPressed:
-                connected &&
-                    controller.supportsTargetControl &&
-                    state == DebugExecutionState.halted
-                ? controller.stepTarget
-                : null,
-          ),
-          const SizedBox(width: 8),
-          _DebugStateBadge(state: state),
-          const SizedBox(width: 12),
-          Expanded(child: _buildSourceTabs()),
-          _DebugToolbarButton(
-            key: const ValueKey('source-root-picker'),
-            tooltip: controller.debugState.sourceRoot.isEmpty
-                ? '设置工程源码根目录'
-                : '工程源码根目录：${controller.debugState.sourceRoot}',
-            icon: controller.debugState.sourceRoot.isEmpty
-                ? Icons.folder_open_outlined
-                : Icons.folder_special_outlined,
-            onPressed: controller.sourceTask.running
-                ? null
-                : controller.chooseSourceRoot,
-          ),
-          const SizedBox(width: 8),
-        ],
+    final debugControls = <Widget>[
+      const SizedBox(width: 8),
+      _DebugToolbarButton(
+        key: const ValueKey('debug-run-control'),
+        tooltip: isRunning ? '暂停目标' : '继续运行',
+        icon: isRunning ? Icons.pause : Icons.play_arrow,
+        onPressed: !connected
+            ? null
+            : switch (state) {
+                DebugExecutionState.running => controller.haltTarget,
+                DebugExecutionState.halted => controller.resumeTarget,
+                _ =>
+                  controller.isGdbMemoryMode ? controller.resumeTarget : null,
+              },
       ),
+      _DebugToolbarButton(
+        key: const ValueKey('debug-step'),
+        tooltip: '单条指令步进',
+        icon: Icons.skip_next,
+        onPressed:
+            connected &&
+                controller.supportsTargetControl &&
+                state == DebugExecutionState.halted
+            ? controller.stepTarget
+            : null,
+      ),
+      const SizedBox(width: 8),
+      _DebugStateBadge(state: state),
+      const SizedBox(width: 12),
+    ];
+    final navigationControls = <Widget>[
+      _DebugToolbarButton(
+        key: const ValueKey('source-navigation-back'),
+        tooltip: '返回上一位置 (Alt+←)',
+        icon: Icons.arrow_back,
+        onPressed: _navigationBack.isEmpty
+            ? null
+            : () => _navigateHistory(back: true),
+      ),
+      _DebugToolbarButton(
+        key: const ValueKey('source-navigation-forward'),
+        tooltip: '前往下一位置 (Alt+→)',
+        icon: Icons.arrow_forward,
+        onPressed: _navigationForward.isEmpty
+            ? null
+            : () => _navigateHistory(back: false),
+      ),
+    ];
+    final rootPicker = _DebugToolbarButton(
+      key: const ValueKey('source-root-picker'),
+      tooltip: controller.debugState.sourceRoot.isEmpty
+          ? '设置工程源码根目录'
+          : '工程源码根目录：${controller.debugState.sourceRoot}',
+      icon: controller.debugState.sourceRoot.isEmpty
+          ? Icons.folder_open_outlined
+          : Icons.folder_special_outlined,
+      onPressed: controller.sourceTask.running
+          ? null
+          : controller.chooseSourceRoot,
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final theme = TalUiTheme.of(context);
+        final debugHeight = theme.targetExtent(42);
+        final navigationHeight = theme.targetExtent(36);
+        if (constraints.maxWidth >= 480) {
+          return SizedBox(
+            height: debugHeight,
+            child: Row(
+              children: [
+                ...debugControls,
+                ...navigationControls,
+                Expanded(child: _buildSourceTabs()),
+                rootPicker,
+                const SizedBox(width: 8),
+              ],
+            ),
+          );
+        }
+        return SizedBox(
+          height: debugHeight + navigationHeight,
+          child: Column(
+            children: [
+              SizedBox(
+                height: debugHeight,
+                child: Row(
+                  children: [
+                    ...debugControls,
+                    const Spacer(),
+                    rootPicker,
+                    const SizedBox(width: 8),
+                  ],
+                ),
+              ),
+              SizedBox(
+                height: navigationHeight,
+                child: Row(
+                  children: [
+                    ...navigationControls,
+                    Expanded(child: _buildSourceTabs()),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -1568,6 +1765,12 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
           constraints.maxWidth,
           30 + _lineNumberWidth + 14 + longest * 8.2,
         );
+        final peek = _sourcePeek;
+        final peekIndex = peek?.anchorLine.clamp(1, _lines.length);
+        _visiblePeekHeight =
+            (_sourcePeekHeight ??
+                    (constraints.maxHeight * .62).clamp(180.0, 320.0))
+                .clamp(150.0, 520.0);
         return Scrollbar(
           controller: _horizontalController,
           thumbVisibility: true,
@@ -1584,9 +1787,26 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
                 child: ListView.builder(
                   key: ValueKey('source-view-$_selectedPath'),
                   controller: _verticalController,
-                  itemExtent: _lineHeight,
-                  itemCount: _lines.length,
-                  itemBuilder: (context, index) => _buildSourceLine(index),
+                  itemExtent: peek == null ? _lineHeight : null,
+                  itemExtentBuilder: peek == null
+                      ? null
+                      : (index, _) => index == peekIndex
+                            ? _visiblePeekHeight
+                            : _lineHeight,
+                  itemCount: _lines.length + (peek == null ? 0 : 1),
+                  itemBuilder: (context, index) {
+                    if (peek != null && index == peekIndex) {
+                      return _buildSourcePeek(
+                        constraints.maxWidth,
+                        contentWidth,
+                      );
+                    }
+                    return _buildSourceLine(
+                      peekIndex != null && index > peekIndex
+                          ? index - 1
+                          : index,
+                    );
+                  },
                 ),
               ),
             ),
@@ -1686,35 +1906,64 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
           ),
           const SizedBox(width: 14),
           Expanded(
-            child: GestureDetector(
-              key: ValueKey('source-line-$lineNumber'),
-              behavior: HitTestBehavior.opaque,
-              onDoubleTapDown: (details) =>
-                  _selectSourceToken(path, index, details.localPosition),
-              onHorizontalDragStart: (details) =>
-                  _selectSourceToken(path, index, details.localPosition),
-              onHorizontalDragUpdate: (details) =>
-                  _selectSourceToken(path, index, details.localPosition),
-              onSecondaryTapUp: (details) => unawaited(
-                _showSourceContextMenu(
-                  context,
-                  path,
-                  index,
-                  details.globalPosition,
-                  details.localPosition,
-                ),
-              ),
-              child: Text.rich(
-                TextSpan(children: _spansForSourceLine(path, index)),
-                maxLines: 1,
-                softWrap: false,
-                overflow: TextOverflow.visible,
-                style: const TextStyle(
-                  color: TalColors.text,
-                  fontSize: 13,
-                  height: 1.45,
-                  fontFamily: talFontFamily,
-                  fontFamilyFallback: talFontFamilyFallback,
+            child: MouseRegion(
+              key: ValueKey('source-mouse-line-$lineNumber'),
+              cursor:
+                  _navigationModifierPressed &&
+                      _hoveredTokenCanNavigate &&
+                      _hoveredToken?.lineIndex == index
+                  ? SystemMouseCursors.click
+                  : SystemMouseCursors.text,
+              onEnter: (event) =>
+                  _hoverSourceToken(path, index, event.localPosition),
+              onHover: (event) =>
+                  _hoverSourceToken(path, index, event.localPosition),
+              onExit: (_) => _exitSourceToken(path, index),
+              child: Listener(
+                onPointerDown: (event) {
+                  if (event.buttons != kPrimaryMouseButton) return;
+                  final keyboard = HardwareKeyboard.instance;
+                  _sourceTapWithModifier =
+                      keyboard.isControlPressed || keyboard.isMetaPressed;
+                  _selectSourceToken(path, index, event.localPosition);
+                },
+                child: GestureDetector(
+                  key: ValueKey('source-line-$lineNumber'),
+                  behavior: HitTestBehavior.opaque,
+                  onTapUp: (_) {
+                    final selection = _selectedSourceToken;
+                    if (_sourceTapWithModifier && selection != null) {
+                      unawaited(_goToDefinition(selection));
+                    }
+                  },
+                  onDoubleTapDown: (details) =>
+                      _selectSourceToken(path, index, details.localPosition),
+                  onHorizontalDragStart: (details) =>
+                      _selectSourceToken(path, index, details.localPosition),
+                  onHorizontalDragUpdate: (details) =>
+                      _selectSourceToken(path, index, details.localPosition),
+                  onSecondaryTapUp: (details) => unawaited(
+                    _showSourceContextMenu(
+                      context,
+                      path,
+                      index,
+                      details.globalPosition,
+                      details.localPosition,
+                    ),
+                  ),
+                  child: Text.rich(
+                    TextSpan(children: _spansForSourceLine(path, index)),
+                    maxLines: 1,
+                    softWrap: false,
+                    overflow: TextOverflow.visible,
+                    style: const TextStyle(
+                      color: TalColors.text,
+                      fontSize: 13,
+                      height: 1.45,
+                      fontFamily: talFontFamily,
+                      fontFamilyFallback: talFontFamilyFallback,
+                    ),
+                  ),
                 ),
               ),
             ),

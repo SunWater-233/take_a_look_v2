@@ -37,11 +37,61 @@ enum _SourceTokenKind {
 }
 
 class HighlightedSourceLine {
-  const HighlightedSourceLine(this.spans, this.textLength, this.rawText);
+  const HighlightedSourceLine(
+    this.spans,
+    this.textLength,
+    this.rawText, {
+    this.identifiers = const [],
+  });
 
   final List<TextSpan> spans;
   final int textLength;
   final String rawText;
+  final List<({int start, int end})> identifiers;
+}
+
+typedef SourceSpanDecoration = ({int start, int end, TextStyle style});
+
+/// Splits syntax spans only at decoration boundaries, retaining syntax colors.
+List<TextSpan> decorateSourceSpans(
+  List<TextSpan> spans,
+  List<SourceSpanDecoration> decorations,
+) {
+  if (decorations.isEmpty) return spans;
+  final result = <TextSpan>[];
+  var offset = 0;
+  for (final span in spans) {
+    final text = span.text ?? '';
+    final end = offset + text.length;
+    final boundaries = <int>{offset, end};
+    for (final decoration in decorations) {
+      if (decoration.start > offset && decoration.start < end) {
+        boundaries.add(decoration.start);
+      }
+      if (decoration.end > offset && decoration.end < end) {
+        boundaries.add(decoration.end);
+      }
+    }
+    final cuts = boundaries.toList()..sort();
+    for (var index = 0; index + 1 < cuts.length; index++) {
+      final start = cuts[index];
+      final stop = cuts[index + 1];
+      var style = span.style;
+      for (final decoration in decorations) {
+        if (start >= decoration.start && stop <= decoration.end) {
+          style = (style ?? const TextStyle()).merge(decoration.style);
+        }
+      }
+      result.add(
+        TextSpan(
+          text: text.substring(start - offset, stop - offset),
+          style: style,
+        ),
+      );
+    }
+    offset = end;
+  }
+  return result;
 }
 
 class _CppSyntaxHighlighter {
@@ -144,6 +194,7 @@ class _CppSyntaxHighlighter {
     void Function(bool) setBlockComment,
   ) {
     final spans = <TextSpan>[];
+    final identifiers = <({int start, int end})>[];
     var index = 0;
     final firstNonSpace = line.length - line.trimLeft().length;
     if (!isInBlockComment() &&
@@ -210,6 +261,9 @@ class _CppSyntaxHighlighter {
             ? _SourceTokenKind.type
             : _SourceTokenKind.plain;
         _add(spans, word, kind);
+        if (kind == _SourceTokenKind.plain) {
+          identifiers.add((start: index, end: end));
+        }
         index = end;
         continue;
       }
@@ -227,7 +281,12 @@ class _CppSyntaxHighlighter {
       index += 1;
     }
     if (line.isEmpty) spans.add(const TextSpan(text: ''));
-    return HighlightedSourceLine(spans, line.length, line);
+    return HighlightedSourceLine(
+      spans,
+      line.length,
+      line,
+      identifiers: identifiers,
+    );
   }
 
   static void _add(List<TextSpan> spans, String text, _SourceTokenKind kind) {

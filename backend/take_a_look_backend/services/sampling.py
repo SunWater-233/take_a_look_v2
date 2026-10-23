@@ -32,7 +32,7 @@ class SamplingServiceMixin:
                         # The phone services every probe request on one worker, so a
                         # status poll steals read time from capture. Poll slowly while
                         # a running target is being sampled quickly.
-                        fast_capture = (self._target_execution_state != "halted"
+                        fast_capture = (self._debug.execution_state != "halted"
                                         and self._sample_rate_hz >= 200)
                         self._next_debug_poll_at = now + (0.25 if fast_capture else 0.05)
                         connected = self._connection_status == "connected"
@@ -41,7 +41,7 @@ class SamplingServiceMixin:
                     if monitor_revision != self._monitor_schedule_revision:
                         monitor_revision = self._monitor_schedule_revision
                         next_monitor_at = now
-                    active = connected and not self._sampling_paused and self._target_execution_state != "halted"
+                    active = connected and not self._sampling_paused and self._debug.execution_state != "halted"
                     memory_period = 1.0 / self._sample_rate_hz
                     rtt_period = max(1.0 / self._rtt_sample_rate_hz, 0.002)
                     periods = (memory_period, rtt_period)
@@ -83,7 +83,7 @@ class SamplingServiceMixin:
                                 deadlines.append(next_memory_at)
                         # Drain push streams while capture is paused. Monitors use
                         # fresh cached values; old RTT frames must never be replayed.
-                        if rtt_enabled and self._target_execution_state != "halted":
+                        if rtt_enabled and self._debug.execution_state != "halted":
                             if now >= next_rtt_at:
                                 frames = self._read_rtt_locked(elapsed, now)
                                 if active:
@@ -142,7 +142,7 @@ class SamplingServiceMixin:
         pushed: list[tuple[WatchedVariable, tuple[object, int]]] = []
         next_at = now + 2.0
         can_read_memory = (backend_capabilities(self._memory).memory_sampling
-                           or self._target_execution_state == "halted")
+                           or self._debug.execution_state == "halted")
         plus = self._rtt_enabled and self._rtt_protocol == "plus"
         for watch in self._watches.values():
             if watch.mode != "monitor" or not watch.monitor_enabled:
@@ -150,7 +150,7 @@ class SamplingServiceMixin:
             period = 1.0 / (watch.monitor_rate_hz or self._monitor_rate_hz)
             if watch.next_monitor_at <= now:
                 watch.next_monitor_at = now + period
-                if watch.symbol.is_rtt or (plus and self._target_execution_state != "halted"):
+                if watch.symbol.is_rtt or (plus and self._debug.execution_state != "halted"):
                     cached = self._latest_rtt_values.get(watch.symbol.key)
                     if cached is not None and (watch.updated_at_ms is None or cached[1] > watch.updated_at_ms):
                         pushed.append((watch, cached))

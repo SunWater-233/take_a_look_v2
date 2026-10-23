@@ -1,4 +1,17 @@
-part of 'panels.dart';
+import 'dart:async';
+import 'dart:math' as math;
+
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
+
+import 'package:tal_drag_preview/tal_drag_preview.dart';
+
+import '../controller/controller.dart';
+import '../workspace/native_panel_drag.dart';
+import '../workspace/panel_types.dart';
+import '../theme/theme.dart';
+
+part 'source_tab_attention.dart';
 
 const double _talPanelTabMouseDragSlop = 10;
 
@@ -122,7 +135,7 @@ class TalPanelTabSurface extends StatelessWidget {
               top: 0,
               bottom: 0,
               child: Center(
-                child: _SourceUnreadDot(key: ValueKey('source-panel-unread')),
+                child: SourceUnreadDot(key: ValueKey('source-panel-unread')),
               ),
             ),
         ],
@@ -243,7 +256,7 @@ class _TalPanelFrameState extends State<TalPanelFrame> {
                             (tabs.length == 1 || collapsed) &&
                                 tabs.contains(WorkspacePanelId.sourceDebug) &&
                                 widget.controller != null
-                            ? _SourceTabAttention(
+                            ? SourceTabAttention(
                                 controller: widget.controller!,
                                 builder: (attention, unread) => Container(
                                   color: _sourceAttentionColor.withValues(
@@ -261,7 +274,7 @@ class _TalPanelFrameState extends State<TalPanelFrame> {
                                       ),
                                       if (unread) ...[
                                         const SizedBox(width: 6),
-                                        const _SourceUnreadDot(
+                                        const SourceUnreadDot(
                                           key: ValueKey('source-panel-unread'),
                                         ),
                                       ],
@@ -805,7 +818,7 @@ class _PanelTabsState extends State<_PanelTabs> {
     );
     final controller = widget.controller;
     return tab == WorkspacePanelId.sourceDebug && controller != null
-        ? _SourceTabAttention(controller: controller, builder: surface)
+        ? SourceTabAttention(controller: controller, builder: surface)
         : surface(0, false);
   }
 }

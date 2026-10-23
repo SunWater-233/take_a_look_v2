@@ -1,7 +1,35 @@
-part of 'panels.dart';
+import 'dart:async';
+import 'dart:io';
+import 'dart:math' as math;
 
-class _SourceDebugPanel extends StatefulWidget {
-  const _SourceDebugPanel({
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
+
+import 'package:flutter/services.dart';
+import 'package:desktop_drop/desktop_drop.dart';
+import 'package:tal_drag_preview/tal_drag_preview.dart';
+
+import '../controller/controller.dart';
+import '../app/file_pickers.dart';
+import '../workspace/keyboard_shortcuts.dart';
+import '../models/models.dart';
+import 'source_search.dart';
+import 'source_search_controller.dart';
+import 'source_highlighter.dart';
+import 'source_documents.dart';
+import '../theme/theme.dart';
+
+import 'shared_controls.dart';
+import 'panel_frame.dart';
+import 'source_file_drag_data.dart';
+
+part 'source_build_tools.dart';
+part 'workbench_output.dart';
+
+class SourceDebugPanel extends StatefulWidget {
+  const SourceDebugPanel({
+    super.key,
     required this.controller,
     this.readOnlyPreview = false,
     this.externalOutput = false,
@@ -14,10 +42,10 @@ class _SourceDebugPanel extends StatefulWidget {
   final bool visible;
 
   @override
-  State<_SourceDebugPanel> createState() => _SourceDebugPanelState();
+  State<SourceDebugPanel> createState() => _SourceDebugPanelState();
 }
 
-class _SourceDebugPanelState extends State<_SourceDebugPanel> {
+class _SourceDebugPanelState extends State<SourceDebugPanel> {
   static const _lineHeight = 22.0;
   static const _searchResultHeight = 30.0;
   final ScrollController _verticalController = ScrollController();
@@ -85,7 +113,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   }
 
   @override
-  void didUpdateWidget(covariant _SourceDebugPanel oldWidget) {
+  void didUpdateWidget(covariant SourceDebugPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.visible != widget.visible &&
         oldWidget.controller == controller &&
@@ -939,7 +967,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
 
   @override
   Widget build(BuildContext context) {
-    return DragTarget<_SourceFileDragData>(
+    return DragTarget<SourceFileDragData>(
       key: const ValueKey('source-symbol-drop-target'),
       onWillAcceptWithDetails: (_) => !widget.readOnlyPreview && widget.visible,
       onAcceptWithDetails: (details) =>
@@ -1431,7 +1459,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
                   width: 10,
                   child: controller.isSourceFileUnread(path)
                       ? Center(
-                          child: _SourceUnreadDot(
+                          child: SourceUnreadDot(
                             key: ValueKey('source-file-unread-$path'),
                           ),
                         )

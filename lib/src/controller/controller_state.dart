@@ -1,4 +1,5 @@
 import '../models/models.dart';
+import '../models/connection_capabilities.dart';
 import '../analysis/analysis.dart';
 import '../models/source_tools.dart';
 
@@ -81,6 +82,10 @@ class DebugState {
 }
 
 class ConnectionState {
+  ConnectionCapabilities? advertisedCapabilities;
+  ConnectionCapabilities get capabilities =>
+      advertisedCapabilities ??
+      ConnectionCapabilities.forConfiguration(connectionKind, remoteConfig);
   ConnectionStatus status = ConnectionStatus.disconnected;
   String probeType = '自动发现任意探针';
   String targetName = 'auto';

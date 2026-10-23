@@ -47,8 +47,10 @@ def run() -> int:
         errors.append(f"libusb: {error}")
 
     try:
+        import pyocd
         from pyocd.probe.aggregator import PROBE_CLASSES
 
+        checks["pyocd_version"] = pyocd.__version__
         checks["probe_plugins"] = sorted(PROBE_CLASSES)
         checks["jlink_runtime"] = "available" if "jlink" in PROBE_CLASSES else "optional; install SEGGER J-Link separately"
         missing = {"cmsisdap", "stlink"} - PROBE_CLASSES.keys()

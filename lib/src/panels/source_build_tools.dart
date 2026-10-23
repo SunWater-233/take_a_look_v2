@@ -1,4 +1,4 @@
-part of 'panels.dart';
+part of 'source_debug_panel.dart';
 
 class _SourceBuildToolbar extends StatelessWidget {
   const _SourceBuildToolbar({required this.controller, required this.compact});
@@ -29,7 +29,7 @@ class _SourceBuildToolbar extends StatelessWidget {
         final iconsOnly = compact || constraints.maxWidth < 440;
         Future<void> settings() => showDialog<void>(
           context: context,
-          builder: (_) => _SourceProjectDialog(controller: controller),
+          builder: (_) => SourceProjectDialog(controller: controller),
         );
         Widget action(
           String key,
@@ -175,14 +175,14 @@ class _SourceBuildToolbar extends StatelessWidget {
   );
 }
 
-class _SourceProjectDialog extends StatefulWidget {
-  const _SourceProjectDialog({required this.controller});
+class SourceProjectDialog extends StatefulWidget {
+  const SourceProjectDialog({super.key, required this.controller});
   final TakeALookController controller;
   @override
-  State<_SourceProjectDialog> createState() => _SourceProjectDialogState();
+  State<SourceProjectDialog> createState() => _SourceProjectDialogState();
 }
 
-class _SourceProjectDialogState extends State<_SourceProjectDialog> {
+class _SourceProjectDialogState extends State<SourceProjectDialog> {
   final _form = GlobalKey<FormState>();
   late final TextEditingController _root;
   late final TextEditingController _command;
@@ -298,7 +298,7 @@ class _SourceProjectDialogState extends State<_SourceProjectDialog> {
       required ValueChanged<String> onChanged,
     }) {
       final disabled = _saving || values.isEmpty;
-      return _LabeledField(
+      return LabeledField(
         label: label,
         child: ExcludeFocus(
           excluding: disabled,

@@ -1,4 +1,25 @@
-part of 'panels.dart';
+import 'dart:async';
+import 'dart:math' as math;
+
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
+
+import 'package:flutter/services.dart';
+
+import '../chart/inspection_anchor.dart';
+import '../controller/controller.dart';
+import '../workspace/keyboard_shortcuts.dart';
+import '../models/models.dart';
+import '../models/watch_tree.dart';
+import '../theme/theme.dart';
+import 'table_layout.dart';
+import 'watch_color_dialog.dart';
+
+import 'shared_controls.dart';
+
+part 'compact_watch_panel.dart';
+part 'watch_browser.dart';
+part 'watch_value_cell.dart';
 
 const _watchColumnLabels = <String>[
   '变量',
@@ -14,18 +35,18 @@ const _watchColumnLabels = <String>[
 ];
 
 typedef _WatchRowContextMenuCallback =
-    void Function(String key, _ContextMenuRequest request);
+    void Function(String key, TableContextMenuRequest request);
 
-class _WatchPanel extends StatefulWidget {
-  const _WatchPanel({required this.controller});
+class WatchPanel extends StatefulWidget {
+  const WatchPanel({super.key, required this.controller});
 
   final TakeALookController controller;
 
   @override
-  State<_WatchPanel> createState() => _WatchPanelState();
+  State<WatchPanel> createState() => _WatchPanelState();
 }
 
-class _WatchPanelState extends State<_WatchPanel> {
+class _WatchPanelState extends State<WatchPanel> {
   static const _minimumColumnWidths = <double>[
     96,
     88,
@@ -71,7 +92,7 @@ class _WatchPanelState extends State<_WatchPanel> {
       .fold(0, (sum, entry) => sum + entry.$2);
 
   @override
-  void didUpdateWidget(covariant _WatchPanel oldWidget) {
+  void didUpdateWidget(covariant WatchPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != controller) {
       _appliedPlotWatchSelectionRevision = -1;
@@ -365,7 +386,7 @@ class _WatchPanelState extends State<_WatchPanel> {
 
   Future<void> _showHeaderContextMenu(
     int clickedColumn,
-    _ContextMenuRequest request,
+    TableContextMenuRequest request,
   ) async {
     final targetColumns = _selectedColumns.length > 1
         ? (_selectedColumns.toList()..sort())
@@ -411,7 +432,7 @@ class _WatchPanelState extends State<_WatchPanel> {
 
   Future<void> _showNameContextMenu(
     String clickedKey,
-    _ContextMenuRequest request,
+    TableContextMenuRequest request,
   ) async {
     final keys = _contextWatchKeys(clickedKey);
     if (keys.isEmpty) return;
@@ -518,7 +539,7 @@ class _WatchPanelState extends State<_WatchPanel> {
 
   Future<void> _showPlotContextMenu(
     String clickedKey,
-    _ContextMenuRequest request,
+    TableContextMenuRequest request,
   ) async {
     final keys = _contextWatchKeys(clickedKey);
     if (keys.isEmpty) return;
@@ -564,7 +585,7 @@ class _WatchPanelState extends State<_WatchPanel> {
                   onKeyEvent: _handleWatchShortcut,
                   child: LayoutBuilder(
                     builder: (context, constraints) {
-                      return _ResizableTableViewport(
+                      return ResizableTableViewport(
                         layout: _tableLayout,
                         contentWidth: _tableWidth,
                         horizontalController: _horizontalScrollController,
@@ -699,9 +720,9 @@ class _WatchTableHeader extends StatelessWidget {
   final List<double> columnWidths;
   final Set<int> hiddenColumns;
   final Set<int> selectedColumns;
-  final _ColumnResizeCallback onResizeColumn;
+  final ColumnResizeCallback onResizeColumn;
   final ValueChanged<int> onSelectColumn;
-  final _ColumnContextMenuCallback onContextMenu;
+  final ColumnContextMenuCallback onContextMenu;
 
   @override
   Widget build(BuildContext context) {
@@ -717,7 +738,7 @@ class _WatchTableHeader extends StatelessWidget {
         children: [
           for (final (index, label) in _watchColumnLabels.indexed)
             if (!hiddenColumns.contains(index))
-              _ResizableTableHeaderCell(
+              ResizableTableHeaderCell(
                 label: label,
                 width: columnWidths[index],
                 columnIndex: index,
@@ -1097,7 +1118,7 @@ class _WatchCell extends StatelessWidget {
   final double width;
   final Widget child;
   final EdgeInsets padding;
-  final ValueChanged<_ContextMenuRequest>? onContextMenu;
+  final ValueChanged<TableContextMenuRequest>? onContextMenu;
   final bool selected;
 
   @override
@@ -1117,7 +1138,7 @@ class _WatchCell extends StatelessWidget {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onSecondaryTapUp: (details) => callback(
-        _ContextMenuRequest(
+        TableContextMenuRequest(
           globalPosition: details.globalPosition,
           touchOptimized: false,
         ),

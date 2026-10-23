@@ -9,6 +9,7 @@ import 'package:take_a_look_v2/src/analysis/analysis.dart';
 import 'package:take_a_look_v2/src/controller/controller.dart';
 import 'package:take_a_look_v2/src/models/models.dart';
 import 'package:take_a_look_v2/src/panels/panels.dart';
+import 'package:take_a_look_v2/src/panels/source_debug_panel.dart';
 import 'package:take_a_look_v2/src/theme/theme.dart';
 import 'package:take_a_look_v2/src/workspace/panel_types.dart';
 import 'package:take_a_look_v2/src/workspace/window_sync.dart';
@@ -765,10 +766,7 @@ void main() {
       await bench.mount();
       await bench.workspace.activateWorkbenchView(WorkspacePanelId.sourceDebug);
       await tester.pumpAndSettle();
-      final source = find.byWidgetPredicate(
-        (widget) => widget.runtimeType.toString() == '_SourceDebugPanel',
-        skipOffstage: false,
-      );
+      final source = find.byType(SourceDebugPanel, skipOffstage: false);
       final state = tester.state(source);
       expect(bench.controller.isSourceDebugVisible, isTrue);
       await bench.workspace.activateWorkbenchView(WorkspacePanelId.plot);

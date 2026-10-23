@@ -1,7 +1,11 @@
-part of 'panels.dart';
+part of 'source_debug_panel.dart';
 
-class _BuildOutputPanel extends StatelessWidget {
-  const _BuildOutputPanel({required this.controller, this.onShowSource});
+class BuildOutputPanel extends StatelessWidget {
+  const BuildOutputPanel({
+    super.key,
+    required this.controller,
+    this.onShowSource,
+  });
 
   final TakeALookController controller;
   final VoidCallback? onShowSource;
@@ -21,8 +25,8 @@ class _BuildOutputPanel extends StatelessWidget {
   );
 }
 
-class _RegistersPanel extends StatelessWidget {
-  const _RegistersPanel({required this.controller});
+class RegistersPanel extends StatelessWidget {
+  const RegistersPanel({super.key, required this.controller});
 
   final TakeALookController controller;
 

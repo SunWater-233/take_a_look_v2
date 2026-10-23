@@ -1,4 +1,4 @@
-part of 'panels.dart';
+part of 'watch_panel.dart';
 
 Future<void> showFullWatchTable(
   BuildContext context,
@@ -25,7 +25,7 @@ Future<void> showFullWatchTable(
               ],
             ),
           ),
-          Expanded(child: _WatchPanel(controller: controller)),
+          Expanded(child: WatchPanel(controller: controller)),
         ],
       ),
     ),

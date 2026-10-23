@@ -1,60 +1,25 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
-import 'package:flutter/services.dart';
-import 'package:desktop_drop/desktop_drop.dart';
-import 'package:tal_drag_preview/tal_drag_preview.dart';
-
-import '../chart/chart.dart';
-import '../chart/cartesian_renderer.dart';
-import '../chart/axis_settings.dart';
-import '../chart/inspection_anchor.dart';
-import '../analysis/analysis.dart';
-import '../analysis/analysis_plot_interaction.dart';
-import '../analysis/analysis_fft.dart';
-import '../analysis/analysis_worker.dart';
 import '../controller/controller.dart';
-import '../app/file_pickers.dart';
 import '../workspace/keyboard_shortcuts.dart';
-import '../workspace/native_panel_drag.dart';
 import '../models/models.dart';
-import '../models/watch_tree.dart';
 import '../workspace/panel_types.dart';
-import 'source_search.dart';
-import 'source_search_controller.dart';
-import 'source_highlighter.dart';
-import 'source_documents.dart';
 import '../theme/theme.dart';
-import 'table_layout.dart';
-import 'watch_color_dialog.dart';
-import 'target_chip_dialog.dart';
-import 'ember_pairing_dialog.dart';
+
+import 'panel_frame.dart';
+import 'control_panels.dart';
+import 'connection_panel.dart';
+import 'symbol_panel.dart';
+import 'watch_panel.dart';
+import 'plot_log_panels.dart';
+import 'analysis_chart_panel.dart';
+import 'source_debug_panel.dart';
 
 export '../theme/theme.dart' show TalDropdown;
-
-part 'panel_frame.dart';
-part 'control_panels.dart';
-part 'symbol_panel.dart';
-part 'watch_panel.dart';
-part 'compact_watch_panel.dart';
-part 'watch_browser.dart';
-part 'watch_value_cell.dart';
-part 'workbench_output.dart';
-part 'connection_panel.dart';
-part 'plot_log_panels.dart';
-part 'analysis_chart_panel.dart';
-part 'analysis_chart_painters.dart';
-part 'analysis_fft_panel.dart';
-part 'analysis_chart_table.dart';
-part 'source_debug_panel.dart';
-part 'source_build_tools.dart';
-part 'source_tab_attention.dart';
-part 'shared_controls.dart';
+export 'panel_frame.dart';
 
 Widget buildWorkspacePanel(
   WorkspacePanelId panel,
@@ -98,43 +63,43 @@ Widget buildWorkspacePanelBody(
   VoidCallback? onShowSymbols,
 }) {
   return switch (panel) {
-    WorkspacePanelId.header => _HeaderPanel(controller: controller),
-    WorkspacePanelId.runControl => _RunControlPanel(controller: controller),
-    WorkspacePanelId.sampling => _SamplingPanel(controller: controller),
-    WorkspacePanelId.symbols => _SymbolPanel(
+    WorkspacePanelId.header => HeaderPanel(controller: controller),
+    WorkspacePanelId.runControl => RunControlPanel(controller: controller),
+    WorkspacePanelId.sampling => SamplingPanel(controller: controller),
+    WorkspacePanelId.symbols => SymbolPanel(
       controller: controller,
       defaultMonitor: workbench,
       onShowSource: onShowSource,
     ),
     WorkspacePanelId.watch =>
       workbench
-          ? _CompactWatchPanel(
+          ? CompactWatchPanel(
               controller: controller,
               onShowSymbols: onShowSymbols,
               visible: visible,
             )
-          : _WatchPanel(controller: controller),
-    WorkspacePanelId.connection => _ConnectionPanel(controller: controller),
-    WorkspacePanelId.plot => _PlotPanel(controller: controller),
+          : WatchPanel(controller: controller),
+    WorkspacePanelId.connection => ConnectionPanel(controller: controller),
+    WorkspacePanelId.plot => PlotPanel(controller: controller),
     WorkspacePanelId.analysis => LayoutBuilder(
-      builder: (context, constraints) => _AnalysisChartPanel(
+      builder: (context, constraints) => AnalysisChartPanel(
         controller: controller,
         horizontal:
             workbench && (!adaptiveWorkbench || constraints.maxWidth >= 680),
       ),
     ),
-    WorkspacePanelId.sourceDebug => _SourceDebugPanel(
+    WorkspacePanelId.sourceDebug => SourceDebugPanel(
       controller: controller,
       readOnlyPreview: sourcePreview,
       externalOutput: workbench,
       visible: visible,
     ),
-    WorkspacePanelId.log => _LogPanel(controller: controller),
-    WorkspacePanelId.buildOutput => _BuildOutputPanel(
+    WorkspacePanelId.log => LogPanel(controller: controller),
+    WorkspacePanelId.buildOutput => BuildOutputPanel(
       controller: controller,
       onShowSource: onShowSource,
     ),
-    WorkspacePanelId.registers => _RegistersPanel(controller: controller),
+    WorkspacePanelId.registers => RegistersPanel(controller: controller),
   };
 }
 
@@ -151,7 +116,7 @@ Future<void> showWorkbenchConnectionSettings(
         constraints: BoxConstraints(
           maxHeight: math.min(530, MediaQuery.sizeOf(context).height * .65),
         ),
-        child: _ConnectionPanel(controller: controller),
+        child: ConnectionPanel(controller: controller),
       ),
     ),
     actions: [
@@ -185,7 +150,7 @@ Future<void> showWorkbenchSamplingSettings(
       height: 300,
       child: Column(
         children: [
-          Expanded(child: _SamplingPanel(controller: controller)),
+          Expanded(child: SamplingPanel(controller: controller)),
           const Divider(height: 1),
           AnimatedBuilder(
             animation: controller.samplingChanges,
@@ -227,5 +192,5 @@ Future<void> showWorkbenchProjectSettings(
   TakeALookController controller,
 ) => showDialog<void>(
   context: context,
-  builder: (_) => _SourceProjectDialog(controller: controller),
+  builder: (_) => SourceProjectDialog(controller: controller),
 );

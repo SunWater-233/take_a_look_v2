@@ -1,24 +1,5 @@
 part of 'controller.dart';
 
-class _DeletedWatch {
-  _DeletedWatch({
-    required this.watch,
-    required this.index,
-    required this.draft,
-    required this.expanded,
-    required this.selected,
-    required this.highlighted,
-  });
-
-  final WatchItem watch;
-  final int index;
-  final String? draft;
-  final bool expanded;
-  final bool selected;
-  final bool highlighted;
-  Timer? expiry;
-}
-
 extension TakeALookControllerWatches on TakeALookController {
   void clearSamples() {
     if (_dispatchCommand(ControllerCommand.clearSamples)) return;
@@ -125,10 +106,10 @@ extension TakeALookControllerWatches on TakeALookController {
         .where((item) => selectedKeys.contains(item.key))
         .where((item) => !existing.contains(item.key))
         .toList();
-    if (selected.isNotEmpty) _watchDeletionRedos.clear();
+    if (selected.isNotEmpty) _watchRegistry.clearRedos();
     for (final symbol in selected) {
       // Re-adding a retained variable is equivalent to undoing its removal.
-      final retained = _takeDeletedWatch(symbol.key);
+      final retained = _watchRegistry.takeDeleted(symbol.key);
       final previouslyRemoved = _removedWatchKeys.remove(symbol.key);
       if (retained != null) {
         _restoreDeletedWatch(retained, index: _watches.length);
@@ -177,41 +158,12 @@ extension TakeALookControllerWatches on TakeALookController {
         )) {
       return;
     }
-    final deleted = <_DeletedWatch>[];
-    for (final (index, watch) in _watches.indexed) {
-      if (!removedKeys.contains(watch.symbol.key)) continue;
-      final entry = _DeletedWatch(
-        watch: watch,
-        index: index,
-        draft: watchInputDrafts[watch.symbol.key],
-        expanded: compactExpandedWatches.contains(watch.symbol.key),
-        selected: compactWatchSelection == watch.symbol.key,
-        highlighted: plotHighlightedWatchKey == watch.symbol.key,
-      );
-      if (!samplingPaused && watch.samplingEnabled) {
-        entry.expiry = Timer(const Duration(seconds: 10), () {
-          _discardDeletedWatch(entry);
-          _syncWatchesBackend();
-          _emitState([signals.watches, signals.plot]);
-        });
-      }
-      deleted.add(entry);
-    }
-    if (deleted.isEmpty) return;
-    _watchDeletionRedos.clear();
-    _watchDeletions.add(deleted);
-    _removedWatchKeys.addAll(deleted.map((entry) => entry.watch.symbol.key));
-    // Bound undo memory when acquisition is paused for a long editing session.
-    while (_watchDeletions.length > 50) {
-      for (final entry in List.of(_watchDeletions.first)) {
-        _discardDeletedWatch(entry);
-      }
-    }
-    _watches.removeWhere((item) => removedKeys.contains(item.symbol.key));
-    watchInputDrafts.removeWhere((key, _) => removedKeys.contains(key));
-    compactExpandedWatches.removeAll(removedKeys);
-    if (removedKeys.contains(compactWatchSelection)) {
-      compactWatchSelection = null;
+    if (!_watchRegistry.remove(
+      removedKeys,
+      samplingPaused: samplingPaused,
+      highlightedKey: plotHighlightedWatchKey,
+    )) {
+      return;
     }
     if (removedKeys.contains(plotHighlightedWatchKey)) {
       state.plot.highlightedWatchKey = null;
@@ -222,16 +174,9 @@ extension TakeALookControllerWatches on TakeALookController {
 
   void undoWatchDeletion() {
     if (_dispatchRemote(ControllerCommand.undoWatchDeletion)) return;
-    if (_watchDeletions.isEmpty) return;
-    final entries = _watchDeletions.removeLast();
-    _watchDeletionRedos.add([
-      for (final entry in entries) entry.watch.symbol.key,
-    ]);
-    for (final entry in entries) {
-      entry.expiry?.cancel();
-      entry.expiry = null;
-      _removedWatchKeys.remove(entry.watch.symbol.key);
-      _restoreDeletedWatch(entry);
+    if (!_watchRegistry.canUndo) return;
+    for (final entry in _watchRegistry.undo()) {
+      _restoreWatchHighlight(entry);
     }
     _configurePlotRetention();
     _syncWatchesBackend();
@@ -241,66 +186,32 @@ extension TakeALookControllerWatches on TakeALookController {
 
   void redoWatchDeletion() {
     if (_dispatchRemote(ControllerCommand.redoWatchDeletion)) return;
-    if (_watchDeletionRedos.isEmpty) return;
-    final keys = _watchDeletionRedos.removeLast();
-    final remaining = List<List<String>>.of(_watchDeletionRedos);
-    removeWatches(keys);
-    _watchDeletionRedos
-      ..clear()
-      ..addAll(remaining);
-    _emitState([signals.watches]);
+    if (!_watchRegistry.redo(
+      samplingPaused: samplingPaused,
+      highlightedKey: plotHighlightedWatchKey,
+    )) {
+      return;
+    }
+    if (!_watches.any((watch) => watch.symbol.key == plotHighlightedWatchKey)) {
+      state.plot.highlightedWatchKey = null;
+    }
+    _syncWatchesBackend();
+    _emitState([signals.watches, signals.plot]);
   }
 
-  void _restoreDeletedWatch(_DeletedWatch entry, {int? index}) {
-    final key = entry.watch.symbol.key;
-    _watches.insert(
-      (index ?? entry.index).clamp(0, _watches.length),
-      entry.watch,
-    );
-    if (entry.draft != null) watchInputDrafts[key] = entry.draft!;
-    if (entry.expanded) compactExpandedWatches.add(key);
-    if (entry.selected) compactWatchSelection = key;
+  void _restoreDeletedWatch(DeletedWatch entry, {int? index}) {
+    _watchRegistry.restore(entry, index: index);
+    _restoreWatchHighlight(entry);
+  }
+
+  void _restoreWatchHighlight(DeletedWatch entry) {
     if (entry.highlighted) {
-      state.plot.highlightedWatchKey = key;
+      state.plot.highlightedWatchKey = entry.watch.symbol.key;
       state.plot.watchSelectionRevision++;
     }
   }
 
-  _DeletedWatch? _takeDeletedWatch(String key) {
-    for (final batch in List.of(_watchDeletions)) {
-      final entry = batch
-          .where((item) => item.watch.symbol.key == key)
-          .firstOrNull;
-      if (entry == null) continue;
-      entry.expiry?.cancel();
-      entry.expiry = null;
-      batch.remove(entry);
-      if (batch.isEmpty) _watchDeletions.remove(batch);
-      return entry;
-    }
-    return null;
-  }
-
-  void _discardDeletedWatch(_DeletedWatch entry) {
-    entry.expiry?.cancel();
-    entry.expiry = null;
-    entry.watch.samples.clear();
-    entry.watch.totalSampleCount = 0;
-    _frozenPlotSamples.remove(entry.watch.symbol.key);
-    for (final batch in _watchDeletions) {
-      batch.remove(entry);
-    }
-    _watchDeletions.removeWhere((batch) => batch.isEmpty);
-  }
-
-  void _clearWatchDeletionHistory() {
-    _watchDeletionRedos.clear();
-    for (final batch in List.of(_watchDeletions)) {
-      for (final entry in List.of(batch)) {
-        _discardDeletedWatch(entry);
-      }
-    }
-  }
+  void _clearWatchDeletionHistory() => _watchRegistry.clearHistory();
 
   void reorderWatch(int oldIndex, int newIndex) {
     if (oldIndex < 0 || oldIndex >= _watches.length) return;

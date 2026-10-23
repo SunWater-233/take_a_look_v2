@@ -159,8 +159,8 @@ def test_service_rsp_capture_pause_monitor_resume_clear_and_disconnect(tmp_path:
         # these operations implicitly and no architecture-specific registers run.
         service.handle(RpcMethod.DEBUG_CONTROL, {"action": "resume"})
         service.handle(RpcMethod.DEBUG_CONTROL, {"action": "halt"})
-        assert service._target_execution_state == "halted"
-        assert service._stopped_location is None
+        assert service._debug.execution_state == "halted"
+        assert service._debug.stopped_location is None
         service.handle(RpcMethod.DEBUG_CONTROL, {"action": "resume"})
         service.handle(RpcMethod.CLEAR_SAMPLES, {})
         service.handle(RpcMethod.DISCONNECT, {})

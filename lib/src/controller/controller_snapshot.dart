@@ -113,7 +113,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
 
   void _applySnapshot(JsonObject data) {
     final previousSymbolRevision = _symbolRevision;
-    final hadDeletedWatches = _watchDeletions.isNotEmpty;
+    final hadDeletedWatches = _watchRegistry.canUndo;
     _touchSnapshotFields(data.keys);
     final hasConnectionState = ControllerSnapshotSchema.containsDomain(
       data,
@@ -193,7 +193,25 @@ extension TakeALookControllerSnapshot on TakeALookController {
           data['gatewayProtocolVersion'] as int?;
     }
     if (data['remoteConfig'] case final Map config) {
-      remoteConfig.addAll(Map<String, String>.from(config));
+      final values = Map<String, String>.from(config);
+      if (values.entries.any(
+        (entry) => remoteConfig[entry.key] != entry.value,
+      )) {
+        state.connection.advertisedCapabilities = null;
+      }
+      remoteConfig.addAll(values);
+    }
+    if (data.containsKey('connectionCapabilities')) {
+      final capabilities = data['connectionCapabilities'];
+      state.connection.advertisedCapabilities = capabilities is Map
+          ? ConnectionCapabilities.fromJson(
+              capabilities,
+              fallback: ConnectionCapabilities.forConfiguration(
+                connectionKind,
+                remoteConfig,
+              ),
+            )
+          : null;
     }
     symbolFile = data['symbolFile'] as String? ?? symbolFile;
     sampleRateHz = (data['sampleRateHz'] as num?)?.toDouble() ?? sampleRateHz;

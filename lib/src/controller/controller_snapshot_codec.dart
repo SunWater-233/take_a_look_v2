@@ -73,6 +73,8 @@ class ControllerSnapshotCodec {
     SnapshotField.swdClock => source.state.connection.swdClock,
     SnapshotField.serialNumber => source.state.connection.serialNumber,
     SnapshotField.connectionKind => source.state.connection.connectionKind,
+    SnapshotField.connectionCapabilities =>
+      source.state.connection.advertisedCapabilities?.toJson(),
     SnapshotField.gatewayProtocolVersion =>
       source.state.connection.gatewayProtocolVersion,
     SnapshotField.remoteConfig => Map<String, String>.from(

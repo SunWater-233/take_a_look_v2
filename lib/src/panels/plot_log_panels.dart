@@ -1,7 +1,15 @@
-part of 'panels.dart';
+import 'dart:math' as math;
 
-class _PlotPanel extends StatelessWidget {
-  const _PlotPanel({required this.controller});
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
+
+import '../chart/chart.dart';
+import '../controller/controller.dart';
+import '../models/models.dart';
+import '../theme/theme.dart';
+
+class PlotPanel extends StatelessWidget {
+  const PlotPanel({super.key, required this.controller});
 
   final TakeALookController controller;
 
@@ -66,16 +74,16 @@ class _PlotPanel extends StatelessWidget {
   }
 }
 
-class _LogPanel extends StatefulWidget {
-  const _LogPanel({required this.controller});
+class LogPanel extends StatefulWidget {
+  const LogPanel({super.key, required this.controller});
 
   final TakeALookController controller;
 
   @override
-  State<_LogPanel> createState() => _LogPanelState();
+  State<LogPanel> createState() => _LogPanelState();
 }
 
-class _LogPanelState extends State<_LogPanel> {
+class _LogPanelState extends State<LogPanel> {
   final _scroll = ScrollController();
   PointerDeviceKind _lastPointerKind = PointerDeviceKind.mouse;
   bool _followLatest = true;

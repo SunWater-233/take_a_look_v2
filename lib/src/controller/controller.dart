@@ -10,12 +10,14 @@ import '../analysis/analysis.dart';
 import 'controller_command_router.dart';
 import 'controller_signals.dart';
 import 'controller_state.dart';
+import 'watch_registry.dart';
 import 'controller_snapshot_codec.dart';
 import 'controller_snapshot_schema.dart';
 
 export 'controller_snapshot_codec.dart';
 import '../models/demo_data.dart';
 import '../models/models.dart';
+import '../models/connection_capabilities.dart';
 import '../models/source_tools.dart';
 import '../protocol/commands.dart';
 import '../protocol/events.dart';
@@ -92,10 +94,15 @@ class TakeALookController extends ChangeNotifier {
   final TargetCatalogRequest? emberRequest;
   final PathPicker? targetPackPicker;
   final List<SymbolItem> _symbols = <SymbolItem>[];
-  final List<WatchItem> _watches = <WatchItem>[];
-  final List<List<_DeletedWatch>> _watchDeletions = [];
-  final List<List<String>> _watchDeletionRedos = [];
-  final Set<String> _removedWatchKeys = {};
+  late final WatchRegistry _watchRegistry = WatchRegistry(
+    onExpired: () {
+      _syncWatchesBackend();
+      _emitState([signals.watches, signals.plot]);
+    },
+    onDiscard: (key) => _frozenPlotSamples.remove(key),
+  );
+  List<WatchItem> get _watches => _watchRegistry.watches;
+  Set<String> get _removedWatchKeys => _watchRegistry.removedKeys;
   bool _remoteCanUndoWatchDeletion = false;
   bool _remoteCanRedoWatchDeletion = false;
   final List<LogEntry> _logs = <LogEntry>[];
@@ -122,9 +129,10 @@ class TakeALookController extends ChangeNotifier {
   final ValueNotifier<double> _uiScale = ValueNotifier<double>(1);
   final ControllerSignals signals = ControllerSignals();
   final SnapshotRevisions _snapshotRevisions = SnapshotRevisions();
-  final Map<String, String> watchInputDrafts = {};
-  String? compactWatchSelection;
-  final Set<String> compactExpandedWatches = {};
+  Map<String, String> get watchInputDrafts => _watchRegistry.drafts;
+  String? get compactWatchSelection => _watchRegistry.selection;
+  set compactWatchSelection(String? value) => _watchRegistry.selection = value;
+  Set<String> get compactExpandedWatches => _watchRegistry.expanded;
   String watchSearchQuery = '';
   final Map<String, Set<String>> _watchMonitorScopes = {};
   ({String path, int line})? sourceLocationRequest;
@@ -150,14 +158,18 @@ class TakeALookController extends ChangeNotifier {
   String get serialNumber => state.connection.serialNumber;
   set serialNumber(String value) => state.connection.serialNumber = value;
   String get connectionKind => state.connection.connectionKind;
-  set connectionKind(String value) => state.connection.connectionKind = value;
+  set connectionKind(String value) {
+    if (value != connectionKind) state.connection.advertisedCapabilities = null;
+    state.connection.connectionKind = value;
+  }
+
   Map<String, String> get remoteConfig => state.connection.remoteConfig;
   bool get isGdbMemoryMode =>
       connectionKind == 'gdb' && remoteConfig['gdbMode'] == 'memory';
-  bool get supportsMemoryWrite => connectionKind != 'ember' && !isGdbMemoryMode;
-  bool get supportsTargetControl => !isGdbMemoryMode;
+  bool get supportsMemoryWrite => state.connection.capabilities.memoryWrite;
+  bool get supportsTargetControl => state.connection.capabilities.targetControl;
   bool get supportsFirmwareDownload =>
-      const {'local', 'ember', 'emberGdb'}.contains(connectionKind);
+      state.connection.capabilities.firmwareDownload;
   String get symbolFile => state.connection.symbolFile;
   set symbolFile(String value) => state.connection.symbolFile = value;
   Map<String, dynamic>? get lastBackendError => state.connection.lastError;
@@ -247,30 +259,13 @@ class TakeALookController extends ChangeNotifier {
   List<WatchItem> get watches => List.unmodifiable(_watches);
 
   /// Includes captures retained briefly after removal so undo has no data gap.
-  Iterable<WatchItem> get acquisitionWatches sync* {
-    yield* _watches;
-    for (final batch in _watchDeletions) {
-      for (final entry in batch) {
-        if (entry.expiry != null) yield entry.watch;
-      }
-    }
-  }
+  Iterable<WatchItem> get acquisitionWatches => _watchRegistry.acquiring;
+  Iterable<WatchItem> get _allRetainedWatches => _watchRegistry.retained;
 
-  Iterable<WatchItem> get _allRetainedWatches sync* {
-    yield* _watches;
-    for (final batch in _watchDeletions) {
-      for (final entry in batch) {
-        yield entry.watch;
-      }
-    }
-  }
-
-  bool get canUndoWatchDeletion => _isDetachedRemote
-      ? _remoteCanUndoWatchDeletion
-      : _watchDeletions.isNotEmpty;
-  bool get canRedoWatchDeletion => _isDetachedRemote
-      ? _remoteCanRedoWatchDeletion
-      : _watchDeletionRedos.isNotEmpty;
+  bool get canUndoWatchDeletion =>
+      _isDetachedRemote ? _remoteCanUndoWatchDeletion : _watchRegistry.canUndo;
+  bool get canRedoWatchDeletion =>
+      _isDetachedRemote ? _remoteCanRedoWatchDeletion : _watchRegistry.canRedo;
   List<LogEntry> get logs => List.unmodifiable(_logs);
   Set<String> get selectedSymbols => Set.unmodifiable(_selectedSymbols);
   double get uiScale => _uiScale.value;

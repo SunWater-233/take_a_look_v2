@@ -1,4 +1,4 @@
-part of 'panels.dart';
+part of 'analysis_chart_panel.dart';
 
 extension _AnalysisFftPanelBuilder on _AnalysisChartPanelState {
   Widget _buildFftPanel() {

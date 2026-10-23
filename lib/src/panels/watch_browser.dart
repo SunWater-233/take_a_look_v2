@@ -1,4 +1,4 @@
-part of 'panels.dart';
+part of 'watch_panel.dart';
 
 class _WatchBrowserEntry {
   const _WatchBrowserEntry({
@@ -17,8 +17,9 @@ class _WatchBrowserEntry {
   bool get expandable => members.isNotEmpty;
 }
 
-class _CompactWatchPanel extends StatefulWidget {
-  const _CompactWatchPanel({
+class CompactWatchPanel extends StatefulWidget {
+  const CompactWatchPanel({
+    super.key,
     required this.controller,
     this.onShowSymbols,
     this.visible = true,
@@ -27,10 +28,10 @@ class _CompactWatchPanel extends StatefulWidget {
   final VoidCallback? onShowSymbols;
   final bool visible;
   @override
-  State<_CompactWatchPanel> createState() => _CompactWatchPanelState();
+  State<CompactWatchPanel> createState() => _CompactWatchPanelState();
 }
 
-class _CompactWatchPanelState extends State<_CompactWatchPanel> {
+class _CompactWatchPanelState extends State<CompactWatchPanel> {
   final _panelFocus = FocusNode(debugLabel: 'watch-browser');
   final _search = TextEditingController();
   final _scroll = ScrollController();
@@ -53,7 +54,7 @@ class _CompactWatchPanelState extends State<_CompactWatchPanel> {
   }
 
   @override
-  void didUpdateWidget(covariant _CompactWatchPanel oldWidget) {
+  void didUpdateWidget(covariant CompactWatchPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != controller) {
       oldWidget.controller.setWatchMonitorScope(_scope, null);

@@ -1,4 +1,26 @@
-part of 'panels.dart';
+import 'dart:async';
+import 'dart:math' as math;
+
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
+
+import 'package:flutter/services.dart';
+
+import '../chart/cartesian_renderer.dart';
+import '../chart/axis_settings.dart';
+import '../analysis/analysis.dart';
+import '../analysis/analysis_plot_interaction.dart';
+import '../analysis/analysis_fft.dart';
+import '../analysis/analysis_worker.dart';
+import '../controller/controller.dart';
+import '../theme/theme.dart';
+import 'table_layout.dart';
+
+import 'shared_controls.dart';
+
+part 'analysis_chart_painters.dart';
+part 'analysis_fft_panel.dart';
+part 'analysis_chart_table.dart';
 
 enum _AnalysisImportSource { csv, realtime }
 
@@ -14,8 +36,9 @@ const _analysisStatsColumnLabels = <String>[
 
 Rect _analysisPlotRect(Size size) => AnalysisPlotInteraction.plotRect(size);
 
-class _AnalysisChartPanel extends StatefulWidget {
-  const _AnalysisChartPanel({
+class AnalysisChartPanel extends StatefulWidget {
+  const AnalysisChartPanel({
+    super.key,
     required this.controller,
     this.horizontal = false,
   });
@@ -24,10 +47,10 @@ class _AnalysisChartPanel extends StatefulWidget {
   final bool horizontal;
 
   @override
-  State<_AnalysisChartPanel> createState() => _AnalysisChartPanelState();
+  State<AnalysisChartPanel> createState() => _AnalysisChartPanelState();
 }
 
-class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
+class _AnalysisChartPanelState extends State<AnalysisChartPanel> {
   final MenuController _plotMenuController = MenuController();
   late AnalysisSession _session;
   late final ResizableTableLayout _statsTableLayout;
@@ -91,7 +114,7 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
   }
 
   @override
-  void didUpdateWidget(covariant _AnalysisChartPanel oldWidget) {
+  void didUpdateWidget(covariant AnalysisChartPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (identical(oldWidget.controller, widget.controller)) return;
     oldWidget.controller.analysisChanges.removeListener(
@@ -979,7 +1002,7 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
                 border: Border(top: BorderSide(color: TalColors.border)),
               ),
               child: selected
-                  ? _ResizableTableViewport(
+                  ? ResizableTableViewport(
                       layout: _statsTableLayout,
                       contentWidth: _statsTableWidth,
                       horizontalController: _statsHorizontalScrollController,
@@ -1103,7 +1126,7 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
 
   Future<void> _showStatsHeaderContextMenu(
     int clickedColumn,
-    _ContextMenuRequest request,
+    TableContextMenuRequest request,
   ) async {
     final targetColumns = _statsHeaderTargets(clickedColumn);
     final canHide = _canHideStatsColumns(targetColumns);
@@ -1265,7 +1288,7 @@ class _AnalysisChartPanelState extends State<_AnalysisChartPanel> {
     int seriesIndex,
     int columnIndex,
     String value,
-    _ContextMenuRequest request,
+    TableContextMenuRequest request,
   ) async {
     _selectStatsCell(seriesIndex, columnIndex);
     final action = await showTalContextMenu<String>(

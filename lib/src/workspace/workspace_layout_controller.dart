@@ -178,6 +178,50 @@ class WorkspaceLayoutController {
   WorkspaceGroup? groupForPanel(WorkspacePanelId panel) =>
       session.groups.where((group) => group.panels.contains(panel)).firstOrNull;
 
+  /// Inserts an external panel, moves it between groups, or reorders its tab.
+  /// The insertion index uses the tab strip's positions before removal.
+  void movePanelToGroup(
+    WorkspacePanelId panel,
+    WorkspaceGroup target,
+    int insertionIndex,
+  ) {
+    final source = groupForPanel(panel);
+    if (source == target) {
+      final sourceIndex = target.panels.indexOf(panel);
+      var index = insertionIndex.clamp(0, target.panels.length);
+      if (sourceIndex < index) index--;
+      target.panels.removeAt(sourceIndex);
+      target.panels.insert(index, panel);
+      target.activePanel = panel;
+      return;
+    }
+    if (source != null) detachPanel(source, panel);
+    if (!target.panels.contains(panel)) {
+      target.panels.insert(
+        insertionIndex.clamp(0, target.panels.length),
+        panel,
+      );
+    }
+    target.activePanel = panel;
+    target.z = session.nextZ();
+    target.sidebarCollapsed = false;
+    if (target.sidebar != null) overlaySidebar = target.sidebar;
+    reflow();
+  }
+
+  void separatePanel(WorkspaceGroup source, WorkspacePanelId panel, Rect rect) {
+    detachPanel(source, panel);
+    session.groups.add(
+      WorkspaceGroup(
+        id: session.nextGroupId('separated'),
+        panels: [panel],
+        activePanel: panel,
+        rect: session.gridMode ? snapRectToGrid(rect) : rect,
+        z: session.nextZ(),
+      ),
+    );
+  }
+
   WorkspaceGroup _transferPanel(
     WorkspacePanelId panel,
     WorkspaceGroup? target,
@@ -500,4 +544,199 @@ class WorkspaceLayoutController {
 
   Rect snapRectToGrid(Rect rect) =>
       geometry.snapRectToGrid(rect, session.workspaceSize);
+
+  void bringToFront(WorkspaceGroup group) => group.z = session.nextZ();
+
+  void beginGroupDrag(WorkspaceGroup group) {
+    if (!session.gridMode) return;
+    automatic = false;
+    session.dragRemainder = Offset.zero;
+    session.draggingGroup = group.id;
+    bringToFront(group);
+  }
+
+  void moveGroup(WorkspaceGroup group, Offset delta, Size workspaceSize) {
+    if (!session.gridMode || workspaceSize.isEmpty) return;
+    final totalDelta = Offset(
+      session.dragRemainder.dx + delta.dx / workspaceSize.width,
+      session.dragRemainder.dy + delta.dy / workspaceSize.height,
+    );
+    final snappedDelta = Offset(
+      geometry.wholeGridDelta(
+        totalDelta.dx,
+        geometry.gridCellSize / workspaceSize.width,
+      ),
+      geometry.wholeGridDelta(
+        totalDelta.dy,
+        geometry.gridCellSize / workspaceSize.height,
+      ),
+    );
+    if (snappedDelta == Offset.zero) {
+      session.dragRemainder = totalDelta;
+      return;
+    }
+    final previousRect = group.rect;
+    group.rect = geometry.clampRect(
+      group.rect.translate(snappedDelta.dx, snappedDelta.dy),
+    );
+    final actualDelta = group.rect.topLeft - previousRect.topLeft;
+    session.dragRemainder = Offset(
+      geometry.near(actualDelta.dx, snappedDelta.dx)
+          ? totalDelta.dx - snappedDelta.dx
+          : 0,
+      geometry.near(actualDelta.dy, snappedDelta.dy)
+          ? totalDelta.dy - snappedDelta.dy
+          : 0,
+    );
+    session.mergeTarget = findMergeTarget(group);
+  }
+
+  void endGroupDrag(WorkspaceGroup group) {
+    if (!session.gridMode) return;
+    final target = findMergeTarget(group);
+    session.resetDrag();
+    if (target != null) mergeInto(group, target);
+  }
+
+  void resizeGroup(
+    WorkspaceGroup group,
+    Offset delta,
+    Size workspaceSize, {
+    bool left = false,
+    bool right = false,
+    bool top = false,
+    bool bottom = false,
+  }) {
+    if (workspaceSize.isEmpty) return;
+    if (usesWorkbenchLayout && !session.gridMode && (left || right)) {
+      final sidebar = group.sidebar != null
+          ? group
+          : group == primaryGroup
+          ? sidebarGroup(
+              left ? WorkspaceSidebarSide.left : WorkspaceSidebarSide.right,
+            )
+          : null;
+      if (sidebar != null) {
+        if (sidebarHidden(sidebar)) return;
+        final change = sidebar.sidebar == WorkspaceSidebarSide.left
+            ? delta.dx
+            : -delta.dx;
+        sidebar.sidebarWidth = (sidebar.sidebarWidth + change).clamp(
+          220,
+          math.max(220, workspaceSize.width * .6),
+        );
+        reflow();
+        return;
+      }
+    }
+    if (!session.gridMode) {
+      if (left || right) {
+        resizeAxis(
+          group,
+          delta.dx / workspaceSize.width,
+          horizontal: true,
+          movingEnd: right,
+        );
+      }
+      if (top || bottom) {
+        resizeAxis(
+          group,
+          delta.dy / workspaceSize.height,
+          horizontal: false,
+          movingEnd: bottom,
+        );
+      }
+      session.mergeTarget = null;
+      bringToFront(group);
+      return;
+    }
+    if (left || right) {
+      final total = session.resizeRemainder.dx + delta.dx / workspaceSize.width;
+      final requested = geometry.wholeGridDelta(
+        total,
+        geometry.gridCellSize / workspaceSize.width,
+      );
+      if (requested != 0) {
+        final applied = resizeAxis(
+          group,
+          requested,
+          horizontal: true,
+          movingEnd: right,
+        );
+        session.resizeRemainder = Offset(
+          geometry.near(applied, requested) ? total - requested : 0,
+          session.resizeRemainder.dy,
+        );
+      } else {
+        session.resizeRemainder = Offset(total, session.resizeRemainder.dy);
+      }
+    }
+    if (top || bottom) {
+      final total =
+          session.resizeRemainder.dy + delta.dy / workspaceSize.height;
+      final requested = geometry.wholeGridDelta(
+        total,
+        geometry.gridCellSize / workspaceSize.height,
+      );
+      if (requested != 0) {
+        final applied = resizeAxis(
+          group,
+          requested,
+          horizontal: false,
+          movingEnd: bottom,
+        );
+        session.resizeRemainder = Offset(
+          session.resizeRemainder.dx,
+          geometry.near(applied, requested) ? total - requested : 0,
+        );
+      } else {
+        session.resizeRemainder = Offset(session.resizeRemainder.dx, total);
+      }
+    }
+    session.mergeTarget = null;
+    bringToFront(group);
+  }
+
+  double resizeAxis(
+    WorkspaceGroup group,
+    double requestedDelta, {
+    required bool horizontal,
+    required bool movingEnd,
+  }) {
+    final participants = session.gridMode
+        ? <WorkspaceGroup, bool>{group: movingEnd}
+        : geometry.resizeParticipants(
+            session.groups,
+            group,
+            horizontal: horizontal,
+            movingEnd: movingEnd,
+          );
+    final delta = geometry.constrainedBoundaryDelta(
+      participants,
+      requestedDelta,
+      horizontal: horizontal,
+    );
+    if (delta == 0) return 0;
+
+    for (final entry in participants.entries) {
+      entry.key.rect = geometry.moveBoundary(
+        entry.key.rect,
+        delta,
+        horizontal: horizontal,
+        movingEnd: entry.value,
+      );
+    }
+    return delta;
+  }
+
+  String? findMergeTarget(WorkspaceGroup source) {
+    if (session.draggingGroup == null) return null;
+    final center = source.rect.center;
+    final sorted = session.groupsByZ.reversed;
+    for (final group in sorted) {
+      if (group == source) continue;
+      if (group.rect.inflate(0.012).contains(center)) return group.id;
+    }
+    return null;
+  }
 }

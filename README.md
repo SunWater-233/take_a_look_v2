@@ -91,6 +91,8 @@ widths, selection and collapsed state after edits; `Ctrl+Shift+S` also saves
 immediately. Switching to analysis no longer automatically hides monitoring.
 
 Prerequisites are Flutter, Python 3.11 or newer, and platform build tools.
+The backend pins pyOCD to the tested 0.46.0 release; rerun the backend setup
+after pulling dependency changes so an existing virtual environment is updated.
 
 ```powershell
 .\tool\setup_backend.ps1
@@ -101,8 +103,8 @@ flutter run -d windows
 The app searches for Python in this order:
 
 1. `TAKE_A_LOOK_PYTHON`
-2. a packaged runtime under `backend/runtime/`
-3. `backend/.venv`
+2. `backend/.venv` for current checkout sources
+3. a packaged runtime under `backend/runtime/`
 4. the `python` command on `PATH`
 
 `TAKE_A_LOOK_BACKEND_DIR` can override the backend source directory. These
@@ -158,17 +160,30 @@ Flutter implementation files are grouped by responsibility under `lib/src/`:
 | `workspace/` | Docking layout, panel types, keyboard shortcuts, window sync, and drag coordination |
 | `theme/` | Shared visual styles, adaptive input policy, and common UI controls |
 
-`lib/main.dart` starts `app/app.dart`. The controller and panel libraries keep
-their existing `part` organization inside their directories; import
-`controller/controller.dart` or `panels/panels.dart` instead of importing a
-`part` file directly. Benchmark scripts use the current source paths; archived
-performance results retain the paths recorded when those measurements ran.
+`lib/main.dart` starts `app/app.dart`. The controller's `WatchRegistry` owns
+watch membership, editor preferences, bounded undo/redo history and the ten-second
+capture grace period after deletion. The controller coordinates commands,
+highlight restoration and notifications around those operations.
 
-The workspace widget delegates layout transitions and version migrations to
+`panels/panels.dart` composes independent source, analysis, watch, symbol,
+connection, control, plot/log and frame libraries. Feature-local `part` files
+share private state only within their own feature. Shared table controls and
+source-file drag data have explicit interfaces. Import a feature's root file or
+the workspace factory instead of importing a `part` file directly. Benchmark
+scripts use the current source paths; archived performance results retain the
+paths recorded when those measurements ran.
+
+The workspace widget delegates layout transitions, tab insertion/reordering,
+grid dragging, shared-boundary resizing and version migrations to
 `WorkspaceLayoutController`, tab-drag targets and dwell deadlines to
 `WorkspaceTabDragSession`, and file operations, autosave and write ordering to
 `WorkspacePersistence`. These objects can be tested without native windows.
 The widget owns rendering, coordinate conversion and native-window effects.
+
+Connection capabilities advertised by the backend are decoded once, included
+in window snapshots and consumed by UI controls. Offline/demo sessions and
+older backends use configuration-based defaults. Capabilities are runtime
+metadata and are not stored in project files.
 
 `controller_snapshot_schema.dart` defines snapshot wire fields, revision domains
 and project inclusion together. `ControllerSnapshotCodec` encodes a typed view

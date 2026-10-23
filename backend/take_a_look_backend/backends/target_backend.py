@@ -14,6 +14,7 @@ class TargetCapabilities:
     rtt: bool = True
     firmware_download: bool = False
     manages_breakpoint_step: bool = False
+    target_control: bool = True
 
     def to_json(self) -> dict[str, bool]:
         return {
@@ -21,13 +22,14 @@ class TargetCapabilities:
             "memoryWrite": self.memory_write,
             "rtt": self.rtt,
             "firmwareDownload": self.firmware_download,
+            "targetControl": self.target_control,
         }
 
 
 def capabilities_for_connection(kind: str, options: dict | None = None) -> TargetCapabilities:
     if kind == "gdb" and (options or {}).get("gdbMode") == "memory":
         return TargetCapabilities(memory_sampling=True, memory_write=False, rtt=False,
-                                  manages_breakpoint_step=True)
+                                  manages_breakpoint_step=True, target_control=False)
     return TargetCapabilities(
         memory_sampling=kind in {"local", "ember"},
         memory_write=kind != "ember",

@@ -27,6 +27,7 @@ enum SnapshotField {
   swdClock({SnapshotDomain.connection}, persistInProject: true),
   serialNumber({SnapshotDomain.connection}, persistInProject: true),
   connectionKind({SnapshotDomain.connection}, persistInProject: true),
+  connectionCapabilities({SnapshotDomain.connection}),
   gatewayProtocolVersion({SnapshotDomain.connection}),
   remoteConfig({SnapshotDomain.connection}, persistInProject: true),
   symbolFile({

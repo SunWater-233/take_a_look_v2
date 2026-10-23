@@ -20,6 +20,7 @@ from take_a_look_backend.services.sampling import SamplingServiceMixin
 from take_a_look_backend.services.ordered_worker import OrderedWorker
 from take_a_look_backend.services.recording import RawRecording, export_recording_csv
 from take_a_look_backend.services.debug_info import DebugInfoIndex, load_debug_info_from_elf
+from take_a_look_backend.services.debug_session import DebugSession
 from take_a_look_backend.services.symbols import load_symbols_from_elf
 from take_a_look_backend.services.elf_context import ElfLoadContext
 from take_a_look_backend.services.source_project import SourceProjects
@@ -112,12 +113,7 @@ class BackendService(SamplingServiceMixin):
         self._last_perf_at = self._perf_window_started_at
         self._last_rtt_error = ""
         self._next_rtt_retry_at = 0.0
-        self._debug_info = DebugInfoIndex()
-        self._requested_breakpoints: dict[str, set[int]] = {}
-        self._resolved_breakpoints: list[dict[str, object]] = []
-        self._target_execution_state = "unavailable"
-        self._stopped_location: dict[str, object] | None = None
-        self._registers: dict[str, int] = {}
+        self._debug = DebugSession()
         self._next_debug_poll_at = 0.0
         self._firmware_busy = False
         self._source_projects = SourceProjects(source_settings_file)
@@ -141,7 +137,7 @@ class BackendService(SamplingServiceMixin):
                     self._recording.close()
                 finally:
                     self._stop_rtt_locked()
-                    self._remove_all_breakpoints_locked()
+                    self._debug.remove_breakpoints(self._memory, connected=self._connection_status == "connected")
                     self._memory.disconnect()
                     self._connection_status = "disconnected"
         finally:
@@ -368,7 +364,7 @@ class BackendService(SamplingServiceMixin):
             "elapsedSeconds": self._elapsed_locked(),
             "sampleCount": self._recording.sample_count,
             "rawRecording": self._recording.status(),
-            "debug": self._debug_state_locked(),
+            "debug": self._debug.snapshot(),
         }
 
     def _publish_target_state(self) -> dict[str, object]:
@@ -405,7 +401,7 @@ class BackendService(SamplingServiceMixin):
             # journal on disk and start a fresh plot/recording epoch together.
             self._clear_samples()
             with self._lock:
-                self._target_execution_state = initial_execution_state
+                self._debug.execution_state = initial_execution_state
                 self._refresh_debug_state_locked(force=True)
         except Exception as error:
             try:
@@ -414,9 +410,9 @@ class BackendService(SamplingServiceMixin):
                 pass
             with self._lock:
                 self._connection_status = "disconnected"
-                self._target_execution_state = "unavailable"
-                self._stopped_location = None
-                self._registers = {}
+                self._debug.execution_state = "unavailable"
+                self._debug.stopped_location = None
+                self._debug.registers = {}
                 failed_state = self._runtime_state_locked()
             self._emit(EventName.LOG, {"level": "error", "message": f"连接调试探针失败：{error}"})
             self._emit(EventName.STATE, failed_state)
@@ -427,8 +423,8 @@ class BackendService(SamplingServiceMixin):
             self._connection_status = "connected"
             self._connection_started_at = time.perf_counter()
             self._sampling_paused = False
-            self._target_execution_state = initial_execution_state
-            self._apply_all_breakpoints_locked()
+            self._debug.execution_state = initial_execution_state
+            self._debug.apply_breakpoints(self._memory, connected=self._connection_status == "connected")
             state = self._runtime_state_locked()
         label = {"local": "pyOCD 调试探针", "ember": "EmberMobile 私有协议",
                  "emberGdb": "EmberMobile + GDB", "gdb": "远程 GDB"}[self._connection_kind]
@@ -441,15 +437,15 @@ class BackendService(SamplingServiceMixin):
         with self._lock:
             self._flush_pending_samples_locked()
             self._stop_rtt_locked()
-            self._remove_all_breakpoints_locked()
+            self._debug.remove_breakpoints(self._memory, connected=self._connection_status == "connected")
             self._memory.disconnect()
             self._connection_status = "disconnected"
             self._connection_started_at = None
             self._sampling_paused = False
-            self._target_execution_state = "unavailable"
-            self._stopped_location = None
-            self._registers = {}
-            self._mark_breakpoints_pending_locked()
+            self._debug.execution_state = "unavailable"
+            self._debug.stopped_location = None
+            self._debug.registers = {}
+            self._debug.mark_breakpoints_pending()
             state = self._runtime_state_locked()
         self._emit(EventName.LOG, {"level": "info", "message": "已断开调试探针。"})
         self._emit(EventName.STATE, state)
@@ -503,14 +499,14 @@ class BackendService(SamplingServiceMixin):
                 self._emit(EventName.LOG, {"level": "warning", "message": f"无法读取源码行调试信息：{error}"})
         with self._lock:
             report_progress("ui")
-            self._remove_all_breakpoints_locked()
+            self._debug.remove_breakpoints(self._memory, connected=self._connection_status == "connected")
             self._symbols = {symbol.key: symbol for symbol in symbols}
             self._symbol_file = str(display_path or path)
-            self._debug_info = debug_info
+            self._debug.info = debug_info
             # Watches are only valid for symbols in the current file. RTT symbols
             # are recreated after a connection is established.
             self._watches = self._rebind_watches(self._watches, symbols)
-            self._apply_all_breakpoints_locked()
+            self._debug.apply_breakpoints(self._memory, connected=self._connection_status == "connected")
         self._emit(EventName.LOG, {"level": "info", "message": f"已读取符号文件：{path.name}，变量 {len(symbols)} 个。"})
         state = self.state_snapshot()
         self._emit(EventName.STATE, state)
@@ -544,7 +540,7 @@ class BackendService(SamplingServiceMixin):
                 self._flush_pending_samples_locked()
                 self._stop_rtt_locked()
                 self._memory.halt()
-                self._remove_all_breakpoints_locked()
+                self._debug.remove_breakpoints(self._memory, connected=self._connection_status == "connected")
             task.log(f"下载文件：{original}")
             last_progress = 0.0
             def progress(value: float) -> None:
@@ -565,7 +561,7 @@ class BackendService(SamplingServiceMixin):
             with self._lock:
                 self._symbol_file = str(original)
                 self._clear_samples()
-                self._stopped_location, self._registers = None, {}
+                self._debug.stopped_location, self._debug.registers = None, {}
                 self._rtt_control_block_address = None
                 self._next_rtt_retry_at = 0.0
                 if config["afterDownload"] == "run":
@@ -577,9 +573,9 @@ class BackendService(SamplingServiceMixin):
             with self._lock:
                 if not successful:
                     self._sampling_paused, self._rtt_enabled = True, False
-                    self._target_execution_state = "unknown"
-                    self._stopped_location, self._registers = None, {}
-                    self._mark_breakpoints_pending_locked()
+                    self._debug.execution_state = "unknown"
+                    self._debug.stopped_location, self._debug.registers = None, {}
+                    self._debug.mark_breakpoints_pending()
                 self._firmware_busy = False
                 state = self.state_snapshot()
             self._emit(EventName.STATE, state)
@@ -588,9 +584,9 @@ class BackendService(SamplingServiceMixin):
     def _get_debug_info(self) -> dict[str, object]:
         with self._lock:
             return {
-                "sourceFiles": self._debug_info.source_files,
-                "executableLines": self._debug_info.executable_lines,
-                "debug": self._debug_state_locked(),
+                "sourceFiles": self._debug.info.source_files,
+                "executableLines": self._debug.info.executable_lines,
+                "debug": self._debug.snapshot(),
             }
 
     def _set_breakpoints(self, params: Mapping[str, object]) -> dict[str, object]:
@@ -601,25 +597,9 @@ class BackendService(SamplingServiceMixin):
         ):
             raise ProtocolError("invalid_request", "lines must contain positive integers.")
         with self._lock:
-            canonical_path = self._debug_info.canonical_source_path(path) or path
-            canonical_key = canonical_path.replace("\\", "/").rstrip("/").casefold()
-            # Source-root mappings and DWARF can name one file with different
-            # absolute paths. Keep one authoritative breakpoint set so a
-            # removal cannot reveal a stale alias on the next state event.
-            for existing_path in list(self._requested_breakpoints):
-                existing_canonical = (
-                    self._debug_info.canonical_source_path(existing_path)
-                    or existing_path
-                )
-                existing_key = (
-                    existing_canonical.replace("\\", "/").rstrip("/").casefold()
-                )
-                if existing_key == canonical_key:
-                    del self._requested_breakpoints[existing_path]
-            if raw_lines:
-                self._requested_breakpoints[canonical_path] = set(raw_lines)
-            self._apply_all_breakpoints_locked()
-            payload = self._debug_state_locked()
+            self._debug.set_breakpoints(path, raw_lines, self._memory,
+                                        connected=self._connection_status == "connected")
+            payload = self._debug.snapshot()
         self._emit(EventName.DEBUG, payload)
         return {"debug": payload}
 
@@ -634,65 +614,14 @@ class BackendService(SamplingServiceMixin):
                 if action == "halt":
                     self._memory.halt()
                 elif action == "resume":
-                    self._continue_or_step_locked(resume=True)
+                    self._debug.continue_or_step(self._memory, resume=True)
                 else:
-                    self._continue_or_step_locked(resume=False)
+                    self._debug.continue_or_step(self._memory, resume=False)
                 self._refresh_debug_state_locked(force=True)
             except Exception as error:
                 raise ProtocolError("debug_control_failed", "Unable to control the target.", str(error)) from error
-            payload = self._debug_state_locked()
+            payload = self._debug.snapshot()
         return {"debug": payload}
-
-    def _continue_or_step_locked(self, *, resume: bool) -> None:
-        if backend_capabilities(self._memory).manages_breakpoint_step:
-            if resume:
-                self._memory.resume()
-            else:
-                self._memory.step()
-            return
-        if resume and self._memory.debug_state() == "running":
-            return
-        registers = self._registers or self._memory.read_core_registers()
-        pc = registers.get("pc")
-        current_breakpoint = next(
-            (
-                item
-                for item in self._resolved_breakpoints
-                if item.get("verified") is True
-                and isinstance(item.get("address"), int)
-                and pc is not None
-                and (item["address"] & ~1) == (pc & ~1)
-            ),
-            None,
-        )
-        if current_breakpoint is None:
-            if resume:
-                self._memory.resume()
-            else:
-                self._memory.step()
-            return
-
-        address = int(current_breakpoint["address"])
-        self._memory.remove_breakpoint(address)
-        try:
-            self._memory.step()
-        finally:
-            restored = self._memory.set_breakpoint(address)
-            if not restored:
-                current_breakpoint["verified"] = False
-                current_breakpoint["message"] = "跨过断点后无法重新设置该断点。"
-        if resume:
-            self._memory.resume()
-
-    def _debug_state_locked(self) -> dict[str, object]:
-        return {
-            "executionState": self._target_execution_state,
-            "sourceFiles": self._debug_info.source_files,
-            "executableLines": self._debug_info.executable_lines,
-            "breakpoints": list(self._resolved_breakpoints),
-            "registers": dict(self._registers),
-            "stoppedLocation": self._stopped_location,
-        }
 
     def _poll_debug_state_locked(self) -> None:
         try:
@@ -714,88 +643,24 @@ class BackendService(SamplingServiceMixin):
         self._memory.disconnect()
         self._connection_status = "disconnected"
         self._connection_started_at = None
-        self._target_execution_state = "unavailable"
-        self._stopped_location = None
-        self._registers = {}
-        self._mark_breakpoints_pending_locked()
+        self._debug.execution_state = "unavailable"
+        self._debug.stopped_location = None
+        self._debug.registers = {}
+        self._debug.mark_breakpoints_pending()
         self._emit(EventName.LOG, {"level": "error", "message": f"远程连接已中断：{error}"})
         self._emit(EventName.STATE, self._runtime_state_locked())
         return True
 
     def _refresh_debug_state_locked(self, *, force: bool) -> None:
-        next_state = self._memory.debug_state()
-        if not force and next_state == self._target_execution_state:
+        if not self._debug.refresh(self._memory, force=force):
             return
-        self._target_execution_state = next_state
-        if next_state == "halted":
-            self._registers = self._memory.read_core_registers()
-            pc = self._registers.get("pc")
-            location = self._debug_info.resolve_address(pc) if pc is not None else None
-            self._stopped_location = {"address": pc} if pc is not None else None
-            if location is not None:
-                self._stopped_location.update({"path": location.path, "line": location.line})
-            if not backend_capabilities(self._memory).memory_sampling:
-                symbols = [watch.symbol for watch in self._watches.values()
-                           if not watch.symbol.is_rtt and watch.mode != "manual"
-                           and (watch.mode != "monitor" or watch.monitor_enabled)]
-                if symbols:
-                    self._publish_watch_values_locked(self._memory.read_symbols(symbols))
-        else:
-            self._registers = {}
-            self._stopped_location = None
-        self._emit(EventName.DEBUG, self._debug_state_locked())
-
-    def _remove_all_breakpoints_locked(self) -> None:
-        if self._connection_status == "connected":
-            for item in self._resolved_breakpoints:
-                if item.get("verified") is True and isinstance(item.get("address"), int):
-                    try:
-                        self._memory.remove_breakpoint(item["address"])
-                    except Exception:
-                        pass
-        self._resolved_breakpoints = []
-
-    def _mark_breakpoints_pending_locked(self) -> None:
-        self._resolved_breakpoints = [
-            {
-                "path": path,
-                "requestedLine": line,
-                "actualLine": line,
-                "verified": False,
-                "message": "连接调试探针后设置断点。",
-            }
-            for path, lines in self._requested_breakpoints.items()
-            for line in sorted(lines)
-        ]
-
-    def _apply_all_breakpoints_locked(self) -> None:
-        self._remove_all_breakpoints_locked()
-        resolved: list[dict[str, object]] = []
-        for path, lines in self._requested_breakpoints.items():
-            for requested_line in sorted(lines):
-                location = self._debug_info.resolve_breakpoint(path, requested_line)
-                item: dict[str, object] = {
-                    "path": path,
-                    "requestedLine": requested_line,
-                    "actualLine": location.line if location is not None else requested_line,
-                    "verified": False,
-                }
-                if location is None:
-                    item["message"] = "该行没有可执行指令，不能设置断点。"
-                else:
-                    item["path"] = location.path
-                    item["address"] = location.address
-                    if self._connection_status != "connected":
-                        item["message"] = "连接调试探针后设置断点。"
-                    else:
-                        try:
-                            item["verified"] = self._memory.set_breakpoint(location.address)
-                            if not item["verified"]:
-                                item["message"] = "目标拒绝了断点，可能已用完硬件断点资源。"
-                        except Exception as error:
-                            item["message"] = str(error)
-                resolved.append(item)
-        self._resolved_breakpoints = resolved
+        if self._debug.execution_state == "halted" and not backend_capabilities(self._memory).memory_sampling:
+            symbols = [watch.symbol for watch in self._watches.values()
+                       if not watch.symbol.is_rtt and watch.mode != "manual"
+                       and (watch.mode != "monitor" or watch.monitor_enabled)]
+            if symbols:
+                self._publish_watch_values_locked(self._memory.read_symbols(symbols))
+        self._emit(EventName.DEBUG, self._debug.snapshot())
 
     def _set_config(self, params: Mapping[str, object]) -> dict[str, object]:
         with self._lock:
@@ -863,7 +728,7 @@ class BackendService(SamplingServiceMixin):
             self._watches = new_watches
             self._latest_rtt_values = {key: value for key, value in self._latest_rtt_values.items() if key in new_watches}
             self._monitor_schedule_revision += 1
-            if (self._connection_status == "connected" and self._target_execution_state == "halted"
+            if (self._connection_status == "connected" and self._debug.execution_state == "halted"
                     and not backend_capabilities(self._memory).memory_sampling):
                 self._refresh_debug_state_locked(force=True)
             if self._rtt_protocol == "plus" and membership_changed:
@@ -952,14 +817,14 @@ class BackendService(SamplingServiceMixin):
             if self._connection_status != "connected":
                 raise ProtocolError("not_connected", "请先连接调试探针。")
             can_read_memory = (backend_capabilities(self._memory).memory_sampling
-                               or self._target_execution_state == "halted")
+                               or self._debug.execution_state == "halted")
             if watch.symbol.is_rtt or (not can_read_memory and self._rtt_enabled and self._rtt_protocol == "plus"):
                 latest = self._latest_rtt_values.get(key)
                 if latest is None:
                     raise ProtocolError("no_data", "尚未收到此 RTT 变量的数据。")
                 self._publish_watch_values_locked({key: latest[0]}, updated_at_ms=latest[1])
             else:
-                if not backend_capabilities(self._memory).memory_sampling and self._target_execution_state != "halted":
+                if not backend_capabilities(self._memory).memory_sampling and self._debug.execution_state != "halted":
                     raise ProtocolError("target_running", "当前 GDB 连接需要暂停目标后读取内存。")
                 try:
                     self._publish_watch_values_locked(self._memory.read_symbols([watch.symbol]))

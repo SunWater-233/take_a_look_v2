@@ -26,6 +26,13 @@ codecs, register access and write/readback verification. The remote adapter does
 not inherit pyOCD connection, target-registry or flash-programming behavior;
 those remain in the local adapter. Adapter calls retain the service's existing
 serialization and ownership rules.
+`services/debug_session.py` owns debug information, requested/resolved
+breakpoints, step-over handling, registers and stopped locations. It has no
+worker, service reference or lock; the service keeps target operations under
+its existing shared probe lock and publishes the resulting events. This keeps
+sampling, debug control and firmware downloads in the same serialization domain.
+The Flutter client consumes the advertised connection capabilities, including
+`targetControl`, and forwards them to detached windows.
 Both Ember modes support source firmware downloads. `ember` uses phone firmware
 staging and flash-job polling; `emberGdb` uses MI download with independent
 section readback. Generic `gdb` retains its existing capability restrictions.

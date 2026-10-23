@@ -1,7 +1,15 @@
-part of 'panels.dart';
+import 'package:flutter/material.dart';
 
-class _ConnectionPanel extends StatelessWidget {
-  const _ConnectionPanel({required this.controller});
+import '../controller/controller.dart';
+import '../models/models.dart';
+import '../theme/theme.dart';
+import 'target_chip_dialog.dart';
+import 'ember_pairing_dialog.dart';
+
+import 'shared_controls.dart';
+
+class ConnectionPanel extends StatelessWidget {
+  const ConnectionPanel({super.key, required this.controller});
 
   final TakeALookController controller;
 
@@ -13,7 +21,7 @@ class _ConnectionPanel extends StatelessWidget {
         padding: const EdgeInsets.all(12),
         child: Column(
           children: [
-            _LabeledField(
+            LabeledField(
               label: '连接方式',
               child: IgnorePointer(
                 ignoring:
@@ -35,7 +43,7 @@ class _ConnectionPanel extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             if (controller.connectionKind == 'local') ...[
-              _LabeledField(
+              LabeledField(
                 label: '探针',
                 child: TalDropdown<String>(
                   value: controller.probeType,
@@ -45,7 +53,7 @@ class _ConnectionPanel extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 10),
-              _LabeledField(
+              LabeledField(
                 label: '目标芯片',
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -85,7 +93,7 @@ class _ConnectionPanel extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 10),
-              _LabeledField(
+              LabeledField(
                 label: 'SWD 时钟',
                 child: TalDropdown<String>(
                   value: controller.swdClock,
@@ -104,7 +112,7 @@ class _ConnectionPanel extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 10),
-              _LabeledField(
+              LabeledField(
                 label: '序列号',
                 child: _SerialNumberField(controller: controller),
               ),
@@ -132,7 +140,7 @@ class _RemoteConnectionFields extends StatelessWidget {
       bool secret = false,
     }) => Padding(
       padding: const EdgeInsets.only(bottom: 10),
-      child: _LabeledField(
+      child: LabeledField(
         label: label,
         child: _RemoteConnectionField(
           key: ValueKey('remote-$name'),
@@ -178,7 +186,7 @@ class _RemoteConnectionFields extends StatelessWidget {
           field('gatewayPort', '网关端口', '4242'),
           field('token', '访问令牌', '已配对可留空；或粘贴手机本次令牌', secret: true),
           field('core', '核心编号', '0'),
-          _LabeledField(
+          LabeledField(
             label: 'RTT 传输',
             child: IgnorePointer(
               ignoring:
@@ -204,7 +212,7 @@ class _RemoteConnectionFields extends StatelessWidget {
         if (gdb) ...[
           field('gdbPort', 'GDB 端口', '3333'),
           if (!ember) ...[
-            _LabeledField(
+            LabeledField(
               label: '使用方式',
               child: IgnorePointer(
                 ignoring:

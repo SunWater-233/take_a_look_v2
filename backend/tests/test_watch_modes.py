@@ -29,7 +29,7 @@ def rig(tmp_path):
         {'key': symbols['manual'].key, 'readMode': 'manual'},
     ]})
     service._connection_status = 'connected'
-    service._target_execution_state = 'running'
+    service._debug.execution_state = 'running'
     try:
         yield service, memory, symbols, events
     finally:
@@ -158,7 +158,7 @@ def test_halted_plus_monitor_reads_memory_instead_of_frozen_cache(rig):
     service, memory, symbols, events = rig
     key = symbols['watch'].key
     service._rtt_enabled, service._rtt_protocol = True, 'plus'
-    service._target_execution_state = 'halted'
+    service._debug.execution_state = 'halted'
     service._latest_rtt_values[key] = (999, 1)
     service._poll_monitors_locked(10)
     assert service._watches[key].value == 1

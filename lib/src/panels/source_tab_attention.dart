@@ -1,9 +1,9 @@
-part of 'panels.dart';
+part of 'panel_frame.dart';
 
 const _sourceAttentionColor = TalColors.accent;
 
-class _SourceUnreadDot extends StatelessWidget {
-  const _SourceUnreadDot({super.key});
+class SourceUnreadDot extends StatelessWidget {
+  const SourceUnreadDot({super.key});
 
   @override
   Widget build(BuildContext context) => Semantics(
@@ -19,17 +19,21 @@ class _SourceUnreadDot extends StatelessWidget {
   );
 }
 
-class _SourceTabAttention extends StatefulWidget {
-  const _SourceTabAttention({required this.controller, required this.builder});
+class SourceTabAttention extends StatefulWidget {
+  const SourceTabAttention({
+    super.key,
+    required this.controller,
+    required this.builder,
+  });
 
   final TakeALookController controller;
   final Widget Function(double attention, bool unread) builder;
 
   @override
-  State<_SourceTabAttention> createState() => _SourceTabAttentionState();
+  State<SourceTabAttention> createState() => _SourceTabAttentionState();
 }
 
-class _SourceTabAttentionState extends State<_SourceTabAttention>
+class _SourceTabAttentionState extends State<SourceTabAttention>
     with SingleTickerProviderStateMixin {
   late final AnimationController _cycles;
   Timer? _staticHighlightTimer;
@@ -57,7 +61,7 @@ class _SourceTabAttentionState extends State<_SourceTabAttention>
   }
 
   @override
-  void didUpdateWidget(covariant _SourceTabAttention oldWidget) {
+  void didUpdateWidget(covariant SourceTabAttention oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != widget.controller) {
       oldWidget.controller.sourceWorkspaceChanges.removeListener(_sync);

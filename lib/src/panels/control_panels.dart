@@ -1,7 +1,11 @@
-part of 'panels.dart';
+import 'package:flutter/material.dart';
 
-class _HeaderPanel extends StatelessWidget {
-  const _HeaderPanel({required this.controller});
+import '../controller/controller.dart';
+import '../models/models.dart';
+import '../theme/theme.dart';
+
+class HeaderPanel extends StatelessWidget {
+  const HeaderPanel({super.key, required this.controller});
 
   final TakeALookController controller;
 
@@ -128,8 +132,8 @@ class _BrandLogoPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-class _RunControlPanel extends StatelessWidget {
-  const _RunControlPanel({required this.controller});
+class RunControlPanel extends StatelessWidget {
+  const RunControlPanel({super.key, required this.controller});
 
   final TakeALookController controller;
 
@@ -169,8 +173,8 @@ class _RunControlPanel extends StatelessWidget {
   }
 }
 
-class _SamplingPanel extends StatelessWidget {
-  const _SamplingPanel({required this.controller});
+class SamplingPanel extends StatelessWidget {
+  const SamplingPanel({super.key, required this.controller});
 
   final TakeALookController controller;
 

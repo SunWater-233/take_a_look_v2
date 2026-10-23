@@ -1115,62 +1115,14 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     if (widget.windowSync.isStarted) unawaited(detachedWindows.prewarm());
   }
 
-  void _startDrag(WorkspaceGroup group) {
-    if (!_session.gridMode) return;
-    _layout.automatic = false;
-    setState(() {
-      _session.dragRemainder = Offset.zero;
-      _session.draggingGroup = group.id;
-      _bringToFront(group, notify: false);
-    });
-  }
+  void _startDrag(WorkspaceGroup group) =>
+      setState(() => _layout.beginGroupDrag(group));
 
-  void _moveGroup(WorkspaceGroup group, Offset delta, Size workspaceSize) {
-    if (!_session.gridMode || workspaceSize.isEmpty) return;
-    final totalDelta = Offset(
-      _session.dragRemainder.dx + delta.dx / workspaceSize.width,
-      _session.dragRemainder.dy + delta.dy / workspaceSize.height,
-    );
-    final snappedDelta = Offset(
-      _wholeGridDelta(
-        totalDelta.dx,
-        _geometry.gridCellSize / workspaceSize.width,
-      ),
-      _wholeGridDelta(
-        totalDelta.dy,
-        _geometry.gridCellSize / workspaceSize.height,
-      ),
-    );
-    if (snappedDelta == Offset.zero) {
-      _session.dragRemainder = totalDelta;
-      return;
-    }
-    setState(() {
-      final previousRect = group.rect;
-      group.rect = _clampRect(
-        group.rect.translate(snappedDelta.dx, snappedDelta.dy),
-      );
-      final actualDelta = group.rect.topLeft - previousRect.topLeft;
-      _session.dragRemainder = Offset(
-        _near(actualDelta.dx, snappedDelta.dx)
-            ? totalDelta.dx - snappedDelta.dx
-            : 0,
-        _near(actualDelta.dy, snappedDelta.dy)
-            ? totalDelta.dy - snappedDelta.dy
-            : 0,
-      );
-      _session.mergeTarget = _findMergeTarget(group);
-    });
-  }
+  void _moveGroup(WorkspaceGroup group, Offset delta, Size workspaceSize) =>
+      setState(() => _layout.moveGroup(group, delta, workspaceSize));
 
-  void _endDrag(WorkspaceGroup group) {
-    if (!_session.gridMode) return;
-    setState(() {
-      final target = _findMergeTarget(group);
-      _session.resetDrag();
-      if (target != null) _mergeInto(group, target);
-    });
-  }
+  void _endDrag(WorkspaceGroup group) =>
+      setState(() => _layout.endGroupDrag(group));
 
   void _resizeGroup(
     WorkspaceGroup group,
@@ -1180,135 +1132,17 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     bool right = false,
     bool top = false,
     bool bottom = false,
-  }) {
-    if (workspaceSize.isEmpty) return;
-    if (usesWorkbenchLayout && !_session.gridMode && (left || right)) {
-      final sidebar = group.sidebar != null
-          ? group
-          : group == _primaryGroup
-          ? _sidebarGroup(
-              left ? WorkspaceSidebarSide.left : WorkspaceSidebarSide.right,
-            )
-          : null;
-      if (sidebar != null) {
-        if (_sidebarHidden(sidebar)) return;
-        setState(() {
-          final change = sidebar.sidebar == WorkspaceSidebarSide.left
-              ? delta.dx
-              : -delta.dx;
-          sidebar.sidebarWidth = (sidebar.sidebarWidth + change).clamp(
-            220,
-            math.max(220, workspaceSize.width * .6),
-          );
-          _reflowWorkbench();
-        });
-        return;
-      }
-    }
-    if (!_session.gridMode) {
-      setState(() {
-        if (left || right) {
-          _resizeAxis(
-            group,
-            delta.dx / workspaceSize.width,
-            horizontal: true,
-            movingEnd: right,
-          );
-        }
-        if (top || bottom) {
-          _resizeAxis(
-            group,
-            delta.dy / workspaceSize.height,
-            horizontal: false,
-            movingEnd: bottom,
-          );
-        }
-        _session.mergeTarget = null;
-        _bringToFront(group, notify: false);
-      });
-      return;
-    }
-    setState(() {
-      if (left || right) {
-        final total =
-            _session.resizeRemainder.dx + delta.dx / workspaceSize.width;
-        final requested = _wholeGridDelta(
-          total,
-          _geometry.gridCellSize / workspaceSize.width,
-        );
-        if (requested != 0) {
-          final applied = _resizeAxis(
-            group,
-            requested,
-            horizontal: true,
-            movingEnd: right,
-          );
-          _session.resizeRemainder = Offset(
-            _near(applied, requested) ? total - requested : 0,
-            _session.resizeRemainder.dy,
-          );
-        } else {
-          _session.resizeRemainder = Offset(total, _session.resizeRemainder.dy);
-        }
-      }
-      if (top || bottom) {
-        final total =
-            _session.resizeRemainder.dy + delta.dy / workspaceSize.height;
-        final requested = _wholeGridDelta(
-          total,
-          _geometry.gridCellSize / workspaceSize.height,
-        );
-        if (requested != 0) {
-          final applied = _resizeAxis(
-            group,
-            requested,
-            horizontal: false,
-            movingEnd: bottom,
-          );
-          _session.resizeRemainder = Offset(
-            _session.resizeRemainder.dx,
-            _near(applied, requested) ? total - requested : 0,
-          );
-        } else {
-          _session.resizeRemainder = Offset(_session.resizeRemainder.dx, total);
-        }
-      }
-      _session.mergeTarget = null;
-      _bringToFront(group, notify: false);
-    });
-  }
-
-  double _resizeAxis(
-    WorkspaceGroup group,
-    double requestedDelta, {
-    required bool horizontal,
-    required bool movingEnd,
-  }) {
-    final participants = _session.gridMode
-        ? <WorkspaceGroup, bool>{group: movingEnd}
-        : _geometry.resizeParticipants(
-            _session.groups,
-            group,
-            horizontal: horizontal,
-            movingEnd: movingEnd,
-          );
-    final delta = _geometry.constrainedBoundaryDelta(
-      participants,
-      requestedDelta,
-      horizontal: horizontal,
-    );
-    if (delta == 0) return 0;
-
-    for (final entry in participants.entries) {
-      entry.key.rect = _geometry.moveBoundary(
-        entry.key.rect,
-        delta,
-        horizontal: horizontal,
-        movingEnd: entry.value,
-      );
-    }
-    return delta;
-  }
+  }) => setState(
+    () => _layout.resizeGroup(
+      group,
+      delta,
+      workspaceSize,
+      left: left,
+      right: right,
+      top: top,
+      bottom: bottom,
+    ),
+  );
 
   void _startResize() {
     _layout.automatic = false;
@@ -1321,12 +1155,6 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     setState(() => _resizing = false);
     _scheduleLayoutSave();
   }
-
-  double _wholeGridDelta(double value, double unit) {
-    return _geometry.wholeGridDelta(value, unit);
-  }
-
-  bool _near(double first, double second) => _geometry.near(first, second);
 
   Future<bool> _queueNativeTransfer(NativePanelTransfer transfer) {
     final previous = _nativeTransfers;
@@ -1408,20 +1236,13 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         transfer.insertionIndex ?? target.panels.length,
       );
     } else {
-      setState(() {
-        target.panels.insert(
-          (transfer.insertionIndex ?? target.panels.length).clamp(
-            0,
-            target.panels.length,
-          ),
+      setState(
+        () => _layout.movePanelToGroup(
           panel,
-        );
-        target.activePanel = panel;
-        target.z = _nextZ();
-        target.sidebarCollapsed = false;
-        _layout.overlaySidebar = target.sidebar;
-        _reflowWorkbench();
-      });
+          target,
+          transfer.insertionIndex ?? target.panels.length,
+        ),
+      );
       widget.onPanelVisibilityChanged?.call();
       _scheduleLayoutSave();
     }
@@ -1613,19 +1434,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     WorkspacePanelId panel,
     Rect rect,
   ) {
-    if (_session.gridMode) rect = _snapRectToGrid(rect);
-    setState(() {
-      _detachPanel(group, panel);
-      _session.groups.add(
-        WorkspaceGroup(
-          id: _session.nextGroupId('separated'),
-          panels: [panel],
-          activePanel: panel,
-          rect: rect,
-          z: _nextZ(),
-        ),
-      );
-    });
+    setState(() => _layout.separatePanel(group, panel, rect));
   }
 
   void _acceptTabDrop(
@@ -1642,33 +1451,10 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         .where((group) => group.id == data.sourceGroupId)
         .firstOrNull;
     if (source == null || !source.panels.contains(data.panel)) return;
-    if (source == target) {
-      final sourceIndex = target.panels.indexOf(data.panel);
-      var adjustedIndex = insertionIndex.clamp(0, target.panels.length);
-      if (sourceIndex < adjustedIndex) adjustedIndex -= 1;
-      setState(() {
-        target.panels.removeAt(sourceIndex);
-        target.panels.insert(adjustedIndex, data.panel);
-        target.activePanel = data.panel;
-      });
-      _scheduleLayoutSave();
-      return;
-    }
-    setState(() {
-      _detachPanel(source, data.panel);
-      if (!target.panels.contains(data.panel)) {
-        target.panels.insert(
-          insertionIndex.clamp(0, target.panels.length),
-          data.panel,
-        );
-      }
-      target.activePanel = data.panel;
-      target.z = _nextZ();
-      target.sidebarCollapsed = false;
-      if (target.sidebar != null) _layout.overlaySidebar = target.sidebar;
-      _reflowWorkbench();
-    });
-    widget.onPanelVisibilityChanged?.call();
+    setState(
+      () => _layout.movePanelToGroup(data.panel, target, insertionIndex),
+    );
+    if (source != target) widget.onPanelVisibilityChanged?.call();
     _scheduleLayoutSave();
   }
 
@@ -2004,20 +1790,6 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
 
   Rect _snapRectToGrid(Rect rect) {
     return _geometry.snapRectToGrid(rect, _session.workspaceSize);
-  }
-
-  void _mergeInto(WorkspaceGroup source, String targetId) =>
-      _layout.mergeInto(source, targetId);
-
-  String? _findMergeTarget(WorkspaceGroup source) {
-    if (_session.draggingGroup == null) return null;
-    final center = source.rect.center;
-    final sorted = _session.groupsByZ.reversed;
-    for (final group in sorted) {
-      if (group == source) continue;
-      if (group.rect.inflate(0.012).contains(center)) return group.id;
-    }
-    return null;
   }
 
   Rect _clampRect(Rect rect) {

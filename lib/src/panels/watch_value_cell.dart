@@ -1,4 +1,4 @@
-part of 'panels.dart';
+part of 'watch_panel.dart';
 
 /// Edits a snapshot of the current value. Telemetry only updates the display;
 /// hardware writes happen exclusively on Enter, never on blur or cancellation.

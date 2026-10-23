@@ -1,12 +1,21 @@
-part of 'panels.dart';
+import 'dart:async';
+import 'dart:math' as math;
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
+
+import 'package:flutter/services.dart';
+
+import '../controller/controller.dart';
+import '../models/models.dart';
+import '../theme/theme.dart';
+import 'table_layout.dart';
+
+import 'shared_controls.dart';
+import 'source_file_drag_data.dart';
 
 enum _SymbolTreeNodeKind { folder, sourceFile, symbol }
-
-class _SourceFileDragData {
-  const _SourceFileDragData(this.path);
-
-  final String path;
-}
 
 class _SymbolTreeNode {
   _SymbolTreeNode({required this.key, required this.label, required this.kind});
@@ -40,8 +49,9 @@ final Expando<_SymbolTreeCache> _symbolTreeCaches = Expando<_SymbolTreeCache>(
   'symbol-tree-cache',
 );
 
-class _SymbolPanel extends StatefulWidget {
-  const _SymbolPanel({
+class SymbolPanel extends StatefulWidget {
+  const SymbolPanel({
+    super.key,
     required this.controller,
     this.defaultMonitor = false,
     this.onShowSource,
@@ -52,10 +62,10 @@ class _SymbolPanel extends StatefulWidget {
   final VoidCallback? onShowSource;
 
   @override
-  State<_SymbolPanel> createState() => _SymbolPanelState();
+  State<SymbolPanel> createState() => _SymbolPanelState();
 }
 
-class _SymbolPanelState extends State<_SymbolPanel> {
+class _SymbolPanelState extends State<SymbolPanel> {
   final ResizableTableLayout _tableLayout = ResizableTableLayout(
     widths: const [320, 145, 68, 100, 160],
     minimumWidths: const [120, 80, 48, 60, 80],
@@ -518,7 +528,7 @@ class _SymbolPanelState extends State<_SymbolPanel> {
                       BorderSide(color: TalColors.border),
                     ),
                   ),
-                  child: _ResizableTableViewport(
+                  child: ResizableTableViewport(
                     layout: _tableLayout,
                     contentWidth: _tableWidth,
                     contentKey: const ValueKey('symbol-table-content'),
@@ -616,41 +626,41 @@ class _SymbolTableHeader extends StatelessWidget {
   final double sizeWidth;
   final double sectionWidth;
   final double typeWidth;
-  final _ColumnResizeCallback onResizeColumn;
+  final ColumnResizeCallback onResizeColumn;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
-        _ResizableTableHeaderCell(
+        ResizableTableHeaderCell(
           label: '来源文件 / 变量',
           width: nameWidth,
           columnIndex: 0,
           keyPrefix: 'symbol',
           onResize: onResizeColumn,
         ),
-        _ResizableTableHeaderCell(
+        ResizableTableHeaderCell(
           label: '地址',
           width: addressWidth,
           columnIndex: 1,
           keyPrefix: 'symbol',
           onResize: onResizeColumn,
         ),
-        _ResizableTableHeaderCell(
+        ResizableTableHeaderCell(
           label: '大小',
           width: sizeWidth,
           columnIndex: 2,
           keyPrefix: 'symbol',
           onResize: onResizeColumn,
         ),
-        _ResizableTableHeaderCell(
+        ResizableTableHeaderCell(
           label: '段',
           width: sectionWidth,
           columnIndex: 3,
           keyPrefix: 'symbol',
           onResize: onResizeColumn,
         ),
-        _ResizableTableHeaderCell(
+        ResizableTableHeaderCell(
           label: '类型',
           width: typeWidth,
           columnIndex: 4,
@@ -808,16 +818,16 @@ class _SymbolTreeRow extends StatelessWidget {
             event.buttons & kSecondaryMouseButton == 0) {
           return;
         }
-        context
-            .findAncestorStateOfType<_RightDragResizeRegionState>()
-            ?._registerContextMenu(event.pointer, (position) {
-              if (context.mounted) onFileContextMenu(node, position);
-            });
+        RightDragResizeRegion.registerContextMenu(context, event.pointer, (
+          position,
+        ) {
+          if (context.mounted) onFileContextMenu(node, position);
+        });
       },
       child: node.sourcePath == null
           ? row
-          : Draggable<_SourceFileDragData>(
-              data: _SourceFileDragData(node.sourcePath!),
+          : Draggable<SourceFileDragData>(
+              data: SourceFileDragData(node.sourcePath!),
               allowedButtonsFilter: (buttons) => buttons == kPrimaryMouseButton,
               maxSimultaneousDrags: 1,
               feedback: Material(

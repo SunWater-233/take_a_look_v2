@@ -20,7 +20,7 @@ from take_a_look_backend.protocol import ProtocolError
 def test_connection_capabilities_preserve_the_wire_contract(kind, polling, writes, rtt, flash):
     assert capabilities_for_connection(kind).to_json() == {
         "memorySampling": polling, "memoryWrite": writes,
-        "rtt": rtt, "firmwareDownload": flash,
+        "rtt": rtt, "firmwareDownload": flash, "targetControl": True,
     }
     if kind != "local":
         assert backend_capabilities(RemoteMemoryBackend(kind, {})).to_json() == capabilities_for_connection(kind).to_json()

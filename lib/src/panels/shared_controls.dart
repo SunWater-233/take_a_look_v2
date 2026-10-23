@@ -1,11 +1,17 @@
-part of 'panels.dart';
+import 'dart:math' as math;
 
-typedef _ColumnResizeCallback = void Function(int index, double delta);
-typedef _ColumnContextMenuCallback =
-    void Function(int index, _ContextMenuRequest request);
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
 
-class _ContextMenuRequest {
-  const _ContextMenuRequest({
+import '../theme/theme.dart';
+import 'table_layout.dart';
+
+typedef ColumnResizeCallback = void Function(int index, double delta);
+typedef ColumnContextMenuCallback =
+    void Function(int index, TableContextMenuRequest request);
+
+class TableContextMenuRequest {
+  const TableContextMenuRequest({
     required this.globalPosition,
     required this.touchOptimized,
   });
@@ -14,8 +20,9 @@ class _ContextMenuRequest {
   final bool touchOptimized;
 }
 
-class _ResizableTableHeaderCell extends StatelessWidget {
-  const _ResizableTableHeaderCell({
+class ResizableTableHeaderCell extends StatelessWidget {
+  const ResizableTableHeaderCell({
+    super.key,
     required this.label,
     required this.width,
     required this.columnIndex,
@@ -30,10 +37,10 @@ class _ResizableTableHeaderCell extends StatelessWidget {
   final double width;
   final int columnIndex;
   final String keyPrefix;
-  final _ColumnResizeCallback onResize;
+  final ColumnResizeCallback onResize;
   final bool selected;
   final ValueChanged<int>? onSelect;
-  final _ColumnContextMenuCallback? onContextMenu;
+  final ColumnContextMenuCallback? onContextMenu;
 
   @override
   Widget build(BuildContext context) {
@@ -53,7 +60,7 @@ class _ResizableTableHeaderCell extends StatelessWidget {
                       final box = context.findRenderObject()! as RenderBox;
                       onContextMenu!(
                         columnIndex,
-                        _ContextMenuRequest(
+                        TableContextMenuRequest(
                           globalPosition: box.localToGlobal(
                             box.size.center(Offset.zero),
                           ),
@@ -65,7 +72,7 @@ class _ResizableTableHeaderCell extends StatelessWidget {
                   ? null
                   : (details) => onContextMenu!(
                       columnIndex,
-                      _ContextMenuRequest(
+                      TableContextMenuRequest(
                         globalPosition: details.globalPosition,
                         touchOptimized: false,
                       ),
@@ -107,8 +114,8 @@ class _ResizableTableHeaderCell extends StatelessWidget {
   }
 }
 
-class _RightDragResizeRegion extends StatefulWidget {
-  const _RightDragResizeRegion({
+class RightDragResizeRegion extends StatefulWidget {
+  const RightDragResizeRegion({
     required this.onResizeStart,
     required this.onResize,
     required this.child,
@@ -116,16 +123,24 @@ class _RightDragResizeRegion extends StatefulWidget {
     super.key,
   });
 
+  static void registerContextMenu(
+    BuildContext context,
+    int pointer,
+    ValueChanged<Offset> onContextMenu,
+  ) => context
+      .findAncestorStateOfType<_RightDragResizeRegionState>()
+      ?._registerContextMenu(pointer, onContextMenu);
+
   final VoidCallback onResizeStart;
   final ValueChanged<Offset> onResize;
   final Widget child;
   final bool Function(Offset position)? canStartAt;
 
   @override
-  State<_RightDragResizeRegion> createState() => _RightDragResizeRegionState();
+  State<RightDragResizeRegion> createState() => _RightDragResizeRegionState();
 }
 
-class _RightDragResizeRegionState extends State<_RightDragResizeRegion> {
+class _RightDragResizeRegionState extends State<RightDragResizeRegion> {
   static const _dragThreshold = 5.0;
 
   int? _pointer;
@@ -214,8 +229,9 @@ class _RightDragResizeRegionState extends State<_RightDragResizeRegion> {
 ///
 /// It keeps horizontal overflow, header/body alignment and right-drag scaling
 /// in one place while leaving row construction and selection to each panel.
-class _ResizableTableViewport extends StatelessWidget {
-  const _ResizableTableViewport({
+class ResizableTableViewport extends StatelessWidget {
+  const ResizableTableViewport({
+    super.key,
     required this.layout,
     required this.contentWidth,
     required this.header,
@@ -265,7 +281,7 @@ class _ResizableTableViewport extends StatelessWidget {
                     decoration:
                         bodyDecoration ??
                         const BoxDecoration(color: TalColors.input),
-                    child: _RightDragResizeRegion(
+                    child: RightDragResizeRegion(
                       key: resizeRegionKey,
                       onResizeStart: layout.beginResize,
                       onResize: (delta) {
@@ -292,8 +308,8 @@ class _ResizableTableViewport extends StatelessWidget {
   }
 }
 
-class _LabeledField extends StatelessWidget {
-  const _LabeledField({required this.label, required this.child});
+class LabeledField extends StatelessWidget {
+  const LabeledField({super.key, required this.label, required this.child});
 
   final String label;
   final Widget child;

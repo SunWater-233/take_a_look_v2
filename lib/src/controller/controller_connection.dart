@@ -348,6 +348,7 @@ extension TakeALookControllerConnection on TakeALookController {
   void setRemoteConfig(Map<String, String> values) {
     if (connectionStatus != ConnectionStatus.disconnected) return;
     if (_dispatchCommand(ControllerCommand.setRemoteConfig, values)) return;
+    state.connection.advertisedCapabilities = null;
     remoteConfig.addAll(values);
     _emitState([signals.connection, signals.watches, signals.debug]);
   }

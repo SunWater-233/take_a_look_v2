@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
 from take_a_look_backend.models import SampleFrame, WatchedVariable, json_value
 from take_a_look_backend.backends.ember_transport import EmberError
 from take_a_look_backend.backends.target_backend import backend_capabilities, backend_rtt_binding
-from take_a_look_backend.protocol import EventName
+from take_a_look_backend.protocol import EventName, ProtocolError
 from take_a_look_backend.services.sampling_clock import advance_deadline, wait_until
+
+
+_LOG = logging.getLogger(__name__)
 
 
 class SamplingServiceMixin:
@@ -17,6 +21,7 @@ class SamplingServiceMixin:
         next_memory_at = next_rtt_at = next_monitor_at = last_emit_at = time.perf_counter()
         previous_periods = None
         monitor_revision = -1
+        last_sampling_error = None
         while not self._shutdown.is_set():
             if not self._controls_idle.is_set():
                 self._controls_idle.wait(0.05)
@@ -96,15 +101,23 @@ class SamplingServiceMixin:
                                 last_emit_at = now
                         if not self._pipeline_backpressure:
                             deadlines.append(last_emit_at + 0.006)
+                last_sampling_error = None
             except Exception as error:
+                message = error.message if isinstance(error, ProtocolError) else str(error)
+                signature = (type(error), message)
+                if signature != last_sampling_error:
+                    _LOG.exception("采样失败：%s", message)
+                    last_sampling_error = signature
                 with self._lock:
-                    self._stop_memory_sampling_locked()
-                    self._handle_remote_failure_locked(error)
+                    disconnected = self._handle_connection_failure_locked(error)
+                    if not disconnected:
+                        self._stop_memory_sampling_locked()
                     if isinstance(error, EmberError) and error.code == "client_overflow":
                         self._sampling_paused = True
                         self._emit(EventName.ERROR, {"code": error.code, "message": str(error)})
                         self._emit(EventName.STATE, {"samplingPaused": True})
-                self._emit(EventName.LOG, {"level": "error", "message": f"采样失败：{error}"})
+                if not disconnected:
+                    self._emit(EventName.LOG, {"level": "error", "message": f"采样失败：{message}"})
                 next_memory_at = time.perf_counter() + 0.25
                 deadlines = [next_memory_at]
             now = time.perf_counter()
@@ -215,7 +228,7 @@ class SamplingServiceMixin:
                 self._emit(EventName.LOG, {"level": "info", "message": f"RTT 已启动：{backend.transport_name}。"})
                 self._last_rtt_error = ""
             except Exception as error:
-                if self._handle_remote_failure_locked(error):
+                if self._handle_connection_failure_locked(error):
                     return []
                 text = str(error)
                 self._next_rtt_retry_at = now + 1.0

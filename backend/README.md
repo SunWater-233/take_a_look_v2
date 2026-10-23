@@ -26,6 +26,30 @@ codecs, register access and write/readback verification. The remote adapter does
 not inherit pyOCD connection, target-registry or flash-programming behavior;
 those remain in the local adapter. Adapter calls retain the service's existing
 serialization and ownership rules.
+Local pyOCD sessions guard error recovery against re-entry: if clearing a
+transfer fault also fails, the original transfer error is returned after probe
+locks are released. Failed AP/DP SELECT writes also release the lock acquired
+before the access, so a sampler fault cannot leave disconnect or other controls
+waiting on a lock owned by the sampler thread. Deferred scatter reads consume
+all issued callbacks on failure before reporting the original error; failed
+chunks never publish partial values. Failed reads include the requested address
+and byte count; the sampler logs a traceback for the first error in each
+consecutive failure streak. This does not change the configured SWD frequency
+or retry writes.
+The J-Link, ST-Link and CMSIS-DAP selections match the loaded pyOCD driver type
+rather than product-name text, so OEM names such as SAM-ICE remain selectable
+as J-Link. Automatic selection and serial-number filtering retain their existing
+behavior.
+Local sessions check probe presence once per second even when capture is paused
+or no variables are watched. J-Link uses its emulator connection status; other
+pyOCD probes are matched by their active unique ID. A read/RTT/status failure
+forces an immediate check, and explicit transport-disconnect errors retain
+their meaning through exception wrapping. A target memory fault or inconclusive
+presence query alone does not disconnect. Confirmed loss pauses sampling, stops
+RTT, closes the host probe handle without target resume/breakpoint accesses,
+preserves recordings and watches, and emits disconnected state plus one
+`probe_disconnected` notification. Cleanup errors do not prevent this transition;
+reinsertion requires an explicit connection request.
 `services/debug_session.py` owns debug information, requested/resolved
 breakpoints, step-over handling, registers and stopped locations. It has no
 worker, service reference or lock; the service keeps target operations under

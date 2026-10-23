@@ -306,6 +306,7 @@ String _backendErrorTitle(Map<String, dynamic> error) =>
     switch (error['code']) {
       'startup_failed' => '后端启动失败',
       'connect_failed' => 'pyOCD 连接失败',
+      'probe_disconnected' => '探针连接已中断',
       _ when error['operation'] == 'sourceTask' => '编译 / 下载失败',
       'file_not_found' ||
       'unsupported_symbol_file' ||

@@ -62,9 +62,8 @@ class TypedMemoryBackend:
         raise ProtocolError("download_unsupported", "当前连接不支持固件下载。")
 
     def read_symbol(self, symbol: SymbolInfo) -> object:
-        target = self._require_target()
         size = _access_size(symbol)
-        data = bytes(target.read_memory_block8(symbol.address, size))
+        data = self._read_block(symbol.address, size)
         _check_read_size(data, size)
         return decode_symbol_value(symbol, data)
 
@@ -95,9 +94,11 @@ class TypedMemoryBackend:
         return values_by_key
 
     def _read_blocks(self, plan: tuple[_ReadBlock, ...]):
-        target = self._require_target()
         for block in plan:
-            yield bytes(target.read_memory_block8(block.address, block.size))
+            yield self._read_block(block.address, block.size)
+
+    def _read_block(self, address: int, size: int) -> bytes:
+        return bytes(self._require_target().read_memory_block8(address, size))
 
     def write_symbol(self, symbol: SymbolInfo, value_text: str) -> object:
         if _is_readonly_symbol(symbol):

@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import io
+import errno
 import threading
 import struct
 import zipfile
+from collections import deque
 from dataclasses import dataclass
 from time import perf_counter
 from typing import Any
 
 from take_a_look_backend.protocol import ProtocolError
+from take_a_look_backend.backends.pyocd_compat import guard_dap_error_recovery
 from take_a_look_backend.backends.target_backend import capabilities_for_connection
 # Re-export the existing codec entry points for external callers.
 from take_a_look_backend.backends.typed_memory import (
@@ -37,6 +40,7 @@ class PyOcdMemoryBackend(TypedMemoryBackend):
         self.session: Any | None = None
         self._owns_target_registry = False
         self._pack_archive: zipfile.ZipFile | None = None
+        self._next_probe_check_at = 0.0
 
     @property
     def is_connected(self) -> bool:
@@ -67,8 +71,7 @@ class PyOcdMemoryBackend(TypedMemoryBackend):
         probes = ConnectHelper.get_all_connected_probes(blocking=False, unique_id=config.unique_id)
         timings["probe_scan_s"] = perf_counter() - probe_scan_started
         if config.probe_filter:
-            probe_filter = config.probe_filter.lower()
-            probes = [probe for probe in probes if probe_filter in probe.description.lower()]
+            probes = [probe for probe in probes if _matches_probe_filter(probe, config.probe_filter)]
         if not probes:
             timings["total_s"] = perf_counter() - total_started
             self.last_connect_timings = timings
@@ -80,6 +83,9 @@ class PyOcdMemoryBackend(TypedMemoryBackend):
         try:
             self._prepare_target(config)
             session = Session(probe, auto_open=False, options=options)
+            # Guard before open: discovery can encounter the same failed
+            # recovery as running-target memory sampling.
+            guard_dap_error_recovery(session.target)
             if config.pack_path is not None:
                 _normalise_pack_svd(session.target)
             session.open()
@@ -97,19 +103,70 @@ class PyOcdMemoryBackend(TypedMemoryBackend):
 
         self.session = session
         self.target = session.target
+        self._next_probe_check_at = 0.0
         timings["total_s"] = perf_counter() - total_started
         self.last_connect_timings = timings
 
     def disconnect(self) -> None:
+        self._close_session(probe_lost=False)
+
+    def disconnect_lost_probe(self) -> None:
+        """Release a missing probe without accessing or resuming its target."""
+        self._close_session(probe_lost=True)
+
+    def _close_session(self, *, probe_lost: bool) -> None:
         session = self.session
         self.session = None
         self.target = None
+        self._next_probe_check_at = 0.0
         self._clear_read_plans()
         try:
             if session is not None:
-                session.close()
+                if probe_lost:
+                    # Session.close() normally removes breakpoints and resumes
+                    # the MCU. A lost transport only needs its host handle closed.
+                    session._closed = True
+                    session.probe.close()
+                else:
+                    session.close()
         finally:
             self._release_target_registry()
+
+    def check_connection(self, *, error: Exception | None = None, force: bool = False) -> None:
+        """Check probe presence, independently of target/SWD accessibility."""
+        from pyocd.core.exceptions import ProbeDisconnected
+        from pyocd.probe.debug_probe import DebugProbe
+        from pyocd.probe.jlink_probe import JLinkProbe
+
+        if not self.is_connected:
+            return
+        if error is not None and _probe_disconnect_error(error):
+            raise ProbeDisconnected("本地调试探针连接已中断。") from error
+        now = perf_counter()
+        if not force and now < self._next_probe_check_at:
+            return
+        self._next_probe_check_at = now + 1.0
+        try:
+            probe = self.probe
+            if isinstance(probe, JLinkProbe):
+                connected = getattr(probe._link, "connected", None)
+                if not callable(connected):
+                    return
+                # target_connected() is false in pyOCD's low-level CoreSight
+                # mode even when the emulator USB connection is healthy.
+                present = bool(connected())
+            elif isinstance(probe, DebugProbe):
+                present = type(probe).get_probe_with_id(probe.unique_id) is not None
+            else:
+                return
+        except Exception as check_error:
+            if _probe_disconnect_error(check_error):
+                raise ProbeDisconnected("本地调试探针连接已中断。") from check_error
+            # An enumeration/driver query failure is inconclusive. Do not
+            # turn a target fault or an unsupported presence check into a loss.
+            return
+        if not present:
+            raise ProbeDisconnected("本地调试探针已拔出或连接已中断。")
 
     def _prepare_target(self, config: PyOcdConnectionConfig) -> None:
         from pyocd.target import TARGET, normalise_target_type_name
@@ -199,7 +256,17 @@ class PyOcdMemoryBackend(TypedMemoryBackend):
         finally:
             self._clear_read_plans()
 
+    def _read_block(self, address: int, size: int) -> bytes:
+        from pyocd.core.exceptions import Error
+
+        try:
+            return super()._read_block(address, size)
+        except Error as error:
+            raise _memory_read_error(address, size, error) from error
+
     def _read_blocks(self, plan):
+        from pyocd.core.exceptions import Error
+
         target = self._require_target()
         # A native memory interface may return deferred-looking callbacks after
         # already performing synchronous I/O. Keep its accelerated block reads.
@@ -213,14 +280,31 @@ class PyOcdMemoryBackend(TypedMemoryBackend):
             yield from super()._read_blocks(plan)
             return
         for start in range(0, len(plan), 32):
-            queued = []
-            for block in plan[start:start + 32]:
-                callbacks = [target.read_memory(address, transfer_size=32, now=False)
-                             for address in range(block.address, block.address + block.size, 4)]
-                queued.append(callbacks)
-            for callbacks in queued:
-                values = [callback() if callable(callback) else callback for callback in callbacks]
-                yield struct.pack(f"<{len(values)}I", *values)
+            queued = deque()
+            data = []
+            try:
+                for block in plan[start:start + 32]:
+                    callback = target.read_memory(block.address, transfer_size=32, now=False)
+                    queued.append((block, callback))
+                while queued:
+                    block, callback = queued.popleft()
+                    value = callback() if callable(callback) else callback
+                    data.append(struct.pack("<I", value))
+            except Error as error:
+                raise _memory_read_error(block.address, block.size, error) from error
+            finally:
+                # Deferred DP callbacks own probe locks until consumed. Drain
+                # every issued read even after a queue/resolve failure, keeping
+                # the original error and never retrying a hardware operation.
+                for _block, callback in queued:
+                    if callable(callback):
+                        try:
+                            callback()
+                        except Exception:
+                            pass
+            # Resolve the complete chunk before yielding so consumer/decoder
+            # failures cannot leave pending callbacks behind in this generator.
+            yield from data
 
     def set_breakpoint(self, address: int) -> bool:
         target = self._require_target()
@@ -247,6 +331,39 @@ class PyOcdMemoryBackend(TypedMemoryBackend):
             raise RuntimeError("pyOCD 后端尚未连接。")
         return self.target
 
+
+
+def _memory_read_error(address: int, size: int, error: Exception) -> ProtocolError:
+    return ProtocolError("memory_read_failed", f"读取内存失败（地址 0x{address:08X}，{size} 字节）：{error}")
+
+
+def _matches_probe_filter(probe: Any, probe_filter: str) -> bool:
+    from pyocd.probe.aggregator import PROBE_CLASSES
+
+    normalized = probe_filter.strip().casefold()
+    plugin_name = {"j-link": "jlink", "st-link": "stlink", "cmsis-dap": "cmsisdap"}.get(normalized)
+    if plugin_name is not None:
+        # OEM products such as SAM-ICE use the J-Link driver without putting
+        # "J-Link" in their description. Product names do not identify drivers.
+        probe_class = PROBE_CLASSES.get(plugin_name)
+        return probe_class is not None and isinstance(probe, probe_class)
+    return normalized in probe.description.casefold()
+
+
+def _probe_disconnect_error(error: Exception) -> bool:
+    from pyocd.core.exceptions import ProbeDisconnected
+
+    seen = set()
+    while error is not None and id(error) not in seen:
+        seen.add(id(error))
+        if isinstance(error, (ProbeDisconnected, ConnectionError)):
+            return True
+        if isinstance(error, OSError) and (
+                error.errno in {errno.ENODEV, errno.ENXIO}
+                or getattr(error, "winerror", None) in {6, 1167}):
+            return True
+        error = error.__cause__ or error.__context__
+    return False
 
 
 def _normalise_pack_svd(target: Any) -> None:

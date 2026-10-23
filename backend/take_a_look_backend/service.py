@@ -626,19 +626,27 @@ class BackendService(SamplingServiceMixin):
 
     def _poll_debug_state_locked(self) -> None:
         try:
+            if self._connection_kind == "local":
+                check = getattr(self._memory, "check_connection", None)
+                if callable(check):
+                    check()
             self._refresh_debug_state_locked(force=False)
         except Exception as error:
-            if self._handle_remote_failure_locked(error):
+            if self._handle_connection_failure_locked(error):
                 return
             # Sampling and a temporarily inaccessible target should recover on
             # their next poll without turning a transient status read into a
             # transport-level failure.
             return
 
-    def _handle_remote_failure_locked(self, error: Exception) -> bool:
+    def _handle_connection_failure_locked(self, error: Exception) -> bool:
+        if self._connection_status != "connected":
+            return False
+        if self._connection_kind == "local":
+            return self._handle_local_probe_failure_locked(error)
         fatal = isinstance(error, (ConnectionError, TimeoutError, OSError)) or (
             isinstance(error, EmberError) and error.code in {"unauthorized", "stale_session", "stale_memory", "not_attached"})
-        if self._connection_kind == "local" or not fatal:
+        if not fatal:
             return False
         self._stop_rtt_locked()
         self._memory.disconnect()
@@ -650,6 +658,50 @@ class BackendService(SamplingServiceMixin):
         self._debug.mark_breakpoints_pending()
         self._emit(EventName.LOG, {"level": "error", "message": f"远程连接已中断：{error}"})
         self._emit(EventName.STATE, self._runtime_state_locked())
+        return True
+
+    def _handle_local_probe_failure_locked(self, error: Exception) -> bool:
+        from pyocd.core.exceptions import ProbeDisconnected
+
+        check = getattr(self._memory, "check_connection", None)
+        if not callable(check):
+            return False
+        try:
+            check(error=error, force=True)
+        except ProbeDisconnected as disconnected:
+            reason = str(disconnected)
+        except Exception:
+            # Presence checks are advisory unless they confirm transport loss.
+            # A failed check must not escape the sampler's error handler.
+            return False
+        else:
+            return False
+
+        self._connection_status = "disconnected"
+        self._connection_started_at = None
+        self._sampling_paused = True
+        self._rtt_enabled = False
+        self._debug.execution_state = "unavailable"
+        self._debug.stopped_location = None
+        self._debug.registers = {}
+        self._debug.mark_breakpoints_pending()
+        self._last_rtt_error = ""
+        self._next_rtt_retry_at = 0.0
+        self._latest_rtt_values.clear()
+        disconnect = getattr(self._memory, "disconnect_lost_probe", self._memory.disconnect)
+        cleanup_errors = []
+        for cleanup in (lambda: self._flush_pending_samples_locked(wait=False),
+                        self._stop_memory_sampling_locked,
+                        self._normal_rtt.stop, self._plus_rtt.stop, disconnect):
+            try:
+                cleanup()
+            except Exception as cleanup_error:
+                cleanup_errors.append(str(cleanup_error))
+        message = "本地调试探针连接已中断，已停止采样；请重新连接探针。"
+        self._emit(EventName.LOG, {"level": "error", "message": message})
+        self._emit(EventName.STATE, self._runtime_state_locked())
+        self._emit(EventName.ERROR, {"code": "probe_disconnected", "message": message,
+                   "details": "；".join([reason, *cleanup_errors])})
         return True
 
     def _refresh_debug_state_locked(self, *, force: bool) -> None:
@@ -830,7 +882,7 @@ class BackendService(SamplingServiceMixin):
                 try:
                     self._publish_watch_values_locked(self._memory.read_symbols([watch.symbol]))
                 except Exception as error:
-                    self._handle_remote_failure_locked(error)
+                    self._handle_connection_failure_locked(error)
                     raise ProtocolError("read_failed", "变量读取失败。", str(error)) from error
             return {"values": [self._watch_value_json(watch)]}
 

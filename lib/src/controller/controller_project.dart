@@ -125,6 +125,8 @@ extension TakeALookControllerProject on TakeALookController {
       await _restoreProjectSettings(data);
     } finally {
       _restoringProject = false;
+      _lastMonitorEnabledKeys = null;
+      _scheduleWatchMonitorSync();
       if (!_disposed) signals.connection.emit();
     }
   }
@@ -197,11 +199,23 @@ extension TakeALookControllerProject on TakeALookController {
       }
       // Await the backend before applying the UI, so a delayed state echo cannot
       // replace the project's variables with the previous watch list.
+      final visibleMonitorKeys = <String>{
+        for (final keys in _watchMonitorScopes.values) ...keys,
+        for (final symbol in _symbols)
+          if (symbol.dataSource == 'rtt') symbol.key,
+      };
+      final unrestrictedMonitors =
+          !_watchMonitorVisibilityKnown ||
+          (data['rttEnabled'] == true && data['rttProtocol'] == 'plus');
       await sender(ControllerCommand.setWatches, {
         'watches': [
           for (final raw in data['watches'] as List)
             {
               ...Map<String, dynamic>.from(raw as Map),
+              'monitorEnabled':
+                  unrestrictedMonitors ||
+                  raw['pinned'] == true ||
+                  visibleMonitorKeys.contains(raw['key']),
               'color':
                   '#${(raw['color'] as int).toRadixString(16).padLeft(8, '0')}',
             },

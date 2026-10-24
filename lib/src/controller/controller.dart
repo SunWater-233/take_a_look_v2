@@ -135,6 +135,10 @@ class TakeALookController extends ChangeNotifier {
   Set<String> get compactExpandedWatches => _watchRegistry.expanded;
   String watchSearchQuery = '';
   final Map<String, Set<String>> _watchMonitorScopes = {};
+  bool _watchMonitorVisibilityKnown = false;
+  bool _watchMonitorSyncPending = false;
+  final Map<String, Set<String>?> _pendingRemoteMonitorScopes = {};
+  Set<String>? _lastMonitorEnabledKeys;
   ({String path, int line})? sourceLocationRequest;
   int _analysisDataRevision = 0;
   final Set<String> _visibleSourceViews = <String>{};
@@ -362,6 +366,7 @@ class TakeALookController extends ChangeNotifier {
     if (_restoringProject) return;
     final sender = backendCommand;
     if (sender == null) return;
+    _lastMonitorEnabledKeys = _monitorEnabledKeys();
     unawaited(
       sender(ControllerCommand.setWatches, {
         'watches': [

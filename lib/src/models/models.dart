@@ -143,7 +143,7 @@ class WatchItem {
   bool get samplingEnabled => readMode == WatchReadMode.capture;
   set samplingEnabled(bool value) =>
       readMode = value ? WatchReadMode.capture : WatchReadMode.monitor;
-  bool plotted = true;
+  bool plotted = false;
   bool pinned = false;
   double value = 0;
 

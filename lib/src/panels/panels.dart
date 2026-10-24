@@ -27,6 +27,7 @@ Widget buildWorkspacePanel(
   PanelChrome? chrome,
   bool sourcePreview = false,
   bool workbench = false,
+  bool visible = true,
   Widget? body,
   VoidCallback? onShowSource,
   VoidCallback? onShowSymbols,
@@ -45,6 +46,7 @@ Widget buildWorkspacePanel(
             controller,
             sourcePreview: sourcePreview,
             workbench: workbench,
+            visible: visible,
             onShowSource: onShowSource,
             onShowSymbols: onShowSymbols,
           ),
@@ -78,7 +80,7 @@ Widget buildWorkspacePanelBody(
               onShowSymbols: onShowSymbols,
               visible: visible,
             )
-          : WatchPanel(controller: controller),
+          : WatchPanel(controller: controller, visible: visible),
     WorkspacePanelId.connection => ConnectionPanel(controller: controller),
     WorkspacePanelId.plot => PlotPanel(controller: controller),
     WorkspacePanelId.analysis => LayoutBuilder(

@@ -72,6 +72,7 @@ enum ControllerCommand {
   invertWatchPlots,
   updateAnalysisSession,
   setWatches,
+  setMonitorVisibility,
   writeWatch;
 
   String get wireName => name;
@@ -104,6 +105,7 @@ enum BackendMethod {
   loadSymbols,
   setConfig,
   setWatches,
+  setMonitorVisibility,
   writeWatch,
   writeWatches,
   readWatch,
@@ -233,6 +235,11 @@ class BackendCommandMapper {
       case ControllerCommand.setWatches:
         return BackendCall(
           BackendMethod.setWatches,
+          Map<String, Object?>.from(arguments! as Map),
+        );
+      case ControllerCommand.setMonitorVisibility:
+        return BackendCall(
+          BackendMethod.setMonitorVisibility,
           Map<String, Object?>.from(arguments! as Map),
         );
       case ControllerCommand.writeWatch:

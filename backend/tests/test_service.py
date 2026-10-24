@@ -358,7 +358,7 @@ class BackendServiceTests(unittest.TestCase):
                     self.service.handle(RpcMethod.LOAD_SYMBOLS, {"path": str(path), "loadId": "slow"})
             self.assertEqual(caught.exception.code, "symbol_load_timeout")
             after = self.service.state_snapshot()
-            for key in ("symbols", "watches", "symbolFile", "debug"):
+            for key in ("symbols", "watches", "symbolFile", "sourceProject", "debug"):
                 self.assertEqual(after[key], before[key])
 
     def test_source_index_failure_remains_a_warning_and_load_completes(self) -> None:

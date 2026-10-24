@@ -238,7 +238,10 @@ Future<JsonObject> executeControllerCommand(
         );
       }
     case ControllerCommand.setWatches:
-      throw UnsupportedError('setWatches is an internal backend command');
+    case ControllerCommand.setMonitorVisibility:
+      throw UnsupportedError(
+        '${command.wireName} is an internal backend command',
+      );
   }
   return includeResultState ? controller.stateSnapshot() : <String, dynamic>{};
 }

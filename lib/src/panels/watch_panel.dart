@@ -20,6 +20,7 @@ import 'shared_controls.dart';
 part 'compact_watch_panel.dart';
 part 'watch_browser.dart';
 part 'watch_value_cell.dart';
+part 'watch_monitor_scope.dart';
 
 const _watchColumnLabels = <String>[
   '变量',
@@ -38,9 +39,10 @@ typedef _WatchRowContextMenuCallback =
     void Function(String key, TableContextMenuRequest request);
 
 class WatchPanel extends StatefulWidget {
-  const WatchPanel({super.key, required this.controller});
+  const WatchPanel({super.key, required this.controller, this.visible = true});
 
   final TakeALookController controller;
+  final bool visible;
 
   @override
   State<WatchPanel> createState() => _WatchPanelState();
@@ -575,112 +577,130 @@ class _WatchPanelState extends State<WatchPanel> {
         _normalizeSelection();
         final treeRoots = buildWatchTree(controller.watches);
         _applyPlotSelection(treeRoots);
-        return Padding(
-          padding: const EdgeInsets.all(10),
-          child: Column(
-            children: [
-              Expanded(
-                child: PanelKeyboardListener(
-                  focusNode: _tableFocus,
-                  onKeyEvent: _handleWatchShortcut,
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      return ResizableTableViewport(
-                        layout: _tableLayout,
-                        contentWidth: _tableWidth,
-                        horizontalController: _horizontalScrollController,
-                        contentKey: const ValueKey('watch-table-content'),
-                        resizeRegionKey: const ValueKey(
-                          'watch-table-resize-region',
-                        ),
-                        minimumRowHeight: 40,
-                        canStartResizeAt: _canStartTableResize,
-                        onLayoutChanged: () => setState(() {}),
-                        bodyDecoration: const BoxDecoration(
-                          color: TalColors.input,
-                          border: Border(
-                            left: BorderSide(color: TalColors.border),
-                            right: BorderSide(color: TalColors.border),
-                            bottom: BorderSide(color: TalColors.border),
+        final visible = <String>{};
+        void collectVisible(WatchTreeNode node) {
+          // Aggregate rows show a summary; their hidden members have no demand.
+          if (node.children.isEmpty) visible.add(node.watch.symbol.key);
+          if (_expandedWatchKeys.contains(node.watch.symbol.key)) {
+            for (final child in node.children) {
+              collectVisible(child);
+            }
+          }
+        }
+
+        for (final root in treeRoots) {
+          collectVisible(root);
+        }
+        return _WatchMonitorScope(
+          controller: controller,
+          keys: widget.visible ? visible : <String>{},
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Column(
+              children: [
+                Expanded(
+                  child: PanelKeyboardListener(
+                    focusNode: _tableFocus,
+                    onKeyEvent: _handleWatchShortcut,
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        return ResizableTableViewport(
+                          layout: _tableLayout,
+                          contentWidth: _tableWidth,
+                          horizontalController: _horizontalScrollController,
+                          contentKey: const ValueKey('watch-table-content'),
+                          resizeRegionKey: const ValueKey(
+                            'watch-table-resize-region',
                           ),
-                        ),
-                        header: _WatchTableHeader(
-                          columnWidths: _columnWidths,
-                          hiddenColumns: _hiddenColumns,
-                          selectedColumns: _selectedColumns,
-                          onResizeColumn: _resizeColumn,
-                          onSelectColumn: _selectColumn,
-                          onContextMenu: _showHeaderContextMenu,
-                        ),
-                        body: treeRoots.isEmpty
-                            ? const SizedBox.expand()
-                            : ReorderableListView.builder(
-                                scrollController: _verticalScrollController,
-                                buildDefaultDragHandles: false,
-                                proxyDecorator: (child, index, animation) {
-                                  final horizontalOffset =
-                                      _horizontalScrollController.hasClients
-                                      ? _horizontalScrollController.offset
-                                      : 0.0;
-                                  return ClipRect(
-                                    key: const ValueKey('watch-drag-proxy'),
-                                    clipper: _WatchDragProxyClipper(
-                                      left: horizontalOffset,
-                                      width: constraints.maxWidth,
-                                    ),
-                                    child: Material(
-                                      color: Colors.transparent,
-                                      child: child,
-                                    ),
-                                  );
-                                },
-                                itemCount: treeRoots.length,
-                                onReorderItem: (oldIndex, newIndex) =>
-                                    _reorderWatchRoot(
-                                      treeRoots,
-                                      oldIndex,
-                                      newIndex,
-                                    ),
-                                itemBuilder: (context, index) {
-                                  final node = treeRoots[index];
-                                  return ReorderableDelayedDragStartListener(
-                                    key: ValueKey<String>(
-                                      'watch-reorder-${node.watch.symbol.key}',
-                                    ),
-                                    index: index,
-                                    child: _buildWatchTreeBranch(
-                                      node,
-                                      depth: 0,
-                                    ),
-                                  );
-                                },
-                              ),
-                      );
-                    },
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  const Expanded(
-                    child: Text(
-                      '展开结构体或数组查看成员；读取模式控制采集，眼睛控制曲线显示。监视频率可按变量覆盖默认值。',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: talMuted,
+                          minimumRowHeight: 40,
+                          canStartResizeAt: _canStartTableResize,
+                          onLayoutChanged: () => setState(() {}),
+                          bodyDecoration: const BoxDecoration(
+                            color: TalColors.input,
+                            border: Border(
+                              left: BorderSide(color: TalColors.border),
+                              right: BorderSide(color: TalColors.border),
+                              bottom: BorderSide(color: TalColors.border),
+                            ),
+                          ),
+                          header: _WatchTableHeader(
+                            columnWidths: _columnWidths,
+                            hiddenColumns: _hiddenColumns,
+                            selectedColumns: _selectedColumns,
+                            onResizeColumn: _resizeColumn,
+                            onSelectColumn: _selectColumn,
+                            onContextMenu: _showHeaderContextMenu,
+                          ),
+                          body: treeRoots.isEmpty
+                              ? const SizedBox.expand()
+                              : ReorderableListView.builder(
+                                  scrollController: _verticalScrollController,
+                                  buildDefaultDragHandles: false,
+                                  proxyDecorator: (child, index, animation) {
+                                    final horizontalOffset =
+                                        _horizontalScrollController.hasClients
+                                        ? _horizontalScrollController.offset
+                                        : 0.0;
+                                    return ClipRect(
+                                      key: const ValueKey('watch-drag-proxy'),
+                                      clipper: _WatchDragProxyClipper(
+                                        left: horizontalOffset,
+                                        width: constraints.maxWidth,
+                                      ),
+                                      child: Material(
+                                        color: Colors.transparent,
+                                        child: child,
+                                      ),
+                                    );
+                                  },
+                                  itemCount: treeRoots.length,
+                                  onReorderItem: (oldIndex, newIndex) =>
+                                      _reorderWatchRoot(
+                                        treeRoots,
+                                        oldIndex,
+                                        newIndex,
+                                      ),
+                                  itemBuilder: (context, index) {
+                                    final node = treeRoots[index];
+                                    return ReorderableDelayedDragStartListener(
+                                      key: ValueKey<String>(
+                                        'watch-reorder-${node.watch.symbol.key}',
+                                      ),
+                                      index: index,
+                                      child: _buildWatchTreeBranch(
+                                        node,
+                                        depth: 0,
+                                      ),
+                                    );
+                                  },
+                                ),
+                        );
+                      },
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  TalButton(
-                    onPressed: controller.watches.isEmpty
-                        ? null
-                        : controller.clearWatches,
-                    child: const Text('清空监视'),
-                  ),
-                ],
-              ),
-            ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        '展开查看成员；折叠后仅监视变量暂停刷新，已固定变量持续刷新。采集不受折叠影响。',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: talMuted,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    TalButton(
+                      onPressed: controller.watches.isEmpty
+                          ? null
+                          : controller.clearWatches,
+                      child: const Text('清空监视'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         );
       },

@@ -44,6 +44,7 @@ void main() {
       demoSymbols.take(watchCount).map((symbol) => symbol.key),
     );
     controller.addSelectedToWatch();
+    controller.setAllWatchesPlotted(true);
     addTearDown(controller.dispose);
     await tester.pumpWidget(
       MaterialApp(

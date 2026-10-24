@@ -54,7 +54,7 @@ class SymbolInfo:
 class WatchedVariable:
     symbol: SymbolInfo
     color: str
-    plot_enabled: bool = True
+    plot_enabled: bool = False
     sampling_enabled: bool = True
     value: object = ""
     read_mode: str | None = None

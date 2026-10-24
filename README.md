@@ -44,15 +44,17 @@ left of the current-value header to resize the column; displayed decimal places
 adapt to the available width. Leaving the editor retains its draft without
 writing. Wide panels put details beside the tree.
 Structures initially expand one level, large arrays expand in ranges of 32,
-and clearing a search restores the previous expansion state. The **正在绘制**
-section lists plotted variables even when their tree branches are collapsed or
-filtered by search. **已固定**, **正在绘制**, and **成员** can each be collapsed
+and clearing a search restores the previous expansion state. The **正在采集**
+section lists all variables enrolled in capture, including those with hidden
+curves, even when their tree branches are collapsed or filtered by search.
+**已固定**, **正在采集**, and **成员** can each be collapsed
 by clicking their headers; capture and pinned monitoring continue while hidden.
-**加入采集** controls recording; captured variables have a
-separate visibility button in the **绘制** column and the details area. Hiding a
-curve keeps capture running. Collapsed monitors
-stop automatic reads unless pinned or displayed in another inspector; capture
-continues independently. Pins are saved in projects. Sidebar changes preserve panel state,
+**加入采集** starts recording without automatically plotting a curve. Captured
+variables have a separate visibility button in the **绘制** column and the details
+area; use it to show or hide each curve independently. Hiding a curve keeps capture
+running. Collapsed monitors stop automatic reads unless pinned or displayed in
+another inspector; capture continues independently. Pins are saved in projects.
+Sidebar changes preserve panel state,
 including input drafts and source-view position, and hidden source panels do
 not consume window shortcuts or mark files as read. Detached windows, the
 independent log/build/register panels, UI scaling and project settings remain
@@ -79,6 +81,14 @@ New variables added from the resource library or source view start in **仅监�
 - **仅监视**: refresh the current value at 10 Hz by default, without adding history.
 - **采集**: use the global capture rate and append samples to the recording.
 - **手动读取**: read only on explicit refresh or after a write.
+
+Memory variables in **仅监视** refresh only while displayed in a watch view or
+member details. Folding structures, arrays, sections or the whole panel suspends
+hidden members; **已固定** members keep refreshing even with all watch panels
+hidden. Open views (including detached windows and the full table) share their
+read demand. Reopening a member schedules its next read immediately. Folding
+does not change capture, manual reads or write/readback, and does not reduce RTT
+producer traffic.
 
 The full variable table retains metadata, colors, ordering and per-variable
 monitor-rate overrides (0.5–10 Hz). Pausing capture leaves monitoring active;

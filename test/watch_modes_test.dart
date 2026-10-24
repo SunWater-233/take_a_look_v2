@@ -21,6 +21,86 @@ void main() {
   }
 
   test(
+    'joining capture never enables plotting through any enrollment command',
+    () {
+      final c = fixture();
+      final watch = c.watches.single;
+      final key = watch.symbol.key;
+      c.setWatchReadMode(key, WatchReadMode.capture);
+      expect(watch.samplingEnabled, isTrue);
+      expect(watch.plotted, isFalse);
+      c.toggleWatchPlot(key, true);
+      expect(watch.plotted, isTrue);
+      expect(watch.samplingEnabled, isTrue);
+      c.toggleWatchPlot(key, false);
+      expect(watch.samplingEnabled, isTrue);
+      c.toggleWatchSampling(key, false);
+      c.toggleWatchSampling(key, true);
+      expect(watch.samplingEnabled, isTrue);
+      expect(watch.plotted, isFalse);
+      c.selectSymbols([demoSymbols[1].key]);
+      c.addSelectedToWatch(mode: WatchReadMode.capture);
+      expect(c.watches.last.samplingEnabled, isTrue);
+      expect(c.watches.last.plotted, isFalse);
+    },
+  );
+
+  test(
+    'hidden captures keep every sample when their curves are shown again',
+    () {
+      final c = fixture();
+      final watch = c.watches.single;
+      final key = watch.symbol.key;
+      c.setWatchReadMode(key, WatchReadMode.capture);
+      for (var i = 1; i <= 3; i++) {
+        if (i == 2) c.toggleWatchPlot(key, true);
+        if (i == 3) c.toggleWatchPlot(key, false);
+        c.applyBackendSamples({
+          'captureOnly': true,
+          'frames': [
+            {
+              'elapsed': i.toDouble(),
+              'values': {key: i * 10.0},
+            },
+          ],
+        });
+      }
+      c.toggleWatchPlot(key, true);
+      expect(watch.readMode, WatchReadMode.capture);
+      expect(watch.samples.map((point) => point.dy), [10, 20, 30]);
+      expect(watch.totalSampleCount, 3);
+    },
+  );
+
+  test(
+    'detached windows keep capture active while toggling curve visibility',
+    () async {
+      final c = fixture();
+      final key = c.watches.single.symbol.key;
+      late final TakeALookController detached;
+      detached = TakeALookController(
+        remoteCommand: (command, args) async {
+          detached.applySnapshot(await c.handleCommand(command, args));
+        },
+      )..applySnapshot(c.stateSnapshot());
+      addTearDown(detached.dispose);
+      detached.setWatchReadMode(key, WatchReadMode.capture);
+      await Future<void>.delayed(Duration.zero);
+      expect(detached.watches.single.samplingEnabled, isTrue);
+      expect(detached.watches.single.plotted, isFalse);
+      detached.toggleWatchPlot(key, true);
+      await Future<void>.delayed(Duration.zero);
+      expect(c.watches.single.plotted, isTrue);
+      detached.toggleWatchPlot(key, false);
+      await Future<void>.delayed(Duration.zero);
+      expect(c.watches.single.samplingEnabled, isTrue);
+      expect(detached.watches.single.samplingEnabled, isTrue);
+      expect(c.watches.single.plotted, isFalse);
+      expect(detached.watches.single.plotted, isFalse);
+    },
+  );
+
+  test(
     'latest-only updates preserve history and mode changes never backfill',
     () {
       final controller = fixture();

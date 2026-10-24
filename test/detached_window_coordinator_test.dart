@@ -57,6 +57,11 @@ void main() {
     });
 
     final controller = TakeALookController();
+    controller.loadDemoSymbols();
+    final watchedKey = demoSymbols.first.key;
+    controller.selectSymbols([watchedKey]);
+    controller.addSelectedToWatch();
+    controller.toggleWatchSampling(watchedKey, false);
     final windowSync = MainWindowSync(controller);
     final coordinator = DetachedWindowCoordinator(windowSync);
     addTearDown(() async {
@@ -76,7 +81,15 @@ void main() {
     expect(configurations.single.panel, WorkspacePanelId.sampling);
     expect(invokedMethods, contains(configureDetachedPanelMethod));
 
+    windowSync.setWatchMonitorScopeForWindow(firstWindow.windowId, 'watch', [
+      watchedKey,
+    ]);
+    expect(controller.isWatchMonitorActive(controller.watches.single), isTrue);
     windowSync.reportDetachedWindowReleased('pooled_window');
+    windowSync.setWatchMonitorScopeForWindow(firstWindow.windowId, 'watch', [
+      watchedKey,
+    ]);
+    expect(controller.isWatchMonitorActive(controller.watches.single), isFalse);
     expect(await coordinator.reconcile(), [WorkspacePanelId.sampling]);
 
     final reusedWindow = await coordinator.acquire(
@@ -88,6 +101,10 @@ void main() {
     expect(reusedWindow.windowId, firstWindow.windowId);
     expect(configurations.last.panel, WorkspacePanelId.plot);
     expect(coordinator.windows[WorkspacePanelId.plot], reusedWindow);
+    windowSync.setWatchMonitorScopeForWindow(reusedWindow.windowId, 'watch', [
+      watchedKey,
+    ]);
+    expect(controller.isWatchMonitorActive(controller.watches.single), isTrue);
   });
 
   test('panels can move between detached windows', () async {

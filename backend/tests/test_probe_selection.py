@@ -28,6 +28,12 @@ def named_probe(driver, description, serial="29734569"):
 
 @pytest.fixture
 def connection(monkeypatch):
+    # Mock probes must not depend on optional native libraries on the build host.
+    monkeypatch.setattr("pyocd.probe.aggregator.PROBE_CLASSES", {
+        "cmsisdap": CMSISDAPProbe,
+        "jlink": JLinkProbe,
+        "stlink": StlinkProbe,
+    })
     enumerate_probes = Mock(return_value=[])
     session = Mock(target=SimpleNamespace(dp=None))
     create_session = Mock(return_value=session)

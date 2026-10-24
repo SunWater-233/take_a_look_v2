@@ -19,6 +19,7 @@ void main() {
     )..loadDemoSymbols();
     controller.selectSymbols(demoSymbols.take(3).map((symbol) => symbol.key));
     controller.addSelectedToWatch();
+    controller.setAllWatchesPlotted(true);
     addTearDown(controller.dispose);
     return controller;
   }

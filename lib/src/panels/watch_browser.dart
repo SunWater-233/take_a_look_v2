@@ -3,12 +3,12 @@ part of 'watch_panel.dart';
 enum _WatchBrowserSection {
   members,
   pinned,
-  plotted;
+  capture;
 
   String get rowPrefix => switch (this) {
     members => 'compact',
     pinned => 'pinned',
-    plotted => 'plotted',
+    capture => 'capture',
   };
 
   String get actionPrefix => this == members ? '' : '$name-';
@@ -56,8 +56,6 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
   _WatchBrowserSection _selectionAnchorSection = _WatchBrowserSection.members;
   bool _selectionInitialized = false;
   Set<String> get _rangeExpansions => controller.compactExpandedWatches;
-  late final String _scope =
-      'watch-${DateTime.now().microsecondsSinceEpoch}-${identityHashCode(this)}';
   int _plotRevision = -1;
   double? _valueColumnWidth;
   TakeALookController get controller => widget.controller;
@@ -72,7 +70,6 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
   void didUpdateWidget(covariant CompactWatchPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != controller) {
-      oldWidget.controller.setWatchMonitorScope(_scope, null);
       _search.text = controller.watchSearchQuery;
       _plotRevision = -1;
       _selectedKeys.clear();
@@ -84,7 +81,6 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
 
   @override
   void dispose() {
-    controller.setWatchMonitorScope(_scope, null);
     _panelFocus.dispose();
     _search.dispose();
     _scroll.dispose();
@@ -894,7 +890,13 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
     ]),
     builder: (_, _) => LayoutBuilder(
       builder: (context, constraints) {
-        if (constraints.maxHeight < 48) return const SizedBox.shrink();
+        if (constraints.maxHeight < 48) {
+          return _WatchMonitorScope(
+            controller: controller,
+            keys: const {},
+            child: const SizedBox.shrink(),
+          );
+        }
         final roots = buildWatchTree(controller.watches);
         _syncSelection(roots);
         final rows = _rows(roots);
@@ -915,19 +917,17 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
         final pinned = controller.watches
             .where((w) => w.pinned && allNodes[w.symbol.key]!.children.isEmpty)
             .toList();
-        final plotted = controller.watches
+        final captured = controller.watches
             .where(
               (w) =>
-                  w.samplingEnabled &&
-                  w.plotted &&
-                  allNodes[w.symbol.key]!.children.isEmpty,
+                  w.samplingEnabled && allNodes[w.symbol.key]!.children.isEmpty,
             )
             .toList();
         final pinnedExpanded = !_collapsedSections.contains(
           _WatchBrowserSection.pinned,
         );
-        final plottedExpanded = !_collapsedSections.contains(
-          _WatchBrowserSection.plotted,
+        final captureExpanded = !_collapsedSections.contains(
+          _WatchBrowserSection.capture,
         );
         final membersExpanded = !_collapsedSections.contains(
           _WatchBrowserSection.members,
@@ -935,32 +935,24 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
         _selectionOrder = [
           if (pinnedExpanded)
             for (final w in pinned) (w.symbol.key, _WatchBrowserSection.pinned),
-          if (plottedExpanded)
-            for (final w in plotted)
-              (w.symbol.key, _WatchBrowserSection.plotted),
+          if (captureExpanded)
+            for (final w in captured)
+              (w.symbol.key, _WatchBrowserSection.capture),
           if (membersExpanded)
             for (final row in rows)
               if (row.node != null) (row.key, _WatchBrowserSection.members),
         ];
+        final wide = constraints.maxWidth >= 760;
+        final detailsVisible = wide || constraints.maxHeight > 260;
         final visible = <String>{
           if (membersExpanded)
             for (final row in rows)
               if (row.node != null && !row.expandable) row.key,
-          for (final w in pinned) w.symbol.key,
-          if (selected != null &&
+          if (detailsVisible &&
+              selected != null &&
               allNodes[selected.symbol.key]!.children.isEmpty)
             selected.symbol.key,
         };
-        final owner = controller;
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted && owner == controller) {
-            owner.setWatchMonitorScope(
-              _scope,
-              widget.visible ? visible : <String>{},
-            );
-          }
-        });
-        final wide = constraints.maxWidth >= 760;
         final listWidth = constraints.maxWidth - (wide ? 310 : 0);
         final ui = TalUiTheme.of(context);
         final showPin = !ui.touchOptimized || listWidth >= 280;
@@ -1011,16 +1003,16 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
                 const Divider(height: 12, color: TalColors.borderSoft),
               ],
               _sectionHeader(
-                _WatchBrowserSection.plotted,
-                '正在绘制',
-                icon: Icons.show_chart,
-                count: plotted.length,
+                _WatchBrowserSection.capture,
+                '正在采集',
+                icon: Icons.sensors,
+                count: captured.length,
               ),
-              if (plottedExpanded) ...[
-                if (plotted.isEmpty)
+              if (captureExpanded) ...[
+                if (captured.isEmpty)
                   const Padding(
                     padding: EdgeInsets.fromLTRB(12, 4, 12, 8),
-                    child: Text('暂无正在绘制的变量', style: workbenchMuted),
+                    child: Text('暂无正在采集的变量', style: workbenchMuted),
                   )
                 else
                   ConstrainedBox(
@@ -1028,18 +1020,18 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
                       maxHeight: TalUiTheme.of(context).targetExtent(32) * 3,
                     ),
                     child: ListView(
-                      key: const ValueKey('watch-plotted-list'),
+                      key: const ValueKey('watch-capture-list'),
                       primary: false,
                       shrinkWrap: true,
                       children: [
-                        for (final w in plotted)
+                        for (final w in captured)
                           _row(
                             _WatchBrowserEntry(
                               key: w.symbol.key,
                               label: w.symbol.name,
                               depth: 0,
                               node: allNodes[w.symbol.key],
-                              section: _WatchBrowserSection.plotted,
+                              section: _WatchBrowserSection.capture,
                             ),
                             wide,
                             valueWidth,
@@ -1144,72 +1136,77 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
                 watch: selected,
                 node: allNodes[selected.symbol.key]!,
               );
-        return PanelKeyboardListener(
-          focusNode: _panelFocus,
-          onKeyEvent: _shortcut,
-          child: Material(
-            color: TalColors.surface,
-            child: Column(
-              children: [
-                if (constraints.maxHeight > 130) _toolbar(),
-                if (constraints.maxHeight > 210)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(10, 2, 10, 8),
-                    child: TextField(
-                      key: const ValueKey('watch-member-search'),
-                      controller: _search,
-                      style: workbenchBody,
-                      decoration: InputDecoration(
-                        isDense: true,
-                        prefixIcon: const Icon(Icons.search, size: 17),
-                        hintText: '搜索成员名称或路径，如 current.q',
-                        suffixIcon: _search.text.isEmpty
-                            ? null
-                            : TalIconButton(
-                                tooltip: '清空搜索',
-                                onPressed: () => setState(() {
-                                  _search.clear();
-                                  controller.watchSearchQuery = '';
-                                }),
-                                icon: const Icon(Icons.close, size: 16),
-                              ),
-                      ),
-                      onChanged: (value) =>
-                          setState(() => controller.watchSearchQuery = value),
-                    ),
-                  ),
-                Expanded(
-                  child: wide
-                      ? Row(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Expanded(child: list),
-                            SizedBox(
-                              width: 310,
-                              child: ColoredBox(
-                                color: TalColors.background,
-                                child: SingleChildScrollView(child: details),
-                              ),
-                            ),
-                          ],
-                        )
-                      : Column(
-                          children: [
-                            Expanded(child: list),
-                            if (selected != null && constraints.maxHeight > 260)
-                              ConstrainedBox(
-                                constraints: BoxConstraints(
-                                  maxHeight: math.min(
-                                    300,
-                                    constraints.maxHeight * .46,
-                                  ),
+        return _WatchMonitorScope(
+          controller: controller,
+          keys: widget.visible ? visible : <String>{},
+          child: PanelKeyboardListener(
+            focusNode: _panelFocus,
+            onKeyEvent: _shortcut,
+            child: Material(
+              color: TalColors.surface,
+              child: Column(
+                children: [
+                  if (constraints.maxHeight > 130) _toolbar(),
+                  if (constraints.maxHeight > 210)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(10, 2, 10, 8),
+                      child: TextField(
+                        key: const ValueKey('watch-member-search'),
+                        controller: _search,
+                        style: workbenchBody,
+                        decoration: InputDecoration(
+                          isDense: true,
+                          prefixIcon: const Icon(Icons.search, size: 17),
+                          hintText: '搜索成员名称或路径，如 current.q',
+                          suffixIcon: _search.text.isEmpty
+                              ? null
+                              : TalIconButton(
+                                  tooltip: '清空搜索',
+                                  onPressed: () => setState(() {
+                                    _search.clear();
+                                    controller.watchSearchQuery = '';
+                                  }),
+                                  icon: const Icon(Icons.close, size: 16),
                                 ),
-                                child: SingleChildScrollView(child: details),
-                              ),
-                          ],
                         ),
-                ),
-              ],
+                        onChanged: (value) =>
+                            setState(() => controller.watchSearchQuery = value),
+                      ),
+                    ),
+                  Expanded(
+                    child: wide
+                        ? Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Expanded(child: list),
+                              SizedBox(
+                                width: 310,
+                                child: ColoredBox(
+                                  color: TalColors.background,
+                                  child: SingleChildScrollView(child: details),
+                                ),
+                              ),
+                            ],
+                          )
+                        : Column(
+                            children: [
+                              Expanded(child: list),
+                              if (selected != null &&
+                                  constraints.maxHeight > 260)
+                                ConstrainedBox(
+                                  constraints: BoxConstraints(
+                                    maxHeight: math.min(
+                                      300,
+                                      constraints.maxHeight * .46,
+                                    ),
+                                  ),
+                                  child: SingleChildScrollView(child: details),
+                                ),
+                            ],
+                          ),
+                  ),
+                ],
+              ),
             ),
           ),
         );

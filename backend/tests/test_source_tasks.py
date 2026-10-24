@@ -266,7 +266,9 @@ def test_download_uses_loaded_elf_without_source_settings_and_prefers_explicit_f
         assert service._source_tasks.snapshot()['status'] == 'succeeded', service._source_tasks.snapshot()
         assert downloads == [b'configured firmware' if configured else b'loaded firmware']
         assert service._symbol_file == str(explicit if configured else loaded)
-        assert service._source_projects.current == original_config
+        assert service._source_projects.current == {
+            **original_config, 'firmwarePath': str(explicit if configured else loaded),
+        }
     finally:
         service.close()
 

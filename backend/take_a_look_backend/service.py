@@ -151,6 +151,7 @@ class BackendService(SamplingServiceMixin):
             RpcMethod.DISCONNECT, RpcMethod.TOGGLE_CONNECTION, RpcMethod.SET_WATCHES,
             RpcMethod.SET_CONFIG, RpcMethod.SET_RTT, RpcMethod.CLEAR_SAMPLES,
             RpcMethod.SELECT_TARGET,
+            RpcMethod.SET_MONITOR_VISIBILITY,
         }
         if not priority:
             return self._handle(method, params)
@@ -304,6 +305,8 @@ class BackendService(SamplingServiceMixin):
             return self._set_config(params)
         if method is RpcMethod.SET_WATCHES:
             return self._set_watches(params)
+        if method is RpcMethod.SET_MONITOR_VISIBILITY:
+            return self._set_monitor_visibility(params)
         if method is RpcMethod.WRITE_WATCH:
             return self._write_watch(params)
         if method is RpcMethod.WRITE_WATCHES:
@@ -500,6 +503,7 @@ class BackendService(SamplingServiceMixin):
                 self._emit(EventName.LOG, {"level": "warning", "message": f"无法读取源码行调试信息：{error}"})
         with self._lock:
             report_progress("ui")
+            self._source_projects.sync_firmware_path(display_path or path)
             self._debug.remove_breakpoints(self._memory, connected=self._connection_status == "connected")
             self._symbols = {symbol.key: symbol for symbol in symbols}
             self._symbol_file = str(display_path or path)
@@ -758,21 +762,23 @@ class BackendService(SamplingServiceMixin):
                 if not isinstance(read_mode, str) or read_mode not in {"capture", "monitor", "manual"}:
                     raise ProtocolError("invalid_request", "readMode must be capture, monitor or manual.")
                 monitor_rate = raw.get("monitorRateHz", old.monitor_rate_hz if old else None)
-                if not isinstance(raw.get("monitorEnabled", True), bool):
+                monitor_enabled = raw.get("monitorEnabled", True)
+                if not isinstance(monitor_enabled, bool):
                     raise ProtocolError("invalid_request", "monitorEnabled must be a boolean.")
                 if monitor_rate is not None:
                     monitor_rate = _monitor_frequency(monitor_rate)
                 new_watches[key] = WatchedVariable(
                     symbol=symbol,
                     color=_optional_string(raw, "color") or (old.color if old else "#5EEAD4"),
-                    plot_enabled=read_mode == "capture" and bool(raw.get("plotted", old.plot_enabled if old else True)),
+                    plot_enabled=read_mode == "capture" and bool(raw.get("plotted", old.plot_enabled if old else False)),
                     sampling_enabled=read_mode == "capture",
                     value=old.value if old else "",
                     read_mode=str(read_mode),
                     monitor_rate_hz=monitor_rate,
-                    monitor_enabled=raw.get("monitorEnabled", True) is not False,
+                    monitor_enabled=monitor_enabled,
                     updated_at_ms=old.updated_at_ms if old else None,
                     next_monitor_at=(old.next_monitor_at if old and old.mode == read_mode
+                                     and (old.monitor_enabled or not monitor_enabled)
                                      and old.monitor_rate_hz == monitor_rate else 0.0),
                 )
             # Seal the old acquisition policy without waiting for disk I/O.
@@ -790,6 +796,32 @@ class BackendService(SamplingServiceMixin):
         self._emit(EventName.STATE, state)
         self._wake.set()
         return {"state": state}
+
+    def _set_monitor_visibility(self, params: Mapping[str, object]) -> dict[str, object]:
+        keys = params.get("enabledKeys")
+        if not isinstance(keys, list) or any(not isinstance(key, str) or not key for key in keys):
+            raise ProtocolError("invalid_request", "enabledKeys must be an array of symbol keys.")
+        enabled = set(keys)
+        with self._lock:
+            changed = False
+            for key, watch in self._watches.items():
+                # RTT producers keep their existing lifecycle and presentation rate.
+                if watch.mode != "monitor":
+                    continue
+                active = (watch.symbol.is_rtt or (self._rtt_enabled and self._rtt_protocol == "plus")
+                          or key in enabled)
+                if watch.monitor_enabled == active:
+                    continue
+                watch.monitor_enabled = active
+                if active:
+                    watch.next_monitor_at = 0.0
+                changed = True
+            if changed:
+                self._monitor_schedule_revision += 1
+        if changed:
+            self._wake.set()
+        # Visibility never replaces watches, flushes capture, or rebuilds streams.
+        return {}
 
     def _write_watch(self, params: Mapping[str, object]) -> dict[str, object]:
         key = _required_string(params, "key")

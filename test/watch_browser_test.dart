@@ -81,6 +81,7 @@ void main() {
         addTearDown(() => tester.binding.setSurfaceSize(null));
         c.setWatchPinned('motor.speed', true);
         c.setWatchReadMode('motor.current.q', WatchReadMode.capture);
+        c.toggleWatchPlot('motor.current.q', true);
         c.compactExpandedWatches.add('motor.current');
         c.watchInputDrafts['motor.current.q'] = '4.5';
         await mount(
@@ -91,19 +92,19 @@ void main() {
         );
         final expansion = Set<String>.of(c.compactExpandedWatches);
         const pinned = ValueKey('pinned-watch-motor.speed');
-        const plotted = ValueKey('plotted-watch-motor.current.q');
+        const capturedRow = ValueKey('capture-watch-motor.current.q');
         const member = ValueKey('compact-watch-motor.current.q');
-        for (final key in [pinned, plotted, member]) {
+        for (final key in [pinned, capturedRow, member]) {
           expect(find.byKey(key), findsOneWidget);
         }
         await tester.tap(find.byKey(const ValueKey('watch-pinned-section')));
         await tester.pump();
         expect(find.byKey(pinned), findsNothing);
-        expect(find.byKey(plotted), findsOneWidget);
+        expect(find.byKey(capturedRow), findsOneWidget);
         expect(find.byKey(member), findsOneWidget);
-        await tester.tap(find.byKey(const ValueKey('watch-plotted-section')));
+        await tester.tap(find.byKey(const ValueKey('watch-capture-section')));
         await tester.pump();
-        expect(find.byKey(plotted), findsNothing);
+        expect(find.byKey(capturedRow), findsNothing);
         expect(find.byKey(member), findsOneWidget);
         await tester.tap(find.byKey(const ValueKey('watch-members-section')));
         await tester.pump();
@@ -135,18 +136,18 @@ void main() {
           'current.q',
         );
         await tester.pump();
-        for (final key in [pinned, plotted, member]) {
+        for (final key in [pinned, capturedRow, member]) {
           expect(find.byKey(key), findsNothing);
         }
         await tester.enterText(
           find.byKey(const ValueKey('watch-member-search')),
           '',
         );
-        for (final section in ['pinned', 'plotted', 'members']) {
+        for (final section in ['pinned', 'capture', 'members']) {
           await tester.tap(find.byKey(ValueKey('watch-$section-section')));
           await tester.pump();
         }
-        for (final key in [pinned, plotted, member]) {
+        for (final key in [pinned, capturedRow, member]) {
           expect(find.byKey(key), findsOneWidget);
         }
         expect(c.compactExpandedWatches, expansion);
@@ -187,9 +188,9 @@ void main() {
       await tester.pump();
       const capture = ValueKey('compact-watch-capture-motor.speed');
       const plot = ValueKey('compact-watch-plot-motor.speed');
-      const plottedRow = ValueKey('plotted-watch-motor.speed');
+      const capturedRow = ValueKey('capture-watch-motor.speed');
       expect(find.byKey(plot), findsNothing);
-      expect(find.byKey(plottedRow), findsNothing);
+      expect(find.byKey(capturedRow), findsNothing);
       expect(find.text('加入曲线'), findsNothing);
       expect(
         find.descendant(
@@ -202,12 +203,26 @@ void main() {
       await tester.pump();
       expect(watch.readMode, WatchReadMode.capture);
       expect(find.byKey(plot), findsOneWidget);
-      expect(find.byKey(plottedRow), findsOneWidget);
+      expect(watch.plotted, isFalse);
+      expect(find.byKey(capturedRow), findsOneWidget);
+      expect(find.text('正在采集'), findsOneWidget);
+      await tester.tap(find.byKey(plot));
+      await tester.pump();
+      expect(watch.readMode, WatchReadMode.capture);
+      expect(watch.plotted, isTrue);
+      expect(find.byKey(capturedRow), findsOneWidget);
       await tester.tap(find.byKey(plot));
       await tester.pump();
       expect(watch.plotted, isFalse);
       expect(watch.readMode, WatchReadMode.capture);
-      expect(find.byKey(plottedRow), findsNothing);
+      expect(find.byKey(capturedRow), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('watch-capture-section')),
+          matching: find.text('1'),
+        ),
+        findsOneWidget,
+      );
       c.applyBackendSamples({
         'captureOnly': true,
         'updatedAtMs': 1,
@@ -223,7 +238,7 @@ void main() {
         find.byKey(const ValueKey('watch-detail-plot-motor.speed')),
       );
       await tester.pump();
-      expect(find.byKey(plottedRow), findsOneWidget);
+      expect(find.byKey(capturedRow), findsOneWidget);
       await tester.tap(
         find.byKey(const ValueKey('watch-detail-capture-motor.speed')),
       );
@@ -231,57 +246,91 @@ void main() {
       expect(watch.readMode, WatchReadMode.monitor);
       expect(watch.plotted, isFalse);
       expect(find.byKey(plot), findsNothing);
-      expect(find.byKey(plottedRow), findsNothing);
+      expect(find.byKey(capturedRow), findsNothing);
+      expect(watch.samples.single.dy, 12);
+      await tester.tap(find.byKey(capture));
+      await tester.pump();
+      expect(watch.readMode, WatchReadMode.capture);
+      expect(watch.plotted, isFalse);
+      expect(find.byKey(capturedRow), findsOneWidget);
+      await tester.tap(find.byKey(plot));
+      await tester.pump();
+      expect(watch.plotted, isTrue);
+      expect(watch.readMode, WatchReadMode.capture);
       expect(watch.samples.single.dy, 12);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
     });
   }
 
-  testWidgets('plotted members remain accessible through collapse and search', (
-    tester,
-  ) async {
-    final c = structureFixture();
-    addTearDown(c.dispose);
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    c.setWatchReadMode('motor.current.q', WatchReadMode.capture);
-    c.setWatchPinned('motor.current.q', true);
-    await mount(tester, c);
-    const plottedRow = ValueKey('plotted-watch-motor.current.q');
-    expect(find.byKey(plottedRow), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey('compact-watch-motor.current.q')),
-      findsNothing,
-    );
-    await tester.tap(find.byKey(const ValueKey('compact-watch-motor')));
-    await tester.pump();
-    await tester.enterText(
-      find.byKey(const ValueKey('watch-member-search')),
-      'pid',
-    );
-    await tester.pump();
-    expect(find.byKey(plottedRow), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey('pinned-watch-motor.current.q')),
-      findsOneWidget,
-    );
-    await tester.tap(
-      find.byKey(const ValueKey('compact-watch-plot-plotted-motor.current.q')),
-    );
-    await tester.pump();
-    final watch = c.watches.firstWhere(
-      (w) => w.symbol.key == 'motor.current.q',
-    );
-    expect(watch.samplingEnabled, isTrue);
-    expect(watch.plotted, isFalse);
-    expect(find.byKey(plottedRow), findsNothing);
-    expect(
-      find.byKey(const ValueKey('pinned-watch-motor.current.q')),
-      findsOneWidget,
-    );
-    expect(tester.takeException(), isNull);
-    await tester.pumpWidget(const SizedBox.shrink());
-  });
+  testWidgets(
+    'captured members stay listed when curves are hidden, collapsed or filtered',
+    (tester) async {
+      final c = structureFixture();
+      addTearDown(c.dispose);
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      c.setWatchReadMode('motor.current.q', WatchReadMode.capture);
+      c.toggleWatchPlot('motor.current.q', true);
+      c.setWatchPinned('motor.current.q', true);
+      await mount(tester, c);
+      const capturedRow = ValueKey('capture-watch-motor.current.q');
+      expect(find.byKey(capturedRow), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('compact-watch-motor.current.q')),
+        findsNothing,
+      );
+      await tester.tap(find.byKey(const ValueKey('compact-watch-motor')));
+      await tester.pump();
+      await tester.enterText(
+        find.byKey(const ValueKey('watch-member-search')),
+        'pid',
+      );
+      await tester.pump();
+      expect(find.byKey(capturedRow), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('pinned-watch-motor.current.q')),
+        findsOneWidget,
+      );
+      await tester.tap(
+        find.byKey(
+          const ValueKey('compact-watch-plot-capture-motor.current.q'),
+        ),
+      );
+      await tester.pump();
+      final watch = c.watches.firstWhere(
+        (w) => w.symbol.key == 'motor.current.q',
+      );
+      expect(watch.samplingEnabled, isTrue);
+      expect(watch.plotted, isFalse);
+      expect(find.byKey(capturedRow), findsOneWidget);
+      c.applySnapshot({'samplingPaused': true});
+      await tester.pump();
+      expect(find.byKey(capturedRow), findsOneWidget);
+      await tester.tap(
+        find.byKey(
+          const ValueKey('compact-watch-plot-capture-motor.current.q'),
+        ),
+      );
+      await tester.pump();
+      expect(watch.plotted, isTrue);
+      expect(find.byKey(capturedRow), findsOneWidget);
+      await tester.tap(
+        find.byKey(
+          const ValueKey('compact-watch-capture-capture-motor.current.q'),
+        ),
+      );
+      await tester.pump();
+      expect(watch.samplingEnabled, isFalse);
+      expect(find.byKey(capturedRow), findsNothing);
+      expect(find.text('暂无正在采集的变量'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('pinned-watch-motor.current.q')),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
 
   testWidgets('search reveals nested members and clearing restores expansion', (
     tester,
@@ -452,6 +501,7 @@ void main() {
       addTearDown(() => tester.binding.setSurfaceSize(null));
       c.setWatchReadMode('motor.speed', WatchReadMode.capture);
       c.setWatchReadMode('motor.current.q', WatchReadMode.capture);
+      c.setAllWatchesPlotted(true);
       await mount(tester, c);
       await tester.tap(
         find.byKey(const ValueKey('compact-watch-motor.current')),
@@ -539,6 +589,8 @@ void main() {
     c.setWatchPinned('motor.current.q', true);
     c.setWatchReadMode('motor.speed', WatchReadMode.capture);
     c.setWatchReadMode('motor.current.q', WatchReadMode.capture);
+    c.setAllWatchesPlotted(true);
+    c.toggleWatchPlot('motor.speed', false);
     c.applyWatchValues({
       'values': [
         {'key': 'motor.speed', 'value': 1450, 'updatedAtMs': 1},

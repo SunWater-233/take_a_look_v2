@@ -167,6 +167,7 @@ void main() {
     controller.loadDemoSymbols();
     controller.toggleSymbol(demoSymbols.first.key);
     controller.addSelectedToWatch();
+    controller.setAllWatchesPlotted(true);
     controller.applySnapshot({
       'connectionStatus': 'connected',
       'samplingPaused': false,
@@ -199,6 +200,7 @@ void main() {
     controller.loadDemoSymbols();
     controller.toggleSymbol(demoSymbols.first.key);
     controller.addSelectedToWatch();
+    controller.setAllWatchesPlotted(true);
     final key = controller.watches.single.symbol.key;
     controller.applyTelemetrySnapshot({
       'elapsedSeconds': 10,

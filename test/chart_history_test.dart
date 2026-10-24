@@ -26,6 +26,7 @@ void main() {
       });
       controller.selectSymbols([demoSymbols.first.key]);
       controller.addSelectedToWatch();
+      controller.setAllWatchesPlotted(true);
       controller.configurePlotView({'plotRetentionSeconds': 1});
       final watch = controller.watches.single;
       final frames = [

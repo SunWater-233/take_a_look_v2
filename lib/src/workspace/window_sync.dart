@@ -55,6 +55,7 @@ class MainWindowSync {
   final Map<WorkspacePanelId, WindowController> _windows =
       <WorkspacePanelId, WindowController>{};
   final Map<String, WindowSyncTarget> _targets = {};
+  final Set<String> _releasedMonitorWindows = {};
   Timer? _stateBroadcastTimer;
   Timer? _telemetryBroadcastTimer;
   bool _started = false;
@@ -88,6 +89,7 @@ class MainWindowSync {
     WindowController window,
     Iterable<WorkspacePanelId> panels,
   ) {
+    _releasedMonitorWindows.remove(window.windowId);
     return _target(window).initialize(
       includeHistory:
           panels.contains(WorkspacePanelId.plot) ||
@@ -97,6 +99,7 @@ class MainWindowSync {
   }
 
   void registerWindow(WorkspacePanelId panel, WindowController window) {
+    _releasedMonitorWindows.remove(window.windowId);
     _windows[panel] = window;
     _target(window).active = true;
     _scheduleStateBroadcast();
@@ -141,9 +144,19 @@ class MainWindowSync {
     }
     if (call.method == 'command') {
       final envelope = Map<String, dynamic>.from(call.arguments as Map);
+      final command = ControllerCommand.parse(envelope['name'] as String);
+      if (command == ControllerCommand.setWatchMonitorScope) {
+        final scope = Map<String, Object?>.from(envelope['arguments'] as Map);
+        setWatchMonitorScopeForWindow(
+          envelope['windowId'] as String,
+          scope['scope'] as String,
+          (scope['keys'] as List?)?.cast<String>(),
+        );
+        return null;
+      }
       final versions = controller.snapshotVersions();
       await controller.handleCommand(
-        ControllerCommand.parse(envelope['name'] as String),
+        command,
         envelope['arguments'],
         includeResultState: false,
       );
@@ -182,9 +195,25 @@ class MainWindowSync {
 
   void reportDetachedWindowReleased(String windowId) {
     controller.removeSourceViewsForWindow(windowId);
+    releaseWatchMonitorScopesForWindow(windowId);
     if (!_detachedWindowReleases.isClosed) {
       _detachedWindowReleases.add(windowId);
     }
+  }
+
+  void setWatchMonitorScopeForWindow(
+    String windowId,
+    String scope,
+    Iterable<String>? keys,
+  ) {
+    // A late in-flight message from a pooled/closed window cannot resume reads.
+    if (_releasedMonitorWindows.contains(windowId)) return;
+    controller.setWatchMonitorScope('window:$windowId:$scope', keys);
+  }
+
+  void releaseWatchMonitorScopesForWindow(String windowId) {
+    _releasedMonitorWindows.add(windowId);
+    controller.removeWatchMonitorScopesForWindow(windowId);
   }
 
   void _scheduleStateBroadcast() {
@@ -214,6 +243,7 @@ class MainWindowSync {
   Future<void> dispose() async {
     for (final window in _windows.values) {
       controller.removeSourceViewsForWindow(window.windowId);
+      releaseWatchMonitorScopesForWindow(window.windowId);
     }
     controller.stateSyncChanges.removeListener(_scheduleStateBroadcast);
     controller.symbolLoadChanges.removeListener(_broadcastSymbolLoad);

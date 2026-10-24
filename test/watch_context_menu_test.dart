@@ -12,6 +12,7 @@ void main() {
     final controller = TakeALookController()..loadDemoSymbols();
     controller.selectSymbols(demoSymbols.take(3).map((symbol) => symbol.key));
     controller.addSelectedToWatch();
+    controller.setAllWatchesPlotted(true);
     await tester.pumpWidget(
       MaterialApp(
         theme: buildTalTheme(),
@@ -320,6 +321,11 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('采集').last);
       await tester.pumpAndSettle();
+      final speed = controller.watches.firstWhere(
+        (watch) => watch.symbol.key == 'motor.speed',
+      );
+      expect(speed.samplingEnabled, isTrue);
+      expect(speed.plotted, isFalse);
       await tester.ensureVisible(
         find.byKey(const ValueKey('watch-visibility-motor.speed')),
       );
@@ -327,9 +333,12 @@ void main() {
         find.byKey(const ValueKey('watch-visibility-motor.speed')),
       );
       await tester.pump();
-      final speed = controller.watches.firstWhere(
-        (watch) => watch.symbol.key == 'motor.speed',
+      expect(speed.samplingEnabled, isTrue);
+      expect(speed.plotted, isTrue);
+      await tester.tap(
+        find.byKey(const ValueKey('watch-visibility-motor.speed')),
       );
+      await tester.pump();
       expect(speed.samplingEnabled, isTrue);
       expect(speed.plotted, isFalse);
       expect(find.byType(Checkbox), findsNothing);

@@ -45,6 +45,26 @@ def test_fast_reads_exclude_monitors_and_manual_variables(rig):
     assert not any(name is EventName.WATCH_VALUES for name, _ in events)
 
 
+def test_capture_enrollment_does_not_enable_plotting_and_visibility_keeps_recording(rig):
+    service, _, symbols, _ = rig
+    key = symbols['fast'].key
+    assert service._watches[key].captures
+    assert not service._watches[key].plot_enabled
+    for index, plotted in enumerate((True, False), start=1):
+        service.handle(RpcMethod.SET_WATCHES, {'watches': [
+            {'key': key, 'readMode': 'capture', 'plotted': plotted},
+        ]})
+        assert service._watches[key].captures
+        assert service._watches[key].plot_enabled is plotted
+        service._queue_samples_locked([(float(index), {key: index * 10})])
+    service.handle(RpcMethod.SET_WATCHES, {'watches': [
+        {'key': key, 'readMode': 'capture'},
+    ]})
+    assert not service._watches[key].plot_enabled
+    service._flush_pending_samples_locked()
+    assert service._recording.sample_count == 2
+
+
 def test_collapsed_monitors_stop_polling_without_changing_mode_or_capture(rig):
     service, memory, symbols, _ = rig
     hidden = symbols['watch'].key
@@ -62,6 +82,88 @@ def test_collapsed_monitors_stop_polling_without_changing_mode_or_capture(rig):
     service._poll_monitors_locked(11)
     assert hidden in memory.values
     assert service._recording.sample_count == 0
+
+
+def test_visibility_update_only_changes_monitor_reads_and_resumes_immediately(rig, monkeypatch):
+    service, memory, symbols, events = rig
+    watch_key, slow_key = symbols['watch'].key, symbols['slow'].key
+    service._poll_monitors_locked(10)
+    watches = service._watches
+    capture_symbols = service._capture_symbols_locked()
+    deadlines = {key: watch.next_monitor_at for key, watch in watches.items()}
+    values = dict(memory.values)
+    stamp = watches[slow_key].updated_at_ms
+    events.clear()
+
+    def unexpected(*args, **kwargs):
+        pytest.fail('Changing monitor visibility must not reconfigure or flush capture.')
+
+    monkeypatch.setattr(service, '_flush_pending_samples_locked', unexpected)
+    monkeypatch.setattr(service, '_stop_memory_sampling_locked', unexpected)
+    monkeypatch.setattr(service, '_stop_rtt_locked', unexpected)
+    try:
+        service.handle(RpcMethod.SET_MONITOR_VISIBILITY, {'enabledKeys': []})
+        service._poll_monitors_locked(10.01)
+        assert memory.values == values
+        assert watches[slow_key].value == values[slow_key]
+        assert watches[slow_key].updated_at_ms == stamp
+        assert not events
+        assert service._watches is watches
+        assert service._capture_symbols_locked() is capture_symbols
+        assert {key: watch.next_monitor_at for key, watch in watches.items()} == deadlines
+        assert all(w.mode == 'monitor' for w in (watches[watch_key], watches[slow_key]))
+
+        service.handle(RpcMethod.SET_MONITOR_VISIBILITY, {'enabledKeys': [slow_key]})
+        service._poll_monitors_locked(10.02)  # The slow monitor was not due until 12.
+        assert memory.values[slow_key] == values[slow_key] + 1
+        assert memory.values[watch_key] == values[watch_key]
+        assert symbols['manual'].key not in memory.values
+        assert symbols['fast'].key in service._read_memory_locked(False, 'normal')
+        assert service._recording.sample_count == 0
+        revision = service._monitor_schedule_revision
+        service.handle(RpcMethod.SET_MONITOR_VISIBILITY, {'enabledKeys': [slow_key]})
+        assert service._monitor_schedule_revision == revision
+    finally:
+        monkeypatch.undo()  # Service cleanup is allowed to stop and flush acquisition.
+
+
+@pytest.mark.parametrize('keys', [None, 'watch', {}, [1], [''], [False]])
+def test_invalid_visibility_update_is_atomic(rig, keys):
+    service, *_ = rig
+    before = {key: watch.monitor_enabled for key, watch in service._watches.items()}
+    with pytest.raises(ProtocolError):
+        service.handle(RpcMethod.SET_MONITOR_VISIBILITY, {'enabledKeys': keys})
+    assert {key: watch.monitor_enabled for key, watch in service._watches.items()} == before
+    assert service._controls_idle.is_set()
+
+
+def test_hidden_monitors_allow_explicit_read_and_write_without_enrolling_manual_reads(rig):
+    service, memory, symbols, _ = rig
+    key, manual = symbols['watch'].key, symbols['manual'].key
+    service.handle(RpcMethod.SET_MONITOR_VISIBILITY, {'enabledKeys': [manual]})
+    service._poll_monitors_locked(10)
+    assert key not in memory.values
+    assert manual not in memory.values
+    service.handle(RpcMethod.READ_WATCH, {'key': key})
+    assert memory.values[key] == 1
+    service.handle(RpcMethod.WRITE_WATCH, {'key': key, 'value': '42'})
+    assert service._watches[key].value == 42
+    service._poll_monitors_locked(11)
+    assert service._watches[key].value == 42
+    assert service._recording.sample_count == 0
+
+
+def test_visibility_update_leaves_rtt_monitors_running(rig):
+    service, memory, symbols, _ = rig
+    key = symbols['watch'].key
+    service.handle(RpcMethod.SET_MONITOR_VISIBILITY, {'enabledKeys': []})
+    assert not service._watches[key].monitor_enabled
+    service._rtt_enabled, service._rtt_protocol = True, 'plus'
+    service._latest_rtt_values[key] = (123, 123456)
+    service.handle(RpcMethod.SET_MONITOR_VISIBILITY, {'enabledKeys': []})
+    service._poll_monitors_locked(10)
+    assert service._watches[key].value == 123
+    assert key not in memory.values
 
 
 def test_monitor_cadence_and_overrides_continue_while_capture_is_paused(rig):

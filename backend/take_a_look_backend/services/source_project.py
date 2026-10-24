@@ -89,6 +89,8 @@ class SourceProjects:
         normalized = str(Path(root).expanduser().resolve())
         if normalized != self.current["sourceRoot"]:
             draft = dict(self._profiles.get(os.path.normcase(normalized), default_config(normalized)))
+            if not draft["firmwarePath"] and not self.current["sourceRoot"]:
+                draft["firmwarePath"] = self.current["firmwarePath"]
         else:
             draft = dict(self.current)
         draft.update(values)
@@ -109,6 +111,23 @@ class SourceProjects:
         self.current, self._profiles = candidate, profiles
         self._platforms = platforms
         return self.snapshot()
+
+    def sync_firmware_path(self, path: Path) -> None:
+        """Commit a loaded symbol file without changing equivalent relative paths."""
+        path = path.resolve()
+        root = str(self.current["sourceRoot"])
+        configured = str(self.current["firmwarePath"])
+        if configured:
+            previous = Path(configured).expanduser()
+            if not previous.is_absolute():
+                previous = Path(root).expanduser() / previous
+            if os.path.normcase(str(previous.resolve())) == os.path.normcase(str(path)):
+                return
+        if root and Path(root).is_dir():
+            self.select({"firmwarePath": str(path)})
+        else:
+            # Symbol selection also works before a source project is selected.
+            self.current = {**self.current, "firmwarePath": str(path)}
 
     def _validate(self, values: dict[str, object]) -> dict[str, object]:
         result = default_config()

@@ -9,6 +9,7 @@ void main() {
       ..loadDemoSymbols();
     controller.selectSymbols(demoSymbols.take(3).map((s) => s.key));
     controller.addSelectedToWatch();
+    controller.setAllWatchesPlotted(true);
     addTearDown(controller.dispose);
     return controller;
   }
@@ -47,7 +48,7 @@ void main() {
     c.exitWatchPlotIsolation();
     c.undoWatchDeletion();
     expect(c.watches, hasLength(4));
-    expect(c.watches.every((w) => w.plotted), isTrue);
+    expect(c.watches.map((w) => w.plotted), [true, true, true, false]);
   });
 
   test('manual members cannot start isolation or become plotted on exit', () {

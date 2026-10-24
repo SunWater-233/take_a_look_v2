@@ -126,9 +126,7 @@ extension TakeALookControllerWatches on TakeALookController {
             color: seriesColors[_watches.length % seriesColors.length],
           )
           ..historyStartSeconds = previouslyRemoved ? elapsedSeconds + 1e-9 : 0
-          ..samplingEnabled = !isAggregateMember
-          ..readMode = isAggregateMember ? WatchReadMode.monitor : mode
-          ..plotted = !isAggregateMember && mode == WatchReadMode.capture,
+          ..readMode = isAggregateMember ? WatchReadMode.monitor : mode,
       );
       final previous = state.plot.visibilityBeforeIsolation;
       if (previous != null) {
@@ -249,19 +247,28 @@ extension TakeALookControllerWatches on TakeALookController {
     }
     final watch = _watchByKey(key);
     if (watch == null || watch.samplingEnabled == value) return;
-    watch.samplingEnabled = value;
-    watch.plotted = value;
-    _syncWatchesBackend();
-    _emitState([signals.watches, signals.plot]);
+    setWatchReadMode(
+      key,
+      value ? WatchReadMode.capture : WatchReadMode.monitor,
+    );
   }
 
   bool usesDevicePush(WatchItem watch) =>
       watch.symbol.dataSource == 'rtt' || (rttEnabled && rttProtocol == 'plus');
 
   bool isWatchMonitorActive(WatchItem watch) =>
+      usesDevicePush(watch) ||
       watch.pinned ||
-      _watchMonitorScopes.isEmpty ||
+      !_watchMonitorVisibilityKnown ||
       _watchMonitorScopes.values.any((keys) => keys.contains(watch.symbol.key));
+
+  /// Once the workspace exists, no visible inspectors means no memory polling.
+  /// Headless controllers retain their previous policy until visibility is known.
+  void initializeWatchMonitorVisibility() {
+    if (_disposed || _watchMonitorVisibilityKnown) return;
+    _watchMonitorVisibilityKnown = true;
+    _scheduleWatchMonitorSync();
+  }
 
   /// Union the members displayed by all open inspectors, including detached ones.
   /// This is a temporary read policy; it never changes a variable's chosen mode.
@@ -277,15 +284,60 @@ extension TakeALookControllerWatches on TakeALookController {
       _watchMonitorScopes.remove(scope);
     } else {
       _watchMonitorScopes[scope] = next;
+      _watchMonitorVisibilityKnown = true;
     }
     if (_isDetachedRemote) {
-      _dispatchRemote(ControllerCommand.setWatchMonitorScope, {
-        'scope': scope,
-        'keys': next?.toList(),
-      });
-    } else {
-      _syncWatchesBackend();
+      _pendingRemoteMonitorScopes[scope] = next;
     }
+    _scheduleWatchMonitorSync();
+  }
+
+  void removeWatchMonitorScopesForWindow(String windowId) {
+    final prefix = 'window:$windowId:';
+    final scopes = _watchMonitorScopes.keys
+        .where((scope) => scope.startsWith(prefix))
+        .toList();
+    for (final scope in scopes) {
+      setWatchMonitorScope(scope, null);
+    }
+  }
+
+  Set<String> _monitorEnabledKeys() => {
+    for (final watch in acquisitionWatches)
+      if (watch.readMode == WatchReadMode.monitor &&
+          isWatchMonitorActive(watch))
+        watch.symbol.key,
+  };
+
+  void _scheduleWatchMonitorSync() {
+    if (_watchMonitorSyncPending || _disposed) return;
+    _watchMonitorSyncPending = true;
+    scheduleMicrotask(() {
+      _watchMonitorSyncPending = false;
+      if (_disposed) return;
+      if (_isDetachedRemote) {
+        final pending = Map<String, Set<String>?>.of(
+          _pendingRemoteMonitorScopes,
+        );
+        _pendingRemoteMonitorScopes.clear();
+        for (final entry in pending.entries) {
+          _dispatchRemote(ControllerCommand.setWatchMonitorScope, {
+            'scope': entry.key,
+            'keys': entry.value?.toList(),
+          });
+        }
+        return;
+      }
+      if (_restoringProject || backendCommand == null) return;
+      final enabled = _monitorEnabledKeys();
+      if (setEquals(_lastMonitorEnabledKeys, enabled)) return;
+      _lastMonitorEnabledKeys = enabled;
+      unawaited(
+        backendCommand!(ControllerCommand.setMonitorVisibility, {
+          'enabledKeys': enabled.toList(),
+        }),
+      );
+    });
   }
 
   void setWatchPinned(String key, bool value) {
@@ -299,7 +351,7 @@ extension TakeALookControllerWatches on TakeALookController {
     final watch = _watchByKey(key);
     if (watch == null || watch.pinned == value) return;
     watch.pinned = value;
-    _syncWatchesBackend();
+    _scheduleWatchMonitorSync();
     _emitState([signals.watches]);
   }
 
@@ -317,7 +369,8 @@ extension TakeALookControllerWatches on TakeALookController {
     final watch = _watchByKey(key);
     if (watch == null || watch.readMode == mode) return;
     watch.readMode = mode;
-    watch.plotted = mode == WatchReadMode.capture;
+    // Joining capture records data; plotting requires its own explicit action.
+    if (mode != WatchReadMode.capture) watch.plotted = false;
     _syncWatchesBackend();
     _emitState([signals.watches, signals.plot]);
   }

@@ -16,6 +16,7 @@
     "loadSymbols",
     "setConfig",
     "setWatches",
+    "setMonitorVisibility",
     "writeWatch",
     "writeWatches",
     "readWatch",

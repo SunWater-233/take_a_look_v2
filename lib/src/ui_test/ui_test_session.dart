@@ -138,6 +138,7 @@ void motor_control_tick(void)
             .map((symbol) => symbol.key),
       );
       controller.addSelectedToWatch();
+      controller.setAllWatchesPlotted(true);
       if (next != UiTestScenario.disconnected) {
         controller.applySnapshot({'connectionStatus': 'connected'});
         _debug('running');
@@ -255,6 +256,7 @@ void motor_control_tick(void)
           'rttSampleRateHz': call.params['rateHz'],
         });
       case BackendMethod.setWatches:
+      case BackendMethod.setMonitorVisibility:
         // Watch membership, sampling and colors already live in the controller.
         break;
       case BackendMethod.clearSamples:
@@ -387,7 +389,10 @@ void motor_control_tick(void)
     final now = DateTime.now().millisecondsSinceEpoch;
     final monitored = <Map<String, Object>>[];
     for (final (index, watch) in controller.watches.indexed) {
-      if (watch.readMode != WatchReadMode.monitor) continue;
+      if (watch.readMode != WatchReadMode.monitor ||
+          !controller.isWatchMonitorActive(watch)) {
+        continue;
+      }
       if (watch.updatedAtMs != null &&
           now - watch.updatedAtMs! < 1000 / controller.monitorRateFor(watch)) {
         continue;

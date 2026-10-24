@@ -23,6 +23,7 @@ class RpcMethod(StrEnum):
     LOAD_SYMBOLS = "loadSymbols"
     SET_CONFIG = "setConfig"
     SET_WATCHES = "setWatches"
+    SET_MONITOR_VISIBILITY = "setMonitorVisibility"
     WRITE_WATCH = "writeWatch"
     WRITE_WATCHES = "writeWatches"
     READ_WATCH = "readWatch"

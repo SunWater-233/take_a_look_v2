@@ -19,6 +19,15 @@ with Windows DPAPI or Unix 0700/0600 permissions; `TAL_EMBER_CONFIG_DIR` isolate
 the store for tests. A nonempty explicit token overrides `deviceId` authentication.
 `connectionCapabilities` reports memory polling, memory writes, and RTT support.
 
+`setMonitorVisibility {enabledKeys: string[]}` updates the runtime demand for
+memory watches in monitor mode. Hidden monitors keep their last value and
+timestamp; re-enabled monitors are due on the next sampling-loop iteration.
+This command preserves watch objects, capture plans, buffered frames and stream
+lifecycles, and emits no configuration state. Explicit reads and write/readback
+still work. The UI unions all visible inspectors and pinned members before
+sending demand; this policy is not persisted in project files. RTT streams are
+outside this visibility policy.
+
 `backends/target_backend.py` defines the target-operation protocol, connection
 capabilities and RTT binding consumed by the service and sampler. Local pyOCD
 and remote adapters share `TypedMemoryBackend` for coalesced reads, numeric

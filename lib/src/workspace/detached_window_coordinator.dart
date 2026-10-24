@@ -434,6 +434,7 @@ class DetachedWindowCoordinator {
 
   void _clearAssignment(_PooledDetachedWindow entry) {
     windowSync.controller.removeSourceViewsForWindow(entry.controller.windowId);
+    windowSync.releaseWatchMonitorScopesForWindow(entry.controller.windowId);
     _assign(entry, activePanel: null, panels: const <WorkspacePanelId>[]);
   }
 

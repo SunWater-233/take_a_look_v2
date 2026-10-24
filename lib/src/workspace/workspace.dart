@@ -397,6 +397,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   @override
   void initState() {
     super.initState();
+    widget.controller.initializeWatchMonitorVisibility();
     HardwareKeyboard.instance.addHandler(_handleDragKey);
     detachedWindows = DetachedWindowCoordinator(widget.windowSync);
     widget.windowSync.onPanelTransfer = _queueNativeTransfer;
@@ -451,6 +452,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     super.didUpdateWidget(oldWidget);
     _layout.workbenchLayout = widget.workbenchLayout;
     if (oldWidget.controller != widget.controller) {
+      widget.controller.initializeWatchMonitorVisibility();
       oldWidget.controller.sourceWorkspaceChanges.removeListener(
         _handleSourceAddition,
       );

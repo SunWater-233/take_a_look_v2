@@ -12,6 +12,7 @@ void main() {
     final controller = TakeALookController()..loadDemoSymbols();
     controller.selectSymbols([demoSymbols.first.key]);
     controller.addSelectedToWatch();
+    controller.setAllWatchesPlotted(true);
     final key = controller.watches.single.symbol.key;
     controller.applyTelemetrySnapshot({
       'elapsedSeconds': 20,

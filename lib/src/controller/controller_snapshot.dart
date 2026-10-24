@@ -245,6 +245,9 @@ extension TakeALookControllerSnapshot on TakeALookController {
       rttEnabled = data['rttEnabled'] == true;
     }
     rttProtocol = data['rttProtocol'] as String? ?? rttProtocol;
+    if (data.containsKey('rttEnabled') || data.containsKey('rttProtocol')) {
+      _scheduleWatchMonitorSync();
+    }
     if (data.containsKey('followLatest')) {
       followLatest = data['followLatest'] != false;
     }

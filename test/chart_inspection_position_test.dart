@@ -205,7 +205,7 @@ void main() {
         matching: find.byType(Scrollable),
       );
       final scroll = tester.state<ScrollableState>(scrollable.first).position;
-      // Scroll past the plotted summary so only tree rows provide anchors.
+      // Scroll past the capture summary so only tree rows provide anchors.
       final initialScroll =
           tester
               .getTopLeft(find.byKey(const ValueKey('compact-watch-signal_0')))

@@ -7,12 +7,12 @@ class _WatchValueCell extends StatefulWidget {
     super.key,
     required this.controller,
     required this.watch,
-    required this.pinned,
+    required this.prefix,
     required this.onSelect,
   });
   final TakeALookController controller;
   final WatchItem watch;
-  final bool pinned;
+  final String prefix;
   final VoidCallback onSelect;
   @override
   State<_WatchValueCell> createState() => _WatchValueCellState();
@@ -25,7 +25,7 @@ class _WatchValueCellState extends State<_WatchValueCell> {
   String? _error;
   int _revision = 0;
   String get _key => widget.watch.symbol.key;
-  String get _prefix => widget.pinned ? 'pinned' : 'compact';
+  String get _prefix => widget.prefix;
   bool get _canWrite =>
       widget.watch.symbol.writable &&
       widget.controller.supportsMemoryWrite &&

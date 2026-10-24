@@ -1,5 +1,19 @@
 part of 'watch_panel.dart';
 
+enum _WatchBrowserSection {
+  members,
+  pinned,
+  plotted;
+
+  String get rowPrefix => switch (this) {
+    members => 'compact',
+    pinned => 'pinned',
+    plotted => 'plotted',
+  };
+
+  String get actionPrefix => this == members ? '' : '$name-';
+}
+
 class _WatchBrowserEntry {
   const _WatchBrowserEntry({
     required this.key,
@@ -7,13 +21,13 @@ class _WatchBrowserEntry {
     required this.depth,
     this.node,
     this.members = const [],
-    this.pinned = false,
+    this.section = _WatchBrowserSection.members,
   });
   final String key, label;
   final int depth;
   final WatchTreeNode? node;
   final List<WatchTreeNode> members;
-  final bool pinned;
+  final _WatchBrowserSection section;
   bool get expandable => members.isNotEmpty;
 }
 
@@ -36,9 +50,10 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
   final _search = TextEditingController();
   final _scroll = ScrollController();
   final Set<String> _selectedKeys = {};
-  List<(String, bool)> _selectionOrder = [];
+  final Set<_WatchBrowserSection> _collapsedSections = {};
+  List<(String, _WatchBrowserSection)> _selectionOrder = [];
   String? _selectionAnchor;
-  bool _selectionAnchorPinned = false;
+  _WatchBrowserSection _selectionAnchorSection = _WatchBrowserSection.members;
   bool _selectionInitialized = false;
   Set<String> get _rangeExpansions => controller.compactExpandedWatches;
   late final String _scope =
@@ -61,6 +76,7 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
       _search.text = controller.watchSearchQuery;
       _plotRevision = -1;
       _selectedKeys.clear();
+      _collapsedSections.clear();
       _selectionAnchor = null;
       _selectionInitialized = false;
     }
@@ -78,14 +94,14 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
   void _select(
     String key, {
     bool preserveSelection = false,
-    bool pinned = false,
+    _WatchBrowserSection section = _WatchBrowserSection.members,
   }) {
     final keyboard = HardwareKeyboard.instance;
     final additive = keyboard.isControlPressed || keyboard.isMetaPressed;
-    final index = _selectionOrder.indexOf((key, pinned));
+    final index = _selectionOrder.indexOf((key, section));
     final anchor = _selectionOrder.indexOf((
       _selectionAnchor ?? '',
-      _selectionAnchorPinned,
+      _selectionAnchorSection,
     ));
     setState(() {
       if (preserveSelection && _selectedKeys.contains(key)) {
@@ -103,13 +119,13 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
       } else if (!preserveSelection && additive) {
         if (!_selectedKeys.add(key)) _selectedKeys.remove(key);
         _selectionAnchor = key;
-        _selectionAnchorPinned = pinned;
+        _selectionAnchorSection = section;
       } else {
         _selectedKeys
           ..clear()
           ..add(key);
         _selectionAnchor = key;
-        _selectionAnchorPinned = pinned;
+        _selectionAnchorSection = section;
       }
       controller.compactWatchSelection = _selectedKeys.contains(key)
           ? key
@@ -125,14 +141,15 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
         ..clear()
         ..addAll(keys);
       _selectionAnchor = _selectionOrder.firstOrNull?.$1;
-      _selectionAnchorPinned = _selectionOrder.firstOrNull?.$2 ?? false;
+      _selectionAnchorSection =
+          _selectionOrder.firstOrNull?.$2 ?? _WatchBrowserSection.members;
       controller.compactWatchSelection ??= _selectionAnchor;
     });
     _panelFocus.requestFocus();
   }
 
   void _toggle(_WatchBrowserEntry entry) {
-    if (entry.node != null) _select(entry.key, pinned: entry.pinned);
+    if (entry.node != null) _select(entry.key, section: entry.section);
     if (entry.node != null &&
         (HardwareKeyboard.instance.isShiftPressed ||
             HardwareKeyboard.instance.isControlPressed ||
@@ -200,7 +217,7 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
         ..clear()
         ..add(selected);
       _selectionAnchor = selected;
-      _selectionAnchorPinned = false;
+      _selectionAnchorSection = _WatchBrowserSection.members;
     }
     _selectionInitialized = true;
     if (_plotRevision == controller.plotWatchSelectionRevision) return;
@@ -212,7 +229,7 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
       ..clear()
       ..add(key);
     _selectionAnchor = key;
-    _selectionAnchorPinned = false;
+    _selectionAnchorSection = _WatchBrowserSection.members;
     // A curve selection reveals its source, including an array's range group.
     bool reveal(WatchTreeNode node) {
       if (node.watch.symbol.key == key) return true;
@@ -313,9 +330,9 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
   Future<void> _menu(
     WatchItem watch,
     Offset position, {
-    bool pinned = false,
+    _WatchBrowserSection section = _WatchBrowserSection.members,
   }) async {
-    _select(watch.symbol.key, preserveSelection: true, pinned: pinned);
+    _select(watch.symbol.key, preserveSelection: true, section: section);
     final keys = _selectedKeys.toList();
     final plotKeys = <String>{};
     void collect(WatchTreeNode node) {
@@ -356,7 +373,9 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
         _watchPopupItem(
           touchOptimized: TalUiTheme.of(context).touchOptimized,
           value: 'visibility',
-          icon: Icons.show_chart,
+          icon: watch.plotted
+              ? Icons.visibility_outlined
+              : Icons.visibility_off_outlined,
           label: watch.plotted ? '隐藏曲线' : '显示曲线',
           enabled: watch.samplingEnabled,
         ),
@@ -507,182 +526,217 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
         (node == null
             ? _rangeExpansions.contains(entry.key)
             : controller.compactExpandedWatches.contains(entry.key));
-    void activate() {
-      if (entry.expandable) {
-        _toggle(entry);
-      } else {
-        _select(entry.key, pinned: entry.pinned);
-        _panelFocus.requestFocus();
-      }
-    }
-
-    final content = InkWell(
-      onTap: activate,
-      onSecondaryTapUp: watch == null
-          ? null
-          : (d) => _menu(watch, d.globalPosition, pinned: entry.pinned),
-      onLongPress: watch == null
-          ? null
-          : () {
-              final box = context.findRenderObject()! as RenderBox;
-              _menu(
-                watch,
-                box.localToGlobal(box.size.center(Offset.zero)),
-                pinned: entry.pinned,
+    final content = LayoutBuilder(
+      builder: (context, constraints) {
+        final showPin = !ui.touchOptimized || constraints.maxWidth >= 280;
+        final actionWidth = ui.compactIconButtonSize * (showPin ? 3 : 2);
+        // Reserve padding, the value gap and at least 32 pixels for the name.
+        final maxIndentWidth = math.max(
+          25.0,
+          constraints.maxWidth -
+              valueWidth -
+              actionWidth -
+              (wide ? 88 : 0) -
+              51,
+        );
+        void activate() {
+          if (entry.expandable) {
+            _toggle(entry);
+          } else {
+            _select(entry.key, section: entry.section);
+            _panelFocus.requestFocus();
+          }
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (context.mounted) {
+              Scrollable.ensureVisible(
+                context,
+                alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
               );
-            },
-      child: Container(
-        height: height,
-        padding: const EdgeInsets.only(right: 5),
-        decoration: BoxDecoration(
-          color: selected ? TalColors.selection : null,
-          border: Border(
-            left: BorderSide(
-              width: 2,
-              color: selected ? TalColors.accent : Colors.transparent,
+            }
+          });
+        }
+
+        return InkWell(
+          onTap: activate,
+          onSecondaryTapUp: watch == null
+              ? null
+              : (d) => _menu(watch, d.globalPosition, section: entry.section),
+          onLongPress: watch == null
+              ? null
+              : () {
+                  final box = context.findRenderObject()! as RenderBox;
+                  _menu(
+                    watch,
+                    box.localToGlobal(box.size.center(Offset.zero)),
+                    section: entry.section,
+                  );
+                },
+          child: Container(
+            height: height,
+            padding: const EdgeInsets.only(right: 5),
+            decoration: BoxDecoration(
+              color: selected ? TalColors.selection : null,
+              border: Border(
+                left: BorderSide(
+                  width: 2,
+                  color: selected ? TalColors.accent : Colors.transparent,
+                ),
+              ),
             ),
-          ),
-        ),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 25 + math.min(entry.depth, 8) * 12.0,
-              height: height,
-              child: entry.expandable
-                  ? Align(
-                      alignment: Alignment.centerRight,
-                      child: Icon(
-                        expanded ? Icons.expand_more : Icons.chevron_right,
-                        size: 16,
-                        color: TalColors.muted,
-                      ),
-                    )
-                  : watch != null && watch.samplingEnabled && watch.plotted
-                  ? Tooltip(
-                      message: '双击调整绘制颜色',
-                      triggerMode: TooltipTriggerMode.manual,
-                      child: GestureDetector(
-                        key: ValueKey(
-                          'compact-watch-color-${entry.pinned ? 'pinned-' : ''}${entry.key}',
-                        ),
-                        behavior: HitTestBehavior.opaque,
-                        onTap: activate,
-                        onDoubleTap: () => _adjustColor(watch),
-                        child: Align(
+            child: Row(
+              children: [
+                SizedBox(
+                  width: math.min(
+                    25 + math.min(entry.depth, 8) * 12.0,
+                    maxIndentWidth,
+                  ),
+                  height: height,
+                  child: entry.expandable
+                      ? Align(
                           alignment: Alignment.centerRight,
-                          child: Padding(
-                            padding: const EdgeInsets.only(right: 8),
-                            child: SizedBox(
-                              width: 3,
-                              height: height - 12,
-                              child: DecoratedBox(
-                                key: ValueKey(
-                                  'compact-watch-color-bar-${entry.pinned ? 'pinned-' : ''}${entry.key}',
-                                ),
-                                decoration: BoxDecoration(
-                                  color: watch.color,
-                                  borderRadius: BorderRadius.circular(1.5),
+                          child: Icon(
+                            expanded ? Icons.expand_more : Icons.chevron_right,
+                            size: 16,
+                            color: TalColors.muted,
+                          ),
+                        )
+                      : watch != null && watch.samplingEnabled && watch.plotted
+                      ? Tooltip(
+                          message: '双击调整绘制颜色',
+                          triggerMode: TooltipTriggerMode.manual,
+                          child: GestureDetector(
+                            key: ValueKey(
+                              'compact-watch-color-${entry.section.actionPrefix}${entry.key}',
+                            ),
+                            behavior: HitTestBehavior.opaque,
+                            onTap: activate,
+                            onDoubleTap: () => _adjustColor(watch),
+                            child: Align(
+                              alignment: Alignment.centerRight,
+                              child: Padding(
+                                padding: const EdgeInsets.only(right: 8),
+                                child: SizedBox(
+                                  width: 3,
+                                  height: height - 12,
+                                  child: DecoratedBox(
+                                    key: ValueKey(
+                                      'compact-watch-color-bar-${entry.section.actionPrefix}${entry.key}',
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: watch.color,
+                                      borderRadius: BorderRadius.circular(1.5),
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
                           ),
-                        ),
-                      ),
-                    )
-                  : null,
-            ),
-            Expanded(
-              child: Tooltip(
-                triggerMode: TooltipTriggerMode.manual,
-                message: watch?.symbol.name ?? entry.label,
-                child: Text(
-                  entry.label,
-                  style: talMono.copyWith(fontSize: 12),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                        )
+                      : null,
                 ),
-              ),
-            ),
-            if (wide)
-              SizedBox(
-                width: 88,
-                child: Text(
-                  watch?.symbol.type ?? '',
-                  style: workbenchMuted.copyWith(fontSize: 11),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            const SizedBox(width: 12),
-            SizedBox(
-              width: valueWidth,
-              child: entry.expandable && wide
-                  ? const SizedBox.shrink()
-                  : entry.expandable
-                  ? Text(
-                      watch?.symbol.type ?? '${entry.members.length} 项',
-                      style: workbenchMuted.copyWith(fontSize: 11),
-                      textAlign: TextAlign.right,
+                Expanded(
+                  child: Tooltip(
+                    triggerMode: TooltipTriggerMode.manual,
+                    message: watch?.symbol.name ?? entry.label,
+                    child: Text(
+                      entry.label,
+                      style: talMono.copyWith(fontSize: 12),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                    )
-                  : _WatchValueCell(
-                      key: ValueKey(
-                        '${entry.pinned ? 'pinned' : 'compact'}-watch-cell-${entry.key}',
-                      ),
-                      controller: controller,
-                      watch: watch!,
-                      pinned: entry.pinned,
-                      onSelect: () => _select(entry.key, pinned: entry.pinned),
                     ),
-            ),
-            if (entry.expandable)
-              SizedBox(
-                width: ui.compactIconButtonSize * 2,
-                child: Text(
-                  '${entry.members.length} 项',
-                  textAlign: TextAlign.right,
-                  style: workbenchMuted.copyWith(fontSize: 11),
+                  ),
                 ),
-              )
-            else ...[
-              _rowIcon(
-                ui,
-                '固定',
-                watch!.pinned ? Icons.push_pin : Icons.push_pin_outlined,
-                'watch-pin-${entry.pinned ? 'pinned-' : ''}${entry.key}',
-                watch.pinned,
-                () => controller.setWatchPinned(entry.key, !watch.pinned),
-              ),
-              _rowIcon(
-                ui,
-                watch.plotted ? '隐藏曲线' : '加入曲线',
-                Icons.show_chart,
-                'compact-watch-plot-${entry.pinned ? 'pinned-' : ''}${entry.key}',
-                watch.plotted,
-                () {
-                  if (!watch.samplingEnabled) {
-                    controller.setWatchReadMode(
+                if (wide)
+                  SizedBox(
+                    width: 88,
+                    child: Text(
+                      watch?.symbol.type ?? '',
+                      style: workbenchMuted.copyWith(fontSize: 11),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: valueWidth,
+                  child: entry.expandable && wide
+                      ? const SizedBox.shrink()
+                      : entry.expandable
+                      ? Text(
+                          watch?.symbol.type ?? '${entry.members.length} 项',
+                          style: workbenchMuted.copyWith(fontSize: 11),
+                          textAlign: TextAlign.right,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        )
+                      : _WatchValueCell(
+                          key: ValueKey(
+                            '${entry.section.rowPrefix}-watch-cell-${entry.key}',
+                          ),
+                          controller: controller,
+                          watch: watch!,
+                          prefix: entry.section.rowPrefix,
+                          onSelect: activate,
+                        ),
+                ),
+                if (entry.expandable)
+                  SizedBox(
+                    width: actionWidth,
+                    child: Text(
+                      '${entry.members.length} 项',
+                      textAlign: TextAlign.right,
+                      style: workbenchMuted.copyWith(fontSize: 11),
+                    ),
+                  )
+                else ...[
+                  if (showPin)
+                    _rowIcon(
+                      ui,
+                      '固定',
+                      watch!.pinned ? Icons.push_pin : Icons.push_pin_outlined,
+                      'watch-pin-${entry.section.actionPrefix}${entry.key}',
+                      watch.pinned,
+                      () => controller.setWatchPinned(entry.key, !watch.pinned),
+                    ),
+                  _rowIcon(
+                    ui,
+                    watch!.samplingEnabled ? '移出采集' : '加入采集',
+                    Icons.sensors,
+                    'compact-watch-capture-${entry.section.actionPrefix}${entry.key}',
+                    watch.samplingEnabled,
+                    () => controller.setWatchReadMode(
                       entry.key,
-                      WatchReadMode.capture,
-                    );
-                  } else {
-                    controller.toggleWatchPlot(entry.key, !watch.plotted);
-                  }
-                },
-                color: watch.plotted ? watch.color : null,
-              ),
-            ],
-          ],
-        ),
-      ),
+                      watch.samplingEnabled
+                          ? WatchReadMode.monitor
+                          : WatchReadMode.capture,
+                    ),
+                  ),
+                  if (watch.samplingEnabled)
+                    _rowIcon(
+                      ui,
+                      watch.plotted ? '隐藏曲线' : '显示曲线',
+                      watch.plotted
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
+                      'compact-watch-plot-${entry.section.actionPrefix}${entry.key}',
+                      watch.plotted,
+                      () =>
+                          controller.toggleWatchPlot(entry.key, !watch.plotted),
+                      color: watch.plotted ? watch.color : null,
+                    )
+                  else
+                    SizedBox(width: ui.compactIconButtonSize),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
     );
     return watch == null
         ? content
         : WatchRowAnchor(
-            key: ValueKey(
-              '${entry.pinned ? 'pinned' : 'compact'}-watch-${entry.key}',
-            ),
+            key: ValueKey('${entry.section.rowPrefix}-watch-${entry.key}'),
             controller: controller,
             watchKey: entry.key,
             child: content,
@@ -706,6 +760,7 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
       style: IconButton.styleFrom(
         padding: EdgeInsets.zero,
         minimumSize: Size.square(ui.compactIconButtonSize),
+        maximumSize: Size.square(ui.compactIconButtonSize),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
       icon: Icon(
@@ -715,6 +770,92 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
       ),
     ),
   );
+
+  Widget _actionHeader(TalUiTheme ui, String label) => Container(
+    width: ui.compactIconButtonSize,
+    alignment: Alignment.center,
+    decoration: const BoxDecoration(
+      border: Border(left: BorderSide(color: TalColors.borderSoft)),
+    ),
+    child: Text(
+      label,
+      maxLines: 1,
+      softWrap: false,
+      style: workbenchMuted.copyWith(fontSize: 10),
+    ),
+  );
+
+  Widget _sectionHeader(
+    _WatchBrowserSection section,
+    String label, {
+    IconData? icon,
+    int? count,
+    String? hint,
+    EdgeInsets padding = const EdgeInsets.symmetric(
+      horizontal: 12,
+      vertical: 4,
+    ),
+  }) {
+    final expanded = !_collapsedSections.contains(section);
+    return Tooltip(
+      message: '${expanded ? '收起' : '展开'}$label',
+      child: InkWell(
+        key: ValueKey('watch-${section.name}-section'),
+        onTap: () => setState(() {
+          if (!_collapsedSections.add(section)) {
+            _collapsedSections.remove(section);
+          }
+        }),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            minHeight: TalUiTheme.of(context).targetExtent(30),
+          ),
+          child: Padding(
+            padding: padding,
+            child: Row(
+              children: [
+                Icon(
+                  expanded ? Icons.expand_more : Icons.chevron_right,
+                  size: 16,
+                  color: TalColors.muted,
+                ),
+                const SizedBox(width: 4),
+                if (icon != null) ...[
+                  Icon(icon, size: 13, color: TalColors.muted),
+                  const SizedBox(width: 5),
+                ],
+                Expanded(
+                  child: Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          label,
+                          style: workbenchMuted,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (count != null) ...[
+                        const SizedBox(width: 5),
+                        Text('$count', style: workbenchMuted),
+                      ],
+                    ],
+                  ),
+                ),
+                if (hint != null)
+                  Text(
+                    hint,
+                    style: workbenchMuted,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
   Widget _toolbar() => Padding(
     padding: const EdgeInsets.fromLTRB(9, 5, 5, 5),
@@ -774,14 +915,37 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
         final pinned = controller.watches
             .where((w) => w.pinned && allNodes[w.symbol.key]!.children.isEmpty)
             .toList();
+        final plotted = controller.watches
+            .where(
+              (w) =>
+                  w.samplingEnabled &&
+                  w.plotted &&
+                  allNodes[w.symbol.key]!.children.isEmpty,
+            )
+            .toList();
+        final pinnedExpanded = !_collapsedSections.contains(
+          _WatchBrowserSection.pinned,
+        );
+        final plottedExpanded = !_collapsedSections.contains(
+          _WatchBrowserSection.plotted,
+        );
+        final membersExpanded = !_collapsedSections.contains(
+          _WatchBrowserSection.members,
+        );
         _selectionOrder = [
-          for (final w in pinned) (w.symbol.key, true),
-          for (final row in rows)
-            if (row.node != null) (row.key, false),
+          if (pinnedExpanded)
+            for (final w in pinned) (w.symbol.key, _WatchBrowserSection.pinned),
+          if (plottedExpanded)
+            for (final w in plotted)
+              (w.symbol.key, _WatchBrowserSection.plotted),
+          if (membersExpanded)
+            for (final row in rows)
+              if (row.node != null) (row.key, _WatchBrowserSection.members),
         ];
         final visible = <String>{
-          for (final row in rows)
-            if (row.node != null && !row.expandable) row.key,
+          if (membersExpanded)
+            for (final row in rows)
+              if (row.node != null && !row.expandable) row.key,
           for (final w in pinned) w.symbol.key,
           if (selected != null &&
               allNodes[selected.symbol.key]!.children.isEmpty)
@@ -798,6 +962,8 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
         });
         final wide = constraints.maxWidth >= 760;
         final listWidth = constraints.maxWidth - (wide ? 310 : 0);
+        final ui = TalUiTheme.of(context);
+        final showPin = !ui.touchOptimized || listWidth >= 280;
         final maxDepth = rows.fold<int>(
           0,
           (depth, row) => math.max(depth, row.depth),
@@ -805,7 +971,7 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
         final maxValueWidth = math.max(
           64.0,
           listWidth -
-              TalUiTheme.of(context).compactIconButtonSize * 2 -
+              ui.compactIconButtonSize * (showPin ? 3 : 2) -
               (wide ? 192 : 104) -
               math.min(maxDepth, 8) * 12,
         );
@@ -823,111 +989,150 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
             key: const ValueKey('compact-watch-list'),
             children: [
               if (pinned.isNotEmpty) ...[
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(12, 6, 12, 4),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.push_pin_outlined,
-                        size: 13,
-                        color: TalColors.muted,
-                      ),
-                      SizedBox(width: 5),
-                      Text('已固定', style: workbenchMuted),
-                      Spacer(),
-                      Text('折叠后仍刷新', style: workbenchMuted),
-                    ],
-                  ),
+                _sectionHeader(
+                  _WatchBrowserSection.pinned,
+                  '已固定',
+                  icon: Icons.push_pin_outlined,
+                  hint: '折叠后仍刷新',
                 ),
-                for (final w in pinned)
-                  _row(
-                    _WatchBrowserEntry(
-                      key: w.symbol.key,
-                      label: w.symbol.name,
-                      depth: 0,
-                      node: allNodes[w.symbol.key],
-                      pinned: true,
+                if (pinnedExpanded)
+                  for (final w in pinned)
+                    _row(
+                      _WatchBrowserEntry(
+                        key: w.symbol.key,
+                        label: w.symbol.name,
+                        depth: 0,
+                        node: allNodes[w.symbol.key],
+                        section: _WatchBrowserSection.pinned,
+                      ),
+                      wide,
+                      valueWidth,
                     ),
-                    wide,
-                    valueWidth,
-                  ),
                 const Divider(height: 12, color: TalColors.borderSoft),
               ],
+              _sectionHeader(
+                _WatchBrowserSection.plotted,
+                '正在绘制',
+                icon: Icons.show_chart,
+                count: plotted.length,
+              ),
+              if (plottedExpanded) ...[
+                if (plotted.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(12, 4, 12, 8),
+                    child: Text('暂无正在绘制的变量', style: workbenchMuted),
+                  )
+                else
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight: TalUiTheme.of(context).targetExtent(32) * 3,
+                    ),
+                    child: ListView(
+                      key: const ValueKey('watch-plotted-list'),
+                      primary: false,
+                      shrinkWrap: true,
+                      children: [
+                        for (final w in plotted)
+                          _row(
+                            _WatchBrowserEntry(
+                              key: w.symbol.key,
+                              label: w.symbol.name,
+                              depth: 0,
+                              node: allNodes[w.symbol.key],
+                              section: _WatchBrowserSection.plotted,
+                            ),
+                            wide,
+                            valueWidth,
+                          ),
+                      ],
+                    ),
+                  ),
+              ],
+              const Divider(height: 12, color: TalColors.borderSoft),
               Padding(
-                padding: const EdgeInsets.fromLTRB(12, 5, 5, 5),
+                padding: const EdgeInsets.fromLTRB(12, 2, 5, 2),
                 child: Row(
                   children: [
-                    Text(
-                      _search.text.trim().isEmpty ? '成员' : '搜索结果',
-                      style: workbenchMuted,
+                    Expanded(
+                      child: _sectionHeader(
+                        _WatchBrowserSection.members,
+                        _search.text.trim().isEmpty ? '成员' : '搜索结果',
+                        padding: EdgeInsets.zero,
+                      ),
                     ),
-                    const Spacer(),
-                    Tooltip(
-                      message: '左右拖动调整当前值列宽',
-                      child: MouseRegion(
-                        cursor: SystemMouseCursors.resizeColumn,
-                        child: GestureDetector(
-                          key: const ValueKey('watch-value-column-resize'),
-                          behavior: HitTestBehavior.opaque,
-                          onHorizontalDragUpdate: (details) => setState(() {
-                            _valueColumnWidth = (valueWidth - details.delta.dx)
-                                .clamp(64.0, maxValueWidth);
-                          }),
-                          child: const SizedBox(
-                            width: 12,
-                            height: 24,
-                            child: Center(
-                              child: SizedBox(
-                                width: 1,
-                                height: 14,
-                                child: ColoredBox(color: TalColors.border),
+                    if (membersExpanded) ...[
+                      Tooltip(
+                        message: '左右拖动调整当前值列宽',
+                        child: MouseRegion(
+                          cursor: SystemMouseCursors.resizeColumn,
+                          child: GestureDetector(
+                            key: const ValueKey('watch-value-column-resize'),
+                            behavior: HitTestBehavior.opaque,
+                            onHorizontalDragUpdate: (details) => setState(() {
+                              _valueColumnWidth =
+                                  (valueWidth - details.delta.dx).clamp(
+                                    64.0,
+                                    maxValueWidth,
+                                  );
+                            }),
+                            child: const SizedBox(
+                              width: 12,
+                              height: 24,
+                              child: Center(
+                                child: SizedBox(
+                                  width: 1,
+                                  height: 14,
+                                  child: ColoredBox(color: TalColors.border),
+                                ),
                               ),
                             ),
                           ),
                         ),
                       ),
-                    ),
-                    SizedBox(
-                      width: valueWidth,
-                      child: const Text(
-                        '当前值',
-                        style: workbenchMuted,
-                        textAlign: TextAlign.right,
+                      SizedBox(
+                        width: valueWidth,
+                        child: const Text(
+                          '当前值',
+                          style: workbenchMuted,
+                          textAlign: TextAlign.right,
+                        ),
                       ),
-                    ),
-                    SizedBox(
-                      width: TalUiTheme.of(context).compactIconButtonSize * 2,
-                    ),
+                      if (showPin) SizedBox(width: ui.compactIconButtonSize),
+                      _actionHeader(ui, '采集'),
+                      _actionHeader(ui, '绘制'),
+                    ],
                   ],
                 ),
               ),
-              if (rows.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    children: [
-                      Text(
-                        controller.watches.isEmpty ? '从符号变量加入变量' : '没有匹配的成员',
-                        style: workbenchMuted,
-                      ),
-                      if (_search.text.isNotEmpty)
-                        TalButton(
-                          onPressed: () => setState(() {
-                            _search.clear();
-                            controller.watchSearchQuery = '';
-                          }),
-                          child: const Text('清空搜索'),
+              if (membersExpanded) ...[
+                if (rows.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      children: [
+                        Text(
+                          controller.watches.isEmpty ? '从符号变量加入变量' : '没有匹配的成员',
+                          style: workbenchMuted,
                         ),
-                      if (controller.watches.isEmpty &&
-                          widget.onShowSymbols != null)
-                        TalButton(
-                          onPressed: widget.onShowSymbols,
-                          child: const Text('打开符号变量'),
-                        ),
-                    ],
+                        if (_search.text.isNotEmpty)
+                          TalButton(
+                            onPressed: () => setState(() {
+                              _search.clear();
+                              controller.watchSearchQuery = '';
+                            }),
+                            child: const Text('清空搜索'),
+                          ),
+                        if (controller.watches.isEmpty &&
+                            widget.onShowSymbols != null)
+                          TalButton(
+                            onPressed: widget.onShowSymbols,
+                            child: const Text('打开符号变量'),
+                          ),
+                      ],
+                    ),
                   ),
-                ),
-              for (final row in rows) _row(row, wide, valueWidth),
+                for (final row in rows) _row(row, wide, valueWidth),
+              ],
             ],
           ),
         );

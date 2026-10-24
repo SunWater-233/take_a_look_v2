@@ -96,16 +96,31 @@ class _WatchMemberDetails extends StatelessWidget {
                   label: Text(watch.pinned ? '已固定' : '固定成员'),
                 ),
                 TalButton.icon(
+                  key: ValueKey('watch-detail-capture-$_key'),
                   onPressed: () {
-                    if (!watch.samplingEnabled) {
-                      controller.setWatchReadMode(_key, WatchReadMode.capture);
-                    } else {
-                      controller.toggleWatchPlot(_key, !watch.plotted);
-                    }
+                    controller.setWatchReadMode(
+                      _key,
+                      watch.samplingEnabled
+                          ? WatchReadMode.monitor
+                          : WatchReadMode.capture,
+                    );
                   },
-                  icon: const Icon(Icons.show_chart, size: 15),
-                  label: Text(watch.plotted ? '隐藏曲线' : '加入曲线'),
+                  icon: const Icon(Icons.sensors, size: 15),
+                  label: Text(watch.samplingEnabled ? '移出采集' : '加入采集'),
                 ),
+                if (watch.samplingEnabled)
+                  TalButton.icon(
+                    key: ValueKey('watch-detail-plot-$_key'),
+                    onPressed: () =>
+                        controller.toggleWatchPlot(_key, !watch.plotted),
+                    icon: Icon(
+                      watch.plotted
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
+                      size: 15,
+                    ),
+                    label: Text(watch.plotted ? '隐藏曲线' : '显示曲线'),
+                  ),
                 SizedBox(
                   width: ui.touchOptimized ? 112 : 96,
                   child: TalDropdown<WatchReadMode>(

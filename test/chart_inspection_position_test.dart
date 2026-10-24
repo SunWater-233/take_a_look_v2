@@ -200,24 +200,35 @@ void main() {
       await tester.binding.setSurfaceSize(const Size(1400, 600));
       controller.setPlotHighlightedWatch('signal_3', selectWatchRow: true);
       await _pumpPanels(tester, controller);
-      _expectAligned(tester, 'signal_3');
-      final before = _tooltip(tester).center.dy;
       final scrollable = find.descendant(
         of: find.byKey(const ValueKey('compact-watch-list')),
         matching: find.byType(Scrollable),
       );
       final scroll = tester.state<ScrollableState>(scrollable.first).position;
-      scroll.jumpTo(70);
+      // Scroll past the plotted summary so only tree rows provide anchors.
+      final initialScroll =
+          tester
+              .getTopLeft(find.byKey(const ValueKey('compact-watch-signal_0')))
+              .dy -
+          tester
+              .getTopLeft(find.byKey(const ValueKey('compact-watch-list')))
+              .dy -
+          36;
+      scroll.jumpTo(initialScroll);
+      await tester.pumpAndSettle();
+      _expectAligned(tester, 'signal_3');
+      final before = _tooltip(tester).center.dy;
+      scroll.jumpTo(initialScroll + 70);
       await tester.pumpAndSettle();
       _expectAligned(tester, 'signal_3');
       expect(_tooltip(tester).center.dy, closeTo(before - 70, 0.01));
 
       // Retained sliver cache children must not count as visible watch rows.
       controller.setPlotHighlightedWatch('signal_0');
-      scroll.jumpTo(170);
+      scroll.jumpTo(initialScroll + 170);
       await tester.pumpAndSettle();
       _expectAtBottomRight(tester);
-      scroll.jumpTo(0);
+      scroll.jumpTo(initialScroll);
       await tester.pumpAndSettle();
       controller.setPlotHighlightedWatch('signal_3');
       await tester.pumpAndSettle();

@@ -44,7 +44,13 @@ left of the current-value header to resize the column; displayed decimal places
 adapt to the available width. Leaving the editor retains its draft without
 writing. Wide panels put details beside the tree.
 Structures initially expand one level, large arrays expand in ranges of 32,
-and clearing a search restores the previous expansion state. Collapsed monitors
+and clearing a search restores the previous expansion state. The **正在绘制**
+section lists plotted variables even when their tree branches are collapsed or
+filtered by search. **已固定**, **正在绘制**, and **成员** can each be collapsed
+by clicking their headers; capture and pinned monitoring continue while hidden.
+**加入采集** controls recording; captured variables have a
+separate visibility button in the **绘制** column and the details area. Hiding a
+curve keeps capture running. Collapsed monitors
 stop automatic reads unless pinned or displayed in another inspector; capture
 continues independently. Pins are saved in projects. Sidebar changes preserve panel state,
 including input drafts and source-view position, and hidden source panels do

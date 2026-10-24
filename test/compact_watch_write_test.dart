@@ -167,6 +167,10 @@ void main() {
             .data,
         startsWith('9.2500'),
       );
+      await showWatchWidget(
+        tester,
+        find.byKey(ValueKey('compact-watch-value-$key')),
+      );
       expect(
         tester
             .widget<Text>(find.byKey(ValueKey('compact-watch-value-$key')))

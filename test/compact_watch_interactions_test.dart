@@ -70,17 +70,26 @@ void main() {
     return controller;
   }
 
+  Future<void> showRow(WidgetTester tester, Finder finder) =>
+      showWatchWidget(tester, finder);
+
   Future<void> rightClick(WidgetTester tester, Finder finder) async {
+    await showRow(tester, finder);
     await tester.tap(finder, buttons: kSecondaryMouseButton);
     await tester.pumpAndSettle();
   }
 
   Future<void> rightClickBlank(WidgetTester tester) async {
+    tester
+        .widget<ListView>(find.byKey(const ValueKey('compact-watch-list')))
+        .controller!
+        .jumpTo(0);
+    await tester.pump();
     final area = tester.getRect(
       find.byKey(const ValueKey('compact-watch-list-context-area')),
     );
     await tester.tapAt(
-      Offset(area.left + 10, area.bottom - 10),
+      area.topLeft + const Offset(3, 3),
       buttons: kSecondaryMouseButton,
     );
     await tester.pumpAndSettle();
@@ -218,6 +227,7 @@ void main() {
       await tester.pump();
       await tester.tap(rowName('iq_ref'));
       await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await showRow(tester, rowName('speed_pid_kp'));
       await tester.tap(rowName('speed_pid_kp'));
       await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
       await tester.pump();
@@ -251,6 +261,7 @@ void main() {
       final pinnedBar = find.byKey(
         ValueKey('compact-watch-color-bar-pinned-$key'),
       );
+      await showRow(tester, strip);
       expect(tester.getSize(bar).width, 3);
       expect(tester.getSize(bar).height, mode == TalInputMode.touch ? 36 : 20);
       await tester.tap(strip);
@@ -266,6 +277,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(controller.watches.first.color, const Color(0xFF123ABC));
       for (final mark in [bar, pinnedBar]) {
+        await showRow(tester, mark);
         expect(
           (tester.widget<DecoratedBox>(mark).decoration as BoxDecoration).color,
           const Color(0xFF123ABC),
@@ -278,7 +290,9 @@ void main() {
       expect(controller.watches.first.samplingEnabled, isTrue);
       controller.toggleWatchPlot(key, true);
       await tester.pumpAndSettle();
+      await showRow(tester, bar);
       expect(bar, findsOneWidget);
+      await showRow(tester, pinnedBar);
       expect(pinnedBar, findsOneWidget);
 
       final boundary = tester.renderObject<RenderRepaintBoundary>(
@@ -307,7 +321,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(controller.watches.first.plotted, isFalse);
     await rightClick(tester, rowName('iq_ref'));
-    await tester.tap(find.text('显示曲线'));
+    await tester.tap(find.text('显示曲线').last);
     await tester.pumpAndSettle();
     expect(controller.watches.first.plotted, isTrue);
     await rightClick(tester, rowName('iq_ref'));

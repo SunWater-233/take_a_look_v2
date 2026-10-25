@@ -107,7 +107,10 @@ class _SourcePeekPanelState extends State<SourcePeekPanel>
         location.path,
         sourceRoot: widget.sourceRoot,
       );
-      final source = await widget.highlighter.prepare(document);
+      final source = await widget.highlighter.prepare(
+        document,
+        path: location.path,
+      );
       if (!mounted || generation != _generation) return;
       setState(() => _source = source);
       WidgetsBinding.instance.addPostFrameCallback((_) {

@@ -354,7 +354,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     if (path == null) return;
     try {
       final source = await _readSourceDocument(path);
-      final highlighted = await _highlighter.prepare(source);
+      final highlighted = await _highlighter.prepare(source, path: path);
       if (!mounted || generation != _loadGeneration) return;
       setState(() {
         _lines = highlighted.lines;

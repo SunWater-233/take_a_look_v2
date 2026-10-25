@@ -707,8 +707,8 @@ class BackendService(SamplingServiceMixin):
             except Exception as cleanup_error:
                 cleanup_errors.append(str(cleanup_error))
         message = "本地调试探针连接已中断，已停止采样；请重新连接探针。"
-        self._emit(EventName.LOG, {"level": "error", "message": message})
         self._emit(EventName.STATE, self._runtime_state_locked())
+        # ERROR already creates the frontend log entry and connection feedback.
         self._emit(EventName.ERROR, {"code": "probe_disconnected", "message": message,
                    "details": "；".join([reason, *cleanup_errors])})
         return True

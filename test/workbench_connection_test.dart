@@ -37,6 +37,9 @@ void main() {
             ),
           ),
         );
+        // Finish the initial monitor-visibility sync before observing loss.
+        await tester.pumpAndSettle();
+        commands.clear();
         controller.applyBackendEvent(BackendEventType.state, {
           'connectionStatus': 'disconnected',
           'samplingPaused': true,
@@ -51,6 +54,12 @@ void main() {
         expect(controller.connectionStatus, ConnectionStatus.disconnected);
         expect(controller.samplingPaused, isTrue);
         expect(controller.rttEnabled, isFalse);
+        expect(
+          controller.logs.where(
+            (entry) => entry.message.contains('本地调试探针连接已中断'),
+          ),
+          hasLength(1),
+        );
         expect(find.text('探针连接已中断'), findsOneWidget);
         expect(
           tester

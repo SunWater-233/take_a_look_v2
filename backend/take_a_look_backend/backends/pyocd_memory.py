@@ -149,13 +149,14 @@ class PyOcdMemoryBackend(TypedMemoryBackend):
     def check_connection(self, *, error: Exception | None = None, force: bool = False) -> None:
         """Check probe presence, independently of target/SWD accessibility."""
         from pyocd.core.exceptions import ProbeDisconnected
+        from pyocd.probe.cmsis_dap_probe import CMSISDAPProbe
         from pyocd.probe.debug_probe import DebugProbe
         from pyocd.probe.jlink_probe import JLinkProbe
 
         if not self.is_connected:
             return
         if error is not None and _probe_disconnect_error(error):
-            raise ProbeDisconnected("本地调试探针连接已中断。") from error
+            raise ProbeDisconnected(str(error)) from error
         now = perf_counter()
         if not force and now < self._next_probe_check_at:
             return
@@ -169,6 +170,8 @@ class PyOcdMemoryBackend(TypedMemoryBackend):
                 # target_connected() is false in pyOCD's low-level CoreSight
                 # mode even when the emulator USB connection is healthy.
                 present = bool(connected())
+            elif isinstance(probe, CMSISDAPProbe):
+                present = _cmsis_dap_probe_present(probe)
             elif isinstance(probe, DebugProbe):
                 present = type(probe).get_probe_with_id(probe.unique_id) is not None
             else:
@@ -179,7 +182,7 @@ class PyOcdMemoryBackend(TypedMemoryBackend):
             # An enumeration/driver query failure is inconclusive. Do not
             # turn a target fault or an unsupported presence check into a loss.
             return
-        if not present:
+        if present is False:
             raise ProbeDisconnected("本地调试探针已拔出或连接已中断。")
 
     def _prepare_target(self, config: PyOcdConnectionConfig) -> None:
@@ -403,6 +406,32 @@ def _matches_probe_filter(probe: Any, probe_filter: str) -> bool:
         probe_class = PROBE_CLASSES.get(plugin_name)
         return probe_class is not None and isinstance(probe, probe_class)
     return normalized in probe.description.casefold()
+
+
+def _cmsis_dap_probe_present(probe: Any) -> bool | None:
+    device = getattr(getattr(probe._link, "_interface", None), "dev", None)
+    if device is None:
+        # HID and other non-PyUSB transports retain their driver's enumeration.
+        return type(probe).get_probe_with_id(probe.unique_id) is not None
+
+    # pyOCD's CMSIS-DAP discovery reads configuration/string descriptors through
+    # a second handle. WinUSB denies that access while our interface is open,
+    # and discovery silently omits the healthy probe. Device descriptors and
+    # bus/address enumeration require no interface opens or target/SWD traffic.
+    bus, address = device.bus, device.address
+    backend = getattr(getattr(device, "_ctx", None), "backend", None)
+    if bus is None or address is None or backend is None:
+        return None
+    import usb.core
+
+    try:
+        return any((candidate.bus, candidate.address) == (bus, address)
+                   for candidate in usb.core.find(find_all=True, backend=backend,
+                                                  idVendor=device.idVendor, idProduct=device.idProduct))
+    except OSError:
+        # A failed system scan (possibly of another USB device) proves nothing
+        # about this active handle. Actual I/O loss is checked separately.
+        return None
 
 
 def _probe_disconnect_error(error: Exception) -> bool:

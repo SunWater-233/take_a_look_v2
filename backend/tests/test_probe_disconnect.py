@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 import pytest
 from pylink.errors import JLinkException
 from pyocd.core.exceptions import ProbeDisconnected, TransferFaultError, TransferTimeoutError
+from pyocd.probe.cmsis_dap_probe import CMSISDAPProbe
 from pyocd.probe.debug_probe import DebugProbe
 from pyocd.probe.jlink_probe import JLinkProbe
 
@@ -35,6 +36,61 @@ def wrapped_read_error(cause):
         raise ProtocolError("memory_read_failed", "read failed") from cause
     except ProtocolError as error:
         return error
+
+
+def cmsis_dap_memory_backend():
+    memory, _ = memory_backend()
+    device = SimpleNamespace(bus=3, address=10, idVendor=0xFAED, idProduct=0x4873,
+                             _ctx=SimpleNamespace(backend=object()))
+    probe = CMSISDAPProbe(SimpleNamespace(_interface=SimpleNamespace(dev=device),
+                                         get_unique_id=lambda: "active-probe"))
+    probe.close = Mock()
+    memory.session.probe = probe
+    return memory, probe, device
+
+
+def test_open_cmsis_dap_uses_usb_location_without_reopening_exclusive_interface():
+    memory, probe, device = cmsis_dap_memory_backend()
+    with patch.object(CMSISDAPProbe, "get_probe_with_id", return_value=None) as driver_scan, \
+            patch("usb.core.find", return_value=[device]) as usb_scan:
+        memory.check_connection(force=True)
+    driver_scan.assert_not_called()
+    usb_scan.assert_called_once_with(find_all=True, backend=device._ctx.backend,
+                                     idVendor=device.idVendor, idProduct=device.idProduct)
+    assert memory.is_connected
+    probe.close.assert_not_called()
+
+
+@pytest.mark.parametrize("remaining", [[], [SimpleNamespace(bus=3, address=11)]])
+def test_cmsis_dap_loss_checks_active_location_even_with_another_identical_probe(remaining):
+    memory, _, _ = cmsis_dap_memory_backend()
+    with patch.object(CMSISDAPProbe, "get_probe_with_id", return_value=object()) as driver_scan, \
+            patch("usb.core.find", return_value=remaining):
+        with pytest.raises(ProbeDisconnected):
+            memory.check_connection(force=True)
+    driver_scan.assert_not_called()
+
+
+@pytest.mark.parametrize("field", ["bus", "address"])
+def test_cmsis_dap_unknown_usb_location_is_inconclusive(field):
+    memory, _, device = cmsis_dap_memory_backend()
+    setattr(device, field, None)
+    with patch.object(CMSISDAPProbe, "get_probe_with_id", return_value=None) as driver_scan, \
+            patch("usb.core.find") as usb_scan:
+        memory.check_connection(force=True)
+    driver_scan.assert_not_called()
+    usb_scan.assert_not_called()
+    assert memory.is_connected
+
+
+@pytest.mark.parametrize("cause", [PermissionError(errno.EACCES, "interface already open"),
+                                   OSError(errno.ENODEV, "another USB device disappeared")])
+def test_cmsis_dap_failed_system_enumeration_does_not_prove_active_probe_loss(cause):
+    memory, _, _ = cmsis_dap_memory_backend()
+    with patch.object(CMSISDAPProbe, "get_probe_with_id", return_value=object()), \
+            patch("usb.core.find", side_effect=cause):
+        memory.check_connection(force=True)
+    assert memory.is_connected
 
 
 def test_jlink_presence_uses_emulator_status_and_throttles_healthy_checks(monkeypatch):
@@ -227,6 +283,8 @@ def test_unplug_auto_disconnects_once_preserves_recording_and_allows_reconnect(
             assert not service._handle_connection_failure_locked(ProbeDisconnected("already handled"))
         assert service._sampler.is_alive()
         assert sum(n is EventName.ERROR and p.get("code") == "probe_disconnected" for n, p in events) == 1
+        assert not any(n is EventName.LOG and "本地调试探针连接已中断" in p.get("message", "")
+                       for n, p in events), "The ERROR event already creates the frontend log entry"
         probe.close.assert_called_once()
         plus.stop.assert_called_once()
         session.close.assert_not_called()

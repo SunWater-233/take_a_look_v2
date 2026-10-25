@@ -201,6 +201,8 @@ def test_flash_reserves_probe_keeps_rpc_responsive_and_rebinds_symbols(tmp_path,
         assert release.wait(5)
         if fails:
             raise RuntimeError('probe unplugged')
+        memory.last_flash_stats = {'data_bytes': 139216, 'skipped_sectors': 2, 'skipped_bytes': 139216,
+                                   'compare_s': .12, 'program_s': 0, 'verify_s': 0, 'total_s': .2}
         progress(1)
     memory.program_firmware = program
     old = SymbolInfo('speed', 0x20000000, 4, 'float', '.data', 'motor.c')
@@ -236,6 +238,8 @@ def test_flash_reserves_probe_keeps_rpc_responsive_and_rebinds_symbols(tmp_path,
             assert service._watches[new.key].color == '#123456'
             assert service._symbol_file == str(firmware)
             assert memory.reset_calls == [True]
+            assert any('跳过 2 个相同扇区' in line['text']
+                       for line in service._source_tasks.snapshot()['lines'])
     finally:
         release.set()
         service.close()

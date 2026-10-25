@@ -6,9 +6,11 @@ from unittest.mock import MagicMock
 
 import pytest
 from pyocd.core.memory_map import DeviceRegion, FlashRegion, MemoryMap, RamRegion
+from pyocd.core.options_manager import OptionsManager
 from pyocd.core.target import Target
 from pyocd.coresight.coresight_target import CoreSightTarget
-from pyocd.flash.builder import ProgrammingInfo
+from pyocd.flash.builder import FlashBuilder, ProgrammingInfo
+from pyocd.flash.flash import FlashInfo, PageInfo, SectorInfo
 
 from take_a_look_backend.backends.pyocd_memory import PyOcdMemoryBackend
 from take_a_look_backend.protocol import ProtocolError, RpcMethod
@@ -65,6 +67,31 @@ def device():
                            builder=builder, memory=memory)
 
 
+@pytest.fixture
+def sector_device(device):
+    """Run the real pyOCD sector/page builder against byte-addressed flash."""
+    region = FlashRegion(start=0x08000000, length=0x60000, sector_size=0x20000, page_size=0x400)
+    flash = MagicMock()
+    flash.region, flash.target = region, device.target
+    flash.is_erase_all_supported = False
+    flash.is_double_buffering_supported = False
+    flash.get_sector_info.side_effect = lambda address: SectorInfo(address & ~0x1FFFF, .01, 0x20000)
+    flash.get_page_info.side_effect = lambda address: PageInfo(address & ~0x3FF, .001, 0x400)
+    flash.get_flash_info.return_value = FlashInfo(region.start, 1, False)
+    flash.get_flash_builder.side_effect = lambda: FlashBuilder(flash)
+    def erase(address):
+        for cursor in range(address, address + 0x20000):
+            device.memory[cursor] = 0xFF
+    flash.erase_sector.side_effect = erase
+    flash.program_page.side_effect = device.target.write_memory_block8
+    region.flash = flash
+    device.target.memory_map = MemoryMap(region, RamRegion(start=0x20000000, length=0x1000))
+    device.target.session = MagicMock()
+    device.backend.session.options = OptionsManager()
+    device.region, device.flash = region, flash
+    return device
+
+
 @pytest.mark.parametrize('case,code', [
     ('unmapped', 'firmware_address_invalid'),
     ('gap', 'firmware_address_invalid'),
@@ -110,7 +137,7 @@ def test_valid_flash_and_ram_are_loaded_and_fully_verified(tmp_path, device):
     device.backend.program_firmware(firmware(tmp_path/'app.elf', segments), progress.append)
     assert progress[-1] == 1
     assert progress == sorted(progress)
-    assert device.target.read_memory_block8.call_count == 4
+    assert device.target.read_memory_block8.call_count == 2
     for address, data in segments:
         assert bytes(device.memory[address+i] for i in range(len(data))) == data
     # p_memsz includes uninitialised data that must not be written or verified.
@@ -187,6 +214,142 @@ def test_elf_uses_flash_load_address_for_ram_initialisers(tmp_path, device):
     device.backend.program_firmware(str(path), lambda _: None)
     assert bytes(device.memory[0x08000000+i] for i in range(4)) == b'data'
     assert 0x20000000 not in device.memory
+
+
+def test_identical_h723_sized_image_is_read_once_without_flash_algorithms(tmp_path, sector_device):
+    device = sector_device
+    data = bytes(range(256)) * 543 + b'tail' * 52  # Actual AXF payload size: 139216 bytes.
+    assert len(data) == 139216
+    device.memory.update({0x08000000 + index: value for index, value in enumerate(data)})
+    # Non-FF padding must not force reprogramming of an otherwise identical image.
+    device.memory[0x08000000 + len(data)] = 0x5A
+    progress = []
+    device.backend.program_firmware(firmware(tmp_path/'app.axf', [(0x08000000, data)]), progress.append)
+    device.flash.init.assert_not_called()
+    device.flash.erase_sector.assert_not_called()
+    device.flash.program_page.assert_not_called()
+    assert device.target.read_memory_block8.call_count == 9
+    assert sum(call.args[1] for call in device.target.read_memory_block8.call_args_list) == len(data)
+    assert device.backend.last_flash_stats['skipped_bytes'] == len(data)
+    assert device.backend.last_flash_stats['skipped_sectors'] == 2
+    assert progress[-1] == 1 and progress == sorted(progress)
+
+
+def test_changed_sector_rewrites_matching_pages_and_keeps_other_sectors(tmp_path, sector_device):
+    device = sector_device
+    first = bytes(range(256)) * 512
+    second = bytes(reversed(range(256))) * 32
+    chunks = [(0x08000000, first), (0x08020000, second)]
+    for address, data in chunks:
+        device.memory.update({address + index: value for index, value in enumerate(data)})
+    # A changed byte after the first chunk must still cause the whole sector to be rewritten.
+    device.memory[0x08007000] ^= 1
+    device.backend.program_firmware(firmware(tmp_path/'app.axf', chunks), lambda _: None)
+    device.flash.erase_sector.assert_called_once_with(0x08000000)
+    assert device.flash.program_page.call_count == 128
+    for address, data in chunks:
+        assert bytes(device.memory[address + index] for index in range(len(data))) == data
+    assert device.backend.last_flash_stats['skipped_sectors'] == 1
+    assert device.backend.last_flash_stats['skipped_bytes'] == len(second)
+    # The skipped sector is read again after any programming, to catch collateral corruption.
+    assert sum(call.args[1] for call in device.target.read_memory_block8.call_args_list
+               if call.args[0] == 0x08020000) == 2 * len(second)
+
+
+def test_all_discontiguous_image_chunks_of_changed_sector_are_programmed(tmp_path, sector_device):
+    device = sector_device
+    chunks = [(0x08000000, b'first'), (0x08001003, b'last')]
+    device.memory.update({address + index: value for address, data in chunks for index, value in enumerate(data)})
+    device.memory[0x08001006] ^= 1
+    device.backend.program_firmware(firmware(tmp_path/'app.axf', chunks), lambda _: None)
+    device.flash.erase_sector.assert_called_once_with(0x08000000)
+    for address, data in chunks:
+        assert bytes(device.memory[address + index] for index in range(len(data))) == data
+
+
+@pytest.mark.parametrize('failure', ['probe', 'short'])
+def test_comparison_failure_in_later_sector_prevents_all_erases(tmp_path, sector_device, failure):
+    device = sector_device
+    chunks = [(0x08000000, b'new!'), (0x08020000, b'next')]
+    def read(address, size):
+        if address >= 0x08020000:
+            if failure == 'probe':
+                raise RuntimeError('probe disconnected')
+            return b''
+        return b'old!'
+    device.target.read_memory_block8.side_effect = read
+    with pytest.raises(RuntimeError if failure == 'probe' else ProtocolError):
+        device.backend.program_firmware(firmware(tmp_path/'app.axf', chunks), lambda _: None)
+    device.flash.erase_sector.assert_not_called()
+    device.flash.program_page.assert_not_called()
+    assert device.backend.last_flash_stats is None
+
+
+def test_overlapping_image_rejected_before_reset_or_comparison(tmp_path, sector_device):
+    device = sector_device
+    with pytest.raises(ValueError, match='overlap'):
+        device.backend.program_firmware(firmware(tmp_path/'app.axf', [
+            (0x08000000, b'first'), (0x08000002, b'last')]), lambda _: None)
+    device.target.reset_and_halt.assert_not_called()
+    device.target.read_memory_block8.assert_not_called()
+    device.flash.erase_sector.assert_not_called()
+
+
+def test_post_write_failure_in_optimized_path_never_completes(tmp_path, sector_device):
+    device = sector_device
+    def corrupt(address, data):
+        device.memory.update({address + index: value ^ 0xFF for index, value in enumerate(data)})
+    device.flash.program_page.side_effect = corrupt
+    progress = []
+    with pytest.raises(ProtocolError) as error:
+        device.backend.program_firmware(firmware(tmp_path/'app.axf', [(0x08000000, b'new!')]), progress.append)
+    assert error.value.code == 'firmware_verify_failed'
+    assert 1 not in progress
+
+
+def test_configured_preservation_of_unwritten_bytes_is_retained(tmp_path, sector_device):
+    device = sector_device
+    device.backend.session.options.add_front({'keep_unwritten': True})
+    device.memory[0x08000010] = 0x5A
+    device.backend.program_firmware(firmware(tmp_path/'app.axf', [(0x08000000, b'new!')]), lambda _: None)
+    assert device.memory[0x08000010] == 0x5A
+
+
+def test_write_corrupting_a_skipped_sector_fails_full_post_verification(tmp_path, sector_device):
+    device = sector_device
+    device.memory.update({0x08020000 + index: value for index, value in enumerate(b'same')})
+    write = device.target.write_memory_block8.side_effect
+    def corrupt(address, data):
+        write(address, data)
+        device.memory[0x08020000] = 0
+    device.flash.program_page.side_effect = corrupt
+    progress = []
+    with pytest.raises(ProtocolError) as error:
+        device.backend.program_firmware(firmware(tmp_path/'app.axf', [
+            (0x08000000, b'new!'), (0x08020000, b'same')]), progress.append)
+    assert error.value.code == 'firmware_verify_failed'
+    assert '0x08020000' in error.value.details
+    assert 1 not in progress
+    assert device.backend.last_flash_stats is None
+
+
+@pytest.mark.parametrize('fallback', ['external', 'unreadable_erased', 'large_page', 'ram'])
+def test_special_memories_retain_pyocd_general_loader(tmp_path, sector_device, fallback):
+    device = sector_device
+    chunks = [(0x08000000, b'good')]
+    if fallback == 'external':
+        device.region.is_external = True
+    elif fallback == 'unreadable_erased':
+        device.region.are_erased_sectors_readable = False
+    elif fallback == 'large_page':
+        device.flash.get_sector_info.side_effect = lambda address: SectorInfo(address & ~0x1FF, .01, 0x200)
+    else:
+        chunks.append((0x20000000, b'ram'))
+    device.backend.program_firmware(firmware(tmp_path/'app.axf', chunks), lambda _: None)
+    assert device.backend.last_flash_stats['compared_bytes'] == 0
+    assert device.backend.last_flash_stats['skipped_bytes'] == 0
+    for address, data in chunks:
+        assert bytes(device.memory[address + index] for index in range(len(data))) == data
 
 
 def test_failed_verification_fails_async_task_without_post_download_reset_or_resume(tmp_path, device):

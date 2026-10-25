@@ -73,6 +73,18 @@ The shared source-task lifecycle pauses acquisition, removes breakpoints, waits
 for verified programming, then reloads symbols and applies halt/run settings.
 Failed/unknown flash jobs never reset/resume the target or report success.
 
+For the builtin `stm32h723xx` target, J-Link sessions select the generic
+`Cortex-M7` device to enable pyOCD's native AP0 block-memory interface and then
+restore the configured SWD clock. Other probes and pack targets keep their
+connection setup. Local downloads compare readable internal flash by erase
+sector using bounded payload reads, skipping sectors whose image bytes match.
+Changed sectors retain all their image chunks and bypass a redundant smart-flash
+comparison. Any write is followed by a fresh byte-for-byte readback of the whole
+image; an entirely matching image completes after its comparison without running
+a flash algorithm. RAM, external/unreadable flash and pages spanning erase
+sectors retain the general loader. Download output reports comparison, erase/write
+and verification times and the number of skipped sectors.
+
 High-frequency acquisition compiles typed block decoders and retains up to eight
 read plans, including separate capture/monitor sets. Symbol keys and capture
 membership are cached; reloading symbols or changing watches invalidates the

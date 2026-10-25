@@ -104,3 +104,31 @@ def test_custom_probe_filter_keeps_case_insensitive_description_matching(connect
     backend.connect(PyOcdConnectionConfig(None, 4_000_000, probe_filter="hOrCo"))
 
     assert create_session.call_args.args[0] is expected
+
+
+@pytest.mark.parametrize('target,driver,pack_path,native', [
+    ('stm32h723xx', JLinkProbe, None, True),
+    ('STM32H723XX', JLinkProbe, None, True),
+    ('stm32h743xx', JLinkProbe, None, False),
+    ('stm32h723xx', CMSISDAPProbe, None, False),
+    ('stm32h723xx', StlinkProbe, None, False),
+    ('stm32h723xx', JLinkProbe, 'custom.pack', False),
+    (None, JLinkProbe, None, False),
+])
+def test_h723_jlink_uses_native_memory_and_restores_requested_clock(
+        connection, monkeypatch, target, driver, pack_path, native):
+    backend, enumerate_probes, create_session = connection
+    probe = named_probe(driver, 'Test probe')
+    probe.set_clock = Mock()
+    enumerate_probes.return_value = [probe]
+    if pack_path:
+        monkeypatch.setattr(backend, '_prepare_target', lambda _: None)
+    backend.connect(PyOcdConnectionConfig(target, 4_000_000, pack_path=pack_path))
+    options = create_session.call_args.kwargs['options']
+    assert options['frequency'] == 4_000_000
+    if native:
+        assert options['jlink.device'] == 'Cortex-M7'
+        probe.set_clock.assert_called_once_with(4_000_000)
+    else:
+        assert 'jlink.device' not in options
+        probe.set_clock.assert_not_called()

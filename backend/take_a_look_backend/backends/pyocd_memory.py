@@ -12,6 +12,7 @@ from typing import Any
 
 from take_a_look_backend.protocol import ProtocolError
 from take_a_look_backend.backends.pyocd_compat import guard_dap_error_recovery
+from take_a_look_backend.backends.local_firmware import flash_sector_plan, read_firmware_chunks, sector_matches
 from take_a_look_backend.backends.target_backend import capabilities_for_connection
 # Re-export the existing codec entry points for external callers.
 from take_a_look_backend.backends.typed_memory import (
@@ -41,6 +42,7 @@ class PyOcdMemoryBackend(TypedMemoryBackend):
         self._owns_target_registry = False
         self._pack_archive: zipfile.ZipFile | None = None
         self._next_probe_check_at = 0.0
+        self.last_flash_stats: dict[str, int | float] | None = None
 
     @property
     def is_connected(self) -> bool:
@@ -56,6 +58,7 @@ class PyOcdMemoryBackend(TypedMemoryBackend):
 
         from pyocd.core.helpers import ConnectHelper
         from pyocd.core.session import Session
+        from pyocd.probe.jlink_probe import JLinkProbe
 
         total_started = perf_counter()
         timings: dict[str, float] = {}
@@ -78,6 +81,13 @@ class PyOcdMemoryBackend(TypedMemoryBackend):
             raise RuntimeError("没有找到可用的调试探针。")
 
         probe = probes[0]
+        # H723 is a single Cortex-M7 on AP0. Connecting the J-Link core enables
+        # pyOCD's native block-memory interface; low-level CoreSight otherwise
+        # sends every data word as a separate synchronous DLL/USB operation.
+        native_jlink = (isinstance(probe, JLinkProbe) and config.pack_path is None
+                        and (config.target or "").casefold() == "stm32h723xx")
+        if native_jlink:
+            options["jlink.device"] = "Cortex-M7"
         open_started = perf_counter()
         session = None
         try:
@@ -89,6 +99,10 @@ class PyOcdMemoryBackend(TypedMemoryBackend):
             if config.pack_path is not None:
                 _normalise_pack_svd(session.target)
             session.open()
+            if native_jlink:
+                # pylink.connect() selects automatic speed during core connect.
+                # Restore the explicit clock before sampling or flashing.
+                probe.set_clock(config.frequency_hz)
             timings["session_open_s"] = perf_counter() - open_started
         except Exception:
             timings["session_open_s"] = perf_counter() - open_started
@@ -214,45 +228,86 @@ class PyOcdMemoryBackend(TypedMemoryBackend):
     def program_firmware(self, path: str, progress) -> None:
         from pyocd.flash.loader import MemoryLoader
 
+        self.last_flash_stats = None
+        started = perf_counter()
         target = self._require_target()
         segments = _firmware_segments(path, target)
+        total = sum(len(data) for _, data in segments)
         # FileProgrammer catches invalid ELF segment addresses and only logs a
         # warning. Queue validated segments directly so no data can be skipped.
         last_progress = 0.0
+        programming_start = 0.0
         def write_progress(value: float) -> None:
             nonlocal last_progress
             # pyOCD starts its progress range again between erase and program.
-            last_progress = max(last_progress, min(0.8, max(0.0, value * 0.8)))
+            last_progress = max(last_progress, min(0.8, max(0.0,
+                                programming_start + value * (0.8 - programming_start))))
             progress(last_progress)
         loader = MemoryLoader(self.session, progress=write_progress,
                               chip_erase="sector", trust_crc=False)
         for address, data in segments:
             loader.add_data(address, data)
+        sectors = flash_sector_plan(target, segments)
         try:
             # Pack algorithms may change Flash latency without resetting the
             # application's clocks (GD32E50x sets zero wait states). Start from
             # reset clocks before any smart-flash reads, erase, or programming.
             target.reset_and_halt()
-            loader.commit()
+            compare_started = perf_counter()
+            compared_bytes = skipped_bytes = skipped_sectors = 0
+            changed = []
+            def compared(size: int) -> None:
+                nonlocal compared_bytes
+                compared_bytes += size
+                progress(0.15 * compared_bytes / total)
+            if sectors is not None:
+                for sector in sectors:
+                    if sector_matches(target, sector, compared):
+                        skipped_bytes += sum(len(data) for _, data in sector.chunks)
+                        skipped_sectors += 1
+                    else:
+                        # Keep ALL image chunks in a changed sector, including
+                        # matching pages that its erase will destroy.
+                        changed.extend(sector.chunks)
+                programming_start = last_progress = 0.15
+                progress(last_progress)
+                loader = MemoryLoader(self.session, progress=write_progress,
+                                      chip_erase="sector", trust_crc=False, smart_flash=False)
+                for address, data in changed:
+                    loader.add_data(address, data)
+            compare_s = perf_counter() - compare_started
+            program_started = perf_counter()
+            wrote = sectors is None or bool(changed)
+            if wrote:
+                loader.commit()
+            program_s = perf_counter() - program_started
             target.halt()
             target.flush()
             progress(0.8)
-            total = sum(len(data) for _, data in segments)
+            verify_started = perf_counter()
             verified = 0
-            for address, data in segments:
-                for offset in range(0, len(data), 4096):
-                    expected = data[offset:offset + 4096]
-                    actual = bytes(target.read_memory_block8(address + offset, len(expected)))
-                    if actual != expected:
-                        mismatch = next((i for i, (a, b) in enumerate(zip(actual, expected)) if a != b),
-                                        min(len(actual), len(expected)))
-                        expected_byte = f"0x{expected[mismatch]:02X}" if mismatch < len(expected) else "数据结束"
-                        actual_byte = f"0x{actual[mismatch]:02X}" if mismatch < len(actual) else "未读到数据"
-                        raise ProtocolError("firmware_verify_failed", "固件写后校验失败，未确认下载成功。",
-                                            f"地址 0x{address + offset + mismatch:08X}，"
-                                            f"期望 {expected_byte}，实际 {actual_byte}")
-                    verified += len(expected)
-                    progress(0.8 + 0.2 * verified / total)
+            # An entirely unchanged image was already read and compared byte
+            # for byte, with no flash algorithm run. Any write requires a fresh
+            # read of the whole image, including the skipped sectors and RAM.
+            for address, expected, actual in read_firmware_chunks(target, segments) if wrote else ():
+                if actual != expected:
+                    mismatch = next((i for i, (a, b) in enumerate(zip(actual, expected)) if a != b),
+                                    min(len(actual), len(expected)))
+                    expected_byte = f"0x{expected[mismatch]:02X}" if mismatch < len(expected) else "数据结束"
+                    actual_byte = f"0x{actual[mismatch]:02X}" if mismatch < len(actual) else "未读到数据"
+                    raise ProtocolError("firmware_verify_failed", "固件写后校验失败，未确认下载成功。",
+                                        f"地址 0x{address + mismatch:08X}，"
+                                        f"期望 {expected_byte}，实际 {actual_byte}")
+                verified += len(expected)
+                progress(0.8 + 0.2 * verified / total)
+            self.last_flash_stats = {
+                "data_bytes": total, "compared_bytes": compared_bytes,
+                "skipped_bytes": skipped_bytes, "skipped_sectors": skipped_sectors,
+                "compare_s": compare_s, "program_s": program_s,
+                "verify_s": perf_counter() - verify_started, "total_s": perf_counter() - started,
+            }
+            if not wrote:
+                progress(1.0)
         finally:
             self._clear_read_plans()
 

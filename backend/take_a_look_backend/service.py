@@ -557,6 +557,11 @@ class BackendService(SamplingServiceMixin):
             # The sampler and RPC guards reserve the session without holding the
             # service lock throughout flash; getState and shutdown stay responsive.
             self._memory.program_firmware(str(staged), progress)
+            if stats := getattr(self._memory, "last_flash_stats", None):
+                task.log(f"本地固件：{stats['data_bytes'] / 1024:.1f} KiB；"
+                         f"跳过 {stats['skipped_sectors']} 个相同扇区（{stats['skipped_bytes'] / 1024:.1f} KiB）；"
+                         f"比较 {stats['compare_s']:.2f} 秒，擦写 {stats['program_s']:.2f} 秒，"
+                         f"写后校验 {stats['verify_s']:.2f} 秒，总计 {stats['total_s']:.2f} 秒。")
             if timings := getattr(self._memory, "last_flash_timings", None):
                 task.log(f"固件传输：{timings['upload_bytes'] / 1024:.1f} KiB，"
                          f"{timings['upload_s']:.2f} 秒；手机比较、擦写与校验：{timings['flash_s']:.2f} 秒。")

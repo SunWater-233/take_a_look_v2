@@ -3,6 +3,8 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui';
 
+part 'sample_extrema_index.dart';
+
 /// Numeric ring history. Frozen snapshots share pages until a later write.
 /// Extrema summaries retain original order, precision, and earliest equal hits.
 class SampleBuffer extends IterableBase<Offset> {
@@ -26,6 +28,7 @@ class SampleBuffer extends IterableBase<Offset> {
       _latestTime = source._latestTime,
       _lastTime = source._lastTime,
       _readOnly = true {
+    _pageExtrema = source._pageExtrema?.copyFor(_pages);
     for (final page in _pages) {
       if (page != null) page.shared = true;
     }
@@ -48,6 +51,7 @@ class SampleBuffer extends IterableBase<Offset> {
   int _length = 0;
   int _revision = 0;
   final bool _readOnly;
+  _PageExtremaIndex? _pageExtrema;
   ({int revision, double start, double end, (double, double)? bounds})? _bounds;
 
   /// O(number of pages), without copying points or sharing mutable values.
@@ -77,6 +81,7 @@ class SampleBuffer extends IterableBase<Offset> {
     final oldStart = _start;
     _capacity = size;
     _pages = List.filled((size + _pageSize - 1) ~/ _pageSize, null);
+    _pageExtrema = null;
     _start = 0;
     for (var i = 0; i < _length; i++) {
       final sum = oldStart + i;
@@ -174,6 +179,7 @@ class SampleBuffer extends IterableBase<Offset> {
     page.times[offset] = time;
     page.values[offset] = value;
     page.invalidate(offset);
+    _pageExtrema?.invalidate(pageIndex);
   }
 
   void add(Offset point) => addXY(point.dx, point.dy);
@@ -215,6 +221,7 @@ class SampleBuffer extends IterableBase<Offset> {
       _capacity = (_retentionSeconds! * _configuredRate!).ceil() + 1;
     }
     _pages = List.filled((capacity + _pageSize - 1) ~/ _pageSize, null);
+    _pageExtrema = null;
     _revision++;
   }
 
@@ -244,6 +251,28 @@ class SampleBuffer extends IterableBase<Offset> {
     while (index < end) {
       final physical = _position(index);
       final offset = physical % _pageSize;
+      // Query complete pages together. The head/tail and capacity wrap still
+      // use the exact page index, preserving logical order for equal extrema.
+      final fullPages = math.min(
+        (end - index) ~/ _pageSize,
+        (capacity - physical) ~/ _pageSize,
+      );
+      if (offset == 0 && fullPages > 1) {
+        final summaries = _pageExtrema ??= _PageExtremaIndex(_pages);
+        final pageIndex = physical ~/ _pageSize;
+        final (low, high) = summaries.extrema(pageIndex, pageIndex + fullPages);
+        final lowValue = _value(low), highValue = _value(high);
+        if (lowValue < minimum) {
+          minimum = lowValue;
+          minimumIndex = index + low - physical;
+        }
+        if (highValue > maximum) {
+          maximum = highValue;
+          maximumIndex = index + high - physical;
+        }
+        index += fullPages * _pageSize;
+        continue;
+      }
       final count = math.min(
         end - index,
         math.min(_pageSize - offset, capacity - physical),

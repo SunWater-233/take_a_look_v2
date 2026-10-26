@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import BinaryIO, Iterable, Mapping
 
-from .numeric_history import NumericHistory
+from .numeric_history import NumericHistory, write_block
 
 
 def recording_directory() -> Path:
@@ -67,7 +67,7 @@ class RawRecording:
             if self._file is None:
                 self.directory.mkdir(parents=True, exist_ok=True)
                 self.path = Path(tempfile.mkdtemp(prefix="session-", dir=self.directory)) / "samples.talraw"
-                self._file = self.path.open("wb")
+                self._file = self.path.open("wb", buffering=0)
                 self._history = NumericHistory(self.path.parent / "history")
             records = []
             if self.committed_bytes == 0:
@@ -78,8 +78,7 @@ class RawRecording:
                             **({"timing": timings} if any(timings) else {})})
             data = "".join(json.dumps(record, ensure_ascii=False, separators=(",", ":"), allow_nan=False) + "\n"
                            for record in records).encode("utf-8")
-            self._file.write(data)
-            self._file.flush()
+            write_block(self._file, data)
             self._history.append(rows, self._channels)
             self.committed_bytes = self._file.tell()
             self.sample_count += len(rows)

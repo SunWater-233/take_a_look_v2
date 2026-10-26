@@ -87,10 +87,11 @@ class _RenderWatchRowAnchor extends RenderProxyBox {
 
   double? visibleCenterIn(RenderBox chart) {
     if (!attached || !hasSize || _root(this) != _root(chart)) return null;
-    var visible = MatrixUtils.transformRect(
+    final bounds = MatrixUtils.transformRect(
       getTransformTo(chart),
       Offset.zero & size,
     );
+    var visible = bounds;
     RenderObject child = this;
     for (var ancestor = parent; ancestor != null; ancestor = ancestor.parent) {
       if (!ancestor.paintsChild(child)) return null;
@@ -102,6 +103,8 @@ class _RenderWatchRowAnchor extends RenderProxyBox {
       }
       child = ancestor;
     }
-    return visible.isEmpty || !visible.isFinite ? null : visible.center.dy;
+    // Clipping decides whether this row can supply an anchor. It must not move
+    // the row's center as the first or last pixels scroll out of the viewport.
+    return visible.isEmpty || !visible.isFinite ? null : bounds.center.dy;
   }
 }

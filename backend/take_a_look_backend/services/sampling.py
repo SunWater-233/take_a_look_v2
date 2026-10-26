@@ -4,7 +4,7 @@ import logging
 import time
 from typing import Any
 
-from take_a_look_backend.models import SampleFrame, WatchedVariable, json_value
+from take_a_look_backend.models import WatchedVariable, json_value
 from take_a_look_backend.backends.ember_transport import EmberError
 from take_a_look_backend.backends.target_backend import backend_capabilities, backend_rtt_binding
 from take_a_look_backend.protocol import EventName, ProtocolError
@@ -56,7 +56,7 @@ class SamplingServiceMixin:
                     elapsed = self._elapsed_locked(now)
                     rtt_enabled = self._rtt_enabled
                     rtt_protocol = self._rtt_protocol
-                    if self._pipeline_backpressure:
+                    if self._pipeline.backpressure:
                         self._flush_pending_samples_locked(wait=False)
                     if connected:
                         if now >= next_monitor_at:
@@ -65,9 +65,9 @@ class SamplingServiceMixin:
                     memory_enabled = (active and bool(self._capture_symbols_locked()) and
                             backend_capabilities(self._memory).memory_sampling and
                             not (rtt_enabled and rtt_protocol == "plus" and self._plus_rtt.is_started))
-                    if not memory_enabled or self._pipeline_backpressure:
+                    if not memory_enabled or self._pipeline.backpressure:
                         self._stop_memory_sampling_locked()
-                    if connected and not self._pipeline_backpressure:
+                    if connected and not self._pipeline.backpressure:
                         if memory_enabled:
                             push_read = getattr(self._memory, "read_sample_frames", None)
                             frames = (push_read(self._capture_symbols_locked(), self._sample_rate_hz, elapsed)
@@ -95,11 +95,11 @@ class SamplingServiceMixin:
                                     self._queue_samples_locked(frames)
                                 next_rtt_at = advance_deadline(next_rtt_at, time.perf_counter(), rtt_period)
                             deadlines.append(next_rtt_at)
-                    if self._pending_frames:
-                        if len(self._pending_frames) >= 64 or now - last_emit_at >= 0.006:
+                    if self._pipeline.pending_count:
+                        if self._pipeline.pending_count >= 64 or now - last_emit_at >= 0.006:
                             if self._flush_pending_samples_locked(wait=False):
                                 last_emit_at = now
-                        if not self._pipeline_backpressure:
+                        if not self._pipeline.backpressure:
                             deadlines.append(last_emit_at + 0.006)
                 last_sampling_error = None
             except Exception as error:
@@ -257,87 +257,18 @@ class SamplingServiceMixin:
         return frames
 
     def _queue_samples_locked(self, frames: list[tuple[float, dict[str, object]]]) -> None:
-        # Capture the sampling switches/labels at acquisition, before a watch
-        # can be disabled or removed while this batch waits for publication.
-        for acquired in frames:
-            elapsed, values = acquired
-            normalized = {}
-            for key, value in values.items():
-                watch = self._watches.get(key)
-                if watch is not None and watch.captures:
-                    normalized[key] = json_value(value)
-                    self._pending_recording_labels[key] = watch.symbol.name
-            if not normalized:
-                continue
-            frame = SampleFrame(elapsed, normalized, getattr(acquired, "timing", None))
-            self._pending_frames.append(frame)
-            self._pending_updated_at_ms = time.time_ns() // 1_000_000
-            self._pending_recording_frames.append(frame)
+        self._pipeline.queue(frames, self._watches)
 
     def _flush_pending_samples_locked(self, *, wait: bool = True, block: bool | None = None) -> bool:
-        if self._recording.failure is not None:
-            return False
-        if not self._pending_frames:
-            if wait:
-                self._recording_worker.drain()
-            return True
-        frames = self._pending_frames
-        recorded = self._pending_recording_frames
-        labels = self._pending_recording_labels
-        updated_at_ms = self._pending_updated_at_ms
-        weight = (len(frames) * 128 + sum(len(values) for _, values in frames) * 96
-                  + sum(256 for frame in frames if getattr(frame, "timing", None) is not None))
-        future = self._recording_worker.submit_batch(
-            self._commit_sample_batches, (frames, recorded, labels, updated_at_ms),
-            weight=weight, block=wait if block is None else block)
-        if future is None:
-            # Retain the acquired batch and stop further reads until admitted.
-            # Hardware-side RTT overflow still follows its existing error path.
-            self._pipeline_backpressure = True
-            return False
-        self._pipeline_backpressure = False
-        self._pending_frames = []
-        self._pending_recording_frames = []
-        self._pending_recording_labels = {}
-        self._pending_updated_at_ms = None
-        if wait:
-            future.result()
-        return True
+        return self._pipeline.flush(wait=wait, block=block)
 
-    def _commit_sample_batch(self, frames, recorded, labels, updated_at_ms=None) -> None:
-        self._commit_sample_batches([(frames, recorded, labels, updated_at_ms)])
-
-    def _commit_sample_batches(self, batches) -> None:
-        previous_path = self._recording.path
-        try:
-            recorded, labels = [], {}
-            for _, batch_recorded, batch_labels, _ in batches:
-                recorded.extend(batch_recorded)
-                labels.update(batch_labels)
-            self._recording.append(recorded, labels)
-        except Exception as error:
-            first_failure = not self._recording_error_reported
-            self._recording_error_reported = True
-            self._recording.failure = error
-            self._sampling_paused = True
-            self._wake.set()
-            if first_failure:
-                self._emit(EventName.ERROR, {"code": "raw_recording_failed",
-                           "message": "原始记录写入失败，已暂停采样。", "details": str(error)})
-                self._emit(EventName.STATE, {"samplingPaused": True,
-                           "rawRecording": self._recording.status()})
-            return
-        with self._perf_lock:
-            self._sample_count_since_perf += sum(len(frames) for frames, _, _, _ in batches)
-        if self._recording.path != previous_path:
-            self._emit(EventName.LOG, {"level": "info", "message": f"原始采样持续保存：{self._recording.path}"})
-            self._emit(EventName.STATE, {"rawRecording": self._recording.status()})
-        # Preserve each acquisition timestamp, including pending pre-write data.
-        for frames, _, _, updated_at_ms in batches:
-            self._emit(EventName.SAMPLES, {"captureOnly": True, "updatedAtMs": updated_at_ms, "frames": [
-                (frame.to_json() if isinstance(frame, SampleFrame)
-                 else {"elapsed": frame[0], "values": frame[1]}) for frame in frames]})
+    def _recording_failed(self, error) -> None:
+        self._sampling_paused = True
         self._wake.set()
+        self._emit(EventName.ERROR, {"code": "raw_recording_failed",
+                   "message": "原始记录写入失败，已暂停采样。", "details": str(error)})
+        self._emit(EventName.STATE, {"samplingPaused": True,
+                   "rawRecording": self._recording.status()})
 
     def _publish_perf(self, now: float) -> None:
         with self._lock:
@@ -347,9 +278,7 @@ class SamplingServiceMixin:
             capture = getattr(rtt_backend, "control_block", None)
             dropped = sum(getattr(getattr(channel, "stream", None), "dropped", 0)
                           for channel in getattr(capture, "up_channels", []))
-            with self._perf_lock:
-                sample_count = self._sample_count_since_perf
-                self._sample_count_since_perf = 0
+            sample_count = self._pipeline.take_committed_count()
             payload = {
                 "effectiveHz": sample_count / interval,
                 "sampleCount": sample_count,

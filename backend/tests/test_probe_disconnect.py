@@ -259,7 +259,7 @@ def test_unplug_auto_disconnects_once_preserves_recording_and_allows_reconnect(
             service._watches[item.key] = WatchedVariable(item, "#00ff00")
             service._queue_samples_locked([(0.1, {item.key: 1.0})])
             service._flush_pending_samples_locked()
-            service._recording_worker.drain()
+            service._pipeline.drain()
             path, count = service._recording.path, service._recording.sample_count
             service._connection_status = "connected"
             service._sampling_paused = paused

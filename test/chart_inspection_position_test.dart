@@ -200,12 +200,17 @@ void main() {
       await tester.binding.setSurfaceSize(const Size(1400, 600));
       controller.setPlotHighlightedWatch('signal_3', selectWatchRow: true);
       await _pumpPanels(tester, controller);
+      _expectAligned(tester, 'signal_3'); // Partially clipped capture row.
+      // Capture has its own scroll pane. Hide duplicate capture anchors when
+      // exercising the members list's scrolling and offscreen fallback.
+      await tester.tap(find.text('正在采集').first);
+      await tester.pumpAndSettle();
       final scrollable = find.descendant(
         of: find.byKey(const ValueKey('compact-watch-list')),
         matching: find.byType(Scrollable),
       );
       final scroll = tester.state<ScrollableState>(scrollable.first).position;
-      // Scroll past the capture summary so only tree rows provide anchors.
+      // Keep the initial position inside this pane's actual scroll range.
       final initialScroll =
           tester
               .getTopLeft(find.byKey(const ValueKey('compact-watch-signal_0')))
@@ -214,14 +219,18 @@ void main() {
               .getTopLeft(find.byKey(const ValueKey('compact-watch-list')))
               .dy -
           36;
-      scroll.jumpTo(initialScroll);
+      scroll.jumpTo(initialScroll.clamp(0, scroll.maxScrollExtent));
       await tester.pumpAndSettle();
       _expectAligned(tester, 'signal_3');
       final before = _tooltip(tester).center.dy;
-      scroll.jumpTo(initialScroll + 70);
+      final beforeOffset = scroll.pixels;
+      scroll.jumpTo((beforeOffset + 70).clamp(0, scroll.maxScrollExtent));
       await tester.pumpAndSettle();
       _expectAligned(tester, 'signal_3');
-      expect(_tooltip(tester).center.dy, closeTo(before - 70, 0.01));
+      expect(
+        _tooltip(tester).center.dy,
+        closeTo(before - (scroll.pixels - beforeOffset), 0.01),
+      );
 
       // Retained sliver cache children must not count as visible watch rows.
       controller.setPlotHighlightedWatch('signal_0');

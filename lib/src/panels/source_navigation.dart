@@ -77,12 +77,11 @@ extension _SourceNavigation on _SourceDebugPanelState {
   }
 
   void _navigateHistory({required bool back}) {
-    final from = back ? _navigationBack : _navigationForward;
-    final to = back ? _navigationForward : _navigationBack;
-    if (from.isEmpty) return;
-    final current = _captureNavigationLocation();
-    if (current != null) to.add(current);
-    unawaited(_revealNavigationLocation(from.removeLast()));
+    final location = _navigation.travel(
+      back: back,
+      current: _captureNavigationLocation(),
+    );
+    if (location != null) unawaited(_revealNavigationLocation(location));
   }
 
   Future<void> _revealNavigationLocation(

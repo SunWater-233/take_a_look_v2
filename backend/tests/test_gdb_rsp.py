@@ -146,7 +146,7 @@ def test_service_rsp_capture_pause_monitor_resume_clear_and_disconnect(tmp_path:
         service.handle(RpcMethod.SET_SAMPLING_PAUSED, {"paused": True})
         with service._lock:
             service._flush_pending_samples_locked()
-        service._recording_worker.submit(lambda: None).result()
+        service._pipeline.drain()
         count = service._recording.sample_count
         time.sleep(.05)
         assert service._recording.sample_count == count

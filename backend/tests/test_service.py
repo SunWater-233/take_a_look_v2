@@ -149,7 +149,7 @@ class BackendServiceTests(unittest.TestCase):
                 self.assertTrue(self.service._lock.acquire(timeout=0.2))
                 self.service._lock.release()
                 release.set()
-                self.service._recording_worker.drain()
+                self.service._pipeline.drain()
             self.assertEqual(self.service._recording.sample_count, 1)
         finally:
             release.set()

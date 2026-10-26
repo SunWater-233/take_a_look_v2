@@ -19,6 +19,7 @@ import 'source_search_controller.dart';
 import 'source_highlighter.dart';
 import 'source_documents.dart';
 import 'source_references.dart';
+import 'source_navigation_history.dart';
 import 'source_peek.dart';
 import '../theme/theme.dart';
 
@@ -87,8 +88,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
   int _activeSearchIndex = -1;
   int? _revealedSearchLine;
   _SourceTokenSelection? _sourceSelection;
-  final List<_SourceNavigationLocation> _navigationBack = [];
-  final List<_SourceNavigationLocation> _navigationForward = [];
+  final _navigation = SourceNavigationHistory<_SourceNavigationLocation>();
   bool _sourceTapWithModifier = false;
   _SourceTokenSelection? _hoveredToken;
   bool _hoveredTokenCanNavigate = false;
@@ -183,8 +183,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     _hoveredToken = null;
     _sourcePeek = null;
     _references.cancel();
-    _navigationBack.clear();
-    _navigationForward.clear();
+    _navigation.clear();
     _searchVisible = false;
     _searching = false;
     _activeSearchIndex = -1;
@@ -269,8 +268,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     if (sourceRootChanged) {
       _sourcePeek = null;
       _references.cancel();
-      _navigationBack.clear();
-      _navigationForward.clear();
+      _navigation.clear();
       _observedSourceRoot = controller.debugState.sourceRoot;
       _resolvedSourcePaths.clear();
       _sourceDocuments.clear();
@@ -1417,7 +1415,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
         key: const ValueKey('source-navigation-back'),
         tooltip: '返回上一位置 (Alt+←)',
         icon: Icons.arrow_back,
-        onPressed: _navigationBack.isEmpty
+        onPressed: !_navigation.canGoBack
             ? null
             : () => _navigateHistory(back: true),
       ),
@@ -1425,7 +1423,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
         key: const ValueKey('source-navigation-forward'),
         tooltip: '前往下一位置 (Alt+→)',
         icon: Icons.arrow_forward,
-        onPressed: _navigationForward.isEmpty
+        onPressed: !_navigation.canGoForward
             ? null
             : () => _navigateHistory(back: false),
       ),

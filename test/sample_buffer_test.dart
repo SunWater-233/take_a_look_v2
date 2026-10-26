@@ -11,6 +11,68 @@ import 'package:take_a_look_v2/src/telemetry/telemetry_store.dart';
 
 void main() {
   test(
+    'cross-page ranges keep exact ties through dirty writes and snapshots',
+    () {
+      final random = math.Random(6026);
+      final buffer = SampleBuffer(capacity: 8195);
+      void verify(SampleBuffer samples) {
+        final expected = samples.toList();
+        for (var pass = 0; pass < 160; pass++) {
+          final start = random.nextInt(expected.length - 1);
+          final end = start + 1 + random.nextInt(expected.length - start);
+          var low = start, high = start;
+          for (var i = start + 1; i < end; i++) {
+            if (expected[i].dy < expected[low].dy) low = i;
+            if (expected[i].dy > expected[high].dy) high = i;
+          }
+          expect(samples.extremaIndices(start, end), (low, high));
+        }
+        for (final width in [1.0, 7.0, 41.3]) {
+          expect(
+            downsampleTelemetrySamples(
+              samples,
+              xMin: expected[123].dx,
+              xMax: expected[expected.length - 71].dx,
+              pixelWidth: width,
+            ),
+            downsampleTelemetrySamples(
+              expected,
+              xMin: expected[123].dx,
+              xMax: expected[expected.length - 71].dx,
+              pixelWidth: width,
+            ),
+          );
+        }
+      }
+
+      for (var i = 0; i < 16000; i++) {
+        buffer.addXY((i ~/ 3).toDouble(), random.nextInt(7).toDouble());
+      }
+      verify(
+        buffer,
+      ); // Build the tree before overwriting both sides of its wrap.
+      final frozen = buffer.snapshot();
+      for (var i = 16000; i < 23100; i++) {
+        buffer.addXY((i ~/ 3).toDouble(), random.nextInt(7).toDouble());
+        if (i % 997 == 0) verify(buffer);
+      }
+      final dirtySnapshot = buffer.snapshot();
+      buffer.addXY(7700, -20);
+      verify(buffer);
+      verify(frozen);
+      verify(dirtySnapshot);
+      buffer.configureRetention(seconds: 10000, rateHz: 2);
+      verify(buffer);
+      buffer.clear();
+      for (var i = 0; i < 1100; i++) {
+        buffer.addXY(i.toDouble(), 5);
+      }
+      expect(buffer.extremaIndices(0, 1100), (0, 0));
+      verify(buffer);
+    },
+  );
+
+  test(
     'page snapshots and exact reductions survive wrap, writes and resize',
     () {
       final random = math.Random(7182);

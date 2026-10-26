@@ -19,6 +19,20 @@ NODE = struct.Struct("<17d")
 EMPTY = (-1.0, 0.0, math.nan)
 
 
+def write_block(stream, data):
+    """Publish one complete block without a second userspace buffering layer.
+
+    Readers rely on actual file lengths. Handle short writes before exposing a
+    committed journal boundary; no preallocation or delayed visibility is used.
+    """
+    remaining = memoryview(data)
+    while remaining:
+        written = stream.write(remaining)
+        if written is None or written <= 0:
+            raise OSError("History write did not make progress.")
+        remaining = remaining[written:]
+
+
 class _Summary:
     def __init__(self):
         self.count = 0
@@ -50,7 +64,7 @@ class _Series:
     def __init__(self, path: Path):
         self.path = path
         self.count = 0
-        self.raw = path.with_suffix(".samples").open("wb")
+        self.raw = path.with_suffix(".samples").open("wb", buffering=0)
         self.levels = {}
         self.pending = {}
         self.tail = []
@@ -77,25 +91,37 @@ class _Series:
         complete = len(self.tail) // GROUP * GROUP
         for start in range(0, complete, GROUP):
             group = self.tail[start:start + GROUP]
-            finite = [point for point in group if math.isfinite(point[2])]
             summary = _Summary()
-            summary.start = min(point[1] for point in group)
-            summary.end = max(point[1] for point in group)
             summary.first, summary.last = group[0], group[-1]
-            summary.low = min(finite, key=lambda point: point[2]) if finite else group[0]
-            summary.high = max(finite, key=lambda point: point[2]) if finite else group[0]
-            summary.gap = next((point for point in group if not math.isfinite(point[2])), EMPTY)
+            lower = upper = None
+            minimum_time = maximum_time = group[0][1]
+            gap = EMPTY
+            for point in group:
+                stamp, value = point[1], point[2]
+                if stamp < minimum_time:
+                    minimum_time = stamp
+                if stamp > maximum_time:
+                    maximum_time = stamp
+                if math.isfinite(value):
+                    if lower is None or value < lower[2]:
+                        lower = point
+                    if upper is None or value > upper[2]:
+                        upper = point
+                elif gap[0] < 0:
+                    gap = point
+            summary.start, summary.end = minimum_time, maximum_time
+            summary.low = lower if lower is not None else group[0]
+            summary.high = upper if upper is not None else group[0]
+            summary.gap = gap
             output.setdefault(1, bytearray()).extend(summary.encode())
             push(2, summary.fields())
         self.tail = self.tail[complete:]
         self.count += len(indexed)
         for level, data in output.items():
             if level not in self.levels:
-                self.levels[level] = self.path.with_suffix(f".l{level}").open("wb")
-            self.levels[level].write(data)
-            self.levels[level].flush()
-        self.raw.write(raw)
-        self.raw.flush()
+                self.levels[level] = self.path.with_suffix(f".l{level}").open("wb", buffering=0)
+            write_block(self.levels[level], data)
+        write_block(self.raw, raw)
 
     def close(self):
         for stream in [self.raw, *self.levels.values()]:
@@ -112,6 +138,7 @@ class NumericHistory:
     def append(self, rows, channels):
         grouped: dict[int, list[tuple[float, float]]] = {}
         for row in rows:
+            elapsed = float(row[0])
             for index in range(1, len(row), 2):
                 value = row[index + 1]
                 # Raw journals may contain nonnumeric values; those are gaps.
@@ -119,7 +146,11 @@ class NumericHistory:
                     numeric = float(value)
                 except (TypeError, ValueError):
                     numeric = math.nan
-                grouped.setdefault(row[index], []).append((float(row[0]), numeric))
+                channel = row[index]
+                points = grouped.get(channel)
+                if points is None:
+                    points = grouped[channel] = []
+                points.append((elapsed, numeric))
         for channel, points in grouped.items():
             if channel not in self.series:
                 self.series[channel] = _Series(self.directory / str(channel))

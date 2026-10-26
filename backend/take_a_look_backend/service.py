@@ -17,7 +17,7 @@ from take_a_look_backend.backends.ember_pairing import PairingManager
 from take_a_look_backend.models import SymbolInfo, WatchedVariable, json_value
 from take_a_look_backend.protocol import EventName, PROTOCOL_VERSION, ProtocolError, RpcMethod
 from take_a_look_backend.services.sampling import SamplingServiceMixin
-from take_a_look_backend.services.ordered_worker import OrderedWorker
+from take_a_look_backend.services.sample_pipeline import SamplePipeline
 from take_a_look_backend.services.recording import RawRecording, export_recording_csv
 from take_a_look_backend.services.debug_info import DebugInfoIndex, load_debug_info_from_elf
 from take_a_look_backend.services.debug_session import DebugSession
@@ -71,7 +71,6 @@ class BackendService(SamplingServiceMixin):
         self._control_count = 0
         self._controls_idle = threading.Event()
         self._controls_idle.set()
-        self._perf_lock = threading.Lock()
         self._closed = False
         self._wake = threading.Event()
         self._shutdown = threading.Event()
@@ -104,14 +103,7 @@ class BackendService(SamplingServiceMixin):
         self._capture_source_count = -1
         self._capture_symbols: tuple[SymbolInfo, ...] = ()
         self._recording = RawRecording(recording_directory)
-        self._recording_worker = OrderedWorker('tal-recording')
-        self._pipeline_backpressure = False
-        self._recording_error_reported = False
-        self._pending_frames: list[tuple[float, dict[str, object]]] = []
-        self._pending_updated_at_ms: int | None = None
-        self._pending_recording_frames: list[tuple[float, dict[str, object]]] = []
-        self._pending_recording_labels: dict[str, str] = {}
-        self._sample_count_since_perf = 0
+        self._pipeline = SamplePipeline(self._recording, self._emit, self._recording_failed, self._wake)
         self._perf_window_started_at = time.perf_counter()
         self._last_perf_at = self._perf_window_started_at
         self._last_rtt_error = ""
@@ -137,7 +129,7 @@ class BackendService(SamplingServiceMixin):
             with self._lock:
                 try:
                     self._flush_pending_samples_locked()
-                    self._recording_worker.drain()
+                    self._pipeline.drain()
                     self._recording.close()
                 finally:
                     self._stop_rtt_locked()
@@ -145,7 +137,7 @@ class BackendService(SamplingServiceMixin):
                     self._memory.disconnect()
                     self._connection_status = "disconnected"
         finally:
-            self._recording_worker.close()
+            self._pipeline.close()
             self._targets.close()
 
     def handle(self, method: RpcMethod, params: Mapping[str, object]) -> dict[str, object]:
@@ -975,15 +967,8 @@ class BackendService(SamplingServiceMixin):
         with self._lock:
             self._stop_memory_sampling_locked()
             self._flush_pending_samples_locked()
-            self._pending_frames.clear()
-            self._pending_recording_frames.clear()
-            self._pending_recording_labels.clear()
-            self._recording_worker.drain()
-            self._recording.rotate()
-            self._pipeline_backpressure = False
-            self._recording_error_reported = False
+            self._pipeline.rotate()
             self._connection_started_at = time.perf_counter() if self._connection_status == "connected" else None
-            self._sample_count_since_perf = 0
             state = {"elapsedSeconds": 0.0, "sampleCount": 0, "rawRecording": self._recording.status()}
         self._emit(EventName.SAMPLES_CLEARED, {})
         self._emit(EventName.STATE, state)
@@ -1014,7 +999,7 @@ class BackendService(SamplingServiceMixin):
             self._flush_pending_samples_locked(wait=False, block=True)
             # This ordered fence captures the click's committed prefix. Later
             # batches, clear, or reconnect cannot move the export boundary.
-            snapshot = self._recording_worker.submit(self._recording.snapshot)
+            snapshot = self._pipeline.snapshot()
         return path, snapshot
 
     def finish_csv_export(self, prepared) -> dict[str, object]:

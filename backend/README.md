@@ -126,6 +126,12 @@ The recording worker merges already queued adjacent batches, without waiting to
 fill a batch. Drain/export/rotation barriers stop merging, and sample events
 retain their original acquisition timestamps. Journals and history are committed
 before events are published, including under backpressure and recording failure.
+`SamplePipeline` owns sealed batches, acquisition-policy snapshots, admission,
+committed counts and export fences. Target operations retain the service's
+existing serial ownership. Numeric history builds each 64-point summary in one
+pass and writes complete blocks directly to unbuffered files, handling short
+writes before advancing the committed journal boundary. The journal/history
+formats and visibility to concurrent readers remain compatible.
 
 Reproduce host measurements (raw-byte fake target, decoding and recording
 included, no physical probe/network/UI):
@@ -137,6 +143,10 @@ included, no physical probe/network/UI):
 Use `--layout mixed` for mixed numeric types; `--source-root` can point to a
 baseline checkout. Results include acquisition/recording/delivery frame counts,
 CPU cost, sample interval P95/P99 and concurrent explicit-write/readback latency.
+Use `tool/benchmarks/recording_throughput.py` with the same `--source-root` and
+`--output` arguments to measure a fixed recording workload separately from
+sampling timers. See [the optimization report](../docs/performance/2026-10-26/REPORT.md)
+for the current comparison and validation scope.
 
 The GDB adapter starts an installed, architecture-appropriate GDB with MI3;
 `pygdbmi` parses the machine output. GDB itself must be installed separately.

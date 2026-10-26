@@ -155,9 +155,7 @@ extension _SourcePeekActions on _SourceDebugPanelState {
     if (!widget.visible || widget.readOnlyPreview) return;
     final origin = _captureNavigationLocation();
     if (origin != null) {
-      _navigationBack.add(origin);
-      if (_navigationBack.length > 100) _navigationBack.removeAt(0);
-      _navigationForward.clear();
+      _navigation.record(origin);
     }
     await _revealNavigationLocation((
       path: location.path,

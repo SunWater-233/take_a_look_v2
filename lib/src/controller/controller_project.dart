@@ -29,6 +29,7 @@ extension TakeALookControllerProject on TakeALookController {
       'watchInputDrafts': Map<String, String>.of(watchInputDrafts),
       'compactWatchSelection': compactWatchSelection,
       'compactExpandedWatches': compactExpandedWatches.toList(),
+      'compactWatchSummaryFraction': compactWatchSummaryFraction,
       'expandedSymbolTreeNodes': _expandedSymbolTreeNodes.toList(),
       'sourceRoot': debugState.sourceRoot,
       'requestedBreakpoints': {
@@ -39,6 +40,14 @@ extension TakeALookControllerProject on TakeALookController {
   }
 
   static void validateProjectSettings(Map<String, dynamic> data) {
+    final summaryFraction = data['compactWatchSummaryFraction'];
+    if (summaryFraction != null &&
+        (summaryFraction is! num ||
+            !summaryFraction.isFinite ||
+            summaryFraction <= 0 ||
+            summaryFraction >= 1)) {
+      throw const FormatException('项目变量监视分区比例无效。');
+    }
     if (data['symbols'] is! List ||
         data['watches'] is! List ||
         data['sourceProject'] is! Map ||
@@ -246,6 +255,8 @@ extension TakeALookControllerProject on TakeALookController {
         Map<String, String>.from(data['watchInputDrafts'] as Map? ?? {}),
       );
     compactWatchSelection = data['compactWatchSelection'] as String?;
+    compactWatchSummaryFraction = (data['compactWatchSummaryFraction'] as num?)
+        ?.toDouble();
     compactExpandedWatches
       ..clear()
       ..addAll((data['compactExpandedWatches'] as List? ?? []).cast<String>());

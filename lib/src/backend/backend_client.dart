@@ -76,6 +76,7 @@ class BackendClient {
   ) {
     final method = switch (operation) {
       'listTargets' => BackendMethod.listTargets,
+      'onlineTargetPacks' => BackendMethod.onlineTargetPacks,
       'inspectTargetPack' => BackendMethod.inspectTargetPack,
       'importTargetPack' => BackendMethod.importTargetPack,
       'discardTargetPackPreview' => BackendMethod.discardTargetPackPreview,

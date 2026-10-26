@@ -22,6 +22,16 @@ MAX_PACK_BYTES = 512 * 1024 * 1024
 MAX_PDSC_BYTES = 16 * 1024 * 1024
 
 
+def default_bundled_pack_directory() -> Path:
+    if value := os.environ.get("TAL_BUNDLED_PACKS_DIR"):
+        return Path(value).expanduser()
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent / "bundled_packs"
+    backend = Path(__file__).resolve().parents[2]
+    source = backend / "bundled_packs"
+    return source if source.is_dir() else backend / "runtime/take_a_look_backend/bundled_packs"
+
+
 def default_pack_directory() -> Path:
     if value := os.environ.get("TAL_PACKS_DIR"):
         return Path(value).expanduser()
@@ -143,13 +153,28 @@ def _parse_pack(path: Path, digest: str) -> dict[str, object]:
 
 
 class TargetCatalog:
-    def __init__(self, directory: Path | None = None) -> None:
+    def __init__(self, directory: Path | None = None, *, bundled_directory: Path | None = None) -> None:
         self.directory = directory
+        self._bundled_directory = bundled_directory
+        self._bundled: dict[str, dict] = {}
         self._temporary: tempfile.TemporaryDirectory | None = None
         self._lock = threading.RLock()
         self._previews: dict[str, tuple[Path, dict[str, object]]] = {}
         self.revision = 0
         self.warning = ""
+        if bundled_directory is not None and (bundled_directory / "index.json").is_file():
+            try:
+                bundled = json.loads((bundled_directory / "index.json").read_text(encoding="utf-8"))
+                if bundled.get("version") != 1 or not isinstance(bundled.get("packs"), dict):
+                    raise ValueError("Invalid bundled pack index")
+                for digest, pack in bundled["packs"].items():
+                    if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+                        raise ValueError("Invalid bundled pack identity")
+                    if pack.get("id") != digest or not isinstance(pack.get("targets"), list):
+                        raise ValueError("Invalid bundled pack metadata")
+                self._bundled = {key: dict(pack, bundled=True) for key, pack in bundled["packs"].items()}
+            except (OSError, ValueError, AttributeError, TypeError) as error:
+                self.warning = f"无法读取软件自带芯片包：{error}。请重新安装软件。"
         self._data = {"version": 1, "packs": {}, "recent": [],
                       "selected": {"name": "auto", "packId": "", "partNumber": "auto", "packLabel": "内置"}}
         file = directory / "index.json" if directory is not None else None
@@ -179,7 +204,12 @@ class TargetCatalog:
 
     def _pack_path(self, pack_id: str) -> Path:
         # Callers must first resolve the id through the managed index.
+        if pack_id in self._bundled and pack_id not in self._data["packs"]:
+            return self._bundled_directory / f"{pack_id}.pack"
         return self._workspace() / f"{pack_id}.pack"
+
+    def _packs(self) -> dict[str, dict]:
+        return self._bundled | self._data["packs"]
 
     def _commit(self, data: dict) -> None:
         if self.directory is not None:
@@ -227,7 +257,7 @@ class TargetCatalog:
         with self._lock:
             selected = self._data["selected"]
             pack_id = selected.get("packId", "")
-            missing = bool(pack_id and (pack_id not in self._data["packs"] or not self._pack_path(pack_id).is_file()))
+            missing = bool(pack_id and (pack_id not in self._packs() or not self._pack_path(pack_id).is_file()))
             return {"targetName": selected["name"], "targetPackId": pack_id,
                     "targetPartNumber": selected.get("partNumber", selected["name"]),
                     "targetPackLabel": selected.get("packLabel", "内置"), "targetPackMissing": missing,
@@ -237,7 +267,7 @@ class TargetCatalog:
         builtins = builtin_targets()
         with self._lock:
             packs, targets = [], [dict(item) for item in builtins]
-            for pack in self._data["packs"].values():
+            for pack in self._packs().values():
                 available = self._pack_path(pack["id"]).is_file()
                 packs.append({key: value for key, value in pack.items() if key != "targets"} | {"available": available})
                 targets.extend(dict(item, available=available) for item in pack["targets"])
@@ -269,7 +299,7 @@ class TargetCatalog:
                     old[0].unlink(missing_ok=True)
                 self._previews[token] = (staged, metadata)
                 return {key: value for key, value in metadata.items() if key != "targets"} | {
-                    "previewId": token, "alreadyInstalled": metadata["id"] in self._data["packs"] and self._pack_path(metadata["id"]).is_file(),
+                    "previewId": token, "alreadyInstalled": metadata["id"] in self._packs() and self._pack_path(metadata["id"]).is_file(),
                     "sampleTargets": [item["partNumber"] for item in metadata["targets"][:8]]}
         except Exception as error:
             staged.unlink(missing_ok=True)
@@ -288,8 +318,8 @@ class TargetCatalog:
             if preview is None:
                 raise ProtocolError("preview_expired", "导入预览已失效，请重新选择芯片包。")
             staged, metadata = preview
-            destination = self._pack_path(metadata["id"])
-            exists = metadata["id"] in self._data["packs"] and destination.is_file()
+            exists = metadata["id"] in self._packs() and self._pack_path(metadata["id"]).is_file()
+            destination = self._workspace() / f"{metadata['id']}.pack"
             if not exists:
                 data = copy.deepcopy(self._data)
                 data["packs"][metadata["id"]] = metadata
@@ -307,7 +337,7 @@ class TargetCatalog:
         name = normalise(name)
         with self._lock:
             if pack_id:
-                pack = self._data["packs"].get(pack_id)
+                pack = self._packs().get(pack_id)
                 if pack is None or not self._pack_path(pack_id).is_file():
                     raise ProtocolError("target_pack_missing", "芯片包缺失，请重新导入后再选择。")
                 record = next((item for item in pack["targets"] if item["name"] == name), None)
@@ -329,7 +359,7 @@ class TargetCatalog:
             pack_id = self._data["selected"].get("packId", "")
             if not pack_id:
                 return None
-            if pack_id not in self._data["packs"] or not self._pack_path(pack_id).is_file():
+            if pack_id not in self._packs() or not self._pack_path(pack_id).is_file():
                 raise ProtocolError("target_pack_missing", "目标芯片的芯片包缺失，请重新导入后连接。")
             path = self._pack_path(pack_id)
             with path.open("rb") as stream:
@@ -339,6 +369,8 @@ class TargetCatalog:
 
     def remove(self, pack_id: str) -> None:
         with self._lock:
+            if pack_id in self._bundled and pack_id not in self._data["packs"]:
+                raise ProtocolError("bundled_pack_readonly", "这个芯片包由软件自带，不能从芯片库删除。")
             if pack_id not in self._data["packs"]:
                 raise ProtocolError("unknown_pack", "这个芯片包已被删除。")
             data = copy.deepcopy(self._data)

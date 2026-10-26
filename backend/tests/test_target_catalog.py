@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import hashlib
 import json
 import os
 import threading
@@ -48,6 +49,75 @@ def install(catalog, path):
     assert preview["targetCount"] >= 1
     result = catalog.import_pack(preview["previewId"])
     return result["packId"]
+
+
+def bundled_fixture(tmp_path):
+    from take_a_look_backend.services.target_catalog import _parse_pack
+    source = make_pack(tmp_path)
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    directory = tmp_path / "shipped"
+    directory.mkdir()
+    (directory / f"{digest}.pack").write_bytes(source.read_bytes())
+    (directory / "index.json").write_text(json.dumps({"version": 1, "packs": {
+        digest: _parse_pack(source, digest)}}), encoding="utf-8")
+    return source, directory, digest
+
+
+def test_bundled_pack_is_available_without_import_and_remains_readonly(tmp_path):
+    source, directory, digest = bundled_fixture(tmp_path)
+    library = tmp_path / "user"
+    catalog = TargetCatalog(library, bundled_directory=directory)
+    try:
+        pack, = catalog.snapshot()["packs"]
+        assert pack["bundled"] and pack["available"]
+        assert not library.exists()  # Startup reads the shipped index without copying packs.
+        catalog.select("nrf52840", digest)
+        assert Path(catalog.connection_pack()).parent == directory
+        preview = catalog.inspect(str(source))
+        assert preview["alreadyInstalled"]
+        assert catalog.import_pack(preview["previewId"])["alreadyInstalled"]
+        assert not list(library.glob("*.pack"))
+        with pytest.raises(ProtocolError, match="bundled_pack_readonly"):
+            catalog.remove(digest)
+        restored = TargetCatalog(library, bundled_directory=directory)
+        try:
+            assert restored.selected["packId"] == digest
+            assert not restored.selection_state()["targetPackMissing"]
+            assert Path(restored.connection_pack()).is_file()
+        finally:
+            restored.close()
+    finally:
+        catalog.close()
+
+
+def test_missing_bundled_pack_can_be_repaired_in_user_storage(tmp_path):
+    source, directory, digest = bundled_fixture(tmp_path)
+    catalog = TargetCatalog(tmp_path / "user", bundled_directory=directory)
+    try:
+        catalog.select("nrf52840", digest)
+        (directory / f"{digest}.pack").unlink()
+        assert catalog.selection_state()["targetPackMissing"]
+        with pytest.raises(ProtocolError, match="target_pack_missing"):
+            catalog.connection_pack()
+        install(catalog, source)
+        assert Path(catalog.connection_pack()).parent == catalog.directory
+        assert not (directory / f"{digest}.pack").exists()
+        catalog.remove(digest)
+        assert catalog.selection_state()["targetPackMissing"]
+    finally:
+        catalog.close()
+
+
+def test_bundled_pack_hash_is_checked_before_connection(tmp_path):
+    _, directory, digest = bundled_fixture(tmp_path)
+    catalog = TargetCatalog(tmp_path / "user", bundled_directory=directory)
+    try:
+        catalog.select("nrf52840", digest)
+        (directory / f"{digest}.pack").write_bytes(b"changed")
+        with pytest.raises(ProtocolError, match="target_pack_changed"):
+            catalog.connection_pack()
+    finally:
+        catalog.close()
 
 
 def test_import_copies_metadata_without_registering_targets_and_restores_selection(tmp_path, catalog):

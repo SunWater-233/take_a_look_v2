@@ -3,6 +3,8 @@
 发布文件为 `take-a-look-v2-<版本>-git.<提交>-linux-<架构>.tar.gz`，旁边的 `.sha256`
 文件用于校验。包内包含 Flutter Release 程序、字体、Python 解释器、pyOCD、
 ELF/DWARF 解析库、libusb 和安装脚本；使用者不需要安装 Flutter、Dart、Python 或 pip。
+同时自带 STM32F1、STM32F4、STM32H7 的官方芯片包，覆盖 STM32F103、STM32F407、
+STM32H723，首次打开即可离线搜索和选择。芯片包管理中标记为“软件自带”。
 
 ## 快速安装
 
@@ -105,7 +107,8 @@ CMSIS-DAP USB VID/PID，需要管理员按照探针厂商说明配置权限。
 
 J-Link 的原生 RTT/连接还需要从 [SEGGER 官网](https://www.segger.com/downloads/jlink/)
 安装对应架构的 J-Link Software and Documentation Pack；其专有运行库不在本包中再分发。
-首次使用没有内置支持的芯片时，也可能需要另外安装相应 CMSIS Device Family Pack。
+其他没有内置或随附支持的芯片，可在“在线下载”中安装相应 CMSIS Device Family Pack，
+也可以通过“添加芯片包”导入本地 `.pack` 文件。
 
 WSL 可以编译并通过 WSLg 启动界面；使用真实 USB 调试器还需要 Windows 主机向 WSL
 转发 USB 设备。没有连接硬件时，自检通过只说明运行库和协议正常，不代表完成了采样验证。

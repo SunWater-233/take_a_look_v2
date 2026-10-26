@@ -55,6 +55,7 @@ class TargetPack {
       targetCount = data['targetCount'] as int,
       size = data['size'] as int? ?? 0,
       importedAt = data['importedAt'] as String? ?? '',
+      bundled = data['bundled'] == true,
       available = data['available'] != false;
 
   final String id;
@@ -64,6 +65,7 @@ class TargetPack {
   final int targetCount;
   final int size;
   final String importedAt;
+  final bool bundled;
   final bool available;
   String get label => '$vendor.$name';
 }

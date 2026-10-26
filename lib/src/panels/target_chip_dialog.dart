@@ -10,6 +10,7 @@ import '../models/models.dart' show ConnectionStatus;
 import '../models/target_catalog.dart';
 import '../protocol/commands.dart';
 import '../theme/theme.dart';
+import 'online_target_pack_dialog.dart';
 
 Future<void> showTargetChipDialog(
   BuildContext context,
@@ -205,6 +206,29 @@ class _TargetChipDialogState extends State<TargetChipDialog> {
     setState(() => _preview = result);
   });
 
+  Future<void> _online() async {
+    final result = await showTalDialog<JsonObject>(
+      context: context,
+      builder: (_) => OnlineTargetPackDialog(
+        controller: controller,
+        initialQuery: _search.text,
+      ),
+    );
+    if (!mounted || result == null) return;
+    await _action('正在更新芯片库…', () async {
+      setState(() {
+        _manage = false;
+        _source = 'pack';
+        _packFilter = result['packId'] as String;
+        _vendor = '';
+        _family = '';
+        _search.text = result['partNumber'] as String? ?? '';
+        _selectedId = null;
+      });
+      _refreshPending = true;
+    });
+  }
+
   Future<void> _import() => _action('正在导入芯片包…', () async {
     final preview = _preview;
     if (preview == null) return;
@@ -338,6 +362,17 @@ class _TargetChipDialogState extends State<TargetChipDialog> {
                         label: const Text('添加芯片包'),
                         onPressed: _busy == null ? _inspect : null,
                       );
+                      final online = TalButton.icon(
+                        key: const ValueKey('online-target-packs'),
+                        icon: const Icon(
+                          Icons.cloud_download_outlined,
+                          size: 17,
+                        ),
+                        label: const Text('在线下载'),
+                        onPressed: _busy == null && _preview == null
+                            ? _online
+                            : null,
+                      );
                       final search = TextField(
                         key: const ValueKey('target-search'),
                         controller: _search,
@@ -362,13 +397,19 @@ class _TargetChipDialogState extends State<TargetChipDialog> {
                               children: [
                                 search,
                                 const SizedBox(height: 8),
-                                add,
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: [online, add],
+                                ),
                               ],
                             )
                           : Row(
                               children: [
                                 Expanded(child: search),
                                 const SizedBox(width: 12),
+                                online,
+                                const SizedBox(width: 8),
                                 add,
                               ],
                             );
@@ -549,7 +590,7 @@ class _TargetChipDialogState extends State<TargetChipDialog> {
               'all': '全部',
               'recent': '最近使用',
               'builtin': '内置芯片',
-              'pack': '用户芯片包',
+              'pack': '芯片包',
             }.entries)
               ChoiceChip(
                 label: Text(entry.value),
@@ -604,7 +645,7 @@ class _TargetChipDialogState extends State<TargetChipDialog> {
                       child: Padding(
                         padding: EdgeInsets.all(16),
                         child: Text(
-                          '没有匹配的芯片\n换个关键词，或添加包含该型号的 .pack 芯片包。',
+                          '没有匹配的芯片\n点击“在线下载”搜索安装，或添加本地 .pack 芯片包。',
                           style: talMuted,
                           textAlign: TextAlign.center,
                         ),
@@ -773,7 +814,7 @@ class _TargetChipDialogState extends State<TargetChipDialog> {
     if (packs.isEmpty) {
       return const Center(
         child: Text(
-          '没有匹配的用户芯片包\n点击“添加芯片包”导入本地 .pack 文件。',
+          '没有匹配的芯片包\n点击“添加芯片包”导入本地 .pack 文件。',
           style: talMuted,
           textAlign: TextAlign.center,
         ),
@@ -794,7 +835,7 @@ class _TargetChipDialogState extends State<TargetChipDialog> {
             Text(pack.label, style: talStrong),
             const SizedBox(height: 4),
             Text(
-              '${pack.version} · ${pack.targetCount} 个芯片 · ${_bytes(pack.size)}${inUse ? ' · 正在使用' : ''}${!pack.available ? ' · 文件缺失' : ''}',
+              '${pack.version} · ${pack.targetCount} 个芯片 · ${_bytes(pack.size)}${pack.bundled ? ' · 软件自带' : ''}${inUse ? ' · 正在使用' : ''}${!pack.available ? ' · 文件缺失' : ''}',
               style: talMuted,
             ),
             if (DateTime.tryParse(pack.importedAt) case final date?)
@@ -817,13 +858,14 @@ class _TargetChipDialogState extends State<TargetChipDialog> {
                   }),
                   child: const Text('查看芯片'),
                 ),
-                TalButton(
-                  key: ValueKey('remove-target-pack-${pack.id}'),
-                  onPressed: _busy == null && !inUse
-                      ? () => _remove(pack)
-                      : null,
-                  child: const Text('删除'),
-                ),
+                if (!pack.bundled)
+                  TalButton(
+                    key: ValueKey('remove-target-pack-${pack.id}'),
+                    onPressed: _busy == null && !inUse
+                        ? () => _remove(pack)
+                        : null,
+                    child: const Text('删除'),
+                  ),
               ],
             ),
           ],

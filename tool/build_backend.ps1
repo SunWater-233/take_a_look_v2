@@ -25,6 +25,9 @@ if ([IO.Path]::GetFullPath($PythonExecutable).StartsWith($ManagedVirtualEnv, [St
     & (Join-Path $ProjectRoot 'windows\normalise_runtime_integrity.ps1') -Executable $PythonExecutable
 }
 
+& $PythonExecutable (Join-Path $ProjectRoot 'tool\prepare_bundled_packs.py')
+if ($LASTEXITCODE -ne 0) { throw 'Preparing bundled chip packs failed.' }
+
 & $PythonExecutable -m PyInstaller `
     --clean `
     --noconfirm `
@@ -44,6 +47,9 @@ if ([IO.Path]::GetFullPath($PythonExecutable).StartsWith($ManagedVirtualEnv, [St
 if ($LASTEXITCODE -ne 0) {
     throw "Backend packaging failed (exit $LASTEXITCODE)."
 }
+
+Copy-Item -LiteralPath (Join-Path $BackendRoot 'bundled_packs') `
+    -Destination (Join-Path $DistRoot 'take_a_look_backend') -Recurse -Force
 
 & (Join-Path $ProjectRoot 'windows\normalise_runtime_integrity.ps1') `
     -Executable (Join-Path $DistRoot 'take_a_look_backend\take_a_look_backend.exe')

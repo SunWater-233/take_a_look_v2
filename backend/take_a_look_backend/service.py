@@ -26,6 +26,7 @@ from take_a_look_backend.services.elf_context import ElfLoadContext
 from take_a_look_backend.services.source_project import SourceProjects
 from take_a_look_backend.services.source_tasks import SourceTasks
 from take_a_look_backend.services.target_catalog import TargetCatalog
+from take_a_look_backend.services.online_packs import OnlinePacks
 
 
 EventSink = Callable[[EventName, object], None]
@@ -54,6 +55,7 @@ class BackendService(SamplingServiceMixin):
         recording_directory: Path | None = None,
         source_settings_file: Path | None = None,
         target_directory: Path | None = None,
+        bundled_target_directory: Path | None = None,
     ) -> None:
         self._emit_event = event_sink
         self._memory: TargetBackend = memory_backend or PyOcdMemoryBackend()
@@ -77,7 +79,8 @@ class BackendService(SamplingServiceMixin):
 
         self._connection_status = "disconnected"
         self._probe_type = "自动发现任意探针"
-        self._targets = TargetCatalog(target_directory)
+        self._targets = TargetCatalog(target_directory, bundled_directory=bundled_target_directory)
+        self._online_packs = OnlinePacks(self._targets, self._publish_target_state)
         self._target_name = str(self._targets.selected["name"])
         self._swd_clock = "4 MHz"
         self._serial_number = ""
@@ -124,6 +127,7 @@ class BackendService(SamplingServiceMixin):
         if self._closed:
             return
         self._closed = True
+        self._online_packs.close()
         self._ember_pairing.close()
         self._source_tasks.close()
         self._shutdown.set()
@@ -206,6 +210,8 @@ class BackendService(SamplingServiceMixin):
             raise ProtocolError("invalid_request", "未知的 EmberMobile 配对操作。")
         if method is RpcMethod.LIST_TARGETS:
             return {**self._targets.snapshot(), "state": self._targets.selection_state()}
+        if method is RpcMethod.ONLINE_TARGET_PACKS:
+            return self._online_packs.request(params)
         if method is RpcMethod.INSPECT_TARGET_PACK:
             return self._targets.inspect(_required_string(params, "path"))
         if method is RpcMethod.DISCARD_TARGET_PACK_PREVIEW:

@@ -50,8 +50,9 @@ Future<void> mount(
   TakeALookController c, {
   double width = 430,
   TalInputMode inputMode = TalInputMode.mouseKeyboard,
+  double height = 850,
 }) async {
-  await tester.binding.setSurfaceSize(Size(width, 850));
+  await tester.binding.setSurfaceSize(Size(width, height));
   await tester.pumpWidget(
     MaterialApp(
       theme: buildTalTheme(inputMode: inputMode),
@@ -73,6 +74,81 @@ Future<void> mount(
 
 void main() {
   for (final mode in TalInputMode.values) {
+    testWidgets('$mode section splitter resizes independent scroll areas', (
+      tester,
+    ) async {
+      final c = structureFixture();
+      addTearDown(c.dispose);
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      for (var i = 0; i < 12; i++) {
+        c.setWatchReadMode('motor.samples[$i]', WatchReadMode.capture);
+      }
+      c.compactExpandedWatches.add('motor.samples');
+      await mount(tester, c, inputMode: mode);
+      final handle = find.byKey(const ValueKey('watch-sections-resize'));
+      final upper = find.byKey(const ValueKey('watch-summary-pane'));
+      final lower = find.byKey(const ValueKey('watch-members-pane'));
+      final upperHeight = tester.getSize(upper).height;
+      final lowerHeight = tester.getSize(lower).height;
+      await tester.drag(
+        handle,
+        const Offset(0, 100),
+        kind: mode == TalInputMode.touch
+            ? PointerDeviceKind.touch
+            : PointerDeviceKind.mouse,
+      );
+      await tester.pump();
+      expect(tester.getSize(upper).height, closeTo(upperHeight + 100, .01));
+      expect(tester.getSize(lower).height, closeTo(lowerHeight - 100, .01));
+      final upperList = find.byKey(const ValueKey('watch-capture-list'));
+      final lowerList = find.byKey(const ValueKey('compact-watch-list'));
+      final upperScroll = tester.widget<ListView>(upperList).controller!;
+      final lowerScroll = tester.widget<ListView>(lowerList).controller!;
+      await tester.drag(upperList, const Offset(0, -150));
+      await tester.pumpAndSettle();
+      expect(upperScroll.offset, greaterThan(0));
+      expect(lowerScroll.offset, 0);
+      final upperOffset = upperScroll.offset;
+      await tester.drag(lowerList, const Offset(0, -120));
+      await tester.pumpAndSettle();
+      expect(lowerScroll.offset, greaterThan(0));
+      expect(upperScroll.offset, upperOffset);
+      expect(c.watches.where((w) => w.samplingEnabled), hasLength(12));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('$mode section splitter clamps and survives panel resize', (
+      tester,
+    ) async {
+      final c = structureFixture();
+      addTearDown(c.dispose);
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await mount(tester, c, inputMode: mode);
+      final handle = find.byKey(const ValueKey('watch-sections-resize'));
+      final upper = find.byKey(const ValueKey('watch-summary-pane'));
+      final lower = find.byKey(const ValueKey('watch-members-pane'));
+      await tester.drag(handle, const Offset(0, 2000));
+      await tester.pump();
+      expect(tester.getSize(lower).height, greaterThanOrEqualTo(62));
+      await tester.drag(handle, const Offset(0, -2000));
+      await tester.pump();
+      expect(tester.getSize(upper).height, greaterThanOrEqualTo(62));
+      expect(tester.getSize(lower).height, greaterThan(0));
+      c.compactWatchSummaryFraction = .4;
+      for (final height in [600.0, 280.0, 160.0, 80.0, 850.0]) {
+        await mount(tester, c, inputMode: mode, height: height);
+        expect(tester.takeException(), isNull);
+        expect(tester.getSize(upper).height, greaterThan(0));
+        expect(tester.getSize(lower).height, greaterThan(0));
+      }
+      final total = tester.getSize(upper).height + tester.getSize(lower).height;
+      expect(tester.getSize(upper).height / total, closeTo(.4, .001));
+      // A different panel instance uses the same saved presentation preference.
+      await tester.pumpWidget(const SizedBox.shrink());
+      await mount(tester, c, inputMode: mode);
+      expect(tester.getSize(upper).height / total, closeTo(.4, .001));
+    });
+
     testWidgets(
       '$mode watch sections collapse independently and keep their state',
       (tester) async {

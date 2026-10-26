@@ -40,6 +40,7 @@ class RpcMethod(StrEnum):
     START_SOURCE_TASK = "startSourceTask"
     CANCEL_SOURCE_TASK = "cancelSourceTask"
     LIST_TARGETS = "listTargets"
+    ONLINE_TARGET_PACKS = "onlineTargetPacks"
     INSPECT_TARGET_PACK = "inspectTargetPack"
     IMPORT_TARGET_PACK = "importTargetPack"
     DISCARD_TARGET_PACK_PREVIEW = "discardTargetPackPreview"

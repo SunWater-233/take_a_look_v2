@@ -133,6 +133,7 @@ class TakeALookController extends ChangeNotifier {
   String? get compactWatchSelection => _watchRegistry.selection;
   set compactWatchSelection(String? value) => _watchRegistry.selection = value;
   Set<String> get compactExpandedWatches => _watchRegistry.expanded;
+  double? compactWatchSummaryFraction;
   String watchSearchQuery = '';
   final Map<String, Set<String>> _watchMonitorScopes = {};
   bool _watchMonitorVisibilityKnown = false;

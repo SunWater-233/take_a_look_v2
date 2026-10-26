@@ -86,6 +86,20 @@ def run() -> int:
             raise RuntimeError("Backend shutdown failed")
         checks["rpc"] = "ok"
         checks["target_catalog"] = "ok"
+        targets = responses[2]["result"]["targets"]
+        prefixes = ("stm32f103", "stm32f407", "stm32h723")
+        bundled_packs = [p for p in responses[2]["result"]["packs"] if p.get("bundled")]
+        if sys.frozen or bundled_packs:
+            for prefix in prefixes:
+                if not any(t["packId"] and t["available"] and t["name"].startswith(prefix) for t in targets):
+                    raise RuntimeError(f"Bundled chip support missing: {prefix}")
+            from take_a_look_backend.services.target_catalog import default_bundled_pack_directory
+            import hashlib
+            for pack in bundled_packs:
+                with (default_bundled_pack_directory() / f"{pack['id']}.pack").open("rb") as stream:
+                    if hashlib.file_digest(stream, "sha256").hexdigest() != pack["id"]:
+                        raise RuntimeError(f"Bundled pack hash mismatch: {pack['name']}")
+            checks["bundled_target_prefixes"] = list(prefixes)
     except Exception as error:
         errors.append(f"rpc: {error}")
 

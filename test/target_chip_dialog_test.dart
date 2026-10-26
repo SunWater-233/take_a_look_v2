@@ -51,6 +51,7 @@ class CatalogHarness {
   bool failList = false;
   bool denyStorage = false;
   Completer<JsonObject>? inspection;
+  JsonObject Function(JsonObject)? onlineHandler;
 
   Future<JsonObject> request(String operation, JsonObject arguments) async {
     calls.add((operation, arguments));
@@ -62,6 +63,34 @@ class CatalogHarness {
       );
     }
     switch (operation) {
+      case 'onlineTargetPacks':
+        if (onlineHandler != null) return onlineHandler!(arguments);
+        if (arguments['operation'] == 'download') {
+          final imported = await request('importTargetPack', {});
+          return {
+            'status': 'succeeded',
+            'result': {...imported, 'partNumber': 'STM32H723VGTx'},
+            'state': imported['state'],
+          };
+        }
+        return {
+          'status': 'succeeded',
+          'result': {
+            'query': arguments['query'] ?? '',
+            'total': 1,
+            'packs': [
+              {
+                'id': 'online-h7',
+                'vendor': 'Keil',
+                'name': 'STM32H7xx_DFP',
+                'version': '4.1.0',
+                'matchingParts': ['STM32H723VGTx'],
+                'matchCount': 1,
+                'installedPackId': packs.isEmpty ? '' : 'user-pack',
+              },
+            ],
+          },
+        };
       case 'listTargets':
         if (failList) {
           throw const BackendException('catalog_failed', '芯片库加载失败。');
@@ -186,6 +215,174 @@ Future<void> openDialog(
 }
 
 void main() {
+  testWidgets('bundled packs are labelled and can be browsed but not deleted', (
+    tester,
+  ) async {
+    final harness = CatalogHarness();
+    await harness.request('importTargetPack', {});
+    harness.packs.single['bundled'] = true;
+    final controller = harness.controller();
+    addTearDown(controller.dispose);
+    await openDialog(tester, controller);
+    await tester.tap(find.byKey(const ValueKey('manage-target-packs')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('软件自带'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('remove-target-pack-user-pack')),
+      findsNothing,
+    );
+    await tester.tap(find.text('查看芯片'));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('target-chip-user-pack:stm32h723vgtx')),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const ValueKey('use-target-chip')));
+    await tester.pumpAndSettle();
+    expect(controller.targetPackId, 'user-pack');
+  });
+  testWidgets(
+    'online search downloads, imports and selects the downloaded chip',
+    (tester) async {
+      final harness = CatalogHarness();
+      final controller = harness.controller();
+      addTearDown(controller.dispose);
+      await openDialog(tester, controller);
+      await tester.enterText(
+        find.byKey(const ValueKey('target-search')),
+        'H723',
+      );
+      await tester.tap(find.byKey(const ValueKey('online-target-packs')));
+      await tester.pumpAndSettle();
+      expect(find.text('在线下载芯片包'), findsOneWidget);
+      expect(find.textContaining('Keil.STM32H7xx_DFP'), findsOneWidget);
+      expect(
+        harness.calls
+            .where((call) => call.$1 == 'onlineTargetPacks')
+            .last
+            .$2['query'],
+        'H723',
+      );
+      await tester.tap(
+        find.byKey(const ValueKey('download-online-pack-online-h7')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('在线下载芯片包'), findsNothing);
+      expect(
+        find.byKey(const ValueKey('target-chip-user-pack:stm32h723vgtx')),
+        findsOneWidget,
+      );
+      expect(controller.targetName, isNot('stm32h723vgtx'));
+      await tester.tap(find.byKey(const ValueKey('use-target-chip')));
+      await tester.pumpAndSettle();
+      expect(controller.targetName, 'stm32h723vgtx');
+      expect(controller.targetPackId, 'user-pack');
+    },
+  );
+
+  testWidgets('online task shows byte progress, cancels and permits retry', (
+    tester,
+  ) async {
+    final harness = CatalogHarness();
+    var cancelled = false;
+    harness.onlineHandler = (params) {
+      if (params['operation'] == 'cancel') cancelled = true;
+      return {
+        'jobId': 'job',
+        'status': cancelled ? 'cancelled' : 'running',
+        'phase': 'download',
+        'message': '正在下载芯片包…',
+        'bytesReceived': 1048576,
+        'totalBytes': 4194304,
+      };
+    };
+    final controller = harness.controller();
+    addTearDown(controller.dispose);
+    await openDialog(tester, controller);
+    await tester.tap(find.byKey(const ValueKey('online-target-packs')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('online-target-search')),
+      'H723',
+    );
+    await tester.tap(find.byKey(const ValueKey('search-online-target-packs')));
+    await tester.pump();
+    expect(find.textContaining('1.0 MiB / 4.0 MiB'), findsOneWidget);
+    expect(
+      tester
+          .widget<LinearProgressIndicator>(find.byType(LinearProgressIndicator))
+          .value,
+      .25,
+    );
+    await tester.tap(find.byKey(const ValueKey('cancel-online-target-job')));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+    expect(cancelled, isTrue);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+    harness.onlineHandler = null;
+    await tester.tap(find.byKey(const ValueKey('search-online-target-packs')));
+    await tester.pumpAndSettle();
+    expect(find.text('下载并安装'), findsOneWidget);
+  });
+
+  testWidgets(
+    'online errors can be retried and installed packs can be opened',
+    (tester) async {
+      final harness = CatalogHarness();
+      harness.onlineHandler = (_) => {
+        'status': 'failed',
+        'message': '无法连接下载服务器，请重试。',
+      };
+      final controller = harness.controller();
+      addTearDown(controller.dispose);
+      await harness.request('importTargetPack', {});
+      await openDialog(tester, controller);
+      await tester.enterText(
+        find.byKey(const ValueKey('target-search')),
+        'H723',
+      );
+      await tester.tap(find.byKey(const ValueKey('online-target-packs')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('无法连接下载服务器'), findsOneWidget);
+      harness.onlineHandler = null;
+      await tester.tap(
+        find.byKey(const ValueKey('search-online-target-packs')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('已安装，查看芯片'), findsOneWidget);
+      await tester.tap(find.text('已安装，查看芯片'));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('target-chip-user-pack:stm32h723vgtx')),
+        findsOneWidget,
+      );
+      expect(
+        harness.calls.where(
+          (call) =>
+              call.$1 == 'onlineTargetPacks' &&
+              call.$2['operation'] == 'download',
+        ),
+        isEmpty,
+      );
+    },
+  );
+
+  for (final size in const [Size(360, 720), Size(540, 460)]) {
+    testWidgets('online search fits $size', (tester) async {
+      final harness = CatalogHarness();
+      final controller = harness.controller();
+      addTearDown(controller.dispose);
+      await openDialog(tester, controller, size: size);
+      await tester.enterText(
+        find.byKey(const ValueKey('target-search')),
+        'H723',
+      );
+      await tester.tap(find.byKey(const ValueKey('online-target-packs')));
+      await tester.pumpAndSettle();
+      expect(find.text('下载并安装'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
   test(
     'catalog search matches vendor, family, full name and exact version source',
     () {
@@ -527,6 +724,19 @@ void main() {
       final file = File('build/ui_test/target_chip_dialog.png');
       await file.parent.create(recursive: true);
       await file.writeAsBytes(data!.buffer.asUint8List());
+      image.dispose();
+    });
+    await tester.tap(find.byKey(const ValueKey('online-target-packs')));
+    await tester.pumpAndSettle();
+    await tester.runAsync(() async {
+      final boundary =
+          boundaryKey.currentContext!.findRenderObject()!
+              as RenderRepaintBoundary;
+      final image = await boundary.toImage();
+      final data = await image.toByteData(format: ui.ImageByteFormat.png);
+      await File(
+        'build/ui_test/online_target_pack_dialog.png',
+      ).writeAsBytes(data!.buffer.asUint8List());
       image.dispose();
     });
     expect(tester.takeException(), isNull);

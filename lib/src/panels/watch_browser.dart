@@ -49,6 +49,7 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
   final _panelFocus = FocusNode(debugLabel: 'watch-browser');
   final _search = TextEditingController();
   final _scroll = ScrollController();
+  final _summaryScroll = ScrollController();
   final Set<String> _selectedKeys = {};
   final Set<_WatchBrowserSection> _collapsedSections = {};
   List<(String, _WatchBrowserSection)> _selectionOrder = [];
@@ -84,6 +85,7 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
     _panelFocus.dispose();
     _search.dispose();
     _scroll.dispose();
+    _summaryScroll.dispose();
     super.dispose();
   }
 
@@ -881,6 +883,83 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
     ),
   );
 
+  Widget _splitLists({
+    required Widget summary,
+    required Widget members,
+    required double initialSummaryHeight,
+  }) => LayoutBuilder(
+    builder: (context, constraints) {
+      final ui = TalUiTheme.of(context);
+      final handleHeight = math.min(
+        ui.touchOptimized ? 24.0 : 12.0,
+        constraints.maxHeight,
+      );
+      final available = constraints.maxHeight - handleHeight;
+      final minHeight = math.min(
+        ui.targetExtent(30) + ui.targetExtent(32),
+        available / 2,
+      );
+      final maxHeight = available - minHeight;
+      final summaryHeight =
+          (controller.compactWatchSummaryFraction == null
+                  ? math.min(initialSummaryHeight, available * .45)
+                  : available * controller.compactWatchSummaryFraction!)
+              .clamp(minHeight, maxHeight);
+      return Column(
+        children: [
+          SizedBox(
+            key: const ValueKey('watch-summary-pane'),
+            height: summaryHeight,
+            child: summary,
+          ),
+          Tooltip(
+            message: '上下拖动调整采集区和成员区高度',
+            child: MouseRegion(
+              cursor: SystemMouseCursors.resizeUpDown,
+              child: GestureDetector(
+                key: const ValueKey('watch-sections-resize'),
+                behavior: HitTestBehavior.opaque,
+                dragStartBehavior: DragStartBehavior.down,
+                onVerticalDragUpdate: available <= 0
+                    ? null
+                    : (details) => setState(() {
+                        final currentHeight =
+                            (available *
+                                    (controller.compactWatchSummaryFraction ??
+                                        summaryHeight / available))
+                                .clamp(minHeight, maxHeight);
+                        controller.compactWatchSummaryFraction =
+                            (currentHeight + details.delta.dy).clamp(
+                              minHeight,
+                              maxHeight,
+                            ) /
+                            available;
+                      }),
+                child: SizedBox(
+                  height: handleHeight,
+                  child: const Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      Divider(height: 1, color: TalColors.borderSoft),
+                      Center(
+                        child: SizedBox(
+                          width: 28,
+                          height: 3,
+                          child: ColoredBox(color: TalColors.border),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Expanded(key: const ValueKey('watch-members-pane'), child: members),
+        ],
+      );
+    },
+  );
+
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: Listenable.merge([
@@ -976,156 +1055,169 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
           behavior: HitTestBehavior.opaque,
           onSecondaryTapUp: (details) => _blankMenu(details.globalPosition),
           onLongPressStart: (details) => _blankMenu(details.globalPosition),
-          child: ListView(
-            controller: _scroll,
-            key: const ValueKey('compact-watch-list'),
-            children: [
-              if (pinned.isNotEmpty) ...[
-                _sectionHeader(
-                  _WatchBrowserSection.pinned,
-                  '已固定',
-                  icon: Icons.push_pin_outlined,
-                  hint: '折叠后仍刷新',
-                ),
-                if (pinnedExpanded)
-                  for (final w in pinned)
-                    _row(
-                      _WatchBrowserEntry(
-                        key: w.symbol.key,
-                        label: w.symbol.name,
-                        depth: 0,
-                        node: allNodes[w.symbol.key],
-                        section: _WatchBrowserSection.pinned,
-                      ),
-                      wide,
-                      valueWidth,
-                    ),
-                const Divider(height: 12, color: TalColors.borderSoft),
-              ],
-              _sectionHeader(
-                _WatchBrowserSection.capture,
-                '正在采集',
-                icon: Icons.sensors,
-                count: captured.length,
-              ),
-              if (captureExpanded) ...[
-                if (captured.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(12, 4, 12, 8),
-                    child: Text('暂无正在采集的变量', style: workbenchMuted),
-                  )
-                else
-                  ConstrainedBox(
-                    constraints: BoxConstraints(
-                      maxHeight: TalUiTheme.of(context).targetExtent(32) * 3,
-                    ),
-                    child: ListView(
-                      key: const ValueKey('watch-capture-list'),
-                      primary: false,
-                      shrinkWrap: true,
-                      children: [
-                        for (final w in captured)
-                          _row(
-                            _WatchBrowserEntry(
-                              key: w.symbol.key,
-                              label: w.symbol.name,
-                              depth: 0,
-                              node: allNodes[w.symbol.key],
-                              section: _WatchBrowserSection.capture,
-                            ),
-                            wide,
-                            valueWidth,
-                          ),
-                      ],
-                    ),
+          child: _splitLists(
+            initialSummaryHeight:
+                ui.targetExtent(30) +
+                (captureExpanded
+                    ? (captured.isEmpty
+                          ? 28
+                          : math.min(captured.length, 3) * ui.targetExtent(32))
+                    : 0) +
+                (pinned.isEmpty
+                    ? 0
+                    : ui.targetExtent(30) +
+                          (pinnedExpanded
+                              ? pinned.length * ui.targetExtent(32)
+                              : 0) +
+                          12),
+            summary: ListView(
+              controller: _summaryScroll,
+              key: const ValueKey('watch-capture-list'),
+              primary: false,
+              children: [
+                if (pinned.isNotEmpty) ...[
+                  _sectionHeader(
+                    _WatchBrowserSection.pinned,
+                    '已固定',
+                    icon: Icons.push_pin_outlined,
+                    hint: '折叠后仍刷新',
                   ),
-              ],
-              const Divider(height: 12, color: TalColors.borderSoft),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 2, 5, 2),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: _sectionHeader(
-                        _WatchBrowserSection.members,
-                        _search.text.trim().isEmpty ? '成员' : '搜索结果',
-                        padding: EdgeInsets.zero,
+                  if (pinnedExpanded)
+                    for (final w in pinned)
+                      _row(
+                        _WatchBrowserEntry(
+                          key: w.symbol.key,
+                          label: w.symbol.name,
+                          depth: 0,
+                          node: allNodes[w.symbol.key],
+                          section: _WatchBrowserSection.pinned,
+                        ),
+                        wide,
+                        valueWidth,
                       ),
-                    ),
-                    if (membersExpanded) ...[
-                      Tooltip(
-                        message: '左右拖动调整当前值列宽',
-                        child: MouseRegion(
-                          cursor: SystemMouseCursors.resizeColumn,
-                          child: GestureDetector(
-                            key: const ValueKey('watch-value-column-resize'),
-                            behavior: HitTestBehavior.opaque,
-                            onHorizontalDragUpdate: (details) => setState(() {
-                              _valueColumnWidth =
-                                  (valueWidth - details.delta.dx).clamp(
-                                    64.0,
-                                    maxValueWidth,
-                                  );
-                            }),
-                            child: const SizedBox(
-                              width: 12,
-                              height: 24,
-                              child: Center(
-                                child: SizedBox(
-                                  width: 1,
-                                  height: 14,
-                                  child: ColoredBox(color: TalColors.border),
+                  const Divider(height: 12, color: TalColors.borderSoft),
+                ],
+                _sectionHeader(
+                  _WatchBrowserSection.capture,
+                  '正在采集',
+                  icon: Icons.sensors,
+                  count: captured.length,
+                ),
+                if (captureExpanded) ...[
+                  if (captured.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.fromLTRB(12, 4, 12, 8),
+                      child: Text('暂无正在采集的变量', style: workbenchMuted),
+                    )
+                  else
+                    for (final w in captured)
+                      _row(
+                        _WatchBrowserEntry(
+                          key: w.symbol.key,
+                          label: w.symbol.name,
+                          depth: 0,
+                          node: allNodes[w.symbol.key],
+                          section: _WatchBrowserSection.capture,
+                        ),
+                        wide,
+                        valueWidth,
+                      ),
+                ],
+              ],
+            ),
+            members: ListView(
+              controller: _scroll,
+              key: const ValueKey('compact-watch-list'),
+              primary: false,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 2, 5, 2),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: _sectionHeader(
+                          _WatchBrowserSection.members,
+                          _search.text.trim().isEmpty ? '成员' : '搜索结果',
+                          padding: EdgeInsets.zero,
+                        ),
+                      ),
+                      if (membersExpanded) ...[
+                        Tooltip(
+                          message: '左右拖动调整当前值列宽',
+                          child: MouseRegion(
+                            cursor: SystemMouseCursors.resizeColumn,
+                            child: GestureDetector(
+                              key: const ValueKey('watch-value-column-resize'),
+                              behavior: HitTestBehavior.opaque,
+                              onHorizontalDragUpdate: (details) => setState(() {
+                                _valueColumnWidth =
+                                    (valueWidth - details.delta.dx).clamp(
+                                      64.0,
+                                      maxValueWidth,
+                                    );
+                              }),
+                              child: const SizedBox(
+                                width: 12,
+                                height: 24,
+                                child: Center(
+                                  child: SizedBox(
+                                    width: 1,
+                                    height: 14,
+                                    child: ColoredBox(color: TalColors.border),
+                                  ),
                                 ),
                               ),
                             ),
                           ),
                         ),
-                      ),
-                      SizedBox(
-                        width: valueWidth,
-                        child: const Text(
-                          '当前值',
-                          style: workbenchMuted,
-                          textAlign: TextAlign.right,
-                        ),
-                      ),
-                      if (showPin) SizedBox(width: ui.compactIconButtonSize),
-                      _actionHeader(ui, '采集'),
-                      _actionHeader(ui, '绘制'),
-                    ],
-                  ],
-                ),
-              ),
-              if (membersExpanded) ...[
-                if (rows.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      children: [
-                        Text(
-                          controller.watches.isEmpty ? '从符号变量加入变量' : '没有匹配的成员',
-                          style: workbenchMuted,
-                        ),
-                        if (_search.text.isNotEmpty)
-                          TalButton(
-                            onPressed: () => setState(() {
-                              _search.clear();
-                              controller.watchSearchQuery = '';
-                            }),
-                            child: const Text('清空搜索'),
+                        SizedBox(
+                          width: valueWidth,
+                          child: const Text(
+                            '当前值',
+                            style: workbenchMuted,
+                            textAlign: TextAlign.right,
                           ),
-                        if (controller.watches.isEmpty &&
-                            widget.onShowSymbols != null)
-                          TalButton(
-                            onPressed: widget.onShowSymbols,
-                            child: const Text('打开符号变量'),
-                          ),
+                        ),
+                        if (showPin) SizedBox(width: ui.compactIconButtonSize),
+                        _actionHeader(ui, '采集'),
+                        _actionHeader(ui, '绘制'),
                       ],
-                    ),
+                    ],
                   ),
-                for (final row in rows) _row(row, wide, valueWidth),
+                ),
+                if (membersExpanded) ...[
+                  if (rows.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        children: [
+                          Text(
+                            controller.watches.isEmpty
+                                ? '从符号变量加入变量'
+                                : '没有匹配的成员',
+                            style: workbenchMuted,
+                          ),
+                          if (_search.text.isNotEmpty)
+                            TalButton(
+                              onPressed: () => setState(() {
+                                _search.clear();
+                                controller.watchSearchQuery = '';
+                              }),
+                              child: const Text('清空搜索'),
+                            ),
+                          if (controller.watches.isEmpty &&
+                              widget.onShowSymbols != null)
+                            TalButton(
+                              onPressed: widget.onShowSymbols,
+                              child: const Text('打开符号变量'),
+                            ),
+                        ],
+                      ),
+                    ),
+                  for (final row in rows) _row(row, wide, valueWidth),
+                ],
               ],
-            ],
+            ),
           ),
         );
         final details = selected == null

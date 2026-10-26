@@ -70,6 +70,7 @@ void main() {
       controller.watchInputDrafts[keys[0]] = '12.5';
       controller.compactWatchSelection = keys[0];
       controller.compactExpandedWatches.add(keys[0]);
+      controller.compactWatchSummaryFraction = .4;
       controller.sampleRateHz = 500;
       controller.sourceProject.buildCommand = 'make debug';
       controller.sourceProject.sourceRoot = directory.path;
@@ -140,6 +141,7 @@ void main() {
       expect(controller.watchInputDrafts[keys[0]], '12.5');
       expect(controller.compactWatchSelection, keys[0]);
       expect(controller.compactExpandedWatches, contains(keys[0]));
+      expect(controller.compactWatchSummaryFraction, .4);
       expect(controller.sourceProject.buildCommand, 'make release');
       expect(controller.debugState.requestedBreakpoints['main.c'], {12, 24});
       expect(controller.sampleRateHz, 500);

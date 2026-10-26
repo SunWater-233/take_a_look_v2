@@ -71,7 +71,12 @@ void main() {
           (catalog['targets'] as List).length,
           (initial['targets'] as List).length + (preview['targetCount'] as int),
         );
-        expect((catalog['packs'] as List).single['id'], preview['id']);
+        expect(
+          (catalog['packs'] as List).where(
+            (pack) => (pack as Map)['id'] == preview['id'],
+          ),
+          hasLength(1),
+        );
       }
       final targets = (catalogs.first['targets'] as List).cast<Map>().where(
         (target) => target['packId'] == preview['id'],
@@ -93,7 +98,10 @@ void main() {
           .timeout(const Duration(seconds: 5));
       expect(controller.targetPackMissing, isTrue);
       final removed = await controller.requestTargetCatalog('listTargets');
-      expect(removed['packs'], isEmpty);
+      expect(
+        (removed['packs'] as List).length,
+        (initial['packs'] as List).length,
+      );
       expect(
         (removed['targets'] as List).length,
         (initial['targets'] as List).length,

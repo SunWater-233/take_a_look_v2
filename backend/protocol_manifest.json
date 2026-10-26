@@ -3,6 +3,7 @@
   "methods": [
     "ember",
     "listTargets",
+    "onlineTargetPacks",
     "inspectTargetPack",
     "importTargetPack",
     "discardTargetPackPreview",

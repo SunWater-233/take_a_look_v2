@@ -9,6 +9,7 @@ EmberMobile gateway / remote GDB Server; it does not expose a network listener.
 
 - ELF/AXF symbol and DWARF type parsing, including arrays, structures and pointer metadata
 - pyOCD probe discovery, target connection, coalesced memory reads, typed writes and readback verification
+- Search, download and manage CMSIS Device Family Packs from the target chip dialog
 - Configurable memory sampling from 1 Hz to 10 kHz
 - J-Scope-compatible RTT-Normal and configured-variable RTT-Plus sampling
 - Target reset/run and reset/halt control
@@ -20,6 +21,33 @@ EmberMobile gateway / remote GDB Server; it does not expose a network listener.
 - One hardware backend owned by the main window; detached Flutter windows use the existing main-window channel
 
 ## Development
+
+Open the target chip selector and choose **在线下载** to search by MCU part
+number, vendor or pack name. The current local search is carried into the
+online dialog. The first search builds a cached index from the official
+[CMSIS-Pack index](https://www.keil.com/pack/index.pidx) and vendor PDSC files;
+this can take a few minutes. **更新在线索引** refreshes it, reusing unchanged
+descriptors. If some vendors cannot be reached, the dialog reports that results
+may be incomplete. A failed or cancelled refresh preserves the previous cache.
+
+**下载并安装** displays byte progress, validates the downloaded pack and adds it
+to the existing local library. The dialog returns to the downloaded chip list;
+choose **使用此芯片** to apply it. Installing alone does not change the active
+target or reconnect hardware. Already installed packs offer **已安装，查看芯片**.
+Search/index/download tasks can be cancelled and do not block hardware commands.
+Local `.pack` import remains available through **添加芯片包**. Index data is
+stored in the chip library's `online/` directory, alongside the existing
+`TAL_PACKS_DIR` override. No additional Python dependencies are required.
+
+Windows and Linux backend builds automatically bundle the official STM32F1,
+STM32F4 and STM32H7 DFPs, covering STM32F103, STM32F407 and STM32H723 without an
+online download. Pack management marks these as **软件自带**; they are read
+directly from the application and cannot be deleted there. User imports and
+online downloads remain independently managed. Versions, source URLs and SHA-256
+hashes are pinned in `tool/bundled_packs.json`. Both backend build scripts run
+`tool/prepare_bundled_packs.py` to verify the cached packs (or download missing
+ones), validate required chip coverage and ship the complete original archives
+with their license notices. Pack files are build assets, excluded from Git.
 
 The default workspace places symbols on the left, variable monitoring on the
 right, and chart/source/analysis tabs in the center. Sidebar tabs share each

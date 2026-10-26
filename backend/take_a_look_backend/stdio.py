@@ -23,7 +23,7 @@ from take_a_look_backend.models import SampleFrame
 from take_a_look_backend.services.ordered_worker import OrderedWorker
 from take_a_look_backend.services.parent_lifetime import watch_desktop_process
 from take_a_look_backend.services.source_project import default_settings_file
-from take_a_look_backend.services.target_catalog import default_pack_directory
+from take_a_look_backend.services.target_catalog import default_pack_directory, default_bundled_pack_directory
 
 TARGET_METHODS = {
     RpcMethod.LIST_TARGETS, RpcMethod.INSPECT_TARGET_PACK, RpcMethod.IMPORT_TARGET_PACK,
@@ -47,7 +47,8 @@ class StdioServer:
         self._sample_sequence = 0
         self._sample_capture_only = False
         self._service = BackendService(self._send_event, source_settings_file=default_settings_file(),
-                                       target_directory=default_pack_directory())
+                                       target_directory=default_pack_directory(),
+                                       bundled_target_directory=default_bundled_pack_directory())
 
     def run(self) -> int:
         try:
@@ -223,6 +224,11 @@ def main() -> None:
         from take_a_look_backend.self_check import run
 
         raise SystemExit(run())
+    if len(sys.argv) == 3 and sys.argv[1] == "--update-pack-index":
+        from take_a_look_backend.services.online_packs import update_pack_index
+
+        update_pack_index(sys.argv[2])
+        return
     server = StdioServer(sys.stdin, sys.stdout.buffer)
     stopped = watch_desktop_process(server.close)
     try:

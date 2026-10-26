@@ -89,6 +89,7 @@ enum ControllerCommand {
 enum BackendMethod {
   ember,
   listTargets,
+  onlineTargetPacks,
   inspectTargetPack,
   importTargetPack,
   discardTargetPackPreview,

@@ -279,17 +279,17 @@ void main() {
       await tester.pump();
       expect(watch.readMode, WatchReadMode.capture);
       expect(find.byKey(plot), findsOneWidget);
-      expect(watch.plotted, isFalse);
+      expect(watch.plotted, isTrue);
       expect(find.byKey(capturedRow), findsOneWidget);
       expect(find.text('正在采集'), findsOneWidget);
       await tester.tap(find.byKey(plot));
       await tester.pump();
       expect(watch.readMode, WatchReadMode.capture);
-      expect(watch.plotted, isTrue);
+      expect(watch.plotted, isFalse);
       expect(find.byKey(capturedRow), findsOneWidget);
       await tester.tap(find.byKey(plot));
       await tester.pump();
-      expect(watch.plotted, isFalse);
+      expect(watch.plotted, isTrue);
       expect(watch.readMode, WatchReadMode.capture);
       expect(find.byKey(capturedRow), findsOneWidget);
       expect(
@@ -327,11 +327,11 @@ void main() {
       await tester.tap(find.byKey(capture));
       await tester.pump();
       expect(watch.readMode, WatchReadMode.capture);
-      expect(watch.plotted, isFalse);
+      expect(watch.plotted, isTrue);
       expect(find.byKey(capturedRow), findsOneWidget);
       await tester.tap(find.byKey(plot));
       await tester.pump();
-      expect(watch.plotted, isTrue);
+      expect(watch.plotted, isFalse);
       expect(watch.readMode, WatchReadMode.capture);
       expect(watch.samples.single.dy, 12);
       expect(tester.takeException(), isNull);

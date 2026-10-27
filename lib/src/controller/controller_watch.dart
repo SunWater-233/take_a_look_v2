@@ -369,8 +369,7 @@ extension TakeALookControllerWatches on TakeALookController {
     final watch = _watchByKey(key);
     if (watch == null || watch.readMode == mode) return;
     watch.readMode = mode;
-    // Joining capture records data; plotting requires its own explicit action.
-    if (mode != WatchReadMode.capture) watch.plotted = false;
+    watch.plotted = mode == WatchReadMode.capture;
     _syncWatchesBackend();
     _emitState([signals.watches, signals.plot]);
   }

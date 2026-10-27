@@ -325,7 +325,7 @@ void main() {
         (watch) => watch.symbol.key == 'motor.speed',
       );
       expect(speed.samplingEnabled, isTrue);
-      expect(speed.plotted, isFalse);
+      expect(speed.plotted, isTrue);
       await tester.ensureVisible(
         find.byKey(const ValueKey('watch-visibility-motor.speed')),
       );
@@ -334,13 +334,13 @@ void main() {
       );
       await tester.pump();
       expect(speed.samplingEnabled, isTrue);
-      expect(speed.plotted, isTrue);
+      expect(speed.plotted, isFalse);
       await tester.tap(
         find.byKey(const ValueKey('watch-visibility-motor.speed')),
       );
       await tester.pump();
       expect(speed.samplingEnabled, isTrue);
-      expect(speed.plotted, isFalse);
+      expect(speed.plotted, isTrue);
       expect(find.byType(Checkbox), findsNothing);
 
       controller.dispose();

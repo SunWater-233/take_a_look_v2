@@ -77,7 +77,7 @@ section lists all variables enrolled in capture, including those with hidden
 curves, even when their tree branches are collapsed or filtered by search.
 **已固定**, **正在采集**, and **成员** can each be collapsed
 by clicking their headers; capture and pinned monitoring continue while hidden.
-**加入采集** starts recording without automatically plotting a curve. Captured
+**加入采集** starts recording and automatically shows the curve. Captured
 variables have a separate visibility button in the **绘制** column and the details
 area; use it to show or hide each curve independently. Hiding a curve keeps capture
 running. Collapsed monitors stop automatic reads unless pinned or displayed in

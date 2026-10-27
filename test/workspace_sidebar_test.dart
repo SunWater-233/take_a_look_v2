@@ -125,6 +125,82 @@ class _DragWindowSync extends MainWindowSync {
 }
 
 void main() {
+  testWidgets(
+    'window resizing places panels at their target in the same frame',
+    (tester) async {
+      final bench = _Workbench(tester);
+      addTearDown(bench.dispose);
+      await bench.mount();
+
+      void expectImmediateLayout() {
+        final workspaceOrigin = tester.getTopLeft(
+          find.byType(DockingWorkspace),
+        );
+        final groups = find.byWidgetPredicate(
+          (widget) =>
+              widget is AnimatedPositioned &&
+              widget.key.toString().contains('workspace-group-'),
+          skipOffstage: false,
+        );
+        expect(groups, findsWidgets);
+        for (final element in groups.evaluate()) {
+          final positioned = element.widget as AnimatedPositioned;
+          final box = element.findRenderObject()! as RenderBox;
+          final actual = box.localToGlobal(Offset.zero) - workspaceOrigin;
+          expect(
+            actual.dx,
+            closeTo(positioned.left!, .01),
+            reason: '${positioned.key} left must follow the window',
+          );
+          expect(
+            actual.dy,
+            closeTo(positioned.top!, .01),
+            reason: '${positioned.key} top must follow the window',
+          );
+          expect(
+            box.size.width,
+            closeTo(positioned.width!, .01),
+            reason: '${positioned.key} width must follow the window',
+          );
+          expect(
+            box.size.height,
+            closeTo(positioned.height!, .01),
+            reason: '${positioned.key} height must follow the window',
+          );
+        }
+      }
+
+      for (final size in const [
+        Size(1600, 900),
+        Size(1200, 700),
+        Size(900, 700),
+        Size(1400, 900),
+      ]) {
+        await tester.binding.setSurfaceSize(size);
+        await tester.pump();
+        expectImmediateLayout();
+        await tester.pump(const Duration(milliseconds: 16));
+        expectImmediateLayout();
+      }
+
+      // A regular sidebar action still has its animated transition.
+      final plot = find.byKey(const ValueKey('workspace-group-plot'));
+      await tester.tap(find.byKey(const ValueKey('sidebar-handle-right')));
+      await tester.pump();
+      expect(
+        tester.widget<AnimatedPositioned>(plot).duration,
+        isNot(Duration.zero),
+      );
+      expect(tester.hasRunningAnimations, isTrue);
+      await tester.pump(const Duration(milliseconds: 50));
+      // Resizing while that transition is running also cancels the old geometry.
+      await tester.binding.setSurfaceSize(const Size(1500, 820));
+      await tester.pump();
+      expectImmediateLayout();
+      await tester.pumpAndSettle();
+    },
+  );
+
   testWidgets('a detached panel can preview and dock at an empty bottom edge', (
     tester,
   ) async {

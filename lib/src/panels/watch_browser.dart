@@ -1242,27 +1242,31 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
                   if (constraints.maxHeight > 210)
                     Padding(
                       padding: const EdgeInsets.fromLTRB(10, 2, 10, 8),
-                      child: TextField(
-                        key: const ValueKey('watch-member-search'),
-                        controller: _search,
-                        style: workbenchBody,
-                        decoration: InputDecoration(
-                          isDense: true,
-                          prefixIcon: const Icon(Icons.search, size: 17),
-                          hintText: '搜索成员名称或路径，如 current.q',
-                          suffixIcon: _search.text.isEmpty
-                              ? null
-                              : TalIconButton(
-                                  tooltip: '清空搜索',
-                                  onPressed: () => setState(() {
-                                    _search.clear();
-                                    controller.watchSearchQuery = '';
-                                  }),
-                                  icon: const Icon(Icons.close, size: 16),
-                                ),
+                      child: SizedBox(
+                        height: ui.controlHeight,
+                        child: TextField(
+                          key: const ValueKey('watch-member-search'),
+                          controller: _search,
+                          style: workbenchBody,
+                          decoration: InputDecoration(
+                            isDense: true,
+                            prefixIcon: const Icon(Icons.search, size: 17),
+                            hintText: '搜索成员名称或路径，如 current.q',
+                            suffixIcon: _search.text.isEmpty
+                                ? null
+                                : TalIconButton(
+                                    tooltip: '清空搜索',
+                                    onPressed: () => setState(() {
+                                      _search.clear();
+                                      controller.watchSearchQuery = '';
+                                    }),
+                                    icon: const Icon(Icons.close, size: 16),
+                                  ),
+                          ),
+                          onChanged: (value) => setState(
+                            () => controller.watchSearchQuery = value,
+                          ),
                         ),
-                        onChanged: (value) =>
-                            setState(() => controller.watchSearchQuery = value),
                       ),
                     ),
                   Expanded(

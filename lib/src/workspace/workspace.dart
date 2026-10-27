@@ -71,6 +71,11 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   Offset? _lastTabDragPreviewPosition;
   int _sourceAdditionRevision = 0;
   final Map<WorkspacePanelId, GlobalKey> _panelBodyKeys = {};
+  final _panelBodies =
+      <
+        WorkspacePanelId,
+        ({TakeALookController controller, bool visible, Widget child})
+      >{};
   bool _resizing = false;
   double? _outputDragHeight;
   Future<void> _nativeTransfers = Future<void>.value();
@@ -452,6 +457,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     super.didUpdateWidget(oldWidget);
     _layout.workbenchLayout = widget.workbenchLayout;
     if (oldWidget.controller != widget.controller) {
+      _panelBodies.clear();
       widget.controller.initializeWatchMonitorVisibility();
       oldWidget.controller.sourceWorkspaceChanges.removeListener(
         _handleSourceAddition,
@@ -487,6 +493,12 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         final size = Size(constraints.maxWidth, constraints.maxHeight);
         final resized = _session.workspaceSize != size;
         _session.workspaceSize = size;
+        // Native resizing supplies the intermediate sizes. Animating toward
+        // each of them makes panels trail the border and keeps laying out
+        // their contents after the window has stopped moving.
+        final layoutDuration = resized
+            ? Duration.zero
+            : _layoutAnimationDuration;
         if (usesWorkbenchLayout || (resized && _layout.automatic)) {
           _reflowWorkbench();
         }
@@ -532,8 +544,9 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
                         group == _outputGroup &&
                         group.outputCollapsed &&
                         _outputDragHeight == null))
-                      _buildGroup(group, size),
-                  if (usesWorkbenchLayout) ..._dockOverlays(size),
+                      _buildGroup(group, size, layoutDuration),
+                  if (usesWorkbenchLayout)
+                    ..._dockOverlays(size, layoutDuration),
                 ],
               ),
             ),
@@ -543,7 +556,11 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     );
   }
 
-  Widget _buildGroup(WorkspaceGroup group, Size workspaceSize) {
+  Widget _buildGroup(
+    WorkspaceGroup group,
+    Size workspaceSize,
+    Duration layoutDuration,
+  ) {
     final expanded = group == _primaryGroup && _layout.focused;
     final hidden =
         _sidebarHidden(group) || (_layout.focused && group != _primaryGroup);
@@ -561,7 +578,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         (usesWorkbenchLayout ? ui.panelHeaderHeight : ui.panelTabStripHeight);
     return AnimatedPositioned(
       key: ValueKey('workspace-group-${group.id}'),
-      duration: _layoutAnimationDuration,
+      duration: layoutDuration,
       curve: Curves.easeOutCubic,
       left: rect.left,
       top: rect.top,
@@ -761,21 +778,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
                     visible: visible && panel == activePanel,
                     child: KeyedSubtree(
                       key: _panelBodyKeys[panel],
-                      child: buildWorkspacePanelBody(
-                        panel,
-                        widget.controller,
-                        workbench: true,
-                        adaptiveWorkbench: true,
-                        visible: visible && panel == activePanel,
-                        onShowSource: () => unawaited(
-                          activateWorkbenchView(WorkspacePanelId.sourceDebug),
-                        ),
-                        onShowSymbols: () {
-                          if (!resourceDocked) {
-                            unawaited(toggleWorkbenchResource());
-                          }
-                        },
-                      ),
+                      child: _panelBody(panel, visible && panel == activePanel),
                     ),
                   ),
                 ),
@@ -785,7 +788,37 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     );
   }
 
-  List<Widget> _dockOverlays(Size size) {
+  Widget _panelBody(WorkspacePanelId panel, bool visible) {
+    final cached = _panelBodies[panel];
+    if (cached != null &&
+        identical(cached.controller, widget.controller) &&
+        cached.visible == visible) {
+      return cached.child;
+    }
+    // Geometry changes still propagate through render constraints and nested
+    // LayoutBuilders. Reuse the body so resizing doesn't also rebuild every
+    // unrelated control. Model listeners and inherited themes remain active.
+    final child = buildWorkspacePanelBody(
+      panel,
+      widget.controller,
+      workbench: true,
+      adaptiveWorkbench: true,
+      visible: visible,
+      onShowSource: () =>
+          unawaited(activateWorkbenchView(WorkspacePanelId.sourceDebug)),
+      onShowSymbols: () {
+        if (!resourceDocked) unawaited(toggleWorkbenchResource());
+      },
+    );
+    _panelBodies[panel] = (
+      controller: widget.controller,
+      visible: visible,
+      child: child,
+    );
+    return child;
+  }
+
+  List<Widget> _dockOverlays(Size size, Duration layoutDuration) {
     final widgets = <Widget>[];
     for (final side in WorkspaceSidebarSide.values) {
       final group = _sidebarGroup(side);
@@ -795,7 +828,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         widgets.add(
           AnimatedPositioned(
             key: ValueKey('sidebar-handle-${side.name}'),
-            duration: _layoutAnimationDuration,
+            duration: layoutDuration,
             curve: Curves.easeOutCubic,
             left: side == WorkspaceSidebarSide.left ? rect.right : null,
             right: side == WorkspaceSidebarSide.right

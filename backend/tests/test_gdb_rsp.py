@@ -137,8 +137,12 @@ def test_service_rsp_capture_pause_monitor_resume_clear_and_disconnect(tmp_path:
             "gdbPath": "unused-no-GDB-process"}})
         assert result["state"]["connectionCapabilities"]["memorySampling"]
         assert not result["state"]["connectionCapabilities"]["memoryWrite"]
+        assert result["state"]["samplingPaused"]
         service.handle(RpcMethod.SET_WATCHES, {"watches": [{"key": symbol.key, "readMode": "capture", "plotted": True}]})
         service.handle(RpcMethod.SET_CONFIG, {"sampleRateHz": 1000})
+        time.sleep(.05)
+        assert not any(name == EventName.SAMPLES for name, _ in events)
+        service.handle(RpcMethod.SET_SAMPLING_PAUSED, {"paused": False})
         deadline = time.perf_counter() + 3
         while not any(name == EventName.SAMPLES for name, _ in events):
             assert time.perf_counter() < deadline

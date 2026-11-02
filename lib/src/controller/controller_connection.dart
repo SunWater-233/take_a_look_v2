@@ -85,6 +85,7 @@ extension TakeALookControllerConnection on TakeALookController {
     await Future<void>.delayed(const Duration(milliseconds: 650));
     if (_disposed) return;
     connectionStatus = ConnectionStatus.connected;
+    samplingPaused = true;
     _reconcileSamplingClock();
     _resetPlotRefreshSchedule();
     _appendLog('已连接 pyOCD：target=$targetName，SWD=$swdClock。');

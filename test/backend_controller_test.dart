@@ -9,6 +9,16 @@ import 'package:take_a_look_v2/src/protocol/commands.dart';
 import 'package:take_a_look_v2/src/protocol/events.dart';
 
 void main() {
+  test('simulated probe connection starts with acquisition paused', () async {
+    final controller = TakeALookController();
+    addTearDown(controller.dispose);
+
+    await controller.toggleConnection();
+
+    expect(controller.connectionStatus, ConnectionStatus.connected);
+    expect(controller.samplingPaused, isTrue);
+  });
+
   test('controller maps backend state, commands, and sample events', () async {
     final commands = <(ControllerCommand, Object?)>[];
     final controller = TakeALookController(

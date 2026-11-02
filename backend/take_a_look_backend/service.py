@@ -424,7 +424,7 @@ class BackendService(SamplingServiceMixin):
         with self._lock:
             self._connection_status = "connected"
             self._connection_started_at = time.perf_counter()
-            self._sampling_paused = False
+            self._sampling_paused = True
             self._debug.execution_state = initial_execution_state
             self._debug.apply_breakpoints(self._memory, connected=self._connection_status == "connected")
             state = self._runtime_state_locked()

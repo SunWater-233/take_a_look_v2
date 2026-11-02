@@ -1,6 +1,7 @@
 """Plan local flash comparisons without running an algorithm or reading ELF gaps."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -71,3 +72,60 @@ def sector_matches(target: Any, sector: FirmwareSector, compared) -> bool:
         if actual != expected:
             return False
     return True
+
+
+@contextmanager
+def batched_flash_pages(target: Any, segments: list[tuple[int, bytes]]):
+    """Combine adjacent pages when a standard flash algorithm has spare work RAM."""
+    from pyocd.flash.flash import Flash
+
+    core_name = target.selected_core.node_name
+    regions = {target.memory_map.get_region_for_address(address, core_name) for address, _ in segments}
+    if len(regions) != 1:
+        yield
+        return
+    region = next(iter(regions))
+    flash = region.flash
+    algo = getattr(flash, "flash_algo", None)
+    page_size = region.page_size
+    batch_size = page_size * 4
+    required = ("load_address", "instructions", "begin_stack", "page_buffers")
+    if (type(flash) is not Flash or not isinstance(algo, dict)
+            or region.has_subregions or not (0 < page_size < batch_size <= 4096)
+            or region.sector_size % batch_size or region.start % batch_size
+            or len(flash.page_buffers) != 1
+            or algo.get("page_buffers") != flash.page_buffers
+            or not all(key in algo for key in required)
+            or not isinstance(algo["load_address"], int)
+            or not isinstance(algo["begin_stack"], int)
+            or not isinstance(algo["instructions"], (list, tuple))
+            or not isinstance(algo.get("end_stack", 0), int)
+            or algo.get("analyzer_supported")
+            or flash.minimum_program_length > page_size
+            or page_size % flash.minimum_program_length):
+        yield
+        return
+
+    old_buffer = flash.page_buffers[0]
+    ram = target.memory_map.get_region_for_address(old_buffer, core_name)
+    if ram is None or not ram.is_ram or not ram.is_writable:
+        yield
+        return
+    occupied_end = max(
+        algo["load_address"] + len(algo["instructions"]) * 4,
+        algo["begin_stack"], algo.get("end_stack", 0),
+        old_buffer + page_size,
+    )
+    new_buffer = (occupied_end + batch_size - 1) // batch_size * batch_size
+    if not ram.contains_range(start=new_buffer, length=batch_size):
+        yield
+        return
+
+    original_buffers = flash.page_buffers
+    region.page_size = batch_size
+    flash.page_buffers = [new_buffer]
+    try:
+        yield
+    finally:
+        flash.page_buffers = original_buffers
+        region.page_size = page_size

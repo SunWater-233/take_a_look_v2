@@ -12,7 +12,7 @@ from typing import Any
 
 from take_a_look_backend.protocol import ProtocolError
 from take_a_look_backend.backends.pyocd_compat import guard_dap_error_recovery
-from take_a_look_backend.backends.local_firmware import flash_sector_plan, read_firmware_chunks, sector_matches
+from take_a_look_backend.backends.local_firmware import batched_flash_pages, flash_sector_plan, read_firmware_chunks, sector_matches
 from take_a_look_backend.backends.target_backend import capabilities_for_connection
 # Re-export the existing codec entry points for external callers.
 from take_a_look_backend.backends.typed_memory import (
@@ -282,7 +282,11 @@ class PyOcdMemoryBackend(TypedMemoryBackend):
             program_started = perf_counter()
             wrote = sectors is None or bool(changed)
             if wrote:
-                loader.commit()
+                if sectors is None:
+                    loader.commit()
+                else:
+                    with batched_flash_pages(target, changed):
+                        loader.commit()
             program_s = perf_counter() - program_started
             target.halt()
             target.flush()

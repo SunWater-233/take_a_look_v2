@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 
+import 'numeric_history.dart';
+
 /// Append-only acquisition journal, independent of all plot buffers. Channel
 /// IDs keep high-rate batches compact; every file contains its own schema.
 /// Writes go to the OS in batches, with fsync at export/rotation/close. CSV
@@ -31,11 +33,13 @@ class RawSampleRecording {
   int _committedBytes = 0;
   Object? failure;
   bool _closed = false;
+  NumericHistoryWriter? _history;
 
   Map<String, Object?> get status => {
     'path': path,
     'sampleCount': sampleCount,
     'bytes': _committedBytes,
+    'historyPath': _history?.directory.path,
     if (failure != null) 'error': failure.toString(),
   };
 
@@ -46,6 +50,7 @@ class RawSampleRecording {
     try {
       final previousChannels = _channels.length;
       final rows = <List<Object>>[];
+      final timings = <Object?>[];
       for (final frame in frames) {
         final values = frame['values']! as Map<String, double>;
         final row = <Object>[frame['elapsed']!];
@@ -62,7 +67,10 @@ class RawSampleRecording {
             entry.value.isFinite ? entry.value : '${entry.value}',
           ]);
         }
-        if (row.length > 1) rows.add(row);
+        if (row.length > 1) {
+          rows.add(row);
+          timings.add(frame['timing']);
+        }
       }
       if (rows.isEmpty) return;
       if (_file == null) {
@@ -72,6 +80,7 @@ class RawSampleRecording {
         );
         path = '${session.path}/samples.talraw';
         _file = File(path!).openSync(mode: FileMode.writeOnly);
+        _history = NumericHistoryWriter(Directory('${session.path}/history'));
       }
       final batch = StringBuffer();
       if (_committedBytes == 0) {
@@ -80,8 +89,14 @@ class RawSampleRecording {
       if (_channels.length != previousChannels) {
         batch.writeln(jsonEncode({'channels': _channels}));
       }
-      batch.writeln(jsonEncode({'frames': rows}));
+      batch.writeln(
+        jsonEncode({
+          'frames': rows,
+          if (timings.any((value) => value != null)) 'timing': timings,
+        }),
+      );
       _file!.writeStringSync(batch.toString());
+      _history!.append(rows, _channels);
       _committedBytes = _file!.positionSync();
       sampleCount += rows.length;
     } catch (error) {
@@ -105,6 +120,7 @@ class RawSampleRecording {
     close();
     _closed = false;
     path = null;
+    _history = null;
     failure = null;
     sampleCount = 0;
     _committedBytes = 0;
@@ -114,6 +130,7 @@ class RawSampleRecording {
 
   void close() {
     _closed = true;
+    _history?.close();
     final file = _file;
     if (file == null) return;
     _file = null;
@@ -138,6 +155,7 @@ Future<int> exportRawRecordingCsv(
   final target = File(destination);
   final boundary = byteLength ?? await File(source).length();
   var channels = <dynamic>[];
+  var hasTiming = false;
   await for (final line
       in File(source)
           .openRead(0, boundary)
@@ -145,6 +163,7 @@ Future<int> exportRawRecordingCsv(
           .transform(const LineSplitter())) {
     final record = jsonDecode(line) as Map<String, dynamic>;
     if (record['channels'] is List) channels = record['channels'] as List;
+    hasTiming = hasTiming || record['timing'] is List;
   }
   await target.parent.create(recursive: true);
   final temporary = File(
@@ -152,9 +171,20 @@ Future<int> exportRawRecordingCsv(
   );
   final output = temporary.openSync(mode: FileMode.writeOnly);
   var rows = 0;
-  var buffer = StringBuffer(
-    'elapsed_seconds,${channels.map((c) => _csv(c['name']!)).join(',')}\n',
-  );
+  const timingKeys = [
+    'quality',
+    'batchSequence',
+    'index',
+    'repeat',
+    'start',
+    'end',
+  ];
+  final header = [
+    'elapsed_seconds',
+    ...channels.map((c) => _csv(c['name']!)),
+    if (hasTiming) ...timingKeys.map((key) => 'timing_$key'),
+  ].join(',');
+  var buffer = StringBuffer('$header\n');
   try {
     await for (final line
         in File(source)
@@ -162,16 +192,22 @@ Future<int> exportRawRecordingCsv(
             .transform(utf8.decoder)
             .transform(const LineSplitter())) {
       final record = jsonDecode(line) as Map<String, dynamic>;
+      var frameIndex = 0;
       for (final raw in record['frames'] as List? ?? const []) {
         final frame = raw as List;
-        final values = List<String>.filled(channels.length, '');
+        final values = List<String>.filled(channels.length, '', growable: true);
         for (var index = 1; index < frame.length; index += 2) {
           values[frame[index] as int] = _csv('${frame[index + 1]}');
+        }
+        if (hasTiming) {
+          final timing = (record['timing'] as List?)?[frameIndex] as Map?;
+          values.addAll(timingKeys.map((key) => _csv('${timing?[key] ?? ''}')));
         }
         buffer.writeln(
           '${(frame.first as num).toStringAsFixed(9)},${values.join(',')}',
         );
         rows++;
+        frameIndex++;
         if (buffer.length >= 65536) {
           output.writeStringSync(buffer.toString());
           buffer = StringBuffer();

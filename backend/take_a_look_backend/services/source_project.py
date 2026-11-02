@@ -70,12 +70,11 @@ class SourceProjects:
                 if data.get("version") == 1:
                     self._platforms = data.get("platforms", {})
                     if data.get("platform") in {"windows", "macos", "linux"}:
-                        self._platforms[data["platform"]] = {"projects": data.get("projects", {}), "lastRoot": data.get("lastRoot", "")}
+                        self._platforms[data["platform"]] = {"projects": data.get("projects", {})}
                     local = self._platforms.get(self.platform, {})
                     self._profiles = local.get("projects", {})
-                    previous = self._profiles.get(local.get("lastRoot", ""))
-                    if isinstance(previous, dict):
-                        self.current = self._validate(previous, check_directory=False)
+                    # Profiles are reused only after an explicit selection.
+                    # Ignore lastRoot from older settings and start unselected.
             except (OSError, ValueError, TypeError, AttributeError, ProtocolError):
                 self._profiles = {}
                 self._platforms = {}
@@ -90,13 +89,15 @@ class SourceProjects:
         normalized = str(Path(root).expanduser().resolve())
         if normalized != self.current["sourceRoot"]:
             draft = dict(self._profiles.get(os.path.normcase(normalized), default_config(normalized)))
+            if not draft["firmwarePath"] and not self.current["sourceRoot"]:
+                draft["firmwarePath"] = self.current["firmwarePath"]
         else:
             draft = dict(self.current)
         draft.update(values)
         draft["sourceRoot"] = normalized
         candidate = self._validate(draft)
         profiles = {**self._profiles, os.path.normcase(normalized): candidate}
-        platforms = {**self._platforms, self.platform: {"lastRoot": os.path.normcase(normalized), "projects": profiles}}
+        platforms = {**self._platforms, self.platform: {"projects": profiles}}
         if self.file is not None:
             self.file.parent.mkdir(parents=True, exist_ok=True)
             descriptor, temporary = tempfile.mkstemp(prefix="source-projects-", suffix=".json", dir=self.file.parent)
@@ -111,14 +112,31 @@ class SourceProjects:
         self._platforms = platforms
         return self.snapshot()
 
-    def _validate(self, values: dict[str, object], *, check_directory: bool = True) -> dict[str, object]:
+    def sync_firmware_path(self, path: Path) -> None:
+        """Commit a loaded symbol file without changing equivalent relative paths."""
+        path = path.resolve()
+        root = str(self.current["sourceRoot"])
+        configured = str(self.current["firmwarePath"])
+        if configured:
+            previous = Path(configured).expanduser()
+            if not previous.is_absolute():
+                previous = Path(root).expanduser() / previous
+            if os.path.normcase(str(previous.resolve())) == os.path.normcase(str(path)):
+                return
+        if root and Path(root).is_dir():
+            self.select({"firmwarePath": str(path)})
+        else:
+            # Symbol selection also works before a source project is selected.
+            self.current = {**self.current, "firmwarePath": str(path)}
+
+    def _validate(self, values: dict[str, object]) -> dict[str, object]:
         result = default_config()
         for key in result:
             value = values.get(key, result[key])
             if not isinstance(value, str) or "\x00" in value or len(value) > 32768:
                 raise ProtocolError("invalid_source_config", f"无效的工程配置：{key}")
             result[key] = value.strip()
-        if check_directory and not Path(str(result["sourceRoot"])).is_dir():
+        if not Path(str(result["sourceRoot"])).is_dir():
             raise ProtocolError("source_root_missing", "源码根目录不存在或不是文件夹。", result["sourceRoot"])
         if result["shell"] not in {item["id"] for item in shell_options()}:
             raise ProtocolError("unsupported_shell", "当前平台不支持此命令解释器。")
@@ -130,9 +148,11 @@ class SourceProjects:
 def firmware_file(config: dict[str, object]) -> Path:
     text = str(config.get("firmwarePath", "")).strip()
     if not text:
-        raise ProtocolError("firmware_required", "请在工程设置中选择下载用的 ELF / AXF 文件。")
+        raise ProtocolError("firmware_required", "请打开 ELF / AXF 文件，或在工程设置中指定下载文件。")
     path = Path(text).expanduser()
     if not path.is_absolute():
+        if not str(config["sourceRoot"]).strip():
+            raise ProtocolError("source_root_required", "相对固件路径需要设置工程源码根目录。")
         path = Path(str(config["sourceRoot"])) / path
     path = path.resolve()
     if path.suffix.lower() not in {".elf", ".axf"} or not path.is_file():

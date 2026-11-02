@@ -14,6 +14,7 @@ SAMPLE_FRAME_MARKER = 0
 
 
 class RpcMethod(StrEnum):
+    EMBER = "ember"
     HANDSHAKE = "handshake"
     GET_STATE = "getState"
     CONNECT = "connect"
@@ -22,7 +23,10 @@ class RpcMethod(StrEnum):
     LOAD_SYMBOLS = "loadSymbols"
     SET_CONFIG = "setConfig"
     SET_WATCHES = "setWatches"
+    SET_MONITOR_VISIBILITY = "setMonitorVisibility"
     WRITE_WATCH = "writeWatch"
+    WRITE_WATCHES = "writeWatches"
+    READ_WATCH = "readWatch"
     SET_SAMPLING_PAUSED = "setSamplingPaused"
     SET_RTT = "setRtt"
     CLEAR_SAMPLES = "clearSamples"
@@ -35,11 +39,19 @@ class RpcMethod(StrEnum):
     SET_SOURCE_PROJECT = "setSourceProject"
     START_SOURCE_TASK = "startSourceTask"
     CANCEL_SOURCE_TASK = "cancelSourceTask"
+    LIST_TARGETS = "listTargets"
+    ONLINE_TARGET_PACKS = "onlineTargetPacks"
+    INSPECT_TARGET_PACK = "inspectTargetPack"
+    IMPORT_TARGET_PACK = "importTargetPack"
+    DISCARD_TARGET_PACK_PREVIEW = "discardTargetPackPreview"
+    REMOVE_TARGET_PACK = "removeTargetPack"
+    SELECT_TARGET = "selectTarget"
 
 
 class EventName(StrEnum):
     STATE = "state"
     SAMPLES = "samples"
+    WATCH_VALUES = "watchValues"
     SAMPLES_CLEARED = "samplesCleared"
     SAMPLE_SCHEMA = "sampleSchema"
     LOG = "log"
@@ -55,6 +67,7 @@ class ProtocolError(Exception):
     code: str
     message: str
     details: object | None = None
+    request_id: object | None = None
 
 
 def parse_request(line: str) -> tuple[object, RpcMethod, dict[str, object]]:
@@ -64,25 +77,27 @@ def parse_request(line: str) -> tuple[object, RpcMethod, dict[str, object]]:
         raise ProtocolError("invalid_json", "Request is not valid JSON.", str(error)) from error
     if not isinstance(raw, Mapping):
         raise ProtocolError("invalid_request", "Request must be a JSON object.")
+    request_id = raw.get("id")
     if raw.get("v") != PROTOCOL_VERSION:
         raise ProtocolError(
             "unsupported_version",
             f"Protocol version must be {PROTOCOL_VERSION}.",
             raw.get("v"),
+            request_id=request_id,
         )
-    request_id = raw.get("id")
     if request_id is None:
         raise ProtocolError("invalid_request", "Request id is required.")
     raw_method = raw.get("method")
     if not isinstance(raw_method, str) or not raw_method:
-        raise ProtocolError("invalid_request", "Method must be a non-empty string.")
+        raise ProtocolError("invalid_request", "Method must be a non-empty string.", request_id=request_id)
     try:
         method = RpcMethod(raw_method)
     except ValueError as error:
-        raise ProtocolError("unknown_method", f"Unknown backend method: {raw_method}") from error
+        raise ProtocolError("unknown_method", f"Unknown backend method: {raw_method}",
+                            request_id=request_id) from error
     params = raw.get("params", {})
     if not isinstance(params, Mapping):
-        raise ProtocolError("invalid_request", "Params must be an object.")
+        raise ProtocolError("invalid_request", "Params must be an object.", request_id=request_id)
     return request_id, method, dict(params)
 
 
@@ -116,24 +131,30 @@ def encode_sample_batch(
     sequence: int,
     keys: list[str],
     frames: list[tuple[float, Mapping[str, object]]],
+    *,
+    updated_at_ms: int | None = None,
 ) -> bytes:
     """Encode high-rate samples without repeating symbol names per value."""
     if len(keys) > 0xFFFF:
         raise ValueError("A sample schema cannot contain more than 65535 values.")
 
     key_indexes = {key: index for index, key in enumerate(keys)}
+    has_timing = any(getattr(frame, "timing", None) is not None for frame in frames)
     validity_size = (len(keys) + 7) // 8
     payload = bytearray(
         struct.pack(
             "<BIIIH",
-            SAMPLE_PAYLOAD_VERSION,
+            3 if has_timing else (2 if updated_at_ms is not None else SAMPLE_PAYLOAD_VERSION),
             schema_id,
             sequence,
             len(frames),
             len(keys),
         )
     )
-    for elapsed, values in frames:
+    if updated_at_ms is not None or has_timing:
+        payload.extend(struct.pack("<Q", updated_at_ms or 0))
+    for frame in frames:
+        elapsed, values = frame
         validity = bytearray(validity_size)
         numeric_values: dict[int, float] = {}
         for key, value in values.items():
@@ -147,6 +168,15 @@ def encode_sample_batch(
         for index in range(len(keys)):
             if index in numeric_values:
                 payload.extend(struct.pack("<d", numeric_values[index]))
+        if has_timing:
+            timing = getattr(frame, "timing", None)
+            if timing is None:
+                payload.append(0)
+            else:
+                if timing["quality"] != "transaction_window":
+                    raise ValueError("Unsupported acquisition time quality")
+                payload.extend(struct.pack("<BQHHdd", 1, timing["batchSequence"],
+                    timing["index"], timing["repeat"], timing["start"], timing["end"]))
     return bytes(payload)
 
 

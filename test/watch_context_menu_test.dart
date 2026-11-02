@@ -12,6 +12,7 @@ void main() {
     final controller = TakeALookController()..loadDemoSymbols();
     controller.selectSymbols(demoSymbols.take(3).map((symbol) => symbol.key));
     controller.addSelectedToWatch();
+    controller.setAllWatchesPlotted(true);
     await tester.pumpWidget(
       MaterialApp(
         theme: buildTalTheme(),
@@ -74,6 +75,36 @@ void main() {
 
     controller.dispose();
     await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('watch table Delete and Ctrl+Z restore row selection and data', (
+    tester,
+  ) async {
+    final controller = await pumpWatchTable(tester);
+    final key = controller.watches.first.symbol.key;
+    controller.applyBackendSamples({
+      'frames': [
+        {
+          'elapsed': 1.0,
+          'values': {key: 12.0},
+        },
+      ],
+    });
+    await tester.tap(find.text('iq_ref'));
+    await tester.sendKeyEvent(LogicalKeyboardKey.delete);
+    await tester.pump();
+    expect(find.text('iq_ref'), findsNothing);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+    expect(find.text('iq_ref'), findsOneWidget);
+    expect(controller.watches.first.samples.single.dy, 12);
+    await tester.sendKeyEvent(LogicalKeyboardKey.delete);
+    await tester.pump();
+    expect(find.text('iq_ref'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
   });
 
   testWidgets('watch header menu uses larger touch targets on long press', (
@@ -169,12 +200,14 @@ void main() {
     await tester.tap(find.text('为所选变量设置曲线颜色（3）'));
     await tester.pumpAndSettle();
     await tester.tap(
-      find.byKey(ValueKey('watch-color-preset-${TalColors.blue.toARGB32()}')),
+      find.byKey(
+        ValueKey('watch-color-preset-${TalChartColors.blue.toARGB32()}'),
+      ),
     );
     await tester.tap(find.byKey(const ValueKey('watch-color-confirm')));
     await tester.pumpAndSettle();
     expect(
-      controller.watches.every((watch) => watch.color == TalColors.blue),
+      controller.watches.every((watch) => watch.color == TalChartColors.blue),
       isTrue,
     );
 
@@ -282,16 +315,30 @@ void main() {
       expect(find.text('speed'), findsOneWidget);
       expect(find.text('current'), findsOneWidget);
 
-      await tester.tap(
-        find.byKey(const ValueKey('watch-sampling-motor.speed')),
+      final mode = find.byKey(const ValueKey('watch-table-mode-motor.speed'));
+      await tester.ensureVisible(mode);
+      await tester.tap(mode);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('采集').last);
+      await tester.pumpAndSettle();
+      final speed = controller.watches.firstWhere(
+        (watch) => watch.symbol.key == 'motor.speed',
+      );
+      expect(speed.samplingEnabled, isTrue);
+      expect(speed.plotted, isTrue);
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('watch-visibility-motor.speed')),
       );
       await tester.tap(
         find.byKey(const ValueKey('watch-visibility-motor.speed')),
       );
       await tester.pump();
-      final speed = controller.watches.firstWhere(
-        (watch) => watch.symbol.key == 'motor.speed',
+      expect(speed.samplingEnabled, isTrue);
+      expect(speed.plotted, isFalse);
+      await tester.tap(
+        find.byKey(const ValueKey('watch-visibility-motor.speed')),
       );
+      await tester.pump();
       expect(speed.samplingEnabled, isTrue);
       expect(speed.plotted, isTrue);
       expect(find.byType(Checkbox), findsNothing);

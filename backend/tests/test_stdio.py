@@ -14,6 +14,72 @@ from take_a_look_backend.protocol import EventName
 
 
 class StdioIntegrationTests(unittest.TestCase):
+    def test_rejected_requests_keep_their_ids_and_later_requests_work(self) -> None:
+        output = io.BytesIO()
+        server = StdioServer(io.StringIO(), output)
+        try:
+            server._handle_line('{"v":2,"id":41,"method":"futureMethod"}')
+            server._handle_line('{"v":2,"id":42,"method":"getState","params":[]}')
+            server._handle_line('{"v":2,"id":43,"method":"getState"}')
+            server._output_worker.drain()
+            replies = {item["id"]: item for line in output.getvalue().splitlines()
+                       if "id" in (item := json.loads(line))}
+            self.assertEqual(replies[41]["error"]["code"], "unknown_method")
+            self.assertEqual(replies[42]["error"]["code"], "invalid_request")
+            self.assertIn("state", replies[43]["result"])
+        finally:
+            server.close()
+
+    def test_batch_rpc_reaches_typed_writes_and_returns_readback_deltas(self) -> None:
+        import tempfile
+        from take_a_look_backend.backends.typed_memory import TypedMemoryBackend
+        from take_a_look_backend.models import SymbolInfo
+        from take_a_look_backend.protocol import RpcMethod
+        from take_a_look_backend.service import BackendService
+
+        class Target:
+            def __init__(self):
+                self.data = bytearray(8)
+                self.operations = []
+            def write_memory_block8(self, address, values):
+                self.operations.append(("write", address, len(values)))
+                self.data[address:address + len(values)] = bytes(values)
+            def read_memory_block8(self, address, size):
+                self.operations.append(("read", address, size))
+                return self.data[address:address + size]
+        class Memory(TypedMemoryBackend):
+            def disconnect(self):
+                self.target = None
+        with tempfile.TemporaryDirectory() as directory:
+            output = io.BytesIO()
+            server = StdioServer(io.StringIO(), output)
+            server._service.close()
+            memory = Memory()
+            target = memory.target = Target()
+            server._service = service = BackendService(server._send_event,
+                memory_backend=memory, recording_directory=Path(directory))
+            service._shutdown.set()
+            service._wake.set()
+            service._sampler.join(2)
+            items = [SymbolInfo(f"v{i}", i * 4, 4, "uint32_t", ".data") for i in range(2)]
+            service._symbols = {item.key: item for item in items}
+            service.handle(RpcMethod.SET_WATCHES, {"watches": [
+                {"key": item.key, "readMode": "manual"} for item in items]})
+            service._connection_status = "connected"
+            try:
+                server._handle_line(json.dumps({"v": 2, "id": 17, "method": "writeWatches",
+                    "params": {"writes": [{"key": item.key, "value": str(i + 1)}
+                                           for i, item in enumerate(items)]}}))
+                server._output_worker.drain()
+                messages = [json.loads(line) for line in output.getvalue().splitlines()]
+                result = next(message["result"] for message in messages if message.get("id") == 17)
+                self.assertEqual([value["value"] for value in result["values"]], [1, 2])
+                self.assertNotIn("state", result)
+                self.assertEqual(target.operations, [("write", 0, 8), ("read", 0, 8)])
+                self.assertEqual(service._recording.sample_count, 0)
+            finally:
+                server.close()
+
     def test_stderr_logging_keeps_levels_and_tracebacks_out_of_protocol(self) -> None:
         backend_root = Path(__file__).resolve().parents[1]
         environment = dict(os.environ)

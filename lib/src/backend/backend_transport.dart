@@ -15,6 +15,23 @@ final _backendStderrLevelPattern = RegExp(
   return (level: match?.group(1)?.toLowerCase() ?? 'error', message: message);
 }
 
+class BackendSampleTiming {
+  const BackendSampleTiming({
+    required this.batchSequence,
+    required this.index,
+    required this.repeat,
+    required this.startSeconds,
+    required this.endSeconds,
+  });
+
+  final int batchSequence;
+  final int index;
+  final int repeat;
+  final double startSeconds;
+  final double endSeconds;
+  String get quality => 'transaction_window';
+}
+
 class BackendSampleBatch {
   const BackendSampleBatch({
     required this.schemaId,
@@ -24,6 +41,9 @@ class BackendSampleBatch {
     required this.values,
     required this.validity,
     required this.validityBytesPerFrame,
+    this.captureOnly = false,
+    this.updatedAtMs,
+    this.timings,
   });
 
   final int schemaId;
@@ -33,6 +53,11 @@ class BackendSampleBatch {
   final Float64List values;
   final Uint8List validity;
   final int validityBytesPerFrame;
+  final bool captureOnly;
+  final int? updatedAtMs;
+
+  /// Per-read order and enclosing IO window, without fabricated read instants.
+  final List<BackendSampleTiming?>? timings;
 
   int get frameCount => elapsedSeconds.length;
   int get variableCount => keys.length;
@@ -57,13 +82,15 @@ int backendSampleSchemaId(Uint8List payload) {
 
 BackendSampleBatch decodeBackendSamplePayload(
   Uint8List payload,
-  List<String> keys,
-) {
+  List<String> keys, {
+  bool captureOnly = false,
+}) {
   if (payload.length < 15) {
     throw const FormatException('Backend sample payload is truncated');
   }
   final data = ByteData.sublistView(payload);
-  if (data.getUint8(0) != 1) {
+  final version = data.getUint8(0);
+  if (version != 1 && version != 2 && version != 3) {
     throw FormatException(
       'Unsupported sample payload version ${data.getUint8(0)}',
     );
@@ -72,6 +99,14 @@ BackendSampleBatch decodeBackendSamplePayload(
   final sequence = data.getUint32(5, Endian.little);
   final frameCount = data.getUint32(9, Endian.little);
   final variableCount = data.getUint16(13, Endian.little);
+  final headerBytes = version >= 2 ? 23 : 15;
+  if (payload.length < headerBytes) {
+    throw const FormatException('Backend sample header is truncated');
+  }
+  final rawUpdatedAtMs = version >= 2 ? data.getUint64(15, Endian.little) : 0;
+  final updatedAtMs = version == 1 || (version == 3 && rawUpdatedAtMs == 0)
+      ? null
+      : rawUpdatedAtMs;
   if (variableCount != keys.length) {
     throw FormatException(
       'Sample schema $schemaId expected ${keys.length} values, got $variableCount',
@@ -80,7 +115,7 @@ BackendSampleBatch decodeBackendSamplePayload(
 
   final validityBytes = (variableCount + 7) ~/ 8;
   final minimumFrameBytes = 8 + validityBytes;
-  if (frameCount > (payload.length - 15) ~/ minimumFrameBytes) {
+  if (frameCount > (payload.length - headerBytes) ~/ minimumFrameBytes) {
     throw const FormatException('Backend sample frame count is invalid');
   }
   if (frameCount * variableCount > 16 * 1024 * 1024) {
@@ -89,7 +124,10 @@ BackendSampleBatch decodeBackendSamplePayload(
   final elapsed = Float64List(frameCount);
   final values = Float64List(frameCount * variableCount);
   final validity = Uint8List(frameCount * validityBytes);
-  var offset = 15;
+  final timings = version == 3
+      ? List<BackendSampleTiming?>.filled(frameCount, null)
+      : null;
+  var offset = headerBytes;
   void requireBytes(int count) {
     if (offset + count > payload.length) {
       throw const FormatException('Backend sample payload is truncated');
@@ -121,6 +159,35 @@ BackendSampleBatch decodeBackendSamplePayload(
       );
       offset += 8;
     }
+    if (version == 3) {
+      requireBytes(1);
+      final quality = data.getUint8(offset++);
+      if (quality == 1) {
+        requireBytes(28);
+        final sequence = data.getUint64(offset, Endian.little);
+        final index = data.getUint16(offset + 8, Endian.little);
+        final repeat = data.getUint16(offset + 10, Endian.little);
+        final start = data.getFloat64(offset + 12, Endian.little);
+        final end = data.getFloat64(offset + 20, Endian.little);
+        if (repeat < 2 ||
+            index >= repeat ||
+            !start.isFinite ||
+            !end.isFinite ||
+            end < start) {
+          throw const FormatException('Invalid acquisition timing metadata');
+        }
+        timings![frame] = BackendSampleTiming(
+          batchSequence: sequence,
+          index: index,
+          repeat: repeat,
+          startSeconds: start,
+          endSeconds: end,
+        );
+        offset += 28;
+      } else if (quality != 0) {
+        throw const FormatException('Unsupported acquisition timing quality');
+      }
+    }
   }
   if (offset != payload.length) {
     throw const FormatException('Backend sample payload has trailing bytes');
@@ -133,6 +200,9 @@ BackendSampleBatch decodeBackendSamplePayload(
     values: values,
     validity: validity,
     validityBytesPerFrame: validityBytes,
+    captureOnly: captureOnly || version == 2 || updatedAtMs != null,
+    updatedAtMs: updatedAtMs,
+    timings: timings,
   );
 }
 

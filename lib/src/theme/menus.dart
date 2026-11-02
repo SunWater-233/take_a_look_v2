@@ -50,7 +50,7 @@ const talContextMenuShape = RoundedRectangleBorder(
 final MenuStyle talContextMenuStyle = MenuStyle(
   backgroundColor: const WidgetStatePropertyAll(TalColors.surfaceAlt),
   surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
-  shadowColor: const WidgetStatePropertyAll(Colors.black),
+  shadowColor: const WidgetStatePropertyAll(TalColors.shadow),
   elevation: const WidgetStatePropertyAll(8),
   padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(vertical: 4)),
   minimumSize: const WidgetStatePropertyAll(Size(184, 0)),
@@ -159,7 +159,7 @@ class TalSelectionContextMenu extends StatelessWidget {
             width: ui.menuMinWidth,
             child: Material(
               color: TalColors.surfaceAlt,
-              shadowColor: Colors.black,
+              shadowColor: TalColors.shadow,
               elevation: 8,
               shape: RoundedRectangleBorder(
                 borderRadius: ui.menuRadius,

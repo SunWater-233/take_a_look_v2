@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'controller.dart';
+import '../models/models.dart';
 import '../protocol/commands.dart';
 
 /// Executes commands arriving from detached windows.
@@ -15,7 +16,9 @@ Future<JsonObject> executeControllerCommand(
 }) async {
   switch (command) {
     case ControllerCommand.setSourceProject:
-      await controller.saveSourceProject(Map<String, dynamic>.from(arguments! as Map));
+      await controller.saveSourceProject(
+        Map<String, dynamic>.from(arguments! as Map),
+      );
     case ControllerCommand.startSourceTask:
       await controller.startSourceTask((arguments! as Map)['kind'] as String);
     case ControllerCommand.cancelSourceTask:
@@ -32,6 +35,8 @@ Future<JsonObject> executeControllerCommand(
       }
     case ControllerCommand.setSampleRate:
       controller.setSampleRate((arguments as num).toDouble());
+    case ControllerCommand.setMonitorRate:
+      controller.setMonitorRate((arguments as num).toDouble());
     case ControllerCommand.setDisplayRefreshMode:
       controller.setDisplayRefreshMode(arguments as String);
     case ControllerCommand.setRttSampleRate:
@@ -136,11 +141,19 @@ Future<JsonObject> executeControllerCommand(
     case ControllerCommand.activateSymbol:
       controller.activateSymbol(arguments as String);
     case ControllerCommand.addSelectedToWatch:
-      controller.addSelectedToWatch();
+      controller.addSelectedToWatch(mode: WatchReadMode.parse(arguments));
     case ControllerCommand.removeWatch:
       controller.removeWatch(arguments as String);
     case ControllerCommand.removeWatches:
       controller.removeWatches((arguments as List).cast<String>());
+    case ControllerCommand.undoWatchDeletion:
+      controller.undoWatchDeletion();
+    case ControllerCommand.redoWatchDeletion:
+      controller.redoWatchDeletion();
+    case ControllerCommand.configureProject:
+      throw const FormatException(
+        'Project configuration belongs to the main window.',
+      );
     case ControllerCommand.reorderWatch:
       final values = Map<String, Object?>.from(arguments! as Map);
       controller.reorderWatch(
@@ -161,6 +174,32 @@ Future<JsonObject> executeControllerCommand(
         values['key'] as String,
         values['value'] as bool,
       );
+    case ControllerCommand.setWatchReadMode:
+      final values = Map<String, Object?>.from(arguments! as Map);
+      controller.setWatchReadMode(
+        values['key'] as String,
+        WatchReadMode.parse(values['mode']),
+      );
+    case ControllerCommand.setWatchMonitorRate:
+      final values = Map<String, Object?>.from(arguments! as Map);
+      controller.setWatchMonitorRate(
+        values['key'] as String,
+        (values['rateHz'] as num?)?.toDouble(),
+      );
+    case ControllerCommand.readWatch:
+      controller.readWatch(arguments as String);
+    case ControllerCommand.setWatchPinned:
+      final values = Map<String, Object?>.from(arguments! as Map);
+      controller.setWatchPinned(
+        values['key'] as String,
+        values['value'] as bool,
+      );
+    case ControllerCommand.setWatchMonitorScope:
+      final values = Map<String, Object?>.from(arguments! as Map);
+      controller.setWatchMonitorScope(
+        values['scope'] as String,
+        (values['keys'] as List?)?.cast<String>(),
+      );
     case ControllerCommand.setWatchColor:
       final values = Map<String, Object?>.from(arguments! as Map);
       controller.setWatchColor(
@@ -175,6 +214,10 @@ Future<JsonObject> executeControllerCommand(
       );
     case ControllerCommand.setOnlyWatchesPlotted:
       controller.setOnlyWatchesPlotted((arguments as List).cast<String>());
+    case ControllerCommand.isolateWatchPlots:
+      controller.isolateWatchPlots((arguments as List).cast<String>());
+    case ControllerCommand.exitWatchPlotIsolation:
+      controller.exitWatchPlotIsolation();
     case ControllerCommand.setAllWatchesPlotted:
       controller.setAllWatchesPlotted(arguments as bool);
     case ControllerCommand.invertWatchPlots:
@@ -185,9 +228,20 @@ Future<JsonObject> executeControllerCommand(
       );
     case ControllerCommand.writeWatch:
       final values = Map<String, Object?>.from(arguments! as Map);
-      controller.writeWatch(values['key'] as String, values['value'] as String);
+      final written = await controller.writeWatch(
+        values['key'] as String,
+        values['value'] as String,
+      );
+      if (!written) {
+        throw StateError(
+          controller.lastBackendError?['message'] as String? ?? '变量写入失败。',
+        );
+      }
     case ControllerCommand.setWatches:
-      throw UnsupportedError('setWatches is an internal backend command');
+    case ControllerCommand.setMonitorVisibility:
+      throw UnsupportedError(
+        '${command.wireName} is an internal backend command',
+      );
   }
   return includeResultState ? controller.stateSnapshot() : <String, dynamic>{};
 }

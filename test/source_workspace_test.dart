@@ -14,6 +14,144 @@ import 'package:take_a_look_v2/src/workspace/window_sync.dart';
 import 'package:take_a_look_v2/src/workspace/workspace.dart';
 
 void main() {
+  testWidgets('double clicking a source file shows and reselects its tab', (
+    tester,
+  ) async {
+    final fixture = await _sourceFixture(tester);
+    final controller = fixture.controller;
+    controller.openSourceFile(fixture.main);
+    await tester.pumpWidget(_Harness(controller: controller));
+    final file = find.descendant(
+      of: find.byKey(const ValueKey('symbol-tree-row-source/control.c')),
+      matching: find.text('control.c'),
+    );
+
+    await tester.tap(file);
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(file);
+    await _waitForSource(tester, fixture.control);
+    expect(controller.sourceWorkspace.selectedPath, fixture.control);
+    expect(controller.sourceWorkspace.openPaths, [
+      fixture.main,
+      fixture.control,
+    ]);
+    expect(controller.sourceWorkspace.unreadPaths, isEmpty);
+    expect(controller.selectedSymbols, isEmpty);
+    expect(controller.watches, isEmpty);
+
+    controller.openSourceFile(fixture.main);
+    await _waitForSource(tester, fixture.main);
+    await tester.tap(file);
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(file);
+    await _waitForSource(tester, fixture.control);
+    expect(controller.sourceWorkspace.openPaths, [
+      fixture.main,
+      fixture.control,
+    ]);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  for (final useSourceRoot in [false, true]) {
+    testWidgets(
+      'dragging a symbol file opens source using ${useSourceRoot ? 'the source root' : 'its debug path'}',
+      (tester) async {
+        final fixture = await _sourceFixture(tester);
+        final controller = fixture.controller;
+        final expectedPath = useSourceRoot ? 'control.c' : fixture.control;
+        if (useSourceRoot) {
+          controller.applyDebugState({
+            'executionState': 'running',
+            'sourceFiles': <String>[],
+            'sourceRoot': File(fixture.control).parent.path,
+          });
+        }
+        controller.openSourceFile(fixture.main);
+        await tester.pumpWidget(
+          _Harness(
+            controller: controller,
+            initialPanel: WorkspacePanelId.sourceDebug,
+          ),
+        );
+        await _waitForSource(tester, fixture.main);
+        for (var attempt = 0; attempt < 2; attempt++) {
+          final drag = await tester.startGesture(
+            tester.getCenter(
+              find.descendant(
+                of: find.byKey(
+                  const ValueKey('symbol-tree-row-source/control.c'),
+                ),
+                matching: find.text('control.c'),
+              ),
+            ),
+            kind: PointerDeviceKind.mouse,
+          );
+          await drag.moveBy(const Offset(-25, 0));
+          await tester.pump();
+          await drag.moveTo(
+            tester.getCenter(
+              find.byKey(const ValueKey('source-symbol-drop-target')),
+            ),
+          );
+          await tester.pump();
+          expect(
+            find.byKey(const ValueKey('source-file-drop-overlay')),
+            findsOneWidget,
+          );
+          await drag.up();
+          await _waitForSource(tester, expectedPath);
+          expect(controller.sourceWorkspace.selectedPath, expectedPath);
+          expect(controller.sourceWorkspace.openPaths, [
+            fixture.main,
+            expectedPath,
+          ]);
+          expect(
+            find.byKey(const ValueKey('source-file-drop-overlay')),
+            findsNothing,
+          );
+        }
+        expect(controller.selectedSymbols, isEmpty);
+        expect(controller.watches, isEmpty);
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
+  }
+
+  testWidgets('cancelling a symbol file drag clears the drop highlight', (
+    tester,
+  ) async {
+    final fixture = await _sourceFixture(tester);
+    final controller = fixture.controller;
+    await tester.pumpWidget(
+      _Harness(
+        controller: controller,
+        initialPanel: WorkspacePanelId.sourceDebug,
+      ),
+    );
+    final drag = await tester.startGesture(
+      tester.getCenter(find.text('control.c')),
+      kind: PointerDeviceKind.mouse,
+    );
+    await drag.moveBy(const Offset(-25, 0));
+    await tester.pump();
+    await drag.moveTo(
+      tester.getCenter(find.byKey(const ValueKey('source-symbol-drop-target'))),
+    );
+    await tester.pump();
+    expect(
+      find.byKey(const ValueKey('source-file-drop-overlay')),
+      findsOneWidget,
+    );
+    await drag.cancel();
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('source-file-drop-overlay')),
+      findsNothing,
+    );
+    expect(controller.sourceWorkspace.openPaths, isEmpty);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   test(
     'source additions are idempotent, alias aware, and separate from stops',
     () {
@@ -541,6 +679,8 @@ class _HarnessState extends State<_Harness> {
               child: buildWorkspacePanel(
                 WorkspacePanelId.symbols,
                 widget.controller,
+                onShowSource: () =>
+                    setState(() => active = WorkspacePanelId.sourceDebug),
               ),
             ),
           ],

@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "packs": [
+    {
+      "vendor": "Keil",
+      "name": "STM32F1xx_DFP",
+      "version": "2.4.1",
+      "url": "https://www.keil.com/pack/Keil.STM32F1xx_DFP.2.4.1.pack",
+      "sha256": "807ea15da5b172b916bbc47b2b87f1e621240ad208d38e82a417a2ef8191e9d1",
+      "requiredPrefix": "stm32f103"
+    },
+    {
+      "vendor": "Keil",
+      "name": "STM32F4xx_DFP",
+      "version": "3.1.1",
+      "url": "https://www.keil.com/pack/Keil.STM32F4xx_DFP.3.1.1.pack",
+      "sha256": "345231106fe697df24bbe9133aeeec1b0383d7891c4adf4f47bbb8b478e9f2f0",
+      "requiredPrefix": "stm32f407"
+    },
+    {
+      "vendor": "Keil",
+      "name": "STM32H7xx_DFP",
+      "version": "4.1.3",
+      "url": "https://www.keil.com/pack/Keil.STM32H7xx_DFP.4.1.3.pack",
+      "sha256": "42a2358e0cb7344a9a54ee14c95eb17af20ccbe44bd2b0a08b24fefbfb67b8c8",
+      "requiredPrefix": "stm32h723"
+    }
+  ]
+}

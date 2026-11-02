@@ -22,4 +22,4 @@ else
   echo 'Install GTK 3, GL/EGL, libstdc++, libusb 1.0, libudev and xdg-utils using your distribution package manager.' >&2
   exit 1
 fi
-echo 'For a Wayland desktop, also enable/install XWayland (Arch: xorg-xwayland).'
+echo 'Wayland desktops use GTK native Wayland. XWayland is optional for the GDK_BACKEND=x11 fallback.'

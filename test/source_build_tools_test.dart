@@ -13,6 +13,187 @@ import 'package:take_a_look_v2/src/theme/theme.dart';
 import 'package:take_a_look_v2/src/workspace/panel_types.dart';
 
 void main() {
+  testWidgets('opening an ELF enables download without project settings', (
+    tester,
+  ) async {
+    final calls = <Object?>[];
+    final controller = TakeALookController(
+      backendCommand: (command, args) async {
+        if (command == ControllerCommand.startSourceTask) calls.add(args);
+      },
+    );
+    addTearDown(controller.dispose);
+    controller.applySnapshot({'connectionStatus': 'connected'});
+    await tester.pumpWidget(_projectSettingsHarness(controller));
+    final download = find.byKey(const ValueKey('source-download'));
+    expect(tester.widget<TalButton>(download).onPressed, isNull);
+
+    controller.applyBackendEvent(BackendEventType.state, {
+      'symbolFile': '${Directory.current.path}/motor.elf',
+      'symbols': [_projectSymbol],
+    });
+    await tester.pump();
+    expect(controller.sourceProject.sourceRoot, isEmpty);
+    expect(controller.sourceProject.firmwarePath, isEmpty);
+    expect(tester.widget<TalButton>(download).onPressed, isNotNull);
+    expect(
+      tester
+          .widget<TalButton>(find.byKey(const ValueKey('source-build')))
+          .onPressed,
+      isNull,
+    );
+    expect(
+      tester
+          .widget<TalButton>(
+            find.byKey(const ValueKey('source-build-download')),
+          )
+          .onPressed,
+      isNull,
+    );
+    await tester.tap(download);
+    await tester.pump();
+    expect(calls, [
+      {'kind': 'download'},
+    ]);
+
+    controller.applySnapshot({
+      'sourceTask': {'id': 'flash', 'status': 'running', 'phase': 'download'},
+    });
+    await tester.pump();
+    expect(tester.widget<TalButton>(download).onPressed, isNull);
+    controller.applySnapshot({
+      'sourceTask': {'id': 'flash', 'status': 'succeeded'},
+      'connectionStatus': 'disconnected',
+    });
+    await tester.pump();
+    expect(tester.widget<TalButton>(download).onPressed, isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  for (final kind in ['local', 'ember', 'emberGdb', 'gdb']) {
+    testWidgets('$kind download follows the adapter capability', (
+      tester,
+    ) async {
+      final calls = <Object?>[];
+      final controller = TakeALookController(
+        backendCommand: (command, args) async {
+          if (command == ControllerCommand.startSourceTask) calls.add(args);
+        },
+      );
+      controller.applySnapshot({
+        'connectionKind': kind,
+        'connectionStatus': 'connected',
+        'sourceProject': {
+          'sourceRoot': Directory.current.path,
+          'buildCommand': 'cmake --build build',
+          'firmwarePath': 'build/app.axf',
+        },
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: buildWorkspacePanelBody(
+              WorkspacePanelId.sourceDebug,
+              controller,
+            ),
+          ),
+        ),
+      );
+      final download = find.byKey(const ValueKey('source-download'));
+      final enabled = kind != 'gdb';
+      expect(controller.supportsFirmwareDownload, enabled);
+      expect(tester.widget<TalButton>(download).onPressed != null, enabled);
+      if (enabled) {
+        await tester.tap(download);
+        await tester.pump();
+        expect(calls.first, {'kind': 'download'});
+        await tester.tap(find.byKey(const ValueKey('source-build-download')));
+        await tester.pump();
+        expect(calls.last, {'kind': 'buildAndDownload'});
+      }
+      await tester.pumpWidget(const SizedBox());
+      controller.dispose();
+    });
+  }
+  test(
+    'async task failures report errors once and sync to detached windows',
+    () {
+      final controller = TakeALookController();
+      final detached = TakeALookController();
+      addTearDown(controller.dispose);
+      addTearDown(detached.dispose);
+      controller.applySourceTask({
+        'id': 'download-1',
+        'status': 'running',
+        'phase': 'download',
+      });
+      expect(controller.lastBackendError, isNull);
+      final failure = {
+        'id': 'download-1',
+        'status': 'failed',
+        'phase': 'download',
+        'message': '固件写后校验失败：地址 0x08000000',
+      };
+      controller.applyBackendEvent(BackendEventType.sourceTask, failure);
+      final error = controller.lastBackendError;
+      expect(error?['code'], 'source_task_failed');
+      expect(error?['operation'], 'sourceTask');
+      expect(error?['message'], failure['message']);
+      final logCount = controller.logs.length;
+      controller.applySourceTask(failure);
+      expect(identical(error, controller.lastBackendError), isTrue);
+      expect(controller.logs.length, logCount);
+      detached.applySnapshot(controller.stateSnapshot());
+      expect(detached.lastBackendError, error);
+      expect(detached.sourceTask.status, 'failed');
+      controller.applySourceTask({...failure, 'id': 'download-2'});
+      expect(controller.logs.length, logCount + 1);
+    },
+  );
+
+  test('rejected task starts preserve backend error details', () async {
+    final controller = TakeALookController(
+      backendCommand: (_, _) async => throw const BackendException(
+        'firmware_missing',
+        '下载文件不存在',
+        'app.axf',
+      ),
+    );
+    addTearDown(controller.dispose);
+    await controller.startSourceTask('download');
+    expect(controller.lastBackendError?['code'], 'firmware_missing');
+    expect(controller.lastBackendError?['message'], '下载文件不存在');
+    expect(controller.lastBackendError?['details'], 'app.axf');
+  });
+
+  testWidgets('download failures show feedback without an output panel', (
+    tester,
+  ) async {
+    final controller = TakeALookController(backendCommand: (_, _) async {});
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTalTheme(),
+        home: Scaffold(
+          body: WorkbenchFeedback(
+            controller: controller,
+            child: const SizedBox.shrink(),
+          ),
+        ),
+      ),
+    );
+    controller.applySourceTask({
+      'id': 'download',
+      'status': 'failed',
+      'message': '固件写后校验失败',
+    });
+    await tester.pumpAndSettle();
+    expect(find.text('编译 / 下载失败'), findsOneWidget);
+    expect(find.text('固件写后校验失败'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   test('source task snapshots retain output and clearing across windows', () {
     final main = TakeALookController();
     final detached = TakeALookController();

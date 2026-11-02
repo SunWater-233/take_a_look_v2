@@ -2,6 +2,20 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from functools import cached_property
+
+
+class SampleFrame(tuple):
+    """An (elapsed, values) pair with optional acquisition-time provenance."""
+
+    def __new__(cls, elapsed, values, timing=None):
+        frame = super().__new__(cls, (elapsed, values))
+        frame.timing = timing
+        return frame
+
+    def to_json(self):
+        return {"elapsed": self[0], "values": self[1],
+                **({"timing": self.timing} if self.timing is not None else {})}
 
 
 @dataclass(frozen=True)
@@ -16,7 +30,7 @@ class SymbolInfo:
     data_source: str = "memory"
     source_id: str = ""
 
-    @property
+    @cached_property
     def key(self) -> str:
         if self.is_rtt:
             return f"rtt:{self.source_id or self.name}"
@@ -40,9 +54,22 @@ class SymbolInfo:
 class WatchedVariable:
     symbol: SymbolInfo
     color: str
-    plot_enabled: bool = True
+    plot_enabled: bool = False
     sampling_enabled: bool = True
     value: object = ""
+    read_mode: str | None = None
+    monitor_rate_hz: float | None = None
+    updated_at_ms: int | None = None
+    next_monitor_at: float = 0.0
+    monitor_enabled: bool = True
+
+    @property
+    def mode(self) -> str:
+        return self.read_mode or ("capture" if self.sampling_enabled else "monitor")
+
+    @property
+    def captures(self) -> bool:
+        return self.mode == "capture"
 
 
 def json_value(value: object) -> object:

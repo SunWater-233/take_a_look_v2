@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:take_a_look_v2/src/controller/controller.dart';
 import 'package:take_a_look_v2/src/protocol/events.dart';
@@ -166,6 +167,7 @@ void main() {
     controller.loadDemoSymbols();
     controller.toggleSymbol(demoSymbols.first.key);
     controller.addSelectedToWatch();
+    controller.setAllWatchesPlotted(true);
     controller.applySnapshot({
       'connectionStatus': 'connected',
       'samplingPaused': false,
@@ -198,6 +200,7 @@ void main() {
     controller.loadDemoSymbols();
     controller.toggleSymbol(demoSymbols.first.key);
     controller.addSelectedToWatch();
+    controller.setAllWatchesPlotted(true);
     final key = controller.watches.single.symbol.key;
     controller.applyTelemetrySnapshot({
       'elapsedSeconds': 10,
@@ -291,6 +294,8 @@ void main() {
     source.loadDemoSymbols();
     source.toggleSymbol(demoSymbols.first.key);
     source.addSelectedToWatch();
+    const customColor = Color(0xFF35A1D2);
+    source.watches.single.color = customColor;
     final key = source.watches.single.symbol.key;
     source.applyTelemetrySnapshot({
       'elapsedSeconds': 2,
@@ -311,10 +316,12 @@ void main() {
     expect(watchState.containsKey('samples'), isFalse);
 
     final target = TakeALookController()..applySnapshot(source.snapshot());
+    expect(target.watches.single.color, customColor);
     expect(target.watches.single.samples, hasLength(2));
     final sampleCursor = target.watches.single.totalSampleCount;
     source.setSerialNumber('probe-02');
     target.applySnapshot(source.stateSnapshot());
+    expect(target.watches.single.color, customColor);
     expect(target.serialNumber, 'probe-02');
     expect(target.watches.single.samples, hasLength(2));
     expect(target.watches.single.totalSampleCount, sampleCursor);

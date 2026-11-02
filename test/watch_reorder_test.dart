@@ -60,7 +60,7 @@ void main() {
       ValueKey<String>('watch-reorder-${controller.watches.first.symbol.key}'),
     );
     final gesture = await tester.startGesture(
-      tester.getCenter(firstRow),
+      tester.getTopLeft(firstRow) + const Offset(450, 20),
       kind: PointerDeviceKind.touch,
     );
     await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));

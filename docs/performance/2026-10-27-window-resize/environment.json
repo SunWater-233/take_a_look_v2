@@ -1,0 +1,106 @@
+{
+  "afterSource": [
+    {
+      "Algorithm": "SHA256",
+      "Hash": "1AA696DCBA3A7EA1107D5D63758FF845A402F0A45CBBCFA84E2B4C91890BFF5B",
+      "Path": "E:\\ProjectGarage\\take_a_look_V2\\take_a_look_v2\\lib\\src\\workspace\\workspace.dart"
+    },
+    {
+      "Algorithm": "SHA256",
+      "Hash": "FB21376932A41012E69D8FD70C187930CD454E688F819C0A6B4564E3C3157735",
+      "Path": "E:\\ProjectGarage\\take_a_look_V2\\take_a_look_v2\\lib\\src\\panels\\watch_browser.dart"
+    },
+    {
+      "Algorithm": "SHA256",
+      "Hash": "C061BC8F29C9F55EF7491B722D4694F563682195481D50244CBBBD4B646585D9",
+      "Path": "E:\\ProjectGarage\\take_a_look_V2\\take_a_look_v2\\tool\\benchmarks\\window_resize_benchmark.dart"
+    }
+  ],
+  "cpu": {
+    "Name": "12th Gen Intel(R) Core(TM) i5-12450H",
+    "NumberOfCores": 8,
+    "NumberOfLogicalProcessors": 12
+  },
+  "beforeSource": [
+    {
+      "Algorithm": "SHA256",
+      "Hash": "DE5C1227F5280B53AC135568EF9BF1B41FFDE292DF996179A470E68E53D18D2A",
+      "Path": "E:\\ProjectGarage\\take_a_look_V2\\take_a_look_v2\\lib\\src\\workspace\\workspace.dart"
+    },
+    {
+      "Algorithm": "SHA256",
+      "Hash": "FB21376932A41012E69D8FD70C187930CD454E688F819C0A6B4564E3C3157735",
+      "Path": "E:\\ProjectGarage\\take_a_look_V2\\take_a_look_v2\\lib\\src\\panels\\watch_browser.dart"
+    },
+    {
+      "Algorithm": "SHA256",
+      "Hash": "C061BC8F29C9F55EF7491B722D4694F563682195481D50244CBBBD4B646585D9",
+      "Path": "E:\\ProjectGarage\\take_a_look_V2\\take_a_look_v2\\tool\\benchmarks\\window_resize_benchmark.dart"
+    }
+  ],
+  "flutter": {
+    "frameworkVersion": "3.47.8",
+    "channel": "stable",
+    "repositoryUrl": "https://github.com/flutter/flutter.git",
+    "frameworkRevision": "737ba8f885dc774b53b442759999a312c9461e4e",
+    "frameworkCommitDate": "2026-10-22 21:37:31 -0700",
+    "engineRevision": "cf636b1dfb818dd6a3ff16e390e93b1a036969c8",
+    "engineCommitDate": "2026-10-23 02:13:38.000Z",
+    "engineContentHash": "dfd2e6cb7d319db05e3bf1503f3e2ac60f6288a2",
+    "engineBuildDate": "2026-10-23 11:34:48.330",
+    "dartSdkVersion": "3.13.7",
+    "devToolsVersion": "2.60.0",
+    "flutterVersion": "3.47.8",
+    "flutterRoot": "D:\\FlutterSDK\\flutter"
+  },
+  "finalSource": [
+    {
+      "Path": "E:\\ProjectGarage\\take_a_look_V2\\take_a_look_v2\\lib\\src\\workspace\\workspace.dart",
+      "Hash": "F6CF3D0260F9331587D25E6F0DF16F2DE0FF5EDEFF17A70F878E595A58327AC6"
+    },
+    {
+      "Path": "E:\\ProjectGarage\\take_a_look_V2\\take_a_look_v2\\lib\\src\\panels\\watch_browser.dart",
+      "Hash": "FB21376932A41012E69D8FD70C187930CD454E688F819C0A6B4564E3C3157735"
+    },
+    {
+      "Path": "E:\\ProjectGarage\\take_a_look_V2\\take_a_look_v2\\tool\\benchmarks\\window_resize_benchmark.dart",
+      "Hash": "823259CD07FAE61653164AC6468E24EC0FAF549BAC0F4D26D200686E2429C6BC"
+    },
+    {
+      "Path": "E:\\ProjectGarage\\take_a_look_V2\\take_a_look_v2\\tool\\benchmarks\\summarize_window_resize.py",
+      "Hash": "3DD29378553AABFDD1C4C89A2F89ABEC7B5FF5894E6791997C00538631C23078"
+    }
+  ],
+  "gpus": [
+    {
+      "Name": "MuMu Virtual Display Adapter",
+      "DriverVersion": "20.36.41.498"
+    },
+    {
+      "Name": "GameViewer Virtual Display Adapter",
+      "DriverVersion": "15.6.5.199"
+    },
+    {
+      "Name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+      "DriverVersion": "32.0.16.1742"
+    },
+    {
+      "Name": "Intel(R) UHD Graphics",
+      "DriverVersion": "32.0.101.7092"
+    }
+  ],
+  "finalBuild": {
+    "files": [
+      {
+        "Path": "E:\\ProjectGarage\\take_a_look_V2\\take_a_look_v2\\build\\windows\\x64\\runner\\Release\\take_a_look_v2.exe",
+        "Hash": "C950893B42184E5955A2E41FB4A9D5CAA2CA6765324F94A7482823C7BE274B48"
+      },
+      {
+        "Path": "E:\\ProjectGarage\\take_a_look_V2\\take_a_look_v2\\build\\windows\\x64\\runner\\Release\\data\\app.so",
+        "Hash": "D57754C7EA5D437D2A2596652EA34694C0F34C1DDDAE5478C7B1E57A26956063"
+      }
+    ],
+    "configuration": "Release",
+    "target": "lib/main.dart"
+  }
+}

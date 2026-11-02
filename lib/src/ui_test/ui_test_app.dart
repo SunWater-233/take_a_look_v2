@@ -8,9 +8,13 @@ import 'package:flutter/rendering.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../app/app.dart';
+import '../analysis/analysis.dart';
 import '../controller/controller.dart';
 import '../models/models.dart';
 import '../theme/theme.dart';
+import '../panels/panels.dart';
+import '../workspace/panel_types.dart';
+import '../workspace/workspace.dart';
 import 'ui_test_session.dart';
 
 class UiTestApp extends StatefulWidget {
@@ -106,6 +110,73 @@ class _UiTestAppState extends State<UiTestApp> {
         'Live samples did not advance.',
       );
       await _capture('smoke-live');
+      DockingWorkspaceState? workspace;
+      void findWorkspace(Element element) {
+        if (element is StatefulElement &&
+            element.state is DockingWorkspaceState) {
+          workspace = element.state as DockingWorkspaceState;
+        }
+        element.visitChildren(findWorkspace);
+      }
+
+      (context as Element).visitChildren(findWorkspace);
+      check(workspace != null, 'Workbench layout was not mounted.');
+      await workspace!.showPanel(WorkspacePanelId.log);
+      check(
+        workspaceOutputPanels.every(workspace!.isPanelVisible),
+        'Independent output panels were not available.',
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      await _capture('smoke-output-panels');
+      await workspace!.toggleWorkbenchOutput();
+      final monitor = controller.watches[2], manual = controller.watches[3];
+      controller.setWatchReadMode(monitor.symbol.key, WatchReadMode.monitor);
+      controller.setWatchReadMode(manual.symbol.key, WatchReadMode.manual);
+      final monitorCount = monitor.totalSampleCount,
+          manualCount = manual.totalSampleCount;
+      await Future<void>.delayed(const Duration(milliseconds: 600));
+      controller.readWatch(manual.symbol.key);
+      controller.writeWatch(manual.symbol.key, '42.5');
+      check(manual.value == 42.5, 'Manual write readback failed.');
+      check(
+        monitor.totalSampleCount == monitorCount &&
+            manual.totalSampleCount == manualCount,
+        'Latest-only values entered history.',
+      );
+      await _capture('smoke-watch-modes');
+      await workspace!.activateWorkbenchView(WorkspacePanelId.sourceDebug);
+      controller.openSourceFile(_session.sourcePath);
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      await _capture('smoke-source');
+      final currentWorkspace = workspace!;
+      if (!currentWorkspace.mounted) return;
+      final navigator = Navigator.of(currentWorkspace.context);
+      final settings = showWorkbenchProjectSettings(
+        currentWorkspace.context,
+        controller,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      await _capture('smoke-project-settings');
+      if (navigator.mounted) navigator.pop();
+      await settings;
+      controller.analysisSession.replaceData([
+        for (final watch in controller.watches.take(2))
+          AnalysisSeries.fromSamples(
+            name: watch.symbol.name,
+            color: watch.color,
+            samples: watch.samples,
+          ),
+      ], '当前实时数据');
+      controller.analysisSession
+        ..selectionStart = 1
+        ..selectionEnd = 3
+        ..fftVisible = true
+        ..updateSelectionStats();
+      controller.commitAnalysisSession(includeData: true);
+      await workspace!.activateWorkbenchView(WorkspacePanelId.analysis);
+      await Future<void>.delayed(const Duration(milliseconds: 700));
+      await _capture('smoke-analysis');
+      await workspace!.activateWorkbenchView(WorkspacePanelId.plot);
       controller.toggleSampling();
       final count = controller.watches.first.totalSampleCount;
       await Future<void>.delayed(const Duration(milliseconds: 100));

@@ -84,6 +84,10 @@ def main():
                     service.handle(RpcMethod.CONNECT, {})
                     time.sleep(args.seconds)
                     service.handle(RpcMethod.SET_SAMPLING_PAUSED, {"paused": True})
+                    # Drain before close disables event delivery. Otherwise the
+                    # final committed batch is counted as a false transport loss.
+                    with service._lock:
+                        service._flush_pending_samples_locked()
                     elapsed = time.perf_counter() - started
                 finally:
                     service.close()

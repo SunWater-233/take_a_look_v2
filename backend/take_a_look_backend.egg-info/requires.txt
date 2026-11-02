@@ -1,7 +1,9 @@
 aioquic<2,>=1.2
 pyelftools>=0.32
 pygdbmi<0.12,>=0.11
-pyocd>=0.45.1
+psutil<8,>=5
+pyocd==0.46.0
+zeroconf<1,>=0.148
 
 [:platform_system == "Windows"]
 libusb-package>=1.0.26.3

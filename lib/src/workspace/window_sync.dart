@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../controller/controller.dart';
 import 'panel_types.dart';
+import 'panel_transfer.dart';
 import 'window_sync_target.dart';
 import '../protocol/commands.dart';
 
@@ -23,6 +24,7 @@ const detachedTabDragStartMethod = 'detachedTabDragStart';
 const detachedTabDragUpdateMethod = 'detachedTabDragUpdate';
 const detachedTabDragEndMethod = 'detachedTabDragEnd';
 const getDetachedWindowBoundsMethod = 'getDetachedWindowBounds';
+const nativePanelTransferMethod = 'nativePanelTransfer';
 
 enum DetachedTabDragPhase { start, update, end }
 
@@ -46,9 +48,14 @@ class MainWindowSync {
   MainWindowSync(this.controller);
 
   final TakeALookController controller;
+  Future<bool> Function(NativePanelTransfer)? onPanelTransfer;
+
+  Future<bool> transferPanel(NativePanelTransfer transfer) async =>
+      await onPanelTransfer?.call(transfer) ?? false;
   final Map<WorkspacePanelId, WindowController> _windows =
       <WorkspacePanelId, WindowController>{};
   final Map<String, WindowSyncTarget> _targets = {};
+  final Set<String> _releasedMonitorWindows = {};
   Timer? _stateBroadcastTimer;
   Timer? _telemetryBroadcastTimer;
   bool _started = false;
@@ -82,6 +89,7 @@ class MainWindowSync {
     WindowController window,
     Iterable<WorkspacePanelId> panels,
   ) {
+    _releasedMonitorWindows.remove(window.windowId);
     return _target(window).initialize(
       includeHistory:
           panels.contains(WorkspacePanelId.plot) ||
@@ -91,13 +99,15 @@ class MainWindowSync {
   }
 
   void registerWindow(WorkspacePanelId panel, WindowController window) {
+    _releasedMonitorWindows.remove(window.windowId);
     _windows[panel] = window;
     _target(window).active = true;
     _scheduleStateBroadcast();
     _scheduleTelemetryBroadcast();
   }
 
-  void unregisterWindow(WorkspacePanelId panel) {
+  void unregisterWindow(WorkspacePanelId panel, {String? windowId}) {
+    if (windowId != null && _windows[panel]?.windowId != windowId) return;
     final window = _windows.remove(panel);
     if (window != null &&
         !_windows.values.any((w) => w.windowId == window.windowId)) {
@@ -109,6 +119,24 @@ class MainWindowSync {
       prepareWindow(window, const [WorkspacePanelId.analysis]);
 
   Future<dynamic> _handleCall(MethodCall call) async {
+    if (call.method == 'ember') {
+      final envelope = Map<String, dynamic>.from(call.arguments as Map);
+      return controller.requestEmber(
+        envelope['operation'] as String,
+        Map<String, Object?>.from(envelope['arguments'] as Map),
+      );
+    }
+    if (call.method == nativePanelTransferMethod) {
+      final transfer = NativePanelTransfer.parse(call.arguments);
+      return transfer != null && await transferPanel(transfer);
+    }
+    if (call.method == 'targetCatalog') {
+      final envelope = Map<String, dynamic>.from(call.arguments as Map);
+      return controller.requestTargetCatalog(
+        envelope['operation'] as String,
+        Map<String, Object?>.from(envelope['arguments'] as Map),
+      );
+    }
     if (call.method == 'snapshot') {
       // Prewarmed windows need metadata only. Assignment supplies the exact
       // history and analysis dataset before the window becomes visible.
@@ -116,9 +144,19 @@ class MainWindowSync {
     }
     if (call.method == 'command') {
       final envelope = Map<String, dynamic>.from(call.arguments as Map);
+      final command = ControllerCommand.parse(envelope['name'] as String);
+      if (command == ControllerCommand.setWatchMonitorScope) {
+        final scope = Map<String, Object?>.from(envelope['arguments'] as Map);
+        setWatchMonitorScopeForWindow(
+          envelope['windowId'] as String,
+          scope['scope'] as String,
+          (scope['keys'] as List?)?.cast<String>(),
+        );
+        return null;
+      }
       final versions = controller.snapshotVersions();
       await controller.handleCommand(
-        ControllerCommand.parse(envelope['name'] as String),
+        command,
         envelope['arguments'],
         includeResultState: false,
       );
@@ -157,9 +195,25 @@ class MainWindowSync {
 
   void reportDetachedWindowReleased(String windowId) {
     controller.removeSourceViewsForWindow(windowId);
+    releaseWatchMonitorScopesForWindow(windowId);
     if (!_detachedWindowReleases.isClosed) {
       _detachedWindowReleases.add(windowId);
     }
+  }
+
+  void setWatchMonitorScopeForWindow(
+    String windowId,
+    String scope,
+    Iterable<String>? keys,
+  ) {
+    // A late in-flight message from a pooled/closed window cannot resume reads.
+    if (_releasedMonitorWindows.contains(windowId)) return;
+    controller.setWatchMonitorScope('window:$windowId:$scope', keys);
+  }
+
+  void releaseWatchMonitorScopesForWindow(String windowId) {
+    _releasedMonitorWindows.add(windowId);
+    controller.removeWatchMonitorScopesForWindow(windowId);
   }
 
   void _scheduleStateBroadcast() {
@@ -189,6 +243,7 @@ class MainWindowSync {
   Future<void> dispose() async {
     for (final window in _windows.values) {
       controller.removeSourceViewsForWindow(window.windowId);
+      releaseWatchMonitorScopesForWindow(window.windowId);
     }
     controller.stateSyncChanges.removeListener(_scheduleStateBroadcast);
     controller.symbolLoadChanges.removeListener(_broadcastSymbolLoad);
@@ -244,7 +299,8 @@ Future<void> initializeDetachedWindow(
   Future<void> Function(Offset screenPosition, int session)?
   onShowTabDragPreview,
   Future<void> Function(int session)? onHideTabDragPreview,
-  Future<Rect> Function()? onGetWindowBounds,
+  Future<Rect?> Function()? onGetWindowBounds,
+  Future<Size> Function()? onGetWindowSize,
 }) async {
   final currentWindow = await WindowController.fromCurrentEngine();
   await currentWindow.setWindowMethodHandler((call) async {
@@ -303,6 +359,10 @@ Future<void> initializeDetachedWindow(
       );
     } else if (call.method == getDetachedWindowBoundsMethod) {
       final bounds = await onGetWindowBounds?.call();
+      if (bounds == null && onGetWindowSize != null) {
+        final size = await onGetWindowSize();
+        return <String, double>{'width': size.width, 'height': size.height};
+      }
       return bounds == null
           ? null
           : <String, double>{
@@ -348,11 +408,40 @@ Future<void> sendDetachedTabDrag({
   });
 }
 
+Future<bool> requestNativePanelTransfer(NativePanelTransfer transfer) async =>
+    await _mainChannel.invokeMethod<bool>(
+      nativePanelTransferMethod,
+      transfer.toJson(),
+    ) ??
+    false;
+
 Future<void> releaseDetachedWindow() async {
   final currentWindow = await WindowController.fromCurrentEngine();
   await _mainChannel.invokeMethod<void>(releaseDetachedWindowMethod, {
     'windowId': currentWindow.windowId,
   });
+}
+
+Future<JsonObject> requestTargetCatalogFromMain(
+  String operation,
+  JsonObject arguments,
+) async {
+  final result = await _mainChannel.invokeMethod<Map<Object?, Object?>>(
+    'targetCatalog',
+    {'operation': operation, 'arguments': arguments},
+  );
+  return Map<String, Object?>.from(result ?? const {});
+}
+
+Future<JsonObject> requestEmberFromMain(
+  String operation,
+  JsonObject arguments,
+) async {
+  final result = await _mainChannel.invokeMethod<Map<Object?, Object?>>(
+    'ember',
+    {'operation': operation, 'arguments': arguments},
+  );
+  return Map<String, Object?>.from(result ?? const {});
 }
 
 Future<void> sendCommandToMain(

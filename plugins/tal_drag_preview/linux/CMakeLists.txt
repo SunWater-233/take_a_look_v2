@@ -6,6 +6,8 @@ set(PLUGIN_NAME "tal_drag_preview_plugin")
 
 add_library(${PLUGIN_NAME} SHARED
   "tal_drag_preview_plugin.cc"
+  "window_input.cc"
+  "wayland_panel_drag.cc"
 )
 apply_standard_settings(${PLUGIN_NAME})
 set_target_properties(${PLUGIN_NAME} PROPERTIES CXX_VISIBILITY_PRESET hidden)
@@ -13,5 +15,9 @@ target_compile_definitions(${PLUGIN_NAME} PRIVATE FLUTTER_PLUGIN_IMPL)
 target_include_directories(${PLUGIN_NAME} INTERFACE
   "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(${PLUGIN_NAME} PRIVATE flutter PkgConfig::GTK)
+pkg_check_modules(WAYLAND QUIET IMPORTED_TARGET wayland-client)
+if(TARGET PkgConfig::WAYLAND)
+  target_link_libraries(${PLUGIN_NAME} PRIVATE PkgConfig::WAYLAND)
+endif()
 
 set(tal_drag_preview_bundled_libraries "" PARENT_SCOPE)

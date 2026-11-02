@@ -141,7 +141,7 @@ void main() {
     final row = find.byKey(ValueKey<String>(demoSymbols.first.key));
     final initialWidth = tester.getSize(content).width;
     final initialRowHeight = tester.getSize(row).height;
-    for (var index = 0; index < 8; index += 1) {
+    for (var index = 0; index < 10; index += 1) {
       expect(
         find.byKey(ValueKey('watch-column-resize-$index')),
         findsOneWidget,
@@ -169,7 +169,7 @@ void main() {
 
     expect(
       tester.getSize(content).width,
-      closeTo(widthAfterColumnResize + 136, 0.01),
+      closeTo(widthAfterColumnResize + 170, 0.01),
     );
     expect(tester.getSize(row).height, closeTo(initialRowHeight + 8.5, 0.01));
 
@@ -213,7 +213,9 @@ void main() {
     expect(find.text('选择绘制颜色'), findsOneWidget);
 
     await tester.tap(
-      find.byKey(ValueKey('watch-color-preset-${TalColors.blue.toARGB32()}')),
+      find.byKey(
+        ValueKey('watch-color-preset-${TalChartColors.blue.toARGB32()}'),
+      ),
     );
     // Opening the picker may also highlight its watch row. Count the color
     // commit separately from that independent plot-selection notification.
@@ -221,7 +223,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('watch-color-confirm')));
     await tester.pumpAndSettle();
 
-    expect(controller.watches.single.color, TalColors.blue);
+    expect(controller.watches.single.color, TalChartColors.blue);
     expect(plotEvents - eventsBeforeConfirm, 1);
 
     controller.dispose();
@@ -291,7 +293,7 @@ void main() {
     await tester.pump();
   });
 
-  testWidgets('connection dropdown uses the compact anchored menu style', (
+  testWidgets('probe dropdown uses the compact anchored menu style', (
     tester,
   ) async {
     final controller = TakeALookController();
@@ -315,7 +317,9 @@ void main() {
       ),
     );
 
-    final anchor = find.byKey(const ValueKey<String>('compact-dropdown-auto'));
+    final anchor = find.byKey(
+      const ValueKey<String>('compact-dropdown-自动发现任意探针'),
+    );
     final anchorRect = tester.getRect(anchor);
 
     final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
@@ -341,7 +345,7 @@ void main() {
     await tester.pumpAndSettle();
 
     final selectedItem = find.byKey(
-      const ValueKey<String>('dropdown-item-auto'),
+      const ValueKey<String>('dropdown-item-自动发现任意探针'),
     );
     final selectedRect = tester.getRect(selectedItem);
     expect(selectedRect.left, closeTo(anchorRect.left, 1));
@@ -349,7 +353,7 @@ void main() {
     expect(selectedRect.height, closeTo(32, 1));
 
     final selectedSurface = tester.widget<Container>(
-      find.byKey(const ValueKey<String>('dropdown-selected-auto')),
+      find.byKey(const ValueKey<String>('dropdown-selected-自动发现任意探针')),
     );
     final decoration = selectedSurface.decoration! as BoxDecoration;
     expect(
@@ -360,7 +364,7 @@ void main() {
     await mouse.moveTo(selectedRect.center);
     await tester.pump();
     final hoveredSelectedSurface = tester.widget<Container>(
-      find.byKey(const ValueKey<String>('dropdown-selected-auto')),
+      find.byKey(const ValueKey<String>('dropdown-selected-自动发现任意探针')),
     );
     expect(
       (hoveredSelectedSurface.decoration! as BoxDecoration).color,
@@ -370,7 +374,7 @@ void main() {
     await mouse.moveTo(const Offset(800, 600));
     await tester.pump();
     final restoredSelectedSurface = tester.widget<Container>(
-      find.byKey(const ValueKey<String>('dropdown-selected-auto')),
+      find.byKey(const ValueKey<String>('dropdown-selected-自动发现任意探针')),
     );
     expect(
       (restoredSelectedSurface.decoration! as BoxDecoration).color,
@@ -378,7 +382,7 @@ void main() {
     );
 
     await tester.tap(
-      find.byKey(const ValueKey<String>('dropdown-item-stm32f407vg')),
+      find.byKey(const ValueKey<String>('dropdown-item-CMSIS-DAP')),
     );
     await tester.pump();
     final closingStartHeight = tester.getSize(animationFinder).height;
@@ -388,7 +392,7 @@ void main() {
     expect(animationFinder, findsOneWidget);
     await tester.pumpAndSettle();
     expect(animationFinder, findsNothing);
-    expect(controller.targetName, 'stm32f407vg');
+    expect(controller.probeType, 'CMSIS-DAP');
 
     await mouse.removePointer();
     controller.dispose();

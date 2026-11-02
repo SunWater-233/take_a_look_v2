@@ -1,23 +1,58 @@
-part of 'panels.dart';
+import 'dart:async';
+import 'dart:io';
+import 'dart:math' as math;
 
-class _SourceDebugPanel extends StatefulWidget {
-  const _SourceDebugPanel({
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
+
+import 'package:flutter/services.dart';
+import 'package:desktop_drop/desktop_drop.dart';
+import 'package:tal_drag_preview/tal_drag_preview.dart';
+
+import '../controller/controller.dart';
+import '../app/file_pickers.dart';
+import '../workspace/keyboard_shortcuts.dart';
+import '../models/models.dart';
+import 'source_search.dart';
+import 'source_search_controller.dart';
+import 'source_highlighter.dart';
+import 'source_documents.dart';
+import 'source_references.dart';
+import 'source_navigation_history.dart';
+import 'source_peek.dart';
+import '../theme/theme.dart';
+
+import 'shared_controls.dart';
+import 'panel_frame.dart';
+import 'source_file_drag_data.dart';
+
+part 'source_build_tools.dart';
+part 'source_navigation.dart';
+part 'source_peek_actions.dart';
+part 'workbench_output.dart';
+
+class SourceDebugPanel extends StatefulWidget {
+  const SourceDebugPanel({
+    super.key,
     required this.controller,
     this.readOnlyPreview = false,
+    this.externalOutput = false,
+    this.visible = true,
   });
 
   final TakeALookController controller;
   final bool readOnlyPreview;
+  final bool externalOutput;
+  final bool visible;
 
   @override
-  State<_SourceDebugPanel> createState() => _SourceDebugPanelState();
+  State<SourceDebugPanel> createState() => _SourceDebugPanelState();
 }
 
-class _SourceDebugPanelState extends State<_SourceDebugPanel> {
+class _SourceDebugPanelState extends State<SourceDebugPanel> {
   static const _lineHeight = 22.0;
   static const _searchResultHeight = 30.0;
-  static const _maxSearchResults = 1000;
-  static const _searchReadBatchSize = 8;
   final ScrollController _verticalController = ScrollController();
   final ScrollController _horizontalController = ScrollController();
   final ScrollController _tabController = ScrollController();
@@ -29,10 +64,10 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   final Map<String, GlobalKey> _tabKeys = <String, GlobalKey>{};
   final Set<String> _externalPathKeys = <String>{};
   final SourceDocuments _sourceDocuments = SourceDocuments();
+  late final SourceSearchController _search = SourceSearchController(
+    _sourceDocuments,
+  );
   List<String> _sourceFiles = const [];
-  List<String> _searchIndexPaths = const [];
-  Future<List<SourceSearchFile>>? _searchFileIndexFuture;
-  int _searchIndexGeneration = 0;
   final FocusNode _panelFocusNode = FocusNode();
   final FocusNode _searchFocusNode = FocusNode();
   final TextEditingController _searchController = TextEditingController();
@@ -45,7 +80,6 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   Map<int, DebugBreakpoint> _lineBreakpoints = const {};
   String? _loadError;
   int _loadGeneration = 0;
-  int _searchGeneration = 0;
   bool _canScrollTabsRight = false;
   bool _draggingFiles = false;
   bool _searchVisible = false;
@@ -54,8 +88,17 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   int _activeSearchIndex = -1;
   int? _revealedSearchLine;
   _SourceTokenSelection? _sourceSelection;
-  Timer? _searchDebounce;
-  List<_SourceSearchResult> _searchResults = const [];
+  final _navigation = SourceNavigationHistory<_SourceNavigationLocation>();
+  bool _sourceTapWithModifier = false;
+  _SourceTokenSelection? _hoveredToken;
+  bool _hoveredTokenCanNavigate = false;
+  bool _navigationModifierPressed = false;
+  _SourcePeekSession? _sourcePeek;
+  double? _sourcePeekHeight;
+  double _visiblePeekHeight = 0;
+  late final SourceReferencesController _references =
+      SourceReferencesController(_sourceDocuments);
+  List<SourceSearchResult> _searchResults = const [];
   Map<String, String> get _resolvedSourcePaths =>
       _sourceDocuments.resolvedPaths;
   String _observedSourceRoot = '';
@@ -72,12 +115,13 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   @override
   void initState() {
     super.initState();
+    HardwareKeyboard.instance.addHandler(_handleNavigationModifier);
     _tabController.addListener(_updateTabOverflow);
     controller.debugChanges.addListener(_handleDebugChange);
     controller.symbolChanges.addListener(_handleDebugChange);
     controller.sourceWorkspaceChanges.addListener(_handleSourceWorkspaceChange);
     controller.sourceToolsChanges.addListener(_handleFirmwareTask);
-    if (!widget.readOnlyPreview) {
+    if (!widget.readOnlyPreview && widget.visible) {
       controller.setSourceViewVisible(_sourceViewId, true);
     }
     _restoreSourceWorkspace();
@@ -85,8 +129,27 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   }
 
   @override
-  void didUpdateWidget(covariant _SourceDebugPanel oldWidget) {
+  void didUpdateWidget(covariant SourceDebugPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!widget.visible) {
+      _hoveredToken = null;
+      _hoveredTokenCanNavigate = false;
+      _navigationModifierPressed = false;
+    }
+    if (oldWidget.visible != widget.visible &&
+        oldWidget.controller == controller &&
+        !widget.readOnlyPreview) {
+      controller.setSourceViewVisible(_sourceViewId, widget.visible);
+      if (widget.visible) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || !widget.visible) return;
+          controller.dismissSourceAttention();
+          if (_selectedPath case final path?) {
+            controller.markSourceFileRead(path);
+          }
+        });
+      }
+    }
     if (oldWidget.controller == controller &&
         oldWidget.readOnlyPreview == widget.readOnlyPreview) {
       return;
@@ -102,7 +165,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     controller.symbolChanges.addListener(_handleDebugChange);
     controller.sourceToolsChanges.addListener(_handleFirmwareTask);
     controller.sourceWorkspaceChanges.addListener(_handleSourceWorkspaceChange);
-    if (!widget.readOnlyPreview) {
+    if (!widget.readOnlyPreview && widget.visible) {
       controller.setSourceViewVisible(_sourceViewId, true);
     }
     _selectedPath = null;
@@ -113,11 +176,14 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     _resolvedSourcePaths.clear();
     _invalidateSearchFileIndex();
     _sourceDocuments.clearIndex();
-    _searchDebounce?.cancel();
-    _searchGeneration += 1;
+    _search.cancel();
     _searchController.clear();
     _searchResults = const [];
     _sourceSelection = null;
+    _hoveredToken = null;
+    _sourcePeek = null;
+    _references.cancel();
+    _navigation.clear();
     _searchVisible = false;
     _searching = false;
     _activeSearchIndex = -1;
@@ -130,6 +196,8 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleNavigationModifier);
+    _references.dispose();
     controller.debugChanges.removeListener(_handleDebugChange);
     controller.symbolChanges.removeListener(_handleDebugChange);
     controller.sourceToolsChanges.removeListener(_handleFirmwareTask);
@@ -143,7 +211,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     _panelFocusNode.dispose();
     _searchFocusNode.dispose();
     _searchController.dispose();
-    _searchDebounce?.cancel();
+    _search.dispose();
     _tabController
       ..removeListener(_updateTabOverflow)
       ..dispose();
@@ -174,7 +242,9 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     for (final path in _openPaths) {
       _externalPathKeys.add(_pathKey(path));
     }
-    if (!widget.readOnlyPreview) controller.dismissSourceAttention();
+    if (!widget.readOnlyPreview && widget.visible) {
+      controller.dismissSourceAttention();
+    }
   }
 
   void _handleSourceWorkspaceChange() {
@@ -182,7 +252,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     final nextPath =
         controller.sourceWorkspace.selectedPath ??
         (widget.readOnlyPreview ? _openPaths.firstOrNull : null);
-    if (nextPath != _selectedPath) {
+    if (nextPath != _selectedPath || controller.sourceLocationRequest != null) {
       unawaited(_loadSource(nextPath));
       _restorePanelFocus();
     } else {
@@ -196,6 +266,9 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     final sourceRootChanged =
         _observedSourceRoot != controller.debugState.sourceRoot;
     if (sourceRootChanged) {
+      _sourcePeek = null;
+      _references.cancel();
+      _navigation.clear();
       _observedSourceRoot = controller.debugState.sourceRoot;
       _resolvedSourcePaths.clear();
       _sourceDocuments.clear();
@@ -253,13 +326,24 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   }
 
   Future<void> _loadSource(String? path, {int? revealLine}) async {
-    if (path != null && !widget.readOnlyPreview) {
+    final request = controller.sourceLocationRequest;
+    if (request != null &&
+        path != null &&
+        controller.sourcePathsMatch(request.path, path)) {
+      revealLine = request.line;
+      controller.sourceLocationRequest = null;
+    }
+    if (path != null && !widget.readOnlyPreview && widget.visible) {
       controller.openSourceFile(path);
       path = controller.openSourcePathFor(path) ?? path;
     }
     final generation = ++_loadGeneration;
     setState(() {
       _selectedPath = path;
+      _sourceSelection = null;
+      _hoveredToken = null;
+      _sourcePeek = null;
+      _references.cancel();
       _revealedSearchLine = revealLine;
       _lines = const [];
       _loadError = null;
@@ -268,13 +352,15 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     if (path == null) return;
     try {
       final source = await _readSourceDocument(path);
-      final highlighted = await _highlighter.prepare(source);
+      final highlighted = await _highlighter.prepare(source, path: path);
       if (!mounted || generation != _loadGeneration) return;
       setState(() {
         _lines = highlighted.lines;
         _maximumLineLength = highlighted.maximumLineLength;
       });
-      if (!widget.readOnlyPreview) controller.markSourceFileRead(path);
+      if (!widget.readOnlyPreview && widget.visible) {
+        controller.markSourceFileRead(path);
+      }
       if (revealLine != null) {
         _scrollToLine(revealLine, immediate: true);
       } else {
@@ -378,6 +464,46 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   }
 
   KeyEventResult _handleSourceCommand(KeyEvent event) {
+    if (!_searchVisible &&
+        event is KeyDownEvent &&
+        !event.synthesized &&
+        !widget.readOnlyPreview &&
+        widget.visible) {
+      final keyboard = HardwareKeyboard.instance;
+      if (event.logicalKey == LogicalKeyboardKey.escape &&
+          _sourcePeek != null) {
+        _closeSourcePeek();
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.f12 &&
+          !keyboard.isControlPressed &&
+          !keyboard.isMetaPressed) {
+        final selection = _selectedSourceToken;
+        if (selection == null) return KeyEventResult.ignored;
+        if (keyboard.isShiftPressed && !keyboard.isAltPressed) {
+          _openReferences(selection);
+        } else if (keyboard.isAltPressed && !keyboard.isShiftPressed) {
+          _openDefinitionPeek(selection);
+        } else if (!keyboard.isShiftPressed && !keyboard.isAltPressed) {
+          unawaited(_goToDefinition(selection));
+        } else {
+          return KeyEventResult.ignored;
+        }
+        return KeyEventResult.handled;
+      }
+      if (!keyboard.isControlPressed &&
+          !keyboard.isMetaPressed &&
+          !keyboard.isShiftPressed) {
+        if (keyboard.isAltPressed &&
+            (event.logicalKey == LogicalKeyboardKey.arrowLeft ||
+                event.logicalKey == LogicalKeyboardKey.arrowRight)) {
+          _navigateHistory(
+            back: event.logicalKey == LogicalKeyboardKey.arrowLeft,
+          );
+          return KeyEventResult.handled;
+        }
+      }
+    }
     if (WorkspaceShortcut.closeSource.matches(event)) {
       _closeSelectedSource();
       return KeyEventResult.handled;
@@ -400,6 +526,9 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
       accepted.add(path);
     }
     if (!mounted) return;
+    if (TalDragPreview.debugNativeDrag) {
+      debugPrint('Source file drop accepted: ${accepted.length}');
+    }
     setState(() => _draggingFiles = false);
     if (accepted.isNotEmpty) {
       await _loadSource(accepted.first);
@@ -474,8 +603,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   }
 
   void _closeSearch() {
-    _searchDebounce?.cancel();
-    _searchGeneration += 1;
+    _search.cancel();
     setState(() {
       _searchVisible = false;
       _searching = false;
@@ -487,8 +615,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
   }
 
   void _queueSearch(String query, {bool immediate = false}) {
-    _searchDebounce?.cancel();
-    final generation = ++_searchGeneration;
+    _search.cancel();
     if (query.trim().isEmpty) {
       setState(() {
         _searching = false;
@@ -504,103 +631,23 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
       _activeSearchIndex = -1;
       _searchSelectionChanged = false;
     });
-    void run() => unawaited(_searchAcrossFiles(query, generation));
-    if (immediate) {
-      run();
-    } else {
-      _searchDebounce = Timer(const Duration(milliseconds: 100), run);
-    }
-  }
-
-  void _invalidateSearchFileIndex() {
-    _searchFileIndexFuture = null;
-    _searchIndexGeneration += 1;
-  }
-
-  Future<List<SourceSearchFile>> _getSearchFiles() {
-    final pathsByKey = <String, String>{};
-    for (final path in [..._sourceFiles, ..._openPaths]) {
-      pathsByKey.putIfAbsent(_pathKey(path), () => path);
-    }
-    final paths = pathsByKey.values.toList();
-    if (_searchFileIndexFuture != null &&
-        listEquals(paths, _searchIndexPaths)) {
-      return _searchFileIndexFuture!;
-    }
-    _searchIndexPaths = paths;
-    final indexGeneration = ++_searchIndexGeneration;
-    final root = controller.debugState.sourceRoot;
-    final rootIndex = root.isEmpty
-        ? Future.value(const <String, List<String>>{})
-        : (_indexSourceRoot(root));
-    return _searchFileIndexFuture = _buildSearchFileIndex(
-      paths,
-      root,
-      rootIndex,
-      Map.of(_resolvedSourcePaths),
-      indexGeneration,
+    _search.queue(
+      query,
+      immediate: immediate,
+      getFiles: _getSearchFiles,
+      readDocument: _readSearchDocument,
+      beforeContents: () => WidgetsBinding.instance.endOfFrame,
+      publish: (results, searching) =>
+          _publishSearchResults(results, searching: searching),
     );
   }
 
-  Future<List<SourceSearchFile>> _buildSearchFileIndex(
-    List<String> paths,
-    String root,
-    Future<Map<String, List<String>>> rootIndexFuture,
-    Map<String, String> resolvedPaths,
-    int generation,
-  ) async {
-    final rootIndex = await rootIndexFuture;
-    if (!mounted || generation != _searchIndexGeneration) return const [];
-    final filesByKey = <String, SourceSearchFile>{};
-    for (final path in rootIndex.values.expand((paths) => paths)) {
-      final file = SourceSearchFile(path: path, sourceRoot: root);
-      filesByKey[file.key] = file;
-    }
-    for (var start = 0; start < paths.length; start += _searchReadBatchSize) {
-      if (!mounted || generation != _searchIndexGeneration) return const [];
-      final batch = await Future.wait(
-        paths.skip(start).take(_searchReadBatchSize).map((path) async {
-          final key = _pathKey(path);
-          var localPath = resolvedPaths[key] ?? filesByKey[key]?.localPath;
-          if (localPath == null && root.isNotEmpty) {
-            localPath = filesByKey[_pathKey('$root/$path')]?.localPath;
-            final candidates = rootIndex[_basename(path).toLowerCase()];
-            if (localPath == null && candidates != null) {
-              // Only ambiguous build-machine aliases need a filesystem probe,
-              // and only when constructing the index, never for each query.
-              if (!await File(path).exists()) {
-                var bestScore = -1;
-                for (final candidate in candidates) {
-                  final score = sourcePathSuffixLength(path, candidate);
-                  if (score > bestScore) {
-                    bestScore = score;
-                    localPath = candidate;
-                  }
-                }
-              }
-            }
-          }
-          return SourceSearchFile(
-            path: path,
-            localPath: localPath,
-            sourceRoot: root,
-            searchContents: true,
-          );
-        }),
-      );
-      for (final file in batch) {
-        // Keep a single result for a local file and its DWARF alias, retaining
-        // the debug path for opening the source and setting breakpoints.
-        if (filesByKey[file.key]?.searchContents != true) {
-          filesByKey[file.key] = file;
-        }
-      }
-    }
-    return filesByKey.values.toList()..sort((left, right) {
-      final priority = left.priority.compareTo(right.priority);
-      return priority != 0 ? priority : left.key.compareTo(right.key);
-    });
-  }
+  void _invalidateSearchFileIndex() => _search.invalidateIndex();
+
+  Future<List<SourceSearchFile>> _getSearchFiles() => _search.files(
+    sourcePaths: [..._sourceFiles, ..._openPaths],
+    sourceRoot: controller.debugState.sourceRoot,
+  );
 
   Future<SourceSearchText?> _readSearchDocument(SourceSearchFile file) async {
     try {
@@ -610,94 +657,11 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     }
   }
 
-  Future<void> _searchAcrossFiles(String query, int generation) async {
-    final files = await _getSearchFiles();
-    if (!mounted || generation != _searchGeneration) return;
-    final fileResults = List.generate(3, (_) => <_SourceSearchResult>[]);
-    for (final file in searchSourceFiles(
-      files,
-      query,
-      limit: _maxSearchResults,
-    )) {
-      fileResults[file.priority].add(
-        _SourceSearchResult.file(path: file.path, preview: file.localPath),
-      );
-    }
-    _publishSearchResults(
-      fileResults.expand((group) => group).toList(),
-      generation,
-    );
-    // Render filename matches before reading and searching file contents.
-    await WidgetsBinding.instance.endOfFrame;
-    if (!mounted || generation != _searchGeneration) return;
-    final results = <_SourceSearchResult>[];
-    for (var priority = 0; priority < fileResults.length; priority += 1) {
-      results.addAll(
-        fileResults[priority].take(_maxSearchResults - results.length),
-      );
-      if (results.length >= _maxSearchResults) break;
-      final contentFiles = files
-          .where(
-            (file) =>
-                file.priority == priority &&
-                file.searchContents &&
-                !file.isBinaryArtifact,
-          )
-          .toList();
-      for (
-        var start = 0;
-        start < contentFiles.length;
-        start += _searchReadBatchSize
-      ) {
-        if (!mounted || generation != _searchGeneration) return;
-        final batch = contentFiles
-            .skip(start)
-            .take(_searchReadBatchSize)
-            .toList();
-        final documents = await Future.wait(batch.map(_readSearchDocument));
-        if (!mounted || generation != _searchGeneration) return;
-        for (var index = 0; index < batch.length; index += 1) {
-          final document = documents[index];
-          if (document == null) continue;
-          for (final match in document.search(
-            query,
-            limit: _maxSearchResults - results.length,
-          )) {
-            results.add(
-              _SourceSearchResult(
-                path: batch[index].path,
-                line: match.line,
-                column: match.column,
-                preview: match.preview,
-              ),
-            );
-          }
-          if (results.length >= _maxSearchResults) break;
-        }
-        _publishSearchResults(
-          [
-            ...results,
-            ...fileResults.skip(priority + 1).expand((group) => group),
-          ].take(_maxSearchResults).toList(),
-          generation,
-        );
-        if (results.length >= _maxSearchResults) break;
-        // Let new keystrokes cancel an obsolete content scan between batches.
-        if (start + batch.length < contentFiles.length) {
-          await Future<void>.delayed(Duration.zero);
-        }
-      }
-      if (results.length >= _maxSearchResults) break;
-    }
-    _publishSearchResults(results, generation, searching: false);
-  }
-
   void _publishSearchResults(
-    List<_SourceSearchResult> results,
-    int generation, {
+    List<SourceSearchResult> results, {
     bool searching = true,
   }) {
-    if (!mounted || generation != _searchGeneration) return;
+    if (!mounted) return;
     final active = _searchSelectionChanged && _activeSearchIndex >= 0
         ? _searchResults[_activeSearchIndex]
         : null;
@@ -799,7 +763,9 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     final position = painter.getPositionForOffset(
       Offset(offset.dx, _lineHeight / 2),
     );
-    if (offset.dx > painter.width) return null;
+    final width = painter.width;
+    painter.dispose();
+    if (offset.dx > width) return null;
     var index = position.offset.clamp(0, line.rawText.length);
     if (index == line.rawText.length && index > 0) index -= 1;
     if (index >= line.rawText.length ||
@@ -815,6 +781,11 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
       end += 1;
     }
     if (!_isIdentifierStart(line.rawText[start])) return null;
+    if (!line.identifiers.any(
+      (range) => range.start == start && range.end == end,
+    )) {
+      return null;
+    }
     return _SourceTokenSelection(
       path: path,
       lineIndex: lineIndex,
@@ -831,58 +802,91 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
       _lines[lineIndex],
       localPosition,
     );
-    if (selection == null) return;
-    setState(() => _sourceSelection = selection);
+    _updateSourceSelection(selection);
+  }
+
+  void _updateSourceSelection(_SourceTokenSelection? selection) =>
+      setState(() => _sourceSelection = selection);
+
+  void _updateSourceView(VoidCallback update) => setState(update);
+
+  bool _handleNavigationModifier(KeyEvent event) {
+    final keyboard = HardwareKeyboard.instance;
+    final pressed =
+        widget.visible &&
+        !widget.readOnlyPreview &&
+        (keyboard.isControlPressed || keyboard.isMetaPressed) &&
+        !keyboard.isAltPressed;
+    if (mounted && pressed != _navigationModifierPressed) {
+      setState(() {
+        _navigationModifierPressed = pressed;
+        _hoveredTokenCanNavigate =
+            pressed &&
+            _hoveredToken != null &&
+            _definitionsFor(_hoveredToken!).isNotEmpty;
+      });
+    }
+    return false;
+  }
+
+  void _hoverSourceToken(String path, int index, Offset position) {
+    if (!widget.visible || widget.readOnlyPreview) return;
+    final token = _tokenAtOffset(path, index, _lines[index], position);
+    if (_hoveredToken?.path == token?.path &&
+        _hoveredToken?.lineIndex == token?.lineIndex &&
+        _hoveredToken?.start == token?.start) {
+      return;
+    }
+    setState(() {
+      _hoveredToken = token;
+      _hoveredTokenCanNavigate =
+          _navigationModifierPressed &&
+          token != null &&
+          _definitionsFor(token).isNotEmpty;
+    });
+  }
+
+  void _exitSourceToken(String path, int index) {
+    if (!mounted ||
+        _hoveredToken?.path != path ||
+        _hoveredToken?.lineIndex != index) {
+      return;
+    }
+    setState(() {
+      _hoveredToken = null;
+      _hoveredTokenCanNavigate = false;
+    });
   }
 
   List<TextSpan> _spansForSourceLine(String path, int lineIndex) {
     final line = _lines[lineIndex];
     final selection = _sourceSelection;
-    if (selection == null ||
-        selection.lineIndex != lineIndex ||
-        !controller.sourcePathsMatch(selection.path, path)) {
-      return line.spans;
-    }
-    final result = <TextSpan>[];
-    var offset = 0;
-    for (final span in line.spans) {
-      final text = span.text ?? '';
-      final spanStart = offset;
-      final spanEnd = offset + text.length;
-      final selectedStart = math.max(spanStart, selection.start);
-      final selectedEnd = math.min(spanEnd, selection.end);
-      if (selectedStart >= selectedEnd) {
-        result.add(span);
-      } else {
-        if (spanStart < selectedStart) {
-          result.add(
-            TextSpan(
-              text: text.substring(0, selectedStart - spanStart),
-              style: span.style,
-            ),
-          );
-        }
-        result.add(
-          TextSpan(
-            text: text.substring(
-              selectedStart - spanStart,
-              selectedEnd - spanStart,
-            ),
-            style: span.style?.copyWith(backgroundColor: TalColors.selection),
+    final hovered = _hoveredToken;
+    return decorateSourceSpans(line.spans, [
+      if (selection != null &&
+          selection.lineIndex == lineIndex &&
+          controller.sourcePathsMatch(selection.path, path))
+        (
+          start: selection.start,
+          end: selection.end,
+          style: const TextStyle(backgroundColor: TalColors.selection),
+        ),
+      if (_navigationModifierPressed &&
+          _hoveredTokenCanNavigate &&
+          hovered != null &&
+          hovered.lineIndex == lineIndex &&
+          hovered.path == path)
+        (
+          start: hovered.start,
+          end: hovered.end,
+          style: TextStyle(
+            color: TalColors.info,
+            backgroundColor: TalColors.info.withValues(alpha: .14),
+            decoration: TextDecoration.underline,
+            decorationColor: TalColors.info,
           ),
-        );
-        if (selectedEnd < spanEnd) {
-          result.add(
-            TextSpan(
-              text: text.substring(selectedEnd - spanStart),
-              style: span.style,
-            ),
-          );
-        }
-      }
-      offset = spanEnd;
-    }
-    return result;
+        ),
+    ]);
   }
 
   Future<String?> _resolveIncludedSource(String sourcePath, String line) async {
@@ -962,22 +966,39 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     Offset localPosition,
   ) async {
     final line = _lines[lineIndex];
-    final selected = _sourceSelection;
-    final hit =
-        selected != null &&
-            selected.lineIndex == lineIndex &&
-            controller.sourcePathsMatch(selected.path, sourcePath)
-        ? selected
-        : _tokenAtOffset(sourcePath, lineIndex, line, localPosition);
+    final generation = _loadGeneration;
+    final hit = _tokenAtOffset(sourcePath, lineIndex, line, localPosition);
+    setState(() => _sourceSelection = hit);
     final token = hit?.token;
     final symbols = token == null
         ? const <SymbolItem>[]
         : _symbolsForToken(token, sourcePath);
     final includeName = _includeNameFromLine(line.rawText);
     final includePath = await _resolveIncludedSource(sourcePath, line.rawText);
-    if (!context.mounted) return;
+    if (!context.mounted || generation != _loadGeneration) return;
 
     final items = <PopupMenuEntry<String>>[];
+    if (hit != null) {
+      items.add(
+        PopupMenuItem<String>(
+          key: const ValueKey('source-menu-definition'),
+          value: 'definition',
+          child: Text('跳转到定义  ${hit.token}    F12'),
+        ),
+      );
+      items.addAll([
+        PopupMenuItem<String>(
+          key: const ValueKey('source-menu-peek-definition'),
+          value: 'peek-definition',
+          child: Text('预览定义  ${hit.token}    Alt+F12'),
+        ),
+        PopupMenuItem<String>(
+          key: const ValueKey('source-menu-references'),
+          value: 'references',
+          child: Text('查看引用  ${hit.token}    Shift+F12'),
+        ),
+      ]);
+    }
     for (final symbol in symbols) {
       final symbolLabel = symbol.name == token ? token : symbol.name;
       final suffix = symbols.length > 1 ? '  ${symbol.addressLabel}' : '';
@@ -991,8 +1012,8 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
           enabled: !watched,
           child: Text(
             watched
-                ? '已在实时调试中  $symbolLabel$suffix'
-                : '加入实时调试  $symbolLabel$suffix',
+                ? '${widget.externalOutput ? '已在变量监视中' : '已在实时调试中'}  $symbolLabel$suffix'
+                : '${widget.externalOutput ? '加入变量监视' : '加入实时调试'}  $symbolLabel$suffix',
           ),
         ),
       );
@@ -1021,8 +1042,20 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
       items: items,
     );
     if (!context.mounted || action == null) return;
-    if (action.startsWith('watch:')) {
-      controller.activateSymbol(action.substring('watch:'.length));
+    if (action == 'definition' && hit != null) {
+      await _goToDefinition(hit);
+    } else if (action == 'peek-definition' && hit != null) {
+      _openDefinitionPeek(hit);
+    } else if (action == 'references' && hit != null) {
+      _openReferences(hit);
+    } else if (action.startsWith('watch:')) {
+      final key = action.substring('watch:'.length);
+      if (widget.externalOutput) {
+        controller.selectSymbols([key]);
+        controller.addSelectedToWatch(mode: WatchReadMode.monitor);
+      } else {
+        controller.activateSymbol(key);
+      }
     } else if (action.startsWith('include:')) {
       final includePath = action.substring('include:'.length);
       if (_matchingPath(includePath, _sourceFiles) == null) {
@@ -1051,10 +1084,11 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_verticalController.hasClients) return;
       final viewport = _verticalController.position.viewportDimension;
-      final target = ((line - 1) * _lineHeight - viewport * 0.38).clamp(
-        0.0,
-        _verticalController.position.maxScrollExtent,
-      );
+      final peekOffset = _sourcePeek != null && line > _sourcePeek!.anchorLine
+          ? _visiblePeekHeight
+          : 0.0;
+      final target = ((line - 1) * _lineHeight + peekOffset - viewport * 0.38)
+          .clamp(0.0, _verticalController.position.maxScrollExtent);
       if (immediate) {
         _verticalController.jumpTo(target);
       } else {
@@ -1071,87 +1105,106 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
 
   @override
   Widget build(BuildContext context) {
-    return PanelKeyboardListener(
-      focusNode: _panelFocusNode,
-      autofocus: true,
-      onKeyEvent: _handlePanelKeyEvent,
-      onWindowKeyEvent: _handleSourceCommand,
-      child: Listener(
-        onPointerDown: (_) => _panelFocusNode.requestFocus(),
-        child: DropTarget(
-          key: const ValueKey('source-file-drop-target'),
-          onDragEntered: (_) {
-            if (mounted) setState(() => _draggingFiles = true);
-          },
-          onDragExited: (_) {
-            if (mounted) setState(() => _draggingFiles = false);
-          },
-          onDragDone: (details) => unawaited(
-            _openDroppedFiles(details.files.map((file) => file.path)),
-          ),
-          child: Stack(
-            children: [
-              LayoutBuilder(
-                builder: (context, constraints) => Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _SourceBuildToolbar(
-                      controller: controller,
-                      compact: constraints.maxHeight < 260,
-                    ),
-                    AnimatedBuilder(
-                      animation: controller.sourceToolsChanges,
-                      builder: (context, _) => _buildToolbar(),
-                    ),
-                    if (_searchVisible) _buildSearchArea(),
-                    const Divider(height: 1, color: TalColors.borderSoft),
-                    Expanded(child: _buildBody()),
-                    _buildRegisterStrip(),
-                    _SourceTaskOutput(
-                      controller: controller,
-                      maxHeight: constraints.maxHeight < 240
-                          ? 34
-                          : (constraints.maxHeight * .32).clamp(85.0, 264.0),
-                      onOpenLocation: (path, line) {
-                        _sourceDocuments.invalidate(path);
-                        _openSource(path);
-                        unawaited(_loadSource(path, revealLine: line));
-                      },
-                    ),
-                  ],
-                ),
-              ),
-              if (_draggingFiles)
-                Positioned.fill(
-                  child: IgnorePointer(
-                    child: Container(
-                      key: const ValueKey('source-file-drop-overlay'),
-                      decoration: BoxDecoration(
-                        color: TalColors.accent.withValues(alpha: 0.08),
-                        border: Border.all(color: TalColors.accent, width: 2),
+    return DragTarget<SourceFileDragData>(
+      key: const ValueKey('source-symbol-drop-target'),
+      onWillAcceptWithDetails: (_) => !widget.readOnlyPreview && widget.visible,
+      onAcceptWithDetails: (details) =>
+          _openSource(controller.canonicalSourcePath(details.data.path)),
+      builder: (context, candidateData, rejectedData) => PanelKeyboardListener(
+        focusNode: _panelFocusNode,
+        autofocus: true,
+        onKeyEvent: _handlePanelKeyEvent,
+        onWindowKeyEvent: _handleSourceCommand,
+        child: Listener(
+          onPointerDown: (_) => _panelFocusNode.requestFocus(),
+          child: DropTarget(
+            key: const ValueKey('source-file-drop-target'),
+            onDragEntered: (_) {
+              if (mounted) setState(() => _draggingFiles = true);
+            },
+            onDragExited: (_) {
+              if (mounted) setState(() => _draggingFiles = false);
+            },
+            onDragDone: (details) {
+              if (TalDragPreview.debugNativeDrag) {
+                debugPrint(
+                  'Source file drop candidates: ${details.files.length}',
+                );
+              }
+              unawaited(
+                _openDroppedFiles(details.files.map((file) => file.path)),
+              );
+            },
+            child: Stack(
+              children: [
+                LayoutBuilder(
+                  builder: (context, constraints) => Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _SourceBuildToolbar(
+                        controller: controller,
+                        compact: constraints.maxHeight < 260,
                       ),
-                      child: const Center(
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: TalColors.surfaceAlt,
-                            borderRadius: BorderRadius.all(Radius.circular(6)),
-                          ),
-                          child: Padding(
-                            padding: EdgeInsets.symmetric(
-                              horizontal: 18,
-                              vertical: 10,
+                      AnimatedBuilder(
+                        animation: controller.sourceToolsChanges,
+                        builder: (context, _) => _buildToolbar(),
+                      ),
+                      if (_searchVisible) _buildSearchArea(),
+                      const Divider(height: 1, color: TalColors.borderSoft),
+                      Expanded(child: _buildBody()),
+                      _buildRegisterStrip(),
+                      if (!widget.externalOutput)
+                        _SourceTaskOutput(
+                          controller: controller,
+                          maxHeight: constraints.maxHeight < 240
+                              ? 34
+                              : (constraints.maxHeight * .32).clamp(
+                                  85.0,
+                                  264.0,
+                                ),
+                          onOpenLocation: (path, line) {
+                            _sourceDocuments.invalidate(path);
+                            _openSource(path);
+                            unawaited(_loadSource(path, revealLine: line));
+                          },
+                        ),
+                    ],
+                  ),
+                ),
+                if (_draggingFiles || candidateData.isNotEmpty)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: Container(
+                        key: const ValueKey('source-file-drop-overlay'),
+                        decoration: BoxDecoration(
+                          color: TalColors.accent.withValues(alpha: 0.08),
+                          border: Border.all(color: TalColors.accent, width: 2),
+                        ),
+                        child: const Center(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: TalColors.surfaceAlt,
+                              borderRadius: BorderRadius.all(
+                                Radius.circular(6),
+                              ),
                             ),
-                            child: Text(
-                              '释放以打开文件',
-                              style: TextStyle(color: TalColors.text),
+                            child: Padding(
+                              padding: EdgeInsets.symmetric(
+                                horizontal: 18,
+                                vertical: 10,
+                              ),
+                              child: Text(
+                                '释放以打开文件',
+                                style: TextStyle(color: TalColors.text),
+                              ),
                             ),
                           ),
                         ),
                       ),
                     ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -1327,50 +1380,113 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
         controller.connectionStatus == ConnectionStatus.connected &&
         !controller.sourceTask.blocksProbe;
     final isRunning = state == DebugExecutionState.running;
-    return SizedBox(
-      height: TalUiTheme.of(context).targetExtent(42),
-      child: Row(
-        children: [
-          const SizedBox(width: 8),
-          _DebugToolbarButton(
-            key: const ValueKey('debug-run-control'),
-            tooltip: isRunning ? '暂停目标' : '继续运行',
-            icon: isRunning ? Icons.pause : Icons.play_arrow,
-            onPressed: !connected
-                ? null
-                : switch (state) {
-                    DebugExecutionState.running => controller.haltTarget,
-                    DebugExecutionState.halted => controller.resumeTarget,
-                    _ => null,
-                  },
-          ),
-          _DebugToolbarButton(
-            key: const ValueKey('debug-step'),
-            tooltip: '单条指令步进',
-            icon: Icons.skip_next,
-            onPressed: connected && state == DebugExecutionState.halted
-                ? controller.stepTarget
-                : null,
-          ),
-          const SizedBox(width: 8),
-          _DebugStateBadge(state: state),
-          const SizedBox(width: 12),
-          Expanded(child: _buildSourceTabs()),
-          _DebugToolbarButton(
-            key: const ValueKey('source-root-picker'),
-            tooltip: controller.debugState.sourceRoot.isEmpty
-                ? '设置工程源码根目录'
-                : '工程源码根目录：${controller.debugState.sourceRoot}',
-            icon: controller.debugState.sourceRoot.isEmpty
-                ? Icons.folder_open_outlined
-                : Icons.folder_special_outlined,
-            onPressed: controller.sourceTask.running
-                ? null
-                : controller.chooseSourceRoot,
-          ),
-          const SizedBox(width: 8),
-        ],
+    final debugControls = <Widget>[
+      const SizedBox(width: 8),
+      _DebugToolbarButton(
+        key: const ValueKey('debug-run-control'),
+        tooltip: isRunning ? '暂停目标' : '继续运行',
+        icon: isRunning ? Icons.pause : Icons.play_arrow,
+        onPressed: !connected
+            ? null
+            : switch (state) {
+                DebugExecutionState.running => controller.haltTarget,
+                DebugExecutionState.halted => controller.resumeTarget,
+                _ =>
+                  controller.isGdbMemoryMode ? controller.resumeTarget : null,
+              },
       ),
+      _DebugToolbarButton(
+        key: const ValueKey('debug-step'),
+        tooltip: '单条指令步进',
+        icon: Icons.skip_next,
+        onPressed:
+            connected &&
+                controller.supportsTargetControl &&
+                state == DebugExecutionState.halted
+            ? controller.stepTarget
+            : null,
+      ),
+      const SizedBox(width: 8),
+      _DebugStateBadge(state: state),
+      const SizedBox(width: 12),
+    ];
+    final navigationControls = <Widget>[
+      _DebugToolbarButton(
+        key: const ValueKey('source-navigation-back'),
+        tooltip: '返回上一位置 (Alt+←)',
+        icon: Icons.arrow_back,
+        onPressed: !_navigation.canGoBack
+            ? null
+            : () => _navigateHistory(back: true),
+      ),
+      _DebugToolbarButton(
+        key: const ValueKey('source-navigation-forward'),
+        tooltip: '前往下一位置 (Alt+→)',
+        icon: Icons.arrow_forward,
+        onPressed: !_navigation.canGoForward
+            ? null
+            : () => _navigateHistory(back: false),
+      ),
+    ];
+    final rootPicker = _DebugToolbarButton(
+      key: const ValueKey('source-root-picker'),
+      tooltip: controller.debugState.sourceRoot.isEmpty
+          ? '设置工程源码根目录'
+          : '工程源码根目录：${controller.debugState.sourceRoot}',
+      icon: controller.debugState.sourceRoot.isEmpty
+          ? Icons.folder_open_outlined
+          : Icons.folder_special_outlined,
+      onPressed: controller.sourceTask.running
+          ? null
+          : controller.chooseSourceRoot,
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final theme = TalUiTheme.of(context);
+        final debugHeight = theme.targetExtent(42);
+        final navigationHeight = theme.targetExtent(36);
+        if (constraints.maxWidth >= 480) {
+          return SizedBox(
+            height: debugHeight,
+            child: Row(
+              children: [
+                ...debugControls,
+                ...navigationControls,
+                Expanded(child: _buildSourceTabs()),
+                rootPicker,
+                const SizedBox(width: 8),
+              ],
+            ),
+          );
+        }
+        return SizedBox(
+          height: debugHeight + navigationHeight,
+          child: Column(
+            children: [
+              SizedBox(
+                height: debugHeight,
+                child: Row(
+                  children: [
+                    ...debugControls,
+                    const Spacer(),
+                    rootPicker,
+                    const SizedBox(width: 8),
+                  ],
+                ),
+              ),
+              SizedBox(
+                height: navigationHeight,
+                child: Row(
+                  children: [
+                    ...navigationControls,
+                    Expanded(child: _buildSourceTabs()),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -1538,7 +1654,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
                   width: 10,
                   child: controller.isSourceFileUnread(path)
                       ? Center(
-                          child: _SourceUnreadDot(
+                          child: SourceUnreadDot(
                             key: ValueKey('source-file-unread-$path'),
                           ),
                         )
@@ -1647,6 +1763,12 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
           constraints.maxWidth,
           30 + _lineNumberWidth + 14 + longest * 8.2,
         );
+        final peek = _sourcePeek;
+        final peekIndex = peek?.anchorLine.clamp(1, _lines.length);
+        _visiblePeekHeight =
+            (_sourcePeekHeight ??
+                    (constraints.maxHeight * .62).clamp(180.0, 320.0))
+                .clamp(150.0, 520.0);
         return Scrollbar(
           controller: _horizontalController,
           thumbVisibility: true,
@@ -1663,9 +1785,26 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
                 child: ListView.builder(
                   key: ValueKey('source-view-$_selectedPath'),
                   controller: _verticalController,
-                  itemExtent: _lineHeight,
-                  itemCount: _lines.length,
-                  itemBuilder: (context, index) => _buildSourceLine(index),
+                  itemExtent: peek == null ? _lineHeight : null,
+                  itemExtentBuilder: peek == null
+                      ? null
+                      : (index, _) => index == peekIndex
+                            ? _visiblePeekHeight
+                            : _lineHeight,
+                  itemCount: _lines.length + (peek == null ? 0 : 1),
+                  itemBuilder: (context, index) {
+                    if (peek != null && index == peekIndex) {
+                      return _buildSourcePeek(
+                        constraints.maxWidth,
+                        contentWidth,
+                      );
+                    }
+                    return _buildSourceLine(
+                      peekIndex != null && index > peekIndex
+                          ? index - 1
+                          : index,
+                    );
+                  },
                 ),
               ),
             ),
@@ -1688,7 +1827,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
     final isSearchResult = _revealedSearchLine == lineNumber;
     return ColoredBox(
       color: isCurrent
-          ? const Color(0x333B82F6)
+          ? TalColors.selection
           : isSearchResult
           ? TalColors.amber.withValues(alpha: 0.16)
           : Colors.transparent,
@@ -1701,7 +1840,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
                   ? const Icon(
                       Icons.arrow_right,
                       size: 18,
-                      color: Color(0xFF65A7FF),
+                      color: TalColors.accent,
                     )
                   : const SizedBox.shrink(),
             ),
@@ -1716,7 +1855,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
               width: _lineNumberWidth,
               height: _lineHeight,
               color: canSetBreakpoint
-                  ? const Color(0xFF353236)
+                  ? TalColors.surfaceAlt
                   : Colors.transparent,
               child: Row(
                 children: [
@@ -1734,7 +1873,7 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
                                 Icons.circle,
                                 size: 11,
                                 color: breakpoint?.verified == true
-                                    ? const Color(0xFFE25858)
+                                    ? TalColors.error
                                     : TalColors.amber,
                               ),
                             )
@@ -1749,8 +1888,8 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
                         textAlign: TextAlign.right,
                         style: TextStyle(
                           color: canSetBreakpoint
-                              ? const Color(0xFFC8C4C9)
-                              : const Color(0xFF625E63),
+                              ? TalColors.muted
+                              : TalColors.disabled,
                           fontSize: 12,
                           height: 1.45,
                           fontFamily: talFontFamily,
@@ -1765,35 +1904,64 @@ class _SourceDebugPanelState extends State<_SourceDebugPanel> {
           ),
           const SizedBox(width: 14),
           Expanded(
-            child: GestureDetector(
-              key: ValueKey('source-line-$lineNumber'),
-              behavior: HitTestBehavior.opaque,
-              onDoubleTapDown: (details) =>
-                  _selectSourceToken(path, index, details.localPosition),
-              onHorizontalDragStart: (details) =>
-                  _selectSourceToken(path, index, details.localPosition),
-              onHorizontalDragUpdate: (details) =>
-                  _selectSourceToken(path, index, details.localPosition),
-              onSecondaryTapUp: (details) => unawaited(
-                _showSourceContextMenu(
-                  context,
-                  path,
-                  index,
-                  details.globalPosition,
-                  details.localPosition,
-                ),
-              ),
-              child: Text.rich(
-                TextSpan(children: _spansForSourceLine(path, index)),
-                maxLines: 1,
-                softWrap: false,
-                overflow: TextOverflow.visible,
-                style: const TextStyle(
-                  color: TalColors.text,
-                  fontSize: 13,
-                  height: 1.45,
-                  fontFamily: talFontFamily,
-                  fontFamilyFallback: talFontFamilyFallback,
+            child: MouseRegion(
+              key: ValueKey('source-mouse-line-$lineNumber'),
+              cursor:
+                  _navigationModifierPressed &&
+                      _hoveredTokenCanNavigate &&
+                      _hoveredToken?.lineIndex == index
+                  ? SystemMouseCursors.click
+                  : SystemMouseCursors.text,
+              onEnter: (event) =>
+                  _hoverSourceToken(path, index, event.localPosition),
+              onHover: (event) =>
+                  _hoverSourceToken(path, index, event.localPosition),
+              onExit: (_) => _exitSourceToken(path, index),
+              child: Listener(
+                onPointerDown: (event) {
+                  if (event.buttons != kPrimaryMouseButton) return;
+                  final keyboard = HardwareKeyboard.instance;
+                  _sourceTapWithModifier =
+                      keyboard.isControlPressed || keyboard.isMetaPressed;
+                  _selectSourceToken(path, index, event.localPosition);
+                },
+                child: GestureDetector(
+                  key: ValueKey('source-line-$lineNumber'),
+                  behavior: HitTestBehavior.opaque,
+                  onTapUp: (_) {
+                    final selection = _selectedSourceToken;
+                    if (_sourceTapWithModifier && selection != null) {
+                      unawaited(_goToDefinition(selection));
+                    }
+                  },
+                  onDoubleTapDown: (details) =>
+                      _selectSourceToken(path, index, details.localPosition),
+                  onHorizontalDragStart: (details) =>
+                      _selectSourceToken(path, index, details.localPosition),
+                  onHorizontalDragUpdate: (details) =>
+                      _selectSourceToken(path, index, details.localPosition),
+                  onSecondaryTapUp: (details) => unawaited(
+                    _showSourceContextMenu(
+                      context,
+                      path,
+                      index,
+                      details.globalPosition,
+                      details.localPosition,
+                    ),
+                  ),
+                  child: Text.rich(
+                    TextSpan(children: _spansForSourceLine(path, index)),
+                    maxLines: 1,
+                    softWrap: false,
+                    overflow: TextOverflow.visible,
+                    style: const TextStyle(
+                      color: TalColors.text,
+                      fontSize: 13,
+                      height: 1.45,
+                      fontFamily: talFontFamily,
+                      fontFamilyFallback: talFontFamilyFallback,
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -1962,26 +2130,6 @@ class _SourceTokenSelection {
   final int start;
   final int end;
   final String token;
-}
-
-class _SourceSearchResult {
-  const _SourceSearchResult({
-    required this.path,
-    required this.line,
-    required this.column,
-    required this.preview,
-  });
-
-  const _SourceSearchResult.file({required this.path, required this.preview})
-    : line = null,
-      column = null;
-
-  final String path;
-  final int? line;
-  final int? column;
-  final String preview;
-
-  bool get isFile => line == null;
 }
 
 String _pathKey(String path) => path.replaceAll('\\', '/').toLowerCase();

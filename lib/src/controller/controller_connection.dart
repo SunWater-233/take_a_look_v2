@@ -1,6 +1,13 @@
 part of 'controller.dart';
 
 extension TakeALookControllerConnection on TakeALookController {
+  void setMonitorRate(double value) {
+    if (!value.isFinite || value < 0.5 || value > 10) return;
+    if (_dispatchCommand(ControllerCommand.setMonitorRate, value)) return;
+    monitorRateHz = value;
+    _emitState([signals.sampling]);
+  }
+
   void setUiScale(double value) {
     if (_dispatchRemote(ControllerCommand.setUiScale, value)) return;
     final normalized = value.clamp(0.5, 2).toDouble();
@@ -60,6 +67,7 @@ extension TakeALookControllerConnection on TakeALookController {
   }
 
   Future<void> toggleConnection() async {
+    if (_restoringProject) return;
     if (_dispatchCommand(ControllerCommand.toggleConnection)) return;
     if (connectionStatus == ConnectionStatus.connected) {
       connectionStatus = ConnectionStatus.disconnected;
@@ -77,6 +85,7 @@ extension TakeALookControllerConnection on TakeALookController {
     await Future<void>.delayed(const Duration(milliseconds: 650));
     if (_disposed) return;
     connectionStatus = ConnectionStatus.connected;
+    samplingPaused = true;
     _reconcileSamplingClock();
     _resetPlotRefreshSchedule();
     _appendLog('已连接 pyOCD：target=$targetName，SWD=$swdClock。');
@@ -105,7 +114,7 @@ extension TakeALookControllerConnection on TakeALookController {
             current.type != replacement.type ||
             current.size != replacement.size ||
             current.section != replacement.section ||
-            current.backendKey != replacement.backendKey ||
+            current.key != replacement.key ||
             current.writable != replacement.writable ||
             current.dataSource != replacement.dataSource) {
           unchanged = false;
@@ -114,6 +123,20 @@ extension TakeALookControllerConnection on TakeALookController {
       }
       if (unchanged) return;
     }
+    final removedNames = {
+      for (final symbol in _symbols)
+        if (_removedWatchKeys.contains(symbol.key))
+          (symbol.source, symbol.name),
+    };
+    // An undo entry belongs to one symbol table/recording, never a new binary.
+    _clearWatchDeletionHistory();
+    _removedWatchKeys.addAll(
+      next
+          .where(
+            (symbol) => removedNames.contains((symbol.source, symbol.name)),
+          )
+          .map((symbol) => symbol.key),
+    );
     _symbols
       ..clear()
       ..addAll(next);
@@ -295,6 +318,10 @@ extension TakeALookControllerConnection on TakeALookController {
   void setTargetName(String value) {
     if (_dispatchCommand(ControllerCommand.setTargetName, value)) return;
     targetName = value;
+    state.connection.targetPackId = '';
+    state.connection.targetPartNumber = value;
+    state.connection.targetPackLabel = '内置';
+    state.connection.targetPackMissing = false;
     _emitState([signals.connection]);
   }
 
@@ -322,8 +349,24 @@ extension TakeALookControllerConnection on TakeALookController {
   void setRemoteConfig(Map<String, String> values) {
     if (connectionStatus != ConnectionStatus.disconnected) return;
     if (_dispatchCommand(ControllerCommand.setRemoteConfig, values)) return;
+    state.connection.advertisedCapabilities = null;
     remoteConfig.addAll(values);
-    _emitState([signals.connection]);
+    _emitState([signals.connection, signals.watches, signals.debug]);
+  }
+
+  Future<JsonObject> requestEmber(
+    String operation, [
+    JsonObject arguments = const {},
+  ]) async {
+    final request = emberRequest;
+    if (request == null) {
+      throw const BackendException('backend_unavailable', '请启动本机硬件后端后再配对手机。');
+    }
+    if (const {'pair', 'forget'}.contains(operation) &&
+        connectionStatus != ConnectionStatus.disconnected) {
+      throw const BackendException('already_connected', '请先断开目标连接，再管理手机配对。');
+    }
+    return request(operation, arguments);
   }
 
   void toggleSampling() {

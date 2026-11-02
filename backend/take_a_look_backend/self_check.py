@@ -17,6 +17,9 @@ def run() -> int:
         "aioquic._crypto", "aioquic._buffer",
         "take_a_look_backend.backends.remote_backend",
         "take_a_look_backend.backends.ember_v2",
+        "take_a_look_backend.backends.ember_pairing", "zeroconf",
+        "take_a_look_backend.backends.remote_firmware",
+        "take_a_look_backend.backends.gdb_rsp",
     ]
     # Linux CMSIS-DAP v1 uses PyUSB; hidapi is a Windows/macOS dependency.
     if sys.platform in ("win32", "darwin"):
@@ -44,8 +47,10 @@ def run() -> int:
         errors.append(f"libusb: {error}")
 
     try:
+        import pyocd
         from pyocd.probe.aggregator import PROBE_CLASSES
 
+        checks["pyocd_version"] = pyocd.__version__
         checks["probe_plugins"] = sorted(PROBE_CLASSES)
         checks["jlink_runtime"] = "available" if "jlink" in PROBE_CLASSES else "optional; install SEGGER J-Link separately"
         missing = {"cmsisdap", "stlink"} - PROBE_CLASSES.keys()
@@ -63,7 +68,7 @@ def run() -> int:
         output = io.BytesIO()
         requests = '\n'.join(
             json.dumps({"v": 2, "id": index, "method": method, "params": {}})
-            for index, method in enumerate(("handshake", "shutdown"), 1)
+            for index, method in enumerate(("handshake", "listTargets", "shutdown"), 1)
         ) + '\n'
         StdioServer(io.StringIO(requests), output).run()
         responses = {
@@ -73,9 +78,28 @@ def run() -> int:
         }
         if responses[1]["result"]["protocolVersion"] != 2:
             raise RuntimeError("Unexpected protocol version")
-        if responses[2]["result"]["state"]["connectionStatus"] != "disconnected":
+        if "memoryWriteBatch" not in responses[1]["result"]["capabilities"]:
+            raise RuntimeError("Batch memory-write support is missing")
+        if len(responses[2]["result"]["targets"]) < 100:
+            raise RuntimeError("Builtin target catalogue is missing")
+        if responses[3]["result"]["state"]["connectionStatus"] != "disconnected":
             raise RuntimeError("Backend shutdown failed")
         checks["rpc"] = "ok"
+        checks["target_catalog"] = "ok"
+        targets = responses[2]["result"]["targets"]
+        prefixes = ("stm32f103", "stm32f407", "stm32h723")
+        bundled_packs = [p for p in responses[2]["result"]["packs"] if p.get("bundled")]
+        if sys.frozen or bundled_packs:
+            for prefix in prefixes:
+                if not any(t["packId"] and t["available"] and t["name"].startswith(prefix) for t in targets):
+                    raise RuntimeError(f"Bundled chip support missing: {prefix}")
+            from take_a_look_backend.services.target_catalog import default_bundled_pack_directory
+            import hashlib
+            for pack in bundled_packs:
+                with (default_bundled_pack_directory() / f"{pack['id']}.pack").open("rb") as stream:
+                    if hashlib.file_digest(stream, "sha256").hexdigest() != pack["id"]:
+                        raise RuntimeError(f"Bundled pack hash mismatch: {pack['name']}")
+            checks["bundled_target_prefixes"] = list(prefixes)
     except Exception as error:
         errors.append(f"rpc: {error}")
 

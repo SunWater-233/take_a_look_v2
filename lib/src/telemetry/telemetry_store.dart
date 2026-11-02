@@ -33,6 +33,7 @@ class TelemetryStore {
     for (final watch in watches) {
       watch.samples.clear();
       watch.totalSampleCount = 0;
+      watch.historyStartSeconds = 0;
     }
   }
 
@@ -46,6 +47,15 @@ class TelemetryStore {
       configureWatch(watch);
     }
     var elapsedSeconds = currentElapsed;
+    final receivedAtMs = DateTime.now().millisecondsSinceEpoch;
+    final stamp = (payload['updatedAtMs'] as num?)?.toInt();
+    final freshKeys = {
+      for (final watch in watchesByKey.values)
+        if (stamp == null ||
+            watch.updatedAtMs == null ||
+            stamp > watch.updatedAtMs!)
+          watch.symbol.key,
+    };
     for (final rawFrame in payload['frames'] as List? ?? const []) {
       if (rawFrame is! Map) continue;
       final frame = Map<String, dynamic>.from(rawFrame);
@@ -55,10 +65,14 @@ class TelemetryStore {
       elapsedSeconds = math.max(elapsedSeconds, elapsed);
       for (final entry in rawValues.entries) {
         final watch = watchesByKey[entry.key];
-        if (watch == null) continue;
-        watch.value = numericValue(entry.value, fallback: watch.value);
-        if (watch.samplingEnabled) {
-          watch.samples.addXY(elapsed, watch.value);
+        if (watch == null || elapsed < watch.historyStartSeconds) continue;
+        final value = numericValue(entry.value, fallback: watch.value);
+        if (freshKeys.contains(watch.symbol.key)) {
+          watch.value = value;
+          watch.updatedAtMs = stamp ?? receivedAtMs;
+        }
+        if (payload['captureOnly'] == true || watch.samplingEnabled) {
+          watch.samples.addXY(elapsed, value);
           watch.totalSampleCount++;
         }
       }
@@ -85,15 +99,27 @@ class TelemetryStore {
       if (watch == null) continue;
       var recorded = 0;
       var latest = watch.value;
+      var received = false;
       for (var frame = 0; frame < batch.frameCount; frame++) {
-        if (!batch.hasValue(frame, variable)) continue;
+        if (!batch.hasValue(frame, variable) ||
+            batch.elapsedSeconds[frame] < watch.historyStartSeconds) {
+          continue;
+        }
+        received = true;
         latest = batch.valueAt(frame, variable);
-        if (watch.samplingEnabled) {
+        if (batch.captureOnly || watch.samplingEnabled) {
           watch.samples.addXY(batch.elapsedSeconds[frame], latest);
           recorded++;
         }
       }
-      watch.value = latest;
+      if (received &&
+          (batch.updatedAtMs == null ||
+              watch.updatedAtMs == null ||
+              batch.updatedAtMs! > watch.updatedAtMs!)) {
+        watch.value = latest;
+        watch.updatedAtMs =
+            batch.updatedAtMs ?? DateTime.now().millisecondsSinceEpoch;
+      }
       watch.totalSampleCount += recorded;
     }
     return elapsedSeconds;

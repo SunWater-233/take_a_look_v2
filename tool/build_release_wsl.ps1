@@ -33,6 +33,9 @@ try {
   if ($Distribution) {
     $wslArguments += @('--distribution', $Distribution)
   }
+  # The isolated Debian build uses mount namespaces/chroot. Select the WSL
+  # account explicitly; the distro's default account is normally unprivileged.
+  if (-not $Native) { $wslArguments += @('--user', 'root') }
   # Pass arguments directly; never interpolate paths into a shell command.
   $wslArguments += @('--cd', $projectDirectory, '--exec', 'bash', 'tool/build_release_wsl.sh')
   if ($Check) { $wslArguments += '--check' }

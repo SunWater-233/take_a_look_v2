@@ -1,7 +1,15 @@
-part of 'panels.dart';
+import 'package:flutter/material.dart';
 
-class _ConnectionPanel extends StatelessWidget {
-  const _ConnectionPanel({required this.controller});
+import '../controller/controller.dart';
+import '../models/models.dart';
+import '../theme/theme.dart';
+import 'target_chip_dialog.dart';
+import 'ember_pairing_dialog.dart';
+
+import 'shared_controls.dart';
+
+class ConnectionPanel extends StatelessWidget {
+  const ConnectionPanel({super.key, required this.controller});
 
   final TakeALookController controller;
 
@@ -13,7 +21,7 @@ class _ConnectionPanel extends StatelessWidget {
         padding: const EdgeInsets.all(12),
         child: Column(
           children: [
-            _LabeledField(
+            LabeledField(
               label: '连接方式',
               child: IgnorePointer(
                 ignoring:
@@ -25,7 +33,7 @@ class _ConnectionPanel extends StatelessWidget {
                   values: const ['local', 'ember', 'emberGdb', 'gdb'],
                   label: (value) => const {
                     'local': '本地 USB / pyOCD',
-                    'ember': 'EmberMobile 私有协议',
+                    'ember': 'EmberMobile',
                     'emberGdb': 'EmberMobile + GDB',
                     'gdb': '远程 GDB',
                   }[value]!,
@@ -35,7 +43,7 @@ class _ConnectionPanel extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             if (controller.connectionKind == 'local') ...[
-              _LabeledField(
+              LabeledField(
                 label: '探针',
                 child: TalDropdown<String>(
                   value: controller.probeType,
@@ -45,22 +53,47 @@ class _ConnectionPanel extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 10),
-              _LabeledField(
+              LabeledField(
                 label: '目标芯片',
-                child: TalDropdown<String>(
-                  value: controller.targetName,
-                  values: const [
-                    'auto',
-                    'stm32f407vg',
-                    'stm32g431rb',
-                    'nrf52840',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    TalButton(
+                      key: const ValueKey('target-chip-selector'),
+                      onPressed: () =>
+                          showTargetChipDialog(context, controller),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              controller.targetName == 'auto'
+                                  ? '自动选择 / 通用 Cortex-M'
+                                  : controller.targetPartNumber,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          const Icon(Icons.search, size: 16),
+                        ],
+                      ),
+                    ),
+                    if (controller.targetPackMissing)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 4),
+                        child: Text(
+                          '芯片包缺失，请重新导入。',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: TalColors.warning,
+                          ),
+                        ),
+                      ),
                   ],
-                  label: (value) => value,
-                  onChanged: controller.setTargetName,
                 ),
               ),
               const SizedBox(height: 10),
-              _LabeledField(
+              LabeledField(
                 label: 'SWD 时钟',
                 child: TalDropdown<String>(
                   value: controller.swdClock,
@@ -79,7 +112,7 @@ class _ConnectionPanel extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 10),
-              _LabeledField(
+              LabeledField(
                 label: '序列号',
                 child: _SerialNumberField(controller: controller),
               ),
@@ -107,7 +140,7 @@ class _RemoteConnectionFields extends StatelessWidget {
       bool secret = false,
     }) => Padding(
       padding: const EdgeInsets.only(bottom: 10),
-      child: _LabeledField(
+      child: LabeledField(
         label: label,
         child: _RemoteConnectionField(
           key: ValueKey('remote-$name'),
@@ -121,12 +154,39 @@ class _RemoteConnectionFields extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (ember) ...[
+          SizedBox(
+            width: double.infinity,
+            child: TalButton(
+              key: const ValueKey('ember-pairing'),
+              onPressed:
+                  controller.connectionStatus == ConnectionStatus.disconnected
+                  ? () => showEmberPairingDialog(context, controller)
+                  : null,
+              child: const Row(
+                children: [
+                  Icon(Icons.phonelink_ring_outlined, size: 17),
+                  SizedBox(width: 8),
+                  Text('配对 / 管理手机'),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            (controller.remoteConfig['deviceId'] ?? '').isNotEmpty
+                ? '已选择配对手机，留空令牌即可自动连接。'
+                : '首次配对时核对两端校验码，在手机同意后即可记住设备。',
+            style: talBody,
+          ),
+          const SizedBox(height: 12),
+        ],
         field('host', '远程地址', '手机 IP 或主机名'),
         if (ember) ...[
           field('gatewayPort', '网关端口', '4242'),
-          field('token', '访问令牌', '手机显示的本次访问令牌', secret: true),
+          field('token', '访问令牌', '已配对可留空；或粘贴手机本次令牌', secret: true),
           field('core', '核心编号', '0'),
-          _LabeledField(
+          LabeledField(
             label: 'RTT 传输',
             child: IgnorePointer(
               ignoring:
@@ -151,13 +211,34 @@ class _RemoteConnectionFields extends StatelessWidget {
         ],
         if (gdb) ...[
           field('gdbPort', 'GDB 端口', '3333'),
-          field('gdbPath', 'GDB 程序', '留空从 PATH 查找，或填写完整路径'),
+          if (!ember) ...[
+            LabeledField(
+              label: '使用方式',
+              child: IgnorePointer(
+                ignoring:
+                    controller.connectionStatus !=
+                    ConnectionStatus.disconnected,
+                child: TalDropdown<String>(
+                  value: controller.remoteConfig['gdbMode'] ?? 'debug',
+                  values: const ['debug', 'memory'],
+                  label: (value) => value == 'memory' ? '高速内存采样（只读）' : '断点调试',
+                  onChanged: (value) =>
+                      controller.setRemoteConfig({'gdbMode': value}),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
+          if (!controller.isGdbMemoryMode)
+            field('gdbPath', 'GDB 程序', '留空从 PATH 查找，或填写完整路径'),
         ],
         Text(
           ember
-              ? '先在手机授权探针、连接目标并启动网关。v2 使用 UDP 4243；访问令牌包含证书指纹。实时优先会跳过旧样本，RTT-Plus 始终可靠传输。'
+              ? '配对后，先在手机授权探针、连接目标，再连接工作台。实时优先会跳过旧样本，RTT-Plus 始终可靠传输。'
                     '${gdb ? '此模式会连接或启动手机 GDB，连接后目标将暂停；运行时采样请使用 RTT。' : '支持内存读取和 RTT；写变量请切换到 GDB 模式。'}'
-              : '连接已有 GDB Server。请选择适合目标架构的 GDB；此模式不提供运行态内存采样或 RTT。',
+              : controller.isGdbMemoryMode
+              ? '使用标准 GDB 协议直接读取，不需要 GDB 程序。目标需支持运行中读内存。服务端可能在连接时暂停目标，可在调试工具栏点击继续运行；此模式不提供写入、单步、复位、断点或 RTT。'
+              : '连接已有 GDB Server。请选择适合目标架构的 GDB；断点调试模式需暂停目标后读取内存。',
           style: talBody,
         ),
       ],
@@ -211,8 +292,10 @@ class _RemoteConnectionFieldState extends State<_RemoteConnectionField> {
     obscureText: widget.secret,
     autocorrect: false,
     enableSuggestions: false,
-    onChanged: (value) =>
-        widget.controller.setRemoteConfig({widget.name: value}),
+    onChanged: (value) => widget.controller.setRemoteConfig({
+      widget.name: value,
+      if (const {'host', 'gatewayPort'}.contains(widget.name)) 'deviceId': '',
+    }),
     style: talBody,
     decoration: InputDecoration(hintText: widget.hint),
   );

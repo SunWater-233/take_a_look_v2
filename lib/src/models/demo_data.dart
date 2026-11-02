@@ -1,17 +1,7 @@
-import 'package:flutter/material.dart';
-
 import 'models.dart';
 import '../theme/theme.dart';
 
-const seriesColors = <Color>[
-  TalColors.accent,
-  TalColors.success,
-  TalColors.blue,
-  TalColors.amber,
-  Color(0xFFC026D3),
-  Color(0xFF0891B2),
-  Color(0xFFDB2777),
-];
+const seriesColors = TalChartColors.series;
 
 const demoSymbols = <SymbolItem>[
   SymbolItem(

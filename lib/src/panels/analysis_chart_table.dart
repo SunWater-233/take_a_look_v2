@@ -1,4 +1,4 @@
-part of 'panels.dart';
+part of 'analysis_chart_panel.dart';
 
 class _AnalysisStatsHeaderCell extends StatefulWidget {
   const _AnalysisStatsHeaderCell({
@@ -19,14 +19,14 @@ class _AnalysisStatsHeaderCell extends StatefulWidget {
   final String label;
   final double width;
   final int columnIndex;
-  final _ColumnResizeCallback onResize;
+  final ColumnResizeCallback onResize;
   final bool selected;
   final ValueChanged<int> onSelect;
   final String hideLabel;
   final bool canHide;
   final VoidCallback onHide;
   final VoidCallback onShowAll;
-  final ValueChanged<_ContextMenuRequest> onTouchContextMenu;
+  final ValueChanged<TableContextMenuRequest> onTouchContextMenu;
 
   @override
   State<_AnalysisStatsHeaderCell> createState() =>
@@ -59,7 +59,7 @@ class _AnalysisStatsHeaderCellState extends State<_AnalysisStatsHeaderCell> {
     _menuAnimationLease = null;
   }
 
-  void _handleContextMenu(_ContextMenuRequest request) {
+  void _handleContextMenu(TableContextMenuRequest request) {
     if (request.touchOptimized) {
       if (_menuController.isOpen) _menuController.close();
       widget.onTouchContextMenu(request);
@@ -90,7 +90,7 @@ class _AnalysisStatsHeaderCellState extends State<_AnalysisStatsHeaderCell> {
           child: const Text('显示全列'),
         ),
       ],
-      child: _ResizableTableHeaderCell(
+      child: ResizableTableHeaderCell(
         label: widget.label,
         width: widget.width,
         columnIndex: widget.columnIndex,
@@ -125,7 +125,7 @@ class _AnalysisStatsCell extends StatefulWidget {
   final VoidCallback onCopy;
   final VoidCallback onOnly;
   final VoidCallback onAll;
-  final ValueChanged<_ContextMenuRequest> onTouchContextMenu;
+  final ValueChanged<TableContextMenuRequest> onTouchContextMenu;
   final Widget child;
 
   @override
@@ -192,7 +192,7 @@ class _AnalysisStatsCellState extends State<_AnalysisStatsCell> {
           if (_menuController.isOpen) _menuController.close();
           final box = context.findRenderObject()! as RenderBox;
           widget.onTouchContextMenu(
-            _ContextMenuRequest(
+            TableContextMenuRequest(
               globalPosition: box.localToGlobal(box.size.center(Offset.zero)),
               touchOptimized: true,
             ),

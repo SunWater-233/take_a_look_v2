@@ -117,6 +117,9 @@ void main() {
       ),
     );
     await pumpWorkbench(tester);
+    await waitForLog(tester, '已启用横向工作台');
+    expect(workspace(tester).usesWorkbenchLayout, isTrue);
+    await tester.runAsync(workspace(tester).restoreLayout);
     await waitForLog(tester, '已恢复保存的工作区布局');
     await tester.tap(find.byKey(const ValueKey('panel-tab-analysis')));
     await tester.pump();
@@ -206,11 +209,8 @@ void main() {
     pendingFile.existsResult.complete(false);
     await tester.pumpAndSettle();
 
-    expect(find.byType(TalPanelFrame), findsNWidgets(4));
-    expect(
-      workspace(tester).isPanelVisible(WorkspacePanelId.analysis),
-      isFalse,
-    );
+    expect(find.byType(TalPanelFrame), findsNWidgets(3));
+    expect(workspace(tester).isPanelVisible(WorkspacePanelId.analysis), isTrue);
     expect(controller.logs, hasLength(initialLogCount));
     await workspace(tester).restoreLayout();
     expect(controller.logs.last.message, '尚未保存过工作区布局。');
@@ -225,7 +225,7 @@ void main() {
     await pumpWorkbench(tester);
     await waitForLog(tester, '恢复布局失败：');
 
-    expect(find.byType(TalPanelFrame), findsNWidgets(4));
+    expect(find.byType(TalPanelFrame), findsNWidgets(3));
     expect(workspace(tester).isPanelVisible(WorkspacePanelId.plot), isTrue);
     expect(controller.uiScale, 1);
     expect(layoutFile.readAsStringSync(), '{invalid layout');
@@ -237,7 +237,7 @@ void main() {
     await tester.runAsync(
       () => WorkspaceLayoutRepository(
         layoutFile,
-      ).save(const WorkspaceLayoutSnapshot(groups: [], uiScale: 1)),
+      ).save(const WorkspaceLayoutSnapshot(groups: [], uiScale: 1, version: 2)),
     );
     await pumpWorkbench(tester);
     await waitForLog(tester, '已恢复保存的工作区布局');

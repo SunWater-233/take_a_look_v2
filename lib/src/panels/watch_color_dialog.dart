@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import 'package:flutter/services.dart';
 
-import '../models/demo_data.dart';
 import '../theme/theme.dart';
 
 class WatchColorDialog extends StatefulWidget {
@@ -15,14 +14,7 @@ class WatchColorDialog extends StatefulWidget {
 }
 
 class WatchColorDialogState extends State<WatchColorDialog> {
-  static const _presets = <Color>[
-    ...seriesColors,
-    Color(0xFFE25858),
-    Color(0xFF22C55E),
-    Color(0xFF06B6D4),
-    Color(0xFFEAB308),
-    Color(0xFFF8FAFC),
-  ];
+  static const _presets = TalChartColors.presets;
 
   late HSVColor _hsv;
   late final TextEditingController _hexController;

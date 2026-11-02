@@ -14,6 +14,13 @@ export '../app/file_pickers.dart';
 typedef BackendEventHandler =
     void Function(BackendEventType event, Object? params);
 
+class _QueuedWatchWrite {
+  _QueuedWatchWrite(this.params);
+
+  final Map<String, Object?> params;
+  final completion = Completer<void>();
+}
+
 class BackendException implements Exception {
   const BackendException(this.code, this.message, [this.details]);
 
@@ -42,11 +49,16 @@ class BackendClient {
   final Duration symbolLoadTimeout;
   final Future<Process> Function()? processStarter;
   Process? _process;
+  Future<void>? _starting;
   StreamSubscription<List<int>>? _stdoutSubscription;
   StreamSubscription<String>? _stderrSubscription;
   BackendStreamDecoder? _streamDecoder;
+  Future<void> _writeTail = Future<void>.value();
   final Map<int, Completer<Map<String, dynamic>>> _pending = {};
+  final List<_QueuedWatchWrite> _watchWrites = [];
+  bool _supportsBatchWrites = false;
   final Map<int, List<String>> _sampleSchemas = {};
+  final Set<int> _captureOnlySchemas = {};
   Map<String, dynamic> _state = {};
   int _nextRequestId = 1;
   int? _lastSampleSequence;
@@ -55,8 +67,33 @@ class BackendClient {
 
   bool get isRunning => _process != null;
 
-  Future<void> start() async {
-    if (_process != null) return;
+  Future<JsonObject> emberRequest(String operation, JsonObject arguments) =>
+      request(BackendMethod.ember, {...arguments, 'operation': operation});
+
+  Future<Map<String, Object?>> targetCatalogRequest(
+    String operation,
+    Map<String, Object?> arguments,
+  ) {
+    final method = switch (operation) {
+      'listTargets' => BackendMethod.listTargets,
+      'onlineTargetPacks' => BackendMethod.onlineTargetPacks,
+      'inspectTargetPack' => BackendMethod.inspectTargetPack,
+      'importTargetPack' => BackendMethod.importTargetPack,
+      'discardTargetPackPreview' => BackendMethod.discardTargetPackPreview,
+      'removeTargetPack' => BackendMethod.removeTargetPack,
+      'selectTarget' => BackendMethod.selectTarget,
+      _ => throw ArgumentError.value(operation, 'operation'),
+    };
+    return request(method, arguments);
+  }
+
+  Future<void> start() {
+    if (_starting case final starting?) return starting;
+    if (_process != null) return Future<void>.value();
+    return _starting = _start().whenComplete(() => _starting = null);
+  }
+
+  Future<void> _start() async {
     _closed = false;
     try {
       final backendDirectory = _findBackendDirectory();
@@ -71,6 +108,7 @@ class BackendClient {
                   ...Platform.environment,
                   'PYTHONPATH': backendDirectory.path,
                   'PYTHONUTF8': '1',
+                  'TAL_PARENT_PID': '$pid',
                   'TAL_HOST_PYTHONPATH':
                       Platform.environment['PYTHONPATH'] ?? '',
                   'TAL_HOST_PYTHONUTF8':
@@ -81,6 +119,7 @@ class BackendClient {
                 runInShell: launch.runInShell,
               ));
       _process = process;
+      _writeTail = Future<void>.value();
       _streamDecoder = BackendStreamDecoder(
         onJsonLine: _handleLine,
         onSamplePayload: _handleSamplePayload,
@@ -103,6 +142,9 @@ class BackendClient {
           });
       unawaited(process.exitCode.then(_handleExit));
       final handshake = await request(BackendMethod.handshake);
+      _supportsBatchWrites =
+          (handshake['capabilities'] as List?)?.contains('memoryWriteBatch') ==
+          true;
       final state = _map(handshake['state']);
       if (state != null) {
         _state = state;
@@ -124,16 +166,26 @@ class BackendClient {
 
   Future<void> command(ControllerCommand command, Object? arguments) async {
     try {
+      if (_starting case final starting?) await starting;
       final call = BackendCommandMapper.translate(command, arguments, _state);
       if (call == null) return;
-      await request(call.method, call.params);
+      if (command == ControllerCommand.writeWatch && _supportsBatchWrites) {
+        final write = _QueuedWatchWrite(Map.of(call.params));
+        _watchWrites.add(write);
+        if (_watchWrites.length == 1) scheduleMicrotask(_flushWatchWrites);
+        await write.completion.future;
+      } else {
+        await request(call.method, call.params);
+      }
     } catch (error) {
-      // Loading owns its lifecycle in the controller, including error feedback.
+      // These operations await completion and own error feedback in the controller.
       if (const {
         ControllerCommand.loadSymbols,
+        ControllerCommand.configureProject,
         ControllerCommand.setSourceProject,
         ControllerCommand.startSourceTask,
         ControllerCommand.cancelSourceTask,
+        ControllerCommand.writeWatch,
       }.contains(command)) {
         rethrow;
       }
@@ -153,10 +205,75 @@ class BackendClient {
     }
   }
 
+  /// Project restoration awaits each operation and reports any failure once.
+  Future<void> projectCommand(
+    ControllerCommand command,
+    Object? arguments,
+  ) async {
+    if (_starting case final starting?) await starting;
+    final call = BackendCommandMapper.translate(command, arguments, _state);
+    if (call == null) throw StateError('Unsupported project command: $command');
+    await request(call.method, call.params);
+  }
+
   Future<Map<String, dynamic>> request(
     BackendMethod method, [
     Map<String, Object?> params = const {},
-  ]) async {
+  ]) {
+    // Flush synchronously into the existing stdin queue so a following pause,
+    // reset or configuration command cannot overtake an explicit write.
+    _flushWatchWrites();
+    return _request(method, params);
+  }
+
+  void _flushWatchWrites() {
+    if (_watchWrites.isEmpty) return;
+    final writes = List<_QueuedWatchWrite>.of(_watchWrites);
+    _watchWrites.clear();
+    var start = 0;
+    while (start < writes.length) {
+      final keys = <Object?>{};
+      var end = start;
+      while (end < writes.length &&
+          end - start < 64 &&
+          keys.add(writes[end].params['key'])) {
+        end++;
+      }
+      final group = writes.sublist(start, end);
+      final method = group.length == 1
+          ? BackendMethod.writeWatch
+          : BackendMethod.writeWatches;
+      final params = group.length == 1
+          ? group.single.params
+          : <String, Object?>{
+              'writes': [for (final write in group) write.params],
+            };
+      unawaited(
+        _request(method, params).then<void>(
+          (_) {
+            for (final write in group) {
+              write.completion.complete();
+            }
+          },
+          onError: (Object error, StackTrace stack) {
+            for (final write in group) {
+              write.completion.completeError(error, stack);
+            }
+          },
+        ),
+      );
+      start = end;
+    }
+  }
+
+  Future<Map<String, dynamic>> _request(
+    BackendMethod method,
+    Map<String, Object?> params,
+  ) async {
+    // Handshake establishes readiness; shutdown must also work during startup.
+    if (method != BackendMethod.handshake && method != BackendMethod.shutdown) {
+      if (_starting case final starting?) await starting;
+    }
     final process = _process;
     if (process == null) {
       throw const BackendException('not_running', '本机硬件后端尚未启动。');
@@ -170,13 +287,24 @@ class BackendClient {
       final response = completer.future.timeout(
         method == BackendMethod.loadSymbols
             ? symbolLoadTimeout
+            : const {
+                BackendMethod.listTargets,
+                BackendMethod.inspectTargetPack,
+                BackendMethod.importTargetPack,
+              }.contains(method)
+            ? const Duration(minutes: 5)
             : commandTimeout,
         onTimeout: () =>
             throw BackendException('timeout', '后端命令超时：${method.wireName}'),
       );
-      final results = await Future.wait<dynamic>([
-        response,
-        Future<void>.sync(() async {
+      // IOSink cannot accept another write while flush() is binding its
+      // stream. Serialize writes only; responses may complete independently.
+      _writeTail = _writeTail.then((_) async {
+        if (!identical(_process, process) ||
+            !identical(_pending[requestId], completer)) {
+          return;
+        }
+        try {
           process.stdin.writeln(
             jsonEncode({
               'v': protocolVersion,
@@ -186,9 +314,13 @@ class BackendClient {
             }),
           );
           await process.stdin.flush();
-        }),
-      ]);
-      return results.first as Map<String, dynamic>;
+        } catch (error, stack) {
+          // Complete the response too, so a failed send cancels its timeout
+          // immediately and leaves the write queue usable for later requests.
+          if (!completer.isCompleted) completer.completeError(error, stack);
+        }
+      });
+      return await response;
     } finally {
       _pending.remove(requestId);
     }
@@ -206,6 +338,7 @@ class BackendClient {
       } catch (_) {}
     }
     if (force) process?.kill();
+    await _writeTail;
     await process?.stdin.close();
     await _stdoutSubscription?.cancel();
     await _stderrSubscription?.cancel();
@@ -214,6 +347,8 @@ class BackendClient {
     _stdoutSubscription = null;
     _stderrSubscription = null;
     _sampleSchemas.clear();
+    _supportsBatchWrites = false;
+    _captureOnlySchemas.clear();
     _lastSampleSequence = null;
     for (final pending in _pending.values) {
       if (!pending.isCompleted) {
@@ -295,7 +430,9 @@ class BackendClient {
       throw const FormatException('Invalid backend sample schema');
     }
     _sampleSchemas[id] = List<String>.unmodifiable(rawKeys.cast<String>());
+    if (schema?['captureOnly'] == true) _captureOnlySchemas.add(id);
     if (_sampleSchemas.length > 8) {
+      _captureOnlySchemas.remove(_sampleSchemas.keys.first);
       _sampleSchemas.remove(_sampleSchemas.keys.first);
     }
   }
@@ -306,7 +443,11 @@ class BackendClient {
     if (keys == null) {
       throw FormatException('Unknown backend sample schema $schemaId');
     }
-    final batch = decodeBackendSamplePayload(payload, keys);
+    final batch = decodeBackendSamplePayload(
+      payload,
+      keys,
+      captureOnly: _captureOnlySchemas.contains(schemaId),
+    );
     final previousSequence = _lastSampleSequence;
     if (previousSequence != null &&
         batch.sequence != ((previousSequence + 1) & 0xFFFFFFFF)) {
@@ -393,6 +534,23 @@ class BackendClient {
     final backendExecutable = Platform.isWindows
         ? 'take_a_look_backend.exe'
         : 'take_a_look_backend';
+    // A checkout runs current sources; ignored frozen output may be older.
+    // Packaged applications have no development virtual environment.
+    final sourceCandidates = <File>[
+      if (override != null && override.isNotEmpty) File(override),
+      File(
+        '${backendDirectory.path}${Platform.pathSeparator}.venv${Platform.pathSeparator}'
+        '${Platform.isWindows ? 'Scripts' : 'bin'}${Platform.pathSeparator}$executable',
+      ),
+    ];
+    for (final candidate in sourceCandidates) {
+      if (candidate.existsSync()) {
+        return _PythonLaunch(
+          candidate.absolute.path,
+          arguments: const ['-m', 'take_a_look_backend.stdio'],
+        );
+      }
+    }
     final standaloneCandidates = <File>[
       File(
         '${backendDirectory.path}${Platform.pathSeparator}runtime'
@@ -407,13 +565,8 @@ class BackendClient {
       if (candidate.existsSync()) return _PythonLaunch(candidate.absolute.path);
     }
     final candidates = <File>[
-      if (override != null && override.isNotEmpty) File(override),
       File(
         '${backendDirectory.path}${Platform.pathSeparator}runtime${Platform.pathSeparator}$executable',
-      ),
-      File(
-        '${backendDirectory.path}${Platform.pathSeparator}.venv${Platform.pathSeparator}'
-        '${Platform.isWindows ? 'Scripts' : 'bin'}${Platform.pathSeparator}$executable',
       ),
     ];
     for (final candidate in candidates) {

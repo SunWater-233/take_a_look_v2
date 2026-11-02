@@ -1,0 +1,210 @@
+{
+  "recordedAt": "2026-10-27T04:12:10.661309+08:00",
+  "environmentReference": "environment.json",
+  "flutterVersion": "3.47.8",
+  "productionEntrypoint": "lib/main.dart",
+  "productionNativeDiagnostics": false,
+  "productionUiThreadPolicy": "RunOnSeparateThread",
+  "sources": [
+    {
+      "path": "lib/src/workspace/workspace.dart",
+      "sha256": "8cd5780e9c8537d68b396200c7a153511a69048dcf85335b4a041c11ff76773d",
+      "bytes": 64949
+    },
+    {
+      "path": "lib/src/panels/watch_browser.dart",
+      "sha256": "fb21376932a41012e69d8fd70c187930cd454e688f819c0a6b4564e3c3157735",
+      "bytes": 48225
+    },
+    {
+      "path": "test/workspace_sidebar_test.dart",
+      "sha256": "6f993882fb56c18c14d69e95c79b7f865e52001aeef6638c7902cb138ebbf18a",
+      "bytes": 38583
+    },
+    {
+      "path": "windows/runner/main.cpp",
+      "sha256": "9acb8513f527930de5849522d1b2b313f0f50235ee7ef7c9d3ce4cb438633edf",
+      "bytes": 1847
+    },
+    {
+      "path": "windows/runner/flutter_window.cpp",
+      "sha256": "566d4ed8892f9c92c3bca9371a7026f591669185780e7db1eace0d6f6f29e696",
+      "bytes": 3685
+    },
+    {
+      "path": "windows/runner/CMakeLists.txt",
+      "sha256": "b4cc7737f4e335fd7ee98f2f5f9fa5b7370817cc1a5c16846ea367fe2ef1f3f6",
+      "bytes": 2222
+    },
+    {
+      "path": "windows/runner/gpu_preference.h",
+      "sha256": "d85cc1710de2eaa5c6d882ea466271f878840fda8099482c0091207d10673502",
+      "bytes": 2059
+    },
+    {
+      "path": "tool/benchmarks/window_resize_benchmark.dart",
+      "sha256": "4d9f2904773a89fc31f235cffac2ddb987b07e173f7e2d867033b3fc8838b64a",
+      "bytes": 11244
+    },
+    {
+      "path": "tool/benchmarks/summarize_window_resize.py",
+      "sha256": "034608d695ec39cbd6a8b94a618958525f901c7d1dde551650332a08a3bd6421",
+      "bytes": 6181
+    },
+    {
+      "path": "tool/benchmarks/windows_resize_trace.h",
+      "sha256": "c652695e2bc46f5fcb23922e35425b1293f74eef58436dcf9c4709f412450fed",
+      "bytes": 574
+    },
+    {
+      "path": "tool/benchmarks/windows_resize_trace.cpp",
+      "sha256": "119eeb3e91c934206434ae65c05c2b05fa00cbec7265eefd3b92064731da5c2e",
+      "bytes": 6110
+    }
+  ],
+  "preservedDiagnosticBundles": {
+    "trace-bundle": [
+      {
+        "path": "build/window_resize_20261027_followup/trace-bundle/take_a_look_v2.exe",
+        "sha256": "4cc502c9a04383efd8b039517eba336fb8e97286e7da06c663f8978564d84506",
+        "bytes": 116224
+      },
+      {
+        "path": "build/window_resize_20261027_followup/trace-bundle/data/app.so",
+        "sha256": "4d06789489fb719617bbc72ac83cd025c44ff712e6308cd518f941e69cee7225",
+        "bytes": 8831880
+      },
+      {
+        "path": "build/window_resize_20261027_followup/trace-bundle/flutter_windows.dll",
+        "sha256": "eca1f8c9b1537bd585bbbcc62362df9ca7e69faa7d4e895688108af63ccea157",
+        "bytes": 21289472
+      }
+    ],
+    "dwm-trace-bundle": [
+      {
+        "path": "build/window_resize_20261027_followup/dwm-trace-bundle/take_a_look_v2.exe",
+        "sha256": "7ce67e955d39591ec7deafc98f094977d9b3a8ff462c693b26c0e7e42f10bcce",
+        "bytes": 116736
+      },
+      {
+        "path": "build/window_resize_20261027_followup/dwm-trace-bundle/data/app.so",
+        "sha256": "3fe39367de89792df85e0c611009ce9757c85417389a07d85c811d3fe3e78671",
+        "bytes": 8831880
+      },
+      {
+        "path": "build/window_resize_20261027_followup/dwm-trace-bundle/flutter_windows.dll",
+        "sha256": "eca1f8c9b1537bd585bbbcc62362df9ca7e69faa7d4e895688108af63ccea157",
+        "bytes": 21289472
+      }
+    ],
+    "cached-bundle": [
+      {
+        "path": "build/window_resize_20261027_followup/cached-bundle/take_a_look_v2.exe",
+        "sha256": "2d3e4b6dc4c27154410aa1e869ef47cc0b29a92df6b2fe0f3cd336da890dd182",
+        "bytes": 150528
+      },
+      {
+        "path": "build/window_resize_20261027_followup/cached-bundle/data/app.so",
+        "sha256": "c2f6ad8a3cbcc474cb4cb895951008b9a4f209bca5b3cf56f808584563ad998e",
+        "bytes": 8831880
+      },
+      {
+        "path": "build/window_resize_20261027_followup/cached-bundle/flutter_windows.dll",
+        "sha256": "eca1f8c9b1537bd585bbbcc62362df9ca7e69faa7d4e895688108af63ccea157",
+        "bytes": 21289472
+      }
+    ]
+  },
+  "productionBinary": [
+    {
+      "path": "build/windows/x64/runner/Release/take_a_look_v2.exe",
+      "sha256": "ce4dafb4c0c63dbbd7f9e23fe4c5c4a7c386d128656564112496fc336f28fe04",
+      "bytes": 98304
+    },
+    {
+      "path": "build/windows/x64/runner/Release/data/app.so",
+      "sha256": "ae0b3b5f0ac54c38de22151dd44c8a42f8214496d0a659640c19171690cdeda0",
+      "bytes": 8799112
+    }
+  ],
+  "rawResultHashes": [
+    {
+      "path": "build/window_resize_20261027_followup/cached-1/results.json",
+      "sha256": "b2babf269c3dfe2058a1d02f28b26f603df94a232464ab3a957ebc781353d716",
+      "bytes": 673099
+    },
+    {
+      "path": "build/window_resize_20261027_followup/cached-2/results.json",
+      "sha256": "73ac33902e04c862a634ccaee6daf29c5f714e92bc56811fc2a05fa39be26ce3",
+      "bytes": 673040
+    },
+    {
+      "path": "build/window_resize_20261027_followup/empty-merged/results.json",
+      "sha256": "62f7633830c02298f82df8291934c4ee7a119e299dbdbfbf951918bec37dd16b",
+      "bytes": 408596
+    },
+    {
+      "path": "build/window_resize_20261027_followup/empty-separate/results.json",
+      "sha256": "f711f0cc3609fc14d2b04f204acb2f9dc7c43fa5d573d7620e340aa9fa006503",
+      "bytes": 409910
+    },
+    {
+      "path": "build/window_resize_20261027_followup/empty-separate-trace/results.json",
+      "sha256": "24b09da5bdc3ad37f6dc5be4e71e9868d349638e1aeaa2ba69fb2c12b4e4115e",
+      "bytes": 411127
+    },
+    {
+      "path": "build/window_resize_20261027_followup/merged-1/results.json",
+      "sha256": "ef12be18e748deeaf60db977708ccdbd49a8dec6993b7dca1b062aaca5a3cbd4",
+      "bytes": 596780
+    },
+    {
+      "path": "build/window_resize_20261027_followup/merged-dwm-3/results.json",
+      "sha256": "3fcbadc1449f631c4681b9e72489887f18da7a6437c5f4ef859ee7d894732e60",
+      "bytes": 592629
+    },
+    {
+      "path": "build/window_resize_20261027_followup/merged-trace-2/results.json",
+      "sha256": "4c11f5bb03a2a777b2b715323f4de35a874a83883656c61511becfcf534b9317",
+      "bytes": 604942
+    },
+    {
+      "path": "build/window_resize_20261027_followup/native-keyboard-separate/results.json",
+      "sha256": "0ba5d393a1e48059e6cfb69a587cf9190fc1dd3478f140b27d445a8ac8c60feb",
+      "bytes": 16660
+    },
+    {
+      "path": "build/window_resize_20261027_followup/separate-1/results.json",
+      "sha256": "1f5fec4f460456d7b7d658d59c0614dc3b13044c1be66f7245d3014fd5967945",
+      "bytes": 673588
+    },
+    {
+      "path": "build/window_resize_20261027_followup/separate-dwm-3/results.json",
+      "sha256": "a2b8394083809b045e5e507763b2bc7533c86fbece0b0ee07152eab860bb11f6",
+      "bytes": 680462
+    },
+    {
+      "path": "build/window_resize_20261027_followup/separate-native-titlebar/results.json",
+      "sha256": "1d22d4227fb7bc8d7da4643ca98dbc00729d35cd9eef15692f38a9b8774aa257",
+      "bytes": 677815
+    },
+    {
+      "path": "build/window_resize_20261027_followup/separate-trace-2/results.json",
+      "sha256": "7532cc0b58e504e9d861e970dbe35a2ffb72ad23ba8a2fdc178c3a4218fa9a53",
+      "bytes": 674106
+    },
+    {
+      "path": "build/window_resize_20261027_followup/uncached-confirm/results.json",
+      "sha256": "7cfd7cbcad7c2b00ea17a896859508a9c0ed9a5d421466f81ee2bf077deb4e11",
+      "bytes": 671275
+    }
+  ],
+  "verification": {
+    "relatedTestsPassed": 76,
+    "flutterAnalyze": "No issues found",
+    "productionReleaseBuild": "passed",
+    "gitDiffCheck": "passed",
+    "nativeKeyboardSizing": "6 size changes, resized event, 0 geometry error",
+    "userWatchBrowserSha256Preserved": "FB21376932A41012E69D8FD70C187930CD454E688F819C0A6B4564E3C3157735"
+  }
+}

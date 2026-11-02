@@ -1,4 +1,5 @@
 import '../models/models.dart';
+import '../models/connection_capabilities.dart';
 import '../analysis/analysis.dart';
 import '../models/source_tools.dart';
 
@@ -69,6 +70,8 @@ class SourceWorkspaceState {
 class DebugState {
   DebugExecutionState executionState = DebugExecutionState.unavailable;
   final List<String> sourceFiles = <String>[];
+  final List<SourceDefinition> sourceDefinitions = <SourceDefinition>[];
+  bool hasSourceDefinitionIndex = false;
   final Map<String, Set<int>> executableLines = <String, Set<int>>{};
   final Map<String, Set<int>> requestedBreakpoints = <String, Set<int>>{};
   final List<DebugBreakpoint> resolvedBreakpoints = <DebugBreakpoint>[];
@@ -81,9 +84,18 @@ class DebugState {
 }
 
 class ConnectionState {
+  ConnectionCapabilities? advertisedCapabilities;
+  ConnectionCapabilities get capabilities =>
+      advertisedCapabilities ??
+      ConnectionCapabilities.forConfiguration(connectionKind, remoteConfig);
   ConnectionStatus status = ConnectionStatus.disconnected;
   String probeType = '自动发现任意探针';
   String targetName = 'auto';
+  String targetPackId = '';
+  String targetPartNumber = 'auto';
+  String targetPackLabel = '内置';
+  bool targetPackMissing = false;
+  int targetCatalogRevision = 0;
   String swdClock = '4 MHz';
   String serialNumber = '';
   String connectionKind = 'local';
@@ -93,7 +105,9 @@ class ConnectionState {
     'gatewayPort': '4242',
     'gdbPort': '3333',
     'token': '',
+    'deviceId': '',
     'gdbPath': '',
+    'gdbMode': 'debug',
     'core': '0',
     'rttDelivery': 'reliable',
   };
@@ -104,6 +118,7 @@ class ConnectionState {
 class AcquisitionState {
   Map<String, dynamic> rawRecording = <String, dynamic>{};
   double sampleRateHz = 50;
+  double monitorRateHz = 10;
   double rttSampleRateHz = 1000;
   String displayRefreshMode = 'standard';
   double elapsedSeconds = 0;
@@ -114,6 +129,7 @@ class AcquisitionState {
 }
 
 class PlotState {
+  Map<String, bool>? visibilityBeforeIsolation;
   String? highlightedWatchKey;
   int watchSelectionRevision = 0;
   bool plottingPaused = false;

@@ -1,4 +1,4 @@
-part of 'panels.dart';
+part of 'source_debug_panel.dart';
 
 class _SourceBuildToolbar extends StatelessWidget {
   const _SourceBuildToolbar({required this.controller, required this.compact});
@@ -11,24 +11,25 @@ class _SourceBuildToolbar extends StatelessWidget {
       controller.sourceToolsChanges,
       controller.connectionChanges,
       controller.debugChanges,
+      controller.symbolChanges,
     ]),
     builder: (context, _) => LayoutBuilder(
       builder: (context, constraints) {
         final project = controller.sourceProject;
         final task = controller.sourceTask;
-        final local = controller.connectionKind == 'local';
+        final supportsDownload = controller.supportsFirmwareDownload;
         final connected =
             controller.connectionStatus == ConnectionStatus.connected;
         final configured = project.canBuild;
+        final firmwarePath = project.firmwarePath.trim().isNotEmpty
+            ? project.firmwarePath.trim()
+            : controller.symbolFile.trim();
         final canDownload =
-            local &&
-            connected &&
-            project.sourceRoot.isNotEmpty &&
-            project.firmwarePath.isNotEmpty;
+            supportsDownload && connected && firmwarePath.isNotEmpty;
         final iconsOnly = compact || constraints.maxWidth < 440;
         Future<void> settings() => showDialog<void>(
           context: context,
-          builder: (_) => _SourceProjectDialog(controller: controller),
+          builder: (_) => SourceProjectDialog(controller: controller),
         );
         Widget action(
           String key,
@@ -63,11 +64,11 @@ class _SourceBuildToolbar extends StatelessWidget {
           );
         }
 
-        final downloadReason = !local
-            ? '当前连接不支持下载，请使用本地 pyOCD 连接'
+        final downloadReason = !supportsDownload
+            ? '当前连接不支持下载，请使用本地 pyOCD 或 EmberMobile 连接'
             : !connected
-            ? '请先连接本地调试探针'
-            : '请设置源码目录和固件文件';
+            ? '请先连接调试目标'
+            : '请打开 ELF / AXF 文件，或在工程设置中指定固件文件';
         final actions = Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -174,14 +175,14 @@ class _SourceBuildToolbar extends StatelessWidget {
   );
 }
 
-class _SourceProjectDialog extends StatefulWidget {
-  const _SourceProjectDialog({required this.controller});
+class SourceProjectDialog extends StatefulWidget {
+  const SourceProjectDialog({super.key, required this.controller});
   final TakeALookController controller;
   @override
-  State<_SourceProjectDialog> createState() => _SourceProjectDialogState();
+  State<SourceProjectDialog> createState() => _SourceProjectDialogState();
 }
 
-class _SourceProjectDialogState extends State<_SourceProjectDialog> {
+class _SourceProjectDialogState extends State<SourceProjectDialog> {
   final _form = GlobalKey<FormState>();
   late final TextEditingController _root;
   late final TextEditingController _command;
@@ -297,7 +298,7 @@ class _SourceProjectDialogState extends State<_SourceProjectDialog> {
       required ValueChanged<String> onChanged,
     }) {
       final disabled = _saving || values.isEmpty;
-      return _LabeledField(
+      return LabeledField(
         label: label,
         child: ExcludeFocus(
           excluding: disabled,
@@ -490,7 +491,7 @@ class _SourceProjectDialogState extends State<_SourceProjectDialog> {
                       padding: const EdgeInsets.only(bottom: 12),
                       child: SelectableText(
                         _error!,
-                        style: talBody.copyWith(color: Colors.redAccent),
+                        style: talBody.copyWith(color: TalColors.error),
                       ),
                     ),
                   Wrap(
@@ -645,10 +646,12 @@ class _SourceTaskOutput extends StatefulWidget {
     required this.controller,
     required this.maxHeight,
     required this.onOpenLocation,
+    this.embedded = false,
   });
   final TakeALookController controller;
   final double maxHeight;
   final void Function(String path, int line) onOpenLocation;
+  final bool embedded;
   @override
   State<_SourceTaskOutput> createState() => _SourceTaskOutputState();
 }
@@ -699,9 +702,9 @@ class _SourceTaskOutputState extends State<_SourceTaskOutput> {
           });
         }
       }
-      final expanded = _expanded && widget.maxHeight >= 85;
+      final expanded = (widget.embedded || _expanded) && widget.maxHeight >= 85;
       final tone = task.status == 'failed'
-          ? Colors.redAccent
+          ? TalColors.error
           : task.status == 'succeeded'
           ? TalColors.success
           : TalColors.muted;
@@ -797,15 +800,16 @@ class _SourceTaskOutputState extends State<_SourceTaskOutput> {
                           }
                         },
                       ),
-                    TalIconButton(
-                      key: const ValueKey('source-output-toggle'),
-                      tooltip: expanded ? '折叠输出' : '展开输出',
-                      onPressed: () => setState(() => _expanded = !_expanded),
-                      icon: Icon(
-                        expanded ? Icons.expand_more : Icons.expand_less,
-                        size: 17,
+                    if (!widget.embedded)
+                      TalIconButton(
+                        key: const ValueKey('source-output-toggle'),
+                        tooltip: expanded ? '折叠输出' : '展开输出',
+                        onPressed: () => setState(() => _expanded = !_expanded),
+                        icon: Icon(
+                          expanded ? Icons.expand_more : Icons.expand_less,
+                          size: 17,
+                        ),
                       ),
-                    ),
                   ],
                 ),
               ),
@@ -814,7 +818,12 @@ class _SourceTaskOutputState extends State<_SourceTaskOutput> {
               SizedBox(
                 height:
                     (widget.maxHeight - TalUiTheme.of(context).targetExtent(34))
-                        .clamp(40.0, 230.0),
+                        .clamp(
+                          40.0,
+                          widget.embedded
+                              ? math.max(40.0, widget.maxHeight)
+                              : 230.0,
+                        ),
                 child: task.lines.isEmpty
                     ? const Align(
                         alignment: Alignment.topLeft,
@@ -842,7 +851,7 @@ class _SourceTaskOutputState extends State<_SourceTaskOutput> {
                                   text,
                                   style: talMono.copyWith(
                                     color: line['stream'] == 'stderr'
-                                        ? Colors.redAccent
+                                        ? TalColors.error
                                         : TalColors.muted,
                                   ),
                                 ),

@@ -5,6 +5,56 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:take_a_look_v2/src/backend/backend_client.dart';
 
 void main() {
+  test(
+    'legacy v2 keeps capture-only semantics with a zero update timestamp',
+    () {
+      final original = _samplePayload();
+      final payload = Uint8List.fromList([
+        2,
+        ...original.sublist(1, 15),
+        ...List<int>.filled(8, 0),
+        ...original.sublist(15),
+      ]);
+      final batch = decodeBackendSamplePayload(payload, ['speed', 'enabled']);
+      expect(batch.captureOnly, isTrue);
+      expect(batch.updatedAtMs, 0);
+      expect(batch.timings, isNull);
+    },
+  );
+
+  test('Python burst payload preserves unknown subread timing and order', () {
+    // Golden emitted by the production Python encode_sample_batch implementation.
+    final payload = base64Decode(
+      'AwEAAAACAAAAAgAAAAEAQOIBAAAAAAAAAAAAAAAkQAEAAAAAAADwPwEHAAAAAAAAAAAAAgAAAAAAAAAkQBx8YTJVACRAAAAAAAAAJEABAAAAAAAAAEABBwAAAAAAAAABAAIAAAAAAAAAJEAcfGEyVQAkQA==',
+    );
+    final batch = decodeBackendSamplePayload(payload, ['v']);
+    expect(batch.elapsedSeconds, [10.0, 10.0]);
+    expect(batch.updatedAtMs, 123456);
+    expect(batch.captureOnly, isTrue);
+    expect(batch.valueAt(0, 0), 1);
+    expect(batch.valueAt(1, 0), 2);
+    for (var i = 0; i < 2; i++) {
+      final timing = batch.timings![i]!;
+      expect(timing.quality, 'transaction_window');
+      expect(timing.batchSequence, 7);
+      expect(timing.index, i);
+      expect(timing.repeat, 2);
+      expect(timing.startSeconds, 10);
+      expect(timing.endSeconds, 10.00065);
+    }
+    expect(
+      () => decodeBackendSamplePayload(payload.sublist(0, payload.length - 1), [
+        'v',
+      ]),
+      throwsFormatException,
+    );
+    final invalid = Uint8List.fromList(payload)..[40] = 2;
+    expect(
+      () => decodeBackendSamplePayload(invalid, ['v']),
+      throwsFormatException,
+    );
+  });
+
   test('JSON scan survives compaction, growth, CRLF and reset', () {
     final lines = <String>[];
     final decoder = BackendStreamDecoder(

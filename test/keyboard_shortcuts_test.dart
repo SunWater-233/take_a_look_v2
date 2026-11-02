@@ -58,6 +58,7 @@ void main() {
       ),
     );
     await tester.pump();
+    await tester.pumpAndSettle();
   }
 
   Future<void> finishSourceRead(WidgetTester tester) async {

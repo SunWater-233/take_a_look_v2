@@ -7,6 +7,7 @@ class ControllerSignal extends ChangeNotifier {
 /// Domain-specific invalidation channels used by focused UI subtrees.
 class ControllerSignals {
   final ControllerSignal connection = ControllerSignal();
+  final ControllerSignal targetCatalog = ControllerSignal();
   final ControllerSignal sampling = ControllerSignal();
   final ControllerSignal symbols = ControllerSignal();
   final ControllerSignal symbolLoad = ControllerSignal();
@@ -25,6 +26,7 @@ class ControllerSignals {
 
   void dispose() {
     connection.dispose();
+    targetCatalog.dispose();
     sampling.dispose();
     symbols.dispose();
     symbolLoad.dispose();

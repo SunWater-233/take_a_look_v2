@@ -68,10 +68,14 @@ if [[ -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]]; then
   echo 'No graphical session found. Start from a Linux desktop or WSLg.' >&2
   exit 1
 fi
-# Some window plugins use X11 APIs. Prefer XWayland when both transports exist;
-# an explicit GDK_BACKEND is preserved for users testing native Wayland.
-if [[ -z "${GDK_BACKEND:-}" && -n "${DISPLAY:-}" ]]; then
-  export GDK_BACKEND=x11
+# Prefer the native transport for this session. GDK can fall back when the
+# advertised Wayland socket is unavailable; an explicit override is preserved.
+if [[ -z "${GDK_BACKEND:-}" ]]; then
+  if [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
+    export GDK_BACKEND=wayland,x11
+  elif [[ -n "${DISPLAY:-}" ]]; then
+    export GDK_BACKEND=x11
+  fi
 fi
 export TAKE_A_LOOK_BACKEND_DIR="${TAKE_A_LOOK_BACKEND_DIR:-$app_root/backend}"
 exec "$app_root/take_a_look_v2" "$@"

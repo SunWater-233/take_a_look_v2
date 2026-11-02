@@ -1,0 +1,5 @@
+{"format":"take-a-look-raw","version":1}
+{"channels":[{"key":"20000000:fast","name":"fast"}]}
+{"frames":[[1,0,10]]}
+{"channels":[{"key":"20000000:fast","name":"fast"},{"key":"20000004:watch","name":"watch"}]}
+{"frames":[[2,1,100]]}

@@ -1,4 +1,6 @@
 import 'dart:math' as math;
+import 'dart:typed_data';
+import 'dart:ui' show PointMode;
 
 import 'package:flutter/material.dart';
 
@@ -118,7 +120,7 @@ class CartesianChartRenderer {
   final CartesianPlotViewport viewport;
 
   void drawBackground() {
-    canvas.drawRect(Offset.zero & size, Paint()..color = TalColors.input);
+    canvas.drawRect(Offset.zero & size, Paint()..color = TalColors.background);
   }
 
   void drawGrid({bool visible = true}) {
@@ -225,28 +227,39 @@ class CartesianChartRenderer {
     Color color, {
     double strokeWidth = 1.8,
   }) {
-    final path = Path();
-    var started = false;
-    for (final point in points) {
+    final source = points is List<Offset> ? points : points.toList();
+    final vertices = Float32List(source.length * 2);
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = strokeWidth
+      ..style = PaintingStyle.stroke;
+    var count = 0;
+    void flush() {
+      if (count > 1) {
+        // Independent line segments avoid Skia's expensive round-join path
+        // tessellation for dense, often reversing min/max envelopes.
+        canvas.drawRawPoints(
+          PointMode.polygon,
+          Float32List.sublistView(vertices, 0, count * 2),
+          paint,
+        );
+      }
+      count = 0;
+    }
+
+    for (final point in source) {
+      if (!point.isFinite) {
+        flush();
+        continue;
+      }
       if (point.dx < viewport.xMin || point.dx > viewport.xMax) continue;
       final x = viewport.mapX(point.dx);
       final y = viewport.mapY(point.dy);
-      if (started) {
-        path.lineTo(x, y);
-      } else {
-        path.moveTo(x, y);
-        started = true;
-      }
+      vertices[count * 2] = x;
+      vertices[count * 2 + 1] = y;
+      count++;
     }
-    if (!started) return;
-    canvas.drawPath(
-      path,
-      Paint()
-        ..color = color
-        ..strokeWidth = strokeWidth
-        ..style = PaintingStyle.stroke
-        ..strokeJoin = StrokeJoin.round,
-    );
+    flush();
   }
 
   void drawLegend(

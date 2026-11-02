@@ -12,6 +12,7 @@ enum ControllerCommand {
   toggleConnection,
   loadSymbols,
   setSampleRate,
+  setMonitorRate,
   setDisplayRefreshMode,
   setRttSampleRate,
   setProbeType,
@@ -50,17 +51,28 @@ enum ControllerCommand {
   addSelectedToWatch,
   removeWatch,
   removeWatches,
+  undoWatchDeletion,
+  redoWatchDeletion,
+  configureProject,
   reorderWatch,
   clearWatches,
   toggleWatchSampling,
+  setWatchReadMode,
+  setWatchMonitorRate,
+  setWatchPinned,
+  setWatchMonitorScope,
+  readWatch,
   toggleWatchPlot,
   setWatchColor,
   setWatchColors,
   setOnlyWatchesPlotted,
+  isolateWatchPlots,
+  exitWatchPlotIsolation,
   setAllWatchesPlotted,
   invertWatchPlots,
   updateAnalysisSession,
   setWatches,
+  setMonitorVisibility,
   writeWatch;
 
   String get wireName => name;
@@ -75,6 +87,14 @@ enum ControllerCommand {
 
 /// Commands implemented by the Python hardware process.
 enum BackendMethod {
+  ember,
+  listTargets,
+  onlineTargetPacks,
+  inspectTargetPack,
+  importTargetPack,
+  discardTargetPackPreview,
+  removeTargetPack,
+  selectTarget,
   setSourceProject,
   startSourceTask,
   cancelSourceTask,
@@ -86,7 +106,10 @@ enum BackendMethod {
   loadSymbols,
   setConfig,
   setWatches,
+  setMonitorVisibility,
   writeWatch,
+  writeWatches,
+  readWatch,
   setSamplingPaused,
   setRtt,
   clearSamples,
@@ -117,6 +140,11 @@ class BackendCommandMapper {
     JsonObject backendState,
   ) {
     switch (command) {
+      case ControllerCommand.configureProject:
+        return BackendCall(
+          BackendMethod.setConfig,
+          Map<String, Object?>.from(arguments! as Map),
+        );
       case ControllerCommand.setSourceProject:
         return BackendCall(
           BackendMethod.setSourceProject,
@@ -143,6 +171,10 @@ class BackendCommandMapper {
       case ControllerCommand.setSampleRate:
         return BackendCall(BackendMethod.setConfig, {
           'sampleRateHz': arguments,
+        });
+      case ControllerCommand.setMonitorRate:
+        return BackendCall(BackendMethod.setConfig, {
+          'monitorRateHz': arguments,
         });
       case ControllerCommand.setRttSampleRate:
         return BackendCall(BackendMethod.setConfig, {
@@ -206,11 +238,18 @@ class BackendCommandMapper {
           BackendMethod.setWatches,
           Map<String, Object?>.from(arguments! as Map),
         );
+      case ControllerCommand.setMonitorVisibility:
+        return BackendCall(
+          BackendMethod.setMonitorVisibility,
+          Map<String, Object?>.from(arguments! as Map),
+        );
       case ControllerCommand.writeWatch:
         return BackendCall(
           BackendMethod.writeWatch,
           Map<String, Object?>.from(arguments! as Map),
         );
+      case ControllerCommand.readWatch:
+        return BackendCall(BackendMethod.readWatch, {'key': arguments});
       case ControllerCommand.setDisplayRefreshMode:
       case ControllerCommand.setUiScale:
       case ControllerCommand.setSourceRoot:
@@ -233,13 +272,21 @@ class BackendCommandMapper {
       case ControllerCommand.addSelectedToWatch:
       case ControllerCommand.removeWatch:
       case ControllerCommand.removeWatches:
+      case ControllerCommand.undoWatchDeletion:
+      case ControllerCommand.redoWatchDeletion:
       case ControllerCommand.reorderWatch:
       case ControllerCommand.clearWatches:
       case ControllerCommand.toggleWatchSampling:
+      case ControllerCommand.setWatchReadMode:
+      case ControllerCommand.setWatchMonitorRate:
+      case ControllerCommand.setWatchPinned:
+      case ControllerCommand.setWatchMonitorScope:
       case ControllerCommand.toggleWatchPlot:
       case ControllerCommand.setWatchColor:
       case ControllerCommand.setWatchColors:
       case ControllerCommand.setOnlyWatchesPlotted:
+      case ControllerCommand.isolateWatchPlots:
+      case ControllerCommand.exitWatchPlotIsolation:
       case ControllerCommand.setAllWatchesPlotted:
       case ControllerCommand.invertWatchPlots:
       case ControllerCommand.updateAnalysisSession:

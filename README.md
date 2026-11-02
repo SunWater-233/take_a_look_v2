@@ -9,6 +9,7 @@ EmberMobile gateway / remote GDB Server; it does not expose a network listener.
 
 - ELF/AXF symbol and DWARF type parsing, including arrays, structures and pointer metadata
 - pyOCD probe discovery, target connection, coalesced memory reads, typed writes and readback verification
+- Search, download and manage CMSIS Device Family Packs from the target chip dialog
 - Configurable memory sampling from 1 Hz to 10 kHz
 - J-Scope-compatible RTT-Normal and configured-variable RTT-Plus sampling
 - Target reset/run and reset/halt control
@@ -21,7 +22,121 @@ EmberMobile gateway / remote GDB Server; it does not expose a network listener.
 
 ## Development
 
+Open the target chip selector and choose **在线下载** to search by MCU part
+number, vendor or pack name. The current local search is carried into the
+online dialog. The first search builds a cached index from the official
+[CMSIS-Pack index](https://www.keil.com/pack/index.pidx) and vendor PDSC files;
+this can take a few minutes. **更新在线索引** refreshes it, reusing unchanged
+descriptors. If some vendors cannot be reached, the dialog reports that results
+may be incomplete. A failed or cancelled refresh preserves the previous cache.
+
+**下载并安装** displays byte progress, validates the downloaded pack and adds it
+to the existing local library. The dialog returns to the downloaded chip list;
+choose **使用此芯片** to apply it. Installing alone does not change the active
+target or reconnect hardware. Already installed packs offer **已安装，查看芯片**.
+Search/index/download tasks can be cancelled and do not block hardware commands.
+Local `.pack` import remains available through **添加芯片包**. Index data is
+stored in the chip library's `online/` directory, alongside the existing
+`TAL_PACKS_DIR` override. No additional Python dependencies are required.
+
+Windows and Linux backend builds automatically bundle the official STM32F1,
+STM32F4 and STM32H7 DFPs, covering STM32F103, STM32F407 and STM32H723 without an
+online download. Pack management marks these as **软件自带**; they are read
+directly from the application and cannot be deleted there. User imports and
+online downloads remain independently managed. Versions, source URLs and SHA-256
+hashes are pinned in `tool/bundled_packs.json`. Both backend build scripts run
+`tool/prepare_bundled_packs.py` to verify the cached packs (or download missing
+ones), validate required chip coverage and ship the complete original archives
+with their license notices. Pack files are build assets, excluded from Git.
+
+The default workspace places symbols on the left, variable monitoring on the
+right, and chart/source/analysis tabs in the center. Sidebar tabs share each
+panel's existing header; no permanent vertical tab rails reserve canvas space.
+The thin handle follows the sidebar's inner edge and toggles it open or closed.
+Drag the handle horizontally while expanded to resize the sidebar.
+Clicking sidebar tabs only selects a panel. Multiple tabs can be switched,
+reordered, or selected through the header menu. Narrow windows show one sidebar
+as an overlay.
+
+Drag any panel tab to a workspace edge to dock it on that side. The edge lights
+immediately and shows a placement preview after 300 ms; movement within the
+same edge does not restart the delay. Dropping applies the layout with a 220 ms
+transition; Esc cancels a drag. Tabs can return to the center or move between
+sides through dragging or the header menu. Variable monitoring uses a compact
+member tree with path search and pinned members. Selecting a member shows its
+value, read policy and plot controls in one details area. Double-click a member's
+current value to edit it in place, press Enter to write and verify by readback,
+or Esc to cancel. The editor uses round-trip precision for the target type
+(9 significant digits for float32, 17 for float64). Drag the divider to the
+left of the current-value header to resize the column; displayed decimal places
+adapt to the available width. Leaving the editor retains its draft without
+writing. Wide panels put details beside the tree.
+Structures initially expand one level, large arrays expand in ranges of 32,
+and clearing a search restores the previous expansion state. The **正在采集**
+section lists all variables enrolled in capture, including those with hidden
+curves, even when their tree branches are collapsed or filtered by search.
+**已固定**, **正在采集**, and **成员** can each be collapsed
+by clicking their headers; capture and pinned monitoring continue while hidden.
+**加入采集** starts recording and automatically shows the curve. Captured
+variables have a separate visibility button in the **绘制** column and the details
+area; use it to show or hide each curve independently. Hiding a curve keeps capture
+running. Collapsed monitors stop automatic reads unless pinned or displayed in
+another inspector; capture continues independently. Pins are saved in projects.
+Sidebar changes preserve panel state,
+including input drafts and source-view position, and hidden source panels do
+not consume window shortcuts or mark files as read. Detached windows, the
+independent log/build/register panels, UI scaling and project settings remain
+available.
+
+Use **文件 → 保存项目** (`Ctrl+S`) to save a `.talproj` file, **打开项目**
+(`Ctrl+O`) to restore it, or **项目另存为** to create another copy. Projects
+include layout, tabs, sidebar/output sizes and collapsed state, variables and
+their colors/read policies, monitor and plot settings, input drafts, connection
+configuration, build commands, source tabs, breakpoints and analysis data.
+Open projects while disconnected; restoring never connects, starts a build or
+writes saved values to the target. Raw capture history remains in recordings.
+Floating panels return to their saved dock positions on restore.
+
+Drag the bottom status bar upward to open output, or drag its top boundary
+downward to collapse it. Nearby common heights gently snap on release. The
+selected output tab and height survive collapse; builds and downloads open the
+build/download output automatically. Variable deletion supports `Ctrl+Z` to undo
+and `Ctrl+Y` to redo, including detached windows.
+
+New variables added from the resource library or source view start in **仅监视**
+(monitor only). The three per-variable read policies are:
+
+- **仅监视**: refresh the current value at 10 Hz by default, without adding history.
+- **采集**: use the global capture rate and append samples to the recording.
+- **手动读取**: read only on explicit refresh or after a write.
+
+Memory variables in **仅监视** refresh only while displayed in a watch view or
+member details. Folding structures, arrays, sections or the whole panel suspends
+hidden members; **已固定** members keep refreshing even with all watch panels
+hidden. Open views (including detached windows and the full table) share their
+read demand. Reopening a member schedules its next read immediately. Folding
+does not change capture, manual reads or write/readback, and does not reduce RTT
+producer traffic.
+
+The full variable table retains metadata, colors, ordering and per-variable
+monitor-rate overrides (0.5–10 Hz). Pausing capture leaves monitoring active;
+hiding a curve does not stop recording. Changing a read policy preserves past
+samples and never fills in history from monitor values. Writes verify by reading
+back immediately and do not create synthetic samples. RTT producers retain their
+device-defined stream rate; monitor mode limits displayed updates, not RTT traffic.
+
+Existing version-1 layout files are preserved on first launch of this workspace.
+Use **视图 → 恢复保存的布局** to restore one, or save the new layout; saving creates a
+one-time `.v1.bak` backup. A restored legacy layout can also be saved and will
+reopen with its chosen panel presentation.
+Version-2 side groups migrate to the sidebar model, with a `.v2.bak` backup on
+the first version-3 save. The desktop app saves sidebar placement, tab order,
+widths, selection and collapsed state after edits; `Ctrl+Shift+S` also saves
+immediately. Switching to analysis no longer automatically hides monitoring.
+
 Prerequisites are Flutter, Python 3.11 or newer, and platform build tools.
+The backend pins pyOCD to the tested 0.46.0 release; rerun the backend setup
+after pulling dependency changes so an existing virtual environment is updated.
 
 ```powershell
 .\tool\setup_backend.ps1
@@ -32,13 +147,44 @@ flutter run -d windows
 The app searches for Python in this order:
 
 1. `TAKE_A_LOOK_PYTHON`
-2. a packaged runtime under `backend/runtime/`
-3. `backend/.venv`
+2. `backend/.venv` for current checkout sources
+3. a packaged runtime under `backend/runtime/`
 4. the `python` command on `PATH`
 
 `TAKE_A_LOOK_BACKEND_DIR` can override the backend source directory. These
 overrides are useful for development and diagnostics; normal development uses
 `backend/.venv` automatically.
+
+## Target chips and user packs
+
+Click **目标芯片** in connection settings to search the complete pyOCD builtin
+catalogue and imported CMSIS Device Family Packs. Search matches part numbers,
+vendors and families; filters include recent targets, builtin targets and user
+packs. Select a row to inspect its core, memory regions, source and version;
+press Enter in the search field, double-click a row, or use **使用此芯片** to save.
+Cancel leaves the current target unchanged. **自动选择 / 通用 Cortex-M** uses
+probe-provided target information where available; a generic Cortex-M target
+does not provide chip-specific flash programming support.
+
+Use **添加芯片包** to preview and import a local `.pack` file. The app copies the
+pack into its own library, so moving the original file does not break it.
+**管理芯片包** lists versions, import dates and sizes and can show or remove the
+targets supplied by each pack. Identical files are deduplicated; different
+versions remain distinct and connections load the exact selected source.
+Search text is retained after importing a missing device's pack.
+
+The selected target, pack version and recent targets survive restarts. While
+connected, browsing and importing remain available; changing targets and
+deleting the active pack require disconnecting. If a selected pack is missing,
+the app preserves its identity and blocks connection until it is reimported or
+another target is selected. The first version supports Cortex-M CMSIS DFPs;
+SDK archives and non-Cortex-M devices are not added to this catalogue.
+
+Pack storage is `%LOCALAPPDATA%\TakeALook\packs` on Windows,
+`~/Library/Application Support/TakeALook/packs` on macOS, and
+`${XDG_DATA_HOME:-~/.local/share}/take-a-look/packs` on Linux.
+`TAL_PACKS_DIR` overrides this location. It is independent of the app installation
+directory and is preserved across application upgrades.
 
 ## Source layout
 
@@ -58,11 +204,38 @@ Flutter implementation files are grouped by responsibility under `lib/src/`:
 | `workspace/` | Docking layout, panel types, keyboard shortcuts, window sync, and drag coordination |
 | `theme/` | Shared visual styles, adaptive input policy, and common UI controls |
 
-`lib/main.dart` starts `app/app.dart`. The controller and panel libraries keep
-their existing `part` organization inside their directories; import
-`controller/controller.dart` or `panels/panels.dart` instead of importing a
-`part` file directly. Benchmark scripts use the current source paths; archived
-performance results retain the paths recorded when those measurements ran.
+`lib/main.dart` starts `app/app.dart`. The controller's `WatchRegistry` owns
+watch membership, editor preferences, bounded undo/redo history and the ten-second
+capture grace period after deletion. The controller coordinates commands,
+highlight restoration and notifications around those operations.
+
+`panels/panels.dart` composes independent source, analysis, watch, symbol,
+connection, control, plot/log and frame libraries. Feature-local `part` files
+share private state only within their own feature. Shared table controls and
+source-file drag data have explicit interfaces. Import a feature's root file or
+the workspace factory instead of importing a `part` file directly. Benchmark
+scripts use the current source paths; archived performance results retain the
+paths recorded when those measurements ran.
+
+The workspace widget delegates layout transitions, tab insertion/reordering,
+grid dragging, shared-boundary resizing and version migrations to
+`WorkspaceLayoutController`, tab-drag targets and dwell deadlines to
+`WorkspaceTabDragSession`, and file operations, autosave and write ordering to
+`WorkspacePersistence`. These objects can be tested without native windows.
+The widget owns rendering, coordinate conversion and native-window effects.
+
+Connection capabilities advertised by the backend are decoded once, included
+in window snapshots and consumed by UI controls. Offline/demo sessions and
+older backends use configuration-based defaults. Capabilities are runtime
+metadata and are not stored in project files.
+
+`controller_snapshot_schema.dart` defines snapshot wire fields, revision domains
+and project inclusion together. `ControllerSnapshotCodec` encodes a typed view
+of state without depending on the controller; patch application remains in the
+controller because it reconciles live samples, deletions and display clocks.
+`SourceSearchController` owns cached file indexing and cancellable content scans,
+while `AnalysisPlotInteraction` owns time-domain plot gestures and viewport
+transitions. Their panel widgets retain focus, scrolling, menus and presentation.
 
 ## Shared UI and input modes
 
@@ -70,7 +243,10 @@ The shared UI module lives in `lib/src/theme/`. Pages import its public entry
 point, `theme/theme.dart`; module internals import their specific dependencies
 directly instead of importing the public entry point.
 
-- `tokens.dart`: colors, fonts, text styles, and shared border tokens.
+- `tokens.dart`: `TalPalette` base colors, `TalColors` semantic UI colors,
+  independent `TalChartColors` / `TalSyntaxColors`, fonts, and shared borders.
+- `workbench_style.dart`: workbench aliases of the same semantic colors and
+  workbench typography; it does not define a second palette.
 - `material_theme.dart`: `buildTalTheme` and Material component styles.
 - `interaction.dart`: `TalUiTheme` dimensions and `TalInteractionRegion` input policy.
 - `controls.dart` / `dropdown.dart`: `TalButton`, `TalIconButton`,
@@ -80,6 +256,20 @@ directly instead of importing the public entry point.
 
 New panels should use these shared controls and theme values instead of adding
 their own device checks or fixed control sizes.
+
+The orange/midnight theme uses `#F44A22` for primary actions and focus,
+`#161616` for the workspace, `#FEF8E8` for headings, `#E4E2E3` for body text,
+and `#A8AAAC` for secondary text. Panels, inputs, hover surfaces, and borders
+use neutral gray levels from `TalColors`. Primary actions use
+`TalButtonVariant.filled` with dark text on orange; secondary controls use
+neutral hover surfaces. Disabled controls stay neutral. Caption buttons use
+the shared `talCaptionButtonStyle`, including the orange close-button hover.
+
+Keep application color literals in `theme/tokens.dart`, including semantic
+success/warning/error colors, chart presets, and syntax highlighting. Chart
+presets retain their existing values independently of UI status colors;
+saved/custom series colors are data and are not recolored by a theme change.
+Both the main window and detached-window startup use the same background.
 
 `TalInteractionRegion` follows actual mouse/keyboard, touch, and pen input in
 each window. Desktop controls are compact (32 logical pixels); touch controls
@@ -134,15 +324,36 @@ constraints and native validation commands.
 
 ## Source debugging
 
-The connection panel supports **本地 USB / pyOCD**, **EmberMobile 私有协议**,
-**EmberMobile + GDB**, and **远程 GDB**. For the phone workflow, authorize the
-USB probe, attach the target, and start the gateway in EmberMobile first. Enter
-the phone address, gateway port (4242), and the current access token in Take A
-Look. The symbol file remains on the computer.
+The connection panel supports **本地 USB / pyOCD**, **EmberMobile**,
+**EmberMobile + GDB**, and **远程 GDB**. For the phone workflow, start the Ember
+service on the phone, choose **配对 / 管理手机**, and **搜索手机**. Select **配对**,
+compare the eight-digit code on both screens, then approve on the phone within
+120 seconds. Saved phones can be selected with **使用**; leave the access token
+empty to use the saved pairing. Pairing does not require a probe. Before connecting
+the workstation, authorize the phone's USB probe and attach its target. The symbol
+file remains on the computer.
 
-**EmberMobile 私有协议** supports live memory reads, run control, registers,
+When discovery is unavailable, enter the phone's IP and gateway port (4242) in
+the pairing window. The existing temporary-token field remains supported and
+an explicit token takes precedence over a saved pairing. **忘记** deletes the
+local credential and revokes it on an available phone; offline removal reports
+that the phone's **已配对电脑** list still needs cleanup. Closing the pairing
+window cancels a pending request. Saved phones are rediscovered by stable ID
+after an address change; authentication always checks the pinned certificate.
+
+Pairing credentials are local to Take A Look, independent of emberctl's store.
+They are encrypted with the current user's DPAPI on Windows, and use private
+directories/files on Unix. Projects retain only the selected device ID; the
+pairing secret is never sent to Flutter or exported into projects. Override the
+store directory with `TAL_EMBER_CONFIG_DIR` for isolated tests.
+
+**EmberMobile** supports live memory reads, run control, registers,
 address breakpoints, and both RTT sampling formats. The v1 gateway does not
 provide arbitrary memory writes, so variable write controls are disabled.
+Source **下载** / **编译并下载** upload the staged ELF/AXF to the phone (binary
+QUIC upload, or bounded v1 chunks), validate its SHA-256, start a phone flash
+job, and wait for verified completion. Upload success alone never completes a
+download task; failures and unknown outcomes appear in source-task feedback.
 
 **EmberMobile + GDB** uses the private gateway for RTT and an installed GDB for
 debug control and memory writes. Enter the GDB port (3333) and the path to an
@@ -152,11 +363,21 @@ PATH. The application starts the phone GDB listener if needed; an existing
 listener must match the port/core and have no connected client. GDB attaches
 with the target halted. Resume it to capture RTT; halt it to inspect or write
 variables. Full-stop GDB is not used for running-target memory polling.
+Source downloads in this mode use GDB `-target-download` through Ember's vFlash
+support, then read back the loadable sections at their physical load addresses.
+Only after verification are symbols/breakpoints refreshed and the requested
+halt/run action applied. This keeps the GDB session in control of the probe.
 
 **远程 GDB** connects to an already running RSP server without requiring an
-EmberMobile token. The current register panel targets ARM/Cortex-M. This mode
-does not supply RTT. GDB is an external executable and is not included in the
-application bundle; `pygdbmi` is included in the Python backend dependencies.
+EmberMobile token. Choose **断点调试** for the installed GDB/MI adapter and
+ARM/Cortex-M register panel, or **高速内存采样（只读）** for direct standard RSP
+memory reads without an external GDB executable. The sampling mode supports
+explicit pause/continue, negotiates NoAck and packet size, and merges gaps only
+inside server-declared RAM. It does not provide writes, step, reset, breakpoints,
+firmware download, or RTT. Servers may halt the core on connection; use continue
+explicitly when required. Server/target support for background memory access
+and fresh server-side reads is required. See [GDB memory sampling](docs/gdb-memory-performance.md).
+GDB itself is not bundled; `pygdbmi` is included for the debugger mode.
 
 On disconnect, the application detaches GDB and closes only the phone GDB/RTT
 services it started. It preserves an adopted phone listener or RTT capture.
@@ -176,7 +397,8 @@ negotiated version. Install `aioquic` through the backend setup script; it is
 included in packaged builds.
 
 TCP-only ADB forwarding cannot carry QUIC. Use the phone's LAN address for v2,
-or explicitly launch with `EMBER_PROTOCOL=1` for the v1 TCP compatibility path.
+or explicitly launch with `EMBER_PROTOCOL=1` and a temporary token for the v1 TCP compatibility path.
+Saved pairing credentials require QUIC and are never sent through the v1 path.
 This is an explicit legacy choice, not an automatic fallback after TLS failure.
 
 RTT v2 data is pushed as raw binary on a separate authenticated data connection,
@@ -189,10 +411,21 @@ untimestamped samples still use a nominal, approximate time axis. The reliable
 client cache is limited to 1 MiB and reports overflow; realtime preview uses
 64 KiB and an approximately 20 ms local queue budget. Reset/epoch changes stop
 the old stream. v2 memory blocks can carry 64 KiB without JSON byte arrays.
+Gateways advertising `memory_batch=1` receive exact watch ranges in binary batches
+(up to 128 ranges / 64 KiB each). The phone decides safe merges from its target
+memory map, without PC-side gap filling. Older gateways retain their existing
+read path. Capture/monitor scheduling stays on the PC, which chooses between
+periodic phone-side memory subscriptions and one read per tick.
 
 Sampling rate remains limited by the probe, phone capture loop, and network;
-the UI's requested frequency does not guarantee physical throughput. See
-EmberMobile's `docs/protocol-v2.md` for the wire contract and benchmark scope.
+the UI's requested frequency does not guarantee physical throughput. Gateways
+advertising `memory_sampling_repeat` pack repeated reads of the same ranges into
+one probe transaction, which raises the sample rate above one transaction per
+sample: the phone returns several reads per tick with one timestamp and one
+measured burst duration, and the PC places them inside that measured window.
+Those samples sit back to back at bus speed, so the tick spacing still comes
+from the phone timer. See EmberMobile's `docs/protocol-v2.md` for the wire
+contract and benchmark scope.
 
 Load an ELF/AXF file built with DWARF debug information (`-Og -g3` is
 recommended for GCC/Clang), then open the **源码调试** tab beside the realtime
@@ -215,6 +448,28 @@ first while content results load. File paths and prepared text are cached across
 queries, and binary build outputs are only matched by name. Content search uses
 literal text. Use `Up`/`Down` to select a result and `Enter` to open it and close
 search; `Esc` closes search without opening the selection.
+Use `Ctrl+Click` on a function or variable to jump to its definition, or select
+the identifier and press `F12`. The source context menu also offers **跳转到定义**.
+Holding Ctrl (Command on macOS) while hovering a resolvable identifier highlights
+and underlines it, with a hand cursor. `Alt+F12` or **预览定义** opens an inline
+definition preview; `Shift+F12` or **查看引用** finds matching identifiers across
+the local C/C++ project. The preview shows code beside results grouped by file,
+and stacks them vertically in narrow panels. Click a result to preview it,
+double-click or press Enter to open it, use Up/Down to select, or Esc to close.
+Drag the preview's bottom edge to resize it. Reference lookup matches whole,
+case-sensitive identifier names, excluding comments, quoted strings, raw strings
+and include paths; it includes declarations/definitions and may include unrelated
+symbols with the same name. Searches stop at 2,000 results and show `+` when capped.
+Locations come from the loaded ELF/AXF's DWARF information, including parameters
+and structure members. Definitions in other files open automatically and the
+destination line is highlighted; ambiguous names open the inline preview with
+scopes and file/line locations. If only a declaration is available, navigation uses it.
+Use `Alt+Left` / `Alt+Right` or the source toolbar arrows to go back / forward.
+Reload the ELF/AXF after rebuilding to update these locations; identifiers absent
+from its debug information cannot be resolved.
+Windows release builds use a frozen Python backend. After changing backend
+sources, run `tool/build_backend.ps1` before `flutter build windows --release`;
+the release build rejects a bundled runtime older than its Python sources.
 Use the folder button in the source toolbar to set the project source root;
 build-machine paths recorded in the ELF are then
 matched to local files automatically. **定位本地源码** remains available as a
@@ -227,6 +482,8 @@ working directory. Building does not require a connected board or an existing
 ELF. Commands, firmware paths, shell selection, extra toolchain directories and
 output encoding are saved per project and operating system in the app's local
 `source-projects.json` configuration file.
+The source root starts unselected on each launch. Select a directory to reuse
+its saved build settings, or explicitly open a saved `.talproj` project.
 
 Windows defaults to PowerShell (`pwsh.exe`, falling back to Windows PowerShell);
 CMD is optional. macOS defaults to zsh and Linux to Bash, using an available
@@ -261,6 +518,10 @@ can be used in place of Ctrl.
 | `Ctrl+Shift+S` | Save workspace layout | Main window |
 | `Ctrl+F` | Open file/content search | Window with a visible source debugger |
 | `Ctrl+W` | Close the active source file tab | Window with a visible source debugger |
+| `Ctrl+Click` / `F12` | Jump to a function or variable definition | Source code / selected identifier |
+| `Alt+F12` / `Shift+F12` | Preview a definition / view references | Selected source identifier |
+| `Up` / `Down`, `Enter`, `Esc` | Select, open, close | Inline source preview |
+| `Alt+Left` / `Alt+Right` | Go back / forward through source locations | Source debugger |
 | `Up` / `Down` | Select a search result | Source search |
 | `Enter` / `Esc` | Open the selection and close search / cancel search | Source search |
 | `Ctrl+A` | Select all watched variables | Active watch panel |
@@ -297,6 +558,15 @@ CSV 导入仍可选择本地文件，导出读取当前采集记录中的全部�
 采样率降低时保留尚未过期的高密度数据，实际输入更快时自动扩容。绘制仅扫描可见时间段，
 按像素保留最小值、最大值和首尾点。主窗口和独立窗口同步完整的保留历史。
 
+左右拖动可回看**当前采样会话的全部已记录时间**，超出内存缓存时自动从磁盘回读；
+“View All / 显示全部”覆盖完整会话。上下拖动和缩放继续保留“跟随最新”。
+每个记录目录的 `history/` 保存数值序列及分层峰谷索引，正式后端在已有记录工作线程中生成。
+前端在后台 isolate 中按时间范围读取，预取左右各半个视窗，60 ms 节流，并且只保留一个进行中的请求和最新待处理视窗。
+历史缓存最多保存两个窗口，常规通道数量下每窗总点数不超过 131072；大范围保留原始峰谷，放大后自动读取更细的样本。
+多曲线共享绘制点预算，选中的曲线仍按完整像素宽度绘制；曲线使用批量线段绘制，避免密集圆角路径的栅格化开销。
+这个索引增加磁盘用量，但不会扩大实时内存缓存，也不会改变原始 CSV 导出内容。
+旧版已有的 `.talraw` 文件仍可导出 CSV；本次历史拖动使用新采样会话生成的索引。
+
 原始数据独立追加到 `samples.talraw`，不受绘图时长、暂停绘图、隐藏曲线、移除变量或像素抽稀影响。
 每批数据直接写入操作系统，导出、清空或关闭时执行刷新；记录写入失败会明确报错并暂停采样。
 清空采样、重新连接正式后端或切换模拟场景会开启新记录，旧记录文件仍保留；CSV 导出使用点击时的完整记录快照。
@@ -318,6 +588,17 @@ CSV 导入仍可选择本地文件，导出读取当前采集记录中的全部�
 .\.venv\Scripts\python.exe -m take_a_look_backend.services.recording "记录文件.talraw" "输出.csv"
 ```
 模拟采样率用于产生 UI 负载，不代表硬件吞吐或真实定时精度。
+
+历史读取性能可单独复测（生成单通道百万点及 32 通道共约 420 万点的模拟记录）：
+
+```powershell
+dart compile exe tool/benchmarks/history_benchmark.dart -o build/history_benchmark.exe
+.\build\history_benchmark.exe build/history-benchmark
+```
+
+`results.json` 包含回读耗时、磁盘读取字节数、返回点数和主 isolate 的定时器间隔；它不等同于窗口帧率。
+`tool/benchmarks/history_ui_benchmark.dart` 可作为独立 Flutter Windows Release 测试程序的入口，
+设置 `TAL_HISTORY_BENCH_DIR` 指向上述目录后，使用真实图表进行连续平移并输出 Flutter 帧耗时和截图。
 
 布局和诊断保存在 `%APPDATA%/TakeALookUiTest/`，与正式布局分开。
 点击“导出诊断”会保存主窗口 PNG 截图和 JSON（场景、样本计数、日志、

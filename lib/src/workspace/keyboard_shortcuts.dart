@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'panel_types.dart';
+
 /// Shared command bindings for window handlers, panel handlers and menu hints.
 /// Physical keys keep commands available under IMEs; logical keys also support
 /// alternate keyboard layouts. Ctrl and Command are both accepted.
@@ -11,9 +13,13 @@ enum WorkspaceShortcut {
     alternate: (PhysicalKeyboardKey.numpad0, LogicalKeyboardKey.numpad0),
   ),
   saveLayout(PhysicalKeyboardKey.keyS, LogicalKeyboardKey.keyS, shift: true),
+  saveProject(PhysicalKeyboardKey.keyS, LogicalKeyboardKey.keyS),
+  openProject(PhysicalKeyboardKey.keyO, LogicalKeyboardKey.keyO),
   findSource(PhysicalKeyboardKey.keyF, LogicalKeyboardKey.keyF),
   closeSource(PhysicalKeyboardKey.keyW, LogicalKeyboardKey.keyW),
-  selectAllWatches(PhysicalKeyboardKey.keyA, LogicalKeyboardKey.keyA);
+  selectAllWatches(PhysicalKeyboardKey.keyA, LogicalKeyboardKey.keyA),
+  undoWatchDeletion(PhysicalKeyboardKey.keyZ, LogicalKeyboardKey.keyZ),
+  redoWatchDeletion(PhysicalKeyboardKey.keyY, LogicalKeyboardKey.keyY);
 
   const WorkspaceShortcut(
     this.physicalKey,
@@ -243,6 +249,7 @@ class PanelKeyboardListener extends StatefulWidget {
 
 class _PanelKeyboardListenerState extends State<PanelKeyboardListener> {
   _PanelKeyboardScopeState? _panel;
+  bool _visible = true;
 
   @override
   void didChangeDependencies() {
@@ -251,13 +258,14 @@ class _PanelKeyboardListenerState extends State<PanelKeyboardListener> {
     _panel = context
         .dependOnInheritedWidgetOfExactType<_PanelKeyboardContext>()
         ?.state;
-    _panel?._bindings[this] = widget;
+    _visible = WorkspacePanelVisibility.of(context);
+    if (_visible) _panel?._bindings[this] = widget;
   }
 
   @override
   void didUpdateWidget(covariant PanelKeyboardListener oldWidget) {
     super.didUpdateWidget(oldWidget);
-    _panel?._bindings[this] = widget;
+    if (_visible) _panel?._bindings[this] = widget;
   }
 
   @override
@@ -269,8 +277,10 @@ class _PanelKeyboardListenerState extends State<PanelKeyboardListener> {
   @override
   Widget build(BuildContext context) => Focus(
     focusNode: widget.focusNode,
-    autofocus: widget.autofocus,
-    onKeyEvent: (_, event) => widget.onKeyEvent(event),
+    autofocus: _visible && widget.autofocus,
+    canRequestFocus: _visible,
+    onKeyEvent: (_, event) =>
+        _visible ? widget.onKeyEvent(event) : KeyEventResult.ignored,
     child: widget.child,
   );
 }

@@ -67,24 +67,23 @@ Map<String,dynamic> auditStateDelta(TakeALookController c, Map<String,int> versi
 
 $processor = Get-CimInstance Win32_Processor
 $computer = Get-CimInstance Win32_ComputerSystem
-$sourcePaths = @(
-  'lib/src/backend/backend_transport.dart', 'lib/src/telemetry/telemetry_store.dart',
-  'lib/src/telemetry/sample_buffer.dart', 'lib/src/models/models.dart',
-  'lib/src/analysis/analysis_data.dart', 'lib/src/analysis/analysis_worker.dart',
-  'lib/src/analysis/analysis.dart', 'lib/src/analysis/analysis_fft.dart',
-  'lib/src/controller/controller.dart', 'lib/src/controller/controller_telemetry.dart',
-  'lib/src/panels/analysis_chart_panel.dart', 'lib/src/panels/analysis_fft_panel.dart',
-  'lib/src/chart/downsampling.dart', 'lib/src/chart/painter.dart',
-  'tool/benchmarks/data_benchmark.dart'
+$sourcePaths = @('pubspec.yaml', 'pubspec.lock') + @(
+  Get-ChildItem -LiteralPath (Join-Path $sourceDirectory 'lib') -Recurse -File -Filter '*.dart' |
+    ForEach-Object { [IO.Path]::GetRelativePath($sourceDirectory, $_.FullName).Replace('\', '/') } |
+    Sort-Object
 )
 $sourceHashes = @{}
 foreach ($sourcePath in $sourcePaths) {
   $sourceHashes[$sourcePath] = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $sourceDirectory $sourcePath)).Hash
 }
 $sourceHashes['tool/benchmarks/performance_audit.dart'] = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $projectDirectory 'tool\benchmarks\performance_audit.dart')).Hash
+$sourceHashes['tool/benchmarks/data_benchmark.dart'] = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $projectDirectory 'tool\benchmarks\data_benchmark.dart')).Hash
 $buildManifest = Join-Path $harnessDirectory 'compiled-source-hashes.json'
 if ($SkipBuild) {
   $compiledHashes = Get-Content -Raw -LiteralPath $buildManifest | ConvertFrom-Json
+  if (@($compiledHashes.PSObject.Properties).Count -ne $sourceHashes.Count) {
+    throw 'Source inventory changed since compilation; rerun without -SkipBuild.'
+  }
   foreach ($sourcePath in $sourceHashes.Keys) {
     if ($compiledHashes.$sourcePath -ne $sourceHashes[$sourcePath]) {
       throw "Source changed since compilation; rerun without -SkipBuild: $sourcePath"
@@ -118,7 +117,8 @@ try {
     $resultName = if ($Suite -eq 'all') { "run-$run.json" } else { "$Suite-run-$run.json" }
     $env:TAL_BENCH_OUTPUT = Join-Path $resultDirectory $resultName
     Write-Output "Starting release benchmark run $run of $Runs. Progress: $env:TAL_BENCH_OUTPUT.progress.jsonl"
-    $process = Start-Process -FilePath $benchmarkExecutable -WorkingDirectory (Split-Path $benchmarkExecutable) -WindowStyle Hidden -PassThru
+    $process = Start-Process -FilePath $benchmarkExecutable -WorkingDirectory (Split-Path $benchmarkExecutable) -WindowStyle Hidden -PassThru `
+      -RedirectStandardOutput "$env:TAL_BENCH_OUTPUT.stdout.log" -RedirectStandardError "$env:TAL_BENCH_OUTPUT.stderr.log"
     $null = $process.Handle
     try {
       if ($ProcessorAffinity -gt 0) { $process.ProcessorAffinity = [IntPtr]$ProcessorAffinity }

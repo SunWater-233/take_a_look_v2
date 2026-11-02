@@ -7,12 +7,19 @@
 #include "flutter/generated_plugin_registrant.h"
 #include "gpu_preference.h"
 
+#ifdef TAL_WINDOW_RESIZE_DIAGNOSTICS
+#include "windows_resize_trace.h"
+#endif
+
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
 
 FlutterWindow::~FlutterWindow() {}
 
 bool FlutterWindow::OnCreate() {
+#ifdef TAL_WINDOW_RESIZE_DIAGNOSTICS
+  tal::resize_trace::Start();
+#endif
   if (!Win32Window::OnCreate()) {
     return false;
   }
@@ -27,6 +34,10 @@ bool FlutterWindow::OnCreate() {
   if (!flutter_controller_) {
     return false;
   }
+#ifdef TAL_WINDOW_RESIZE_DIAGNOSTICS
+  tal::resize_trace::InstallControl(flutter_controller_->engine()->messenger(),
+                                   GetHandle());
+#endif
   RegisterPlugins(flutter_controller_->engine());
   DesktopMultiWindowSetWindowCreatedCallback([](void* controller) {
     auto* flutter_view_controller =
@@ -60,6 +71,9 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+#ifdef TAL_WINDOW_RESIZE_DIAGNOSTICS
+  tal::resize_trace::WindowMessage sample(hwnd, message);
+#endif
   if (message == WM_CLOSE) {
     // desktop_multi_window owns prewarmed and detached engines in a static
     // manager. Destroy their native windows while the main engine and platform

@@ -167,7 +167,7 @@ class SourceTasks:
     def start(self, kind: str, config: dict[str, object]) -> dict[str, object]:
         if kind not in {"build", "download", "buildAndDownload"}:
             raise ProtocolError("invalid_source_task", "未知的工程任务。")
-        if not str(config["sourceRoot"]).strip() or not Path(str(config["sourceRoot"])).is_dir():
+        if kind != "download" and (not str(config["sourceRoot"]).strip() or not Path(str(config["sourceRoot"])).is_dir()):
             raise ProtocolError("source_root_required", "请设置有效的工程源码根目录。")
         if kind != "download" and not str(config["buildCommand"]).strip():
             raise ProtocolError("build_command_required", "请在工程设置中填写编译命令。")

@@ -51,6 +51,11 @@ manifest = {
     "python": platform.python_version(),
     "elf_glibc_requirements": elf_requirements,
 }
+bundled_index = package_root / "backend/runtime/take_a_look_backend/bundled_packs/index.json"
+bundled = json.loads(bundled_index.read_text())
+manifest["bundled_packs"] = [{key: pack[key] for key in
+                              ("vendor", "name", "version", "id", "sourceUrl", "requiredPrefix", "size")}
+                             for pack in bundled["packs"].values()]
 (package_root / "BUILD-INFO.json").write_text(json.dumps(manifest, indent=2) + "\n")
 licenses = package_root / "licenses"
 licenses.mkdir(exist_ok=True)
@@ -75,5 +80,6 @@ for name in ("libusb-1.0-0", "libudev1", "libstdc++6", "libgcc-s1", "libffi7", "
     "Bundled libusb source: https://libusb.info/ (LGPL-2.1-or-later).\n"
     "Bundled system library sources: https://sources.debian.org/ .\n"
     "SEGGER J-Link software is not redistributed; install it separately from SEGGER if needed.\n"
+    "Bundled STM32 CMSIS-Packs retain their original notices and licenses inside each .pack archive.\n"
 )
 print(f"Audited {len(elf_requirements)} ELF files; required glibc >= {minimum}")

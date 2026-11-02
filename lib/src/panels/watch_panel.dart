@@ -1,4 +1,26 @@
-part of 'panels.dart';
+import 'dart:async';
+import 'dart:math' as math;
+
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
+
+import 'package:flutter/services.dart';
+
+import '../chart/inspection_anchor.dart';
+import '../controller/controller.dart';
+import '../workspace/keyboard_shortcuts.dart';
+import '../models/models.dart';
+import '../models/watch_tree.dart';
+import '../theme/theme.dart';
+import 'table_layout.dart';
+import 'watch_color_dialog.dart';
+
+import 'shared_controls.dart';
+
+part 'compact_watch_panel.dart';
+part 'watch_browser.dart';
+part 'watch_value_cell.dart';
+part 'watch_monitor_scope.dart';
 
 const _watchColumnLabels = <String>[
   '变量',
@@ -9,25 +31,39 @@ const _watchColumnLabels = <String>[
   '操作',
   '图标显示',
   '绘制颜色',
+  '读取模式',
+  '监视频率',
 ];
 
 typedef _WatchRowContextMenuCallback =
-    void Function(String key, _ContextMenuRequest request);
+    void Function(String key, TableContextMenuRequest request);
 
-class _WatchPanel extends StatefulWidget {
-  const _WatchPanel({required this.controller});
+class WatchPanel extends StatefulWidget {
+  const WatchPanel({super.key, required this.controller, this.visible = true});
 
   final TakeALookController controller;
+  final bool visible;
 
   @override
-  State<_WatchPanel> createState() => _WatchPanelState();
+  State<WatchPanel> createState() => _WatchPanelState();
 }
 
-class _WatchPanelState extends State<_WatchPanel> {
-  static const _minimumColumnWidths = <double>[96, 88, 72, 72, 72, 108, 72, 72];
+class _WatchPanelState extends State<WatchPanel> {
+  static const _minimumColumnWidths = <double>[
+    96,
+    88,
+    72,
+    72,
+    72,
+    108,
+    72,
+    72,
+    110,
+    120,
+  ];
 
   final ResizableTableLayout _tableLayout = ResizableTableLayout(
-    widths: const [220, 112, 96, 96, 96, 116, 84, 96],
+    widths: const [220, 112, 96, 96, 96, 116, 84, 96, 120, 140],
     minimumWidths: _minimumColumnWidths,
     rowHeight: 44,
   );
@@ -58,7 +94,7 @@ class _WatchPanelState extends State<_WatchPanel> {
       .fold(0, (sum, entry) => sum + entry.$2);
 
   @override
-  void didUpdateWidget(covariant _WatchPanel oldWidget) {
+  void didUpdateWidget(covariant WatchPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != controller) {
       _appliedPlotWatchSelectionRevision = -1;
@@ -183,23 +219,27 @@ class _WatchPanelState extends State<_WatchPanel> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        _WatchRow(
-          key: ValueKey<String>(watch.symbol.key),
+        WatchRowAnchor(
           controller: controller,
-          watch: watch,
-          label: node.label,
-          depth: depth,
-          expandable: node.children.isNotEmpty,
-          expanded: expanded,
-          onToggleExpanded: () => _toggleWatchTreeNode(watch.symbol.key),
-          columnWidths: _columnWidths,
-          hiddenColumns: _hiddenColumns,
-          selectedColumns: _selectedColumns,
-          rowHeight: _rowHeight,
-          selected: _selectedWatchKeys.contains(watch.symbol.key),
-          onSelect: _selectWatch,
-          onNameContextMenu: _showNameContextMenu,
-          onPlotContextMenu: _showPlotContextMenu,
+          watchKey: watch.symbol.key,
+          child: _WatchRow(
+            key: ValueKey<String>(watch.symbol.key),
+            controller: controller,
+            watch: watch,
+            label: node.label,
+            depth: depth,
+            expandable: node.children.isNotEmpty,
+            expanded: expanded,
+            onToggleExpanded: () => _toggleWatchTreeNode(watch.symbol.key),
+            columnWidths: _columnWidths,
+            hiddenColumns: _hiddenColumns,
+            selectedColumns: _selectedColumns,
+            rowHeight: _rowHeight,
+            selected: _selectedWatchKeys.contains(watch.symbol.key),
+            onSelect: _selectWatch,
+            onNameContextMenu: _showNameContextMenu,
+            onPlotContextMenu: _showPlotContextMenu,
+          ),
         ),
         if (expanded)
           for (final child in node.children)
@@ -254,8 +294,29 @@ class _WatchPanelState extends State<_WatchPanel> {
 
   KeyEventResult _handleWatchShortcut(KeyEvent event) {
     final focusContext = FocusManager.instance.primaryFocus?.context;
-    if (focusContext?.findAncestorWidgetOfExactType<EditableText>() != null) {
+    if (ModalRoute.of(context)?.isCurrent == false ||
+        focusContext?.findAncestorWidgetOfExactType<EditableText>() != null) {
       return KeyEventResult.ignored;
+    }
+    if (WorkspaceShortcut.redoWatchDeletion.matches(event) &&
+        controller.canRedoWatchDeletion) {
+      controller.redoWatchDeletion();
+      return KeyEventResult.handled;
+    }
+    if (WorkspaceShortcut.undoWatchDeletion.matches(event) &&
+        controller.canUndoWatchDeletion) {
+      controller.undoWatchDeletion();
+      return KeyEventResult.handled;
+    }
+    if (event is KeyDownEvent &&
+        !event.synthesized &&
+        event.logicalKey == LogicalKeyboardKey.delete &&
+        !HardwareKeyboard.instance.isControlPressed &&
+        !HardwareKeyboard.instance.isMetaPressed &&
+        !HardwareKeyboard.instance.isAltPressed &&
+        _selectedWatchKeys.isNotEmpty) {
+      controller.removeWatches(_selectedWatchKeys);
+      return KeyEventResult.handled;
     }
     if (!WorkspaceShortcut.selectAllWatches.matches(event)) {
       return KeyEventResult.ignored;
@@ -327,7 +388,7 @@ class _WatchPanelState extends State<_WatchPanel> {
 
   Future<void> _showHeaderContextMenu(
     int clickedColumn,
-    _ContextMenuRequest request,
+    TableContextMenuRequest request,
   ) async {
     final targetColumns = _selectedColumns.length > 1
         ? (_selectedColumns.toList()..sort())
@@ -373,7 +434,7 @@ class _WatchPanelState extends State<_WatchPanel> {
 
   Future<void> _showNameContextMenu(
     String clickedKey,
-    _ContextMenuRequest request,
+    TableContextMenuRequest request,
   ) async {
     final keys = _contextWatchKeys(clickedKey);
     if (keys.isEmpty) return;
@@ -387,6 +448,20 @@ class _WatchPanelState extends State<_WatchPanel> {
           value: 'remove',
           icon: Icons.close,
           label: count == 1 ? '移除该变量' : '移除所选变量（$count）',
+          touchOptimized: request.touchOptimized,
+        ),
+        _watchPopupItem(
+          value: 'undo',
+          icon: Icons.undo,
+          label: '撤回删除',
+          enabled: controller.canUndoWatchDeletion,
+          touchOptimized: request.touchOptimized,
+        ),
+        _watchPopupItem(
+          value: 'redo',
+          icon: Icons.redo,
+          label: '重做删除 (Ctrl+Y)',
+          enabled: controller.canRedoWatchDeletion,
           touchOptimized: request.touchOptimized,
         ),
         _watchPopupItem(
@@ -434,6 +509,10 @@ class _WatchPanelState extends State<_WatchPanel> {
       case 'remove':
         _selectedWatchKeys.removeAll(keys);
         controller.removeWatches(keys);
+      case 'undo':
+        controller.undoWatchDeletion();
+      case 'redo':
+        controller.redoWatchDeletion();
       case 'copy':
         final names = [
           for (final watch in controller.watches)
@@ -462,7 +541,7 @@ class _WatchPanelState extends State<_WatchPanel> {
 
   Future<void> _showPlotContextMenu(
     String clickedKey,
-    _ContextMenuRequest request,
+    TableContextMenuRequest request,
   ) async {
     final keys = _contextWatchKeys(clickedKey);
     if (keys.isEmpty) return;
@@ -498,112 +577,130 @@ class _WatchPanelState extends State<_WatchPanel> {
         _normalizeSelection();
         final treeRoots = buildWatchTree(controller.watches);
         _applyPlotSelection(treeRoots);
-        return Padding(
-          padding: const EdgeInsets.all(10),
-          child: Column(
-            children: [
-              Expanded(
-                child: PanelKeyboardListener(
-                  focusNode: _tableFocus,
-                  onKeyEvent: _handleWatchShortcut,
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      return _ResizableTableViewport(
-                        layout: _tableLayout,
-                        contentWidth: _tableWidth,
-                        horizontalController: _horizontalScrollController,
-                        contentKey: const ValueKey('watch-table-content'),
-                        resizeRegionKey: const ValueKey(
-                          'watch-table-resize-region',
-                        ),
-                        minimumRowHeight: 40,
-                        canStartResizeAt: _canStartTableResize,
-                        onLayoutChanged: () => setState(() {}),
-                        bodyDecoration: const BoxDecoration(
-                          color: TalColors.input,
-                          border: Border(
-                            left: BorderSide(color: TalColors.border),
-                            right: BorderSide(color: TalColors.border),
-                            bottom: BorderSide(color: TalColors.border),
+        final visible = <String>{};
+        void collectVisible(WatchTreeNode node) {
+          // Aggregate rows show a summary; their hidden members have no demand.
+          if (node.children.isEmpty) visible.add(node.watch.symbol.key);
+          if (_expandedWatchKeys.contains(node.watch.symbol.key)) {
+            for (final child in node.children) {
+              collectVisible(child);
+            }
+          }
+        }
+
+        for (final root in treeRoots) {
+          collectVisible(root);
+        }
+        return _WatchMonitorScope(
+          controller: controller,
+          keys: widget.visible ? visible : <String>{},
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Column(
+              children: [
+                Expanded(
+                  child: PanelKeyboardListener(
+                    focusNode: _tableFocus,
+                    onKeyEvent: _handleWatchShortcut,
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        return ResizableTableViewport(
+                          layout: _tableLayout,
+                          contentWidth: _tableWidth,
+                          horizontalController: _horizontalScrollController,
+                          contentKey: const ValueKey('watch-table-content'),
+                          resizeRegionKey: const ValueKey(
+                            'watch-table-resize-region',
                           ),
-                        ),
-                        header: _WatchTableHeader(
-                          columnWidths: _columnWidths,
-                          hiddenColumns: _hiddenColumns,
-                          selectedColumns: _selectedColumns,
-                          onResizeColumn: _resizeColumn,
-                          onSelectColumn: _selectColumn,
-                          onContextMenu: _showHeaderContextMenu,
-                        ),
-                        body: treeRoots.isEmpty
-                            ? const SizedBox.expand()
-                            : ReorderableListView.builder(
-                                scrollController: _verticalScrollController,
-                                buildDefaultDragHandles: false,
-                                proxyDecorator: (child, index, animation) {
-                                  final horizontalOffset =
-                                      _horizontalScrollController.hasClients
-                                      ? _horizontalScrollController.offset
-                                      : 0.0;
-                                  return ClipRect(
-                                    key: const ValueKey('watch-drag-proxy'),
-                                    clipper: _WatchDragProxyClipper(
-                                      left: horizontalOffset,
-                                      width: constraints.maxWidth,
-                                    ),
-                                    child: Material(
-                                      color: Colors.transparent,
-                                      child: child,
-                                    ),
-                                  );
-                                },
-                                itemCount: treeRoots.length,
-                                onReorderItem: (oldIndex, newIndex) =>
-                                    _reorderWatchRoot(
-                                      treeRoots,
-                                      oldIndex,
-                                      newIndex,
-                                    ),
-                                itemBuilder: (context, index) {
-                                  final node = treeRoots[index];
-                                  return ReorderableDelayedDragStartListener(
-                                    key: ValueKey<String>(
-                                      'watch-reorder-${node.watch.symbol.key}',
-                                    ),
-                                    index: index,
-                                    child: _buildWatchTreeBranch(
-                                      node,
-                                      depth: 0,
-                                    ),
-                                  );
-                                },
-                              ),
-                      );
-                    },
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  const Expanded(
-                    child: Text(
-                      '展开结构体或数组查看成员；铅笔用于写入，波形用于启停采样，眼睛控制图表显示。',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: talMuted,
+                          minimumRowHeight: 40,
+                          canStartResizeAt: _canStartTableResize,
+                          onLayoutChanged: () => setState(() {}),
+                          bodyDecoration: const BoxDecoration(
+                            color: TalColors.input,
+                            border: Border(
+                              left: BorderSide(color: TalColors.border),
+                              right: BorderSide(color: TalColors.border),
+                              bottom: BorderSide(color: TalColors.border),
+                            ),
+                          ),
+                          header: _WatchTableHeader(
+                            columnWidths: _columnWidths,
+                            hiddenColumns: _hiddenColumns,
+                            selectedColumns: _selectedColumns,
+                            onResizeColumn: _resizeColumn,
+                            onSelectColumn: _selectColumn,
+                            onContextMenu: _showHeaderContextMenu,
+                          ),
+                          body: treeRoots.isEmpty
+                              ? const SizedBox.expand()
+                              : ReorderableListView.builder(
+                                  scrollController: _verticalScrollController,
+                                  buildDefaultDragHandles: false,
+                                  proxyDecorator: (child, index, animation) {
+                                    final horizontalOffset =
+                                        _horizontalScrollController.hasClients
+                                        ? _horizontalScrollController.offset
+                                        : 0.0;
+                                    return ClipRect(
+                                      key: const ValueKey('watch-drag-proxy'),
+                                      clipper: _WatchDragProxyClipper(
+                                        left: horizontalOffset,
+                                        width: constraints.maxWidth,
+                                      ),
+                                      child: Material(
+                                        color: Colors.transparent,
+                                        child: child,
+                                      ),
+                                    );
+                                  },
+                                  itemCount: treeRoots.length,
+                                  onReorderItem: (oldIndex, newIndex) =>
+                                      _reorderWatchRoot(
+                                        treeRoots,
+                                        oldIndex,
+                                        newIndex,
+                                      ),
+                                  itemBuilder: (context, index) {
+                                    final node = treeRoots[index];
+                                    return ReorderableDelayedDragStartListener(
+                                      key: ValueKey<String>(
+                                        'watch-reorder-${node.watch.symbol.key}',
+                                      ),
+                                      index: index,
+                                      child: _buildWatchTreeBranch(
+                                        node,
+                                        depth: 0,
+                                      ),
+                                    );
+                                  },
+                                ),
+                        );
+                      },
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  TalButton(
-                    onPressed: controller.watches.isEmpty
-                        ? null
-                        : controller.clearWatches,
-                    child: const Text('清空监视'),
-                  ),
-                ],
-              ),
-            ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        '展开查看成员；折叠后仅监视变量暂停刷新，已固定变量持续刷新。采集不受折叠影响。',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: talMuted,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    TalButton(
+                      onPressed: controller.watches.isEmpty
+                          ? null
+                          : controller.clearWatches,
+                      child: const Text('清空监视'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         );
       },
@@ -643,9 +740,9 @@ class _WatchTableHeader extends StatelessWidget {
   final List<double> columnWidths;
   final Set<int> hiddenColumns;
   final Set<int> selectedColumns;
-  final _ColumnResizeCallback onResizeColumn;
+  final ColumnResizeCallback onResizeColumn;
   final ValueChanged<int> onSelectColumn;
-  final _ColumnContextMenuCallback onContextMenu;
+  final ColumnContextMenuCallback onContextMenu;
 
   @override
   Widget build(BuildContext context) {
@@ -661,7 +758,7 @@ class _WatchTableHeader extends StatelessWidget {
         children: [
           for (final (index, label) in _watchColumnLabels.indexed)
             if (!hiddenColumns.contains(index))
-              _ResizableTableHeaderCell(
+              ResizableTableHeaderCell(
                 label: label,
                 width: columnWidths[index],
                 columnIndex: index,
@@ -723,7 +820,11 @@ class _WatchRowState extends State<_WatchRow> {
   @override
   void initState() {
     super.initState();
-    editor = TextEditingController(text: widget.watch.valueLabel);
+    editor = TextEditingController(
+      text:
+          widget.controller.watchInputDrafts[widget.watch.symbol.key] ??
+          widget.watch.valueLabel,
+    );
   }
 
   @override
@@ -847,6 +948,11 @@ class _WatchRowState extends State<_WatchRow> {
                         height: TalUiTheme.of(context).targetExtent(30),
                         child: TextField(
                           controller: editor,
+                          onChanged: (value) =>
+                              widget.controller.watchInputDrafts[watch
+                                      .symbol
+                                      .key] =
+                                  value,
                           enabled:
                               watch.symbol.writable &&
                               widget.controller.supportsMemoryWrite,
@@ -885,19 +991,15 @@ class _WatchRowState extends State<_WatchRow> {
                         icon: const Icon(Icons.edit_outlined, size: 16),
                       ),
                       TalIconButton(
-                        key: ValueKey('watch-sampling-${watch.symbol.key}'),
-                        tooltip: watch.samplingEnabled ? '停止采样' : '开始采样',
-                        onPressed: () => widget.controller.toggleWatchSampling(
-                          watch.symbol.key,
-                          !watch.samplingEnabled,
-                        ),
-                        icon: Icon(
-                          Icons.monitor_heart_outlined,
-                          size: 16,
-                          color: watch.samplingEnabled
-                              ? TalColors.accent
-                              : TalColors.muted,
-                        ),
+                        key: ValueKey('watch-read-${watch.symbol.key}'),
+                        tooltip: '立即读取',
+                        onPressed:
+                            widget.controller.connectionStatus ==
+                                ConnectionStatus.connected
+                            ? () =>
+                                  widget.controller.readWatch(watch.symbol.key)
+                            : null,
+                        icon: const Icon(Icons.refresh, size: 16),
                       ),
                     ],
                   ],
@@ -914,10 +1016,12 @@ class _WatchRowState extends State<_WatchRow> {
                   child: TalIconButton(
                     key: ValueKey('watch-visibility-${watch.symbol.key}'),
                     tooltip: watch.plotted ? '在图表中隐藏' : '在图表中显示',
-                    onPressed: () => widget.controller.toggleWatchPlot(
-                      watch.symbol.key,
-                      !watch.plotted,
-                    ),
+                    onPressed: watch.samplingEnabled
+                        ? () => widget.controller.toggleWatchPlot(
+                            watch.symbol.key,
+                            !watch.plotted,
+                          )
+                        : null,
                     icon: Icon(
                       watch.plotted
                           ? Icons.visibility_outlined
@@ -956,6 +1060,48 @@ class _WatchRowState extends State<_WatchRow> {
                   ),
                 ),
               ),
+            if (!widget.hiddenColumns.contains(8))
+              _WatchCell(
+                width: widget.columnWidths[8],
+                selected: widget.selectedColumns.contains(8),
+                child: widget.expandable
+                    ? const Text('—', style: talMuted)
+                    : TalDropdown<WatchReadMode>(
+                        key: ValueKey('watch-table-mode-${watch.symbol.key}'),
+                        value: watch.readMode,
+                        values: WatchReadMode.values,
+                        label: (mode) => mode.label,
+                        onChanged: (mode) => widget.controller.setWatchReadMode(
+                          watch.symbol.key,
+                          mode,
+                        ),
+                      ),
+              ),
+            if (!widget.hiddenColumns.contains(9))
+              _WatchCell(
+                width: widget.columnWidths[9],
+                selected: widget.selectedColumns.contains(9),
+                child:
+                    widget.expandable || watch.readMode != WatchReadMode.monitor
+                    ? const Text('—', style: talMuted)
+                    : widget.controller.usesDevicePush(watch)
+                    ? const Text('设备推送', style: talMuted)
+                    : TalDropdown<double>(
+                        value: watch.monitorRateHz ?? 0,
+                        values: {
+                          ...[0.0, 0.5, 1.0, 2.0, 5.0, 10.0],
+                          if (watch.monitorRateHz != null) watch.monitorRateHz!,
+                        }.toList()..sort(),
+                        label: (rate) => rate == 0
+                            ? '默认 ${formatReadRate(widget.controller.monitorRateHz)}'
+                            : formatReadRate(rate),
+                        onChanged: (rate) =>
+                            widget.controller.setWatchMonitorRate(
+                              watch.symbol.key,
+                              rate == 0 ? null : rate,
+                            ),
+                      ),
+              ),
           ],
         ),
       ),
@@ -992,7 +1138,7 @@ class _WatchCell extends StatelessWidget {
   final double width;
   final Widget child;
   final EdgeInsets padding;
-  final ValueChanged<_ContextMenuRequest>? onContextMenu;
+  final ValueChanged<TableContextMenuRequest>? onContextMenu;
   final bool selected;
 
   @override
@@ -1012,7 +1158,7 @@ class _WatchCell extends StatelessWidget {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onSecondaryTapUp: (details) => callback(
-        _ContextMenuRequest(
+        TableContextMenuRequest(
           globalPosition: details.globalPosition,
           touchOptimized: false,
         ),

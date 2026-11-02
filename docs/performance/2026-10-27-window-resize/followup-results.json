@@ -1,0 +1,2038 @@
+[
+  {
+    "path": "build\\window_resize_20261027_followup\\merged-1\\results.json",
+    "release": true,
+    "mode": "script",
+    "scene": "production",
+    "titlebar": "hidden",
+    "separateUiOverride": "0",
+    "dwmTraceInstrumented": false,
+    "displayRefreshRate": 144.0,
+    "devicePixelRatio": 1.25,
+    "timingFrames": 1004,
+    "matchedTimingFrames": 1004,
+    "script": {
+      "buildMs": {
+        "count": 989,
+        "p50": 4.184,
+        "p95": 7.197,
+        "max": 12.441,
+        "over16_67ms": 0,
+        "overDisplayBudget": 65
+      },
+      "rasterMs": {
+        "count": 989,
+        "p50": 11.582,
+        "p95": 19.682,
+        "max": 40.695,
+        "over16_67ms": 132,
+        "overDisplayBudget": 690
+      },
+      "totalMs": {
+        "count": 989,
+        "p50": 20.185,
+        "p95": 33.29,
+        "max": 247.324
+      },
+      "vsyncOverheadMs": {
+        "count": 989,
+        "p50": 2.139,
+        "p95": 10.247,
+        "max": 220.914
+      },
+      "panelErrorLogicalPx": {
+        "count": 989,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 582,
+        "p50": 28.896,
+        "p95": 124.235,
+        "max": 221.682
+      },
+      "metricsCount": 576,
+      "layoutFrames": 989
+    },
+    "settle": {
+      "buildMs": {
+        "count": 8,
+        "p50": 0.125,
+        "p95": 0.148,
+        "max": 6.39,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "rasterMs": {
+        "count": 8,
+        "p50": 2.348,
+        "p95": 4.257,
+        "max": 33.734,
+        "over16_67ms": 1,
+        "overDisplayBudget": 1
+      },
+      "totalMs": {
+        "count": 8,
+        "p50": 3.7,
+        "p95": 30.298,
+        "max": 195.69
+      },
+      "vsyncOverheadMs": {
+        "count": 8,
+        "p50": 1.12,
+        "p95": 2.066,
+        "max": 155.528
+      },
+      "panelErrorLogicalPx": {
+        "count": 8,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 0
+      },
+      "metricsCount": 0,
+      "layoutFrames": 8
+    },
+    "native": {
+      "buildMs": {
+        "count": 0,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "rasterMs": {
+        "count": 0,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "totalMs": {
+        "count": 0
+      },
+      "vsyncOverheadMs": {
+        "count": 0
+      },
+      "panelErrorLogicalPx": {
+        "count": 0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 0
+      },
+      "metricsCount": 0,
+      "layoutFrames": 0
+    },
+    "errors": [],
+    "setSizeAtLeast100ms": 32,
+    "secondaryNoHandlerExceptions": 1
+  },
+  {
+    "path": "build\\window_resize_20261027_followup\\separate-1\\results.json",
+    "release": true,
+    "mode": "script",
+    "scene": "production",
+    "titlebar": "hidden",
+    "separateUiOverride": "1",
+    "dwmTraceInstrumented": false,
+    "displayRefreshRate": 144.0,
+    "devicePixelRatio": 1.25,
+    "timingFrames": 1178,
+    "matchedTimingFrames": 1177,
+    "script": {
+      "buildMs": {
+        "count": 1156,
+        "p50": 0.999,
+        "p95": 8.715,
+        "max": 12.134,
+        "over16_67ms": 0,
+        "overDisplayBudget": 191
+      },
+      "rasterMs": {
+        "count": 1156,
+        "p50": 10.039,
+        "p95": 19.221,
+        "max": 34.394,
+        "over16_67ms": 144,
+        "overDisplayBudget": 697
+      },
+      "totalMs": {
+        "count": 1156,
+        "p50": 18.856,
+        "p95": 27.967,
+        "max": 41.186
+      },
+      "vsyncOverheadMs": {
+        "count": 1156,
+        "p50": 0.474,
+        "p95": 1.059,
+        "max": 2.178
+      },
+      "panelErrorLogicalPx": {
+        "count": 1156,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 582,
+        "p50": 27.921,
+        "p95": 39.116,
+        "max": 83.947
+      },
+      "metricsCount": 576,
+      "layoutFrames": 1156
+    },
+    "settle": {
+      "buildMs": {
+        "count": 6,
+        "p50": 0.106,
+        "p95": 0.149,
+        "max": 0.22,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "rasterMs": {
+        "count": 6,
+        "p50": 2.457,
+        "p95": 3.877,
+        "max": 5.018,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "totalMs": {
+        "count": 6,
+        "p50": 3.169,
+        "p95": 4.903,
+        "max": 7.647
+      },
+      "vsyncOverheadMs": {
+        "count": 6,
+        "p50": 0.738,
+        "p95": 0.762,
+        "max": 0.947
+      },
+      "panelErrorLogicalPx": {
+        "count": 6,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 0
+      },
+      "metricsCount": 0,
+      "layoutFrames": 6
+    },
+    "native": {
+      "buildMs": {
+        "count": 0,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "rasterMs": {
+        "count": 0,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "totalMs": {
+        "count": 0
+      },
+      "vsyncOverheadMs": {
+        "count": 0
+      },
+      "panelErrorLogicalPx": {
+        "count": 0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 0
+      },
+      "metricsCount": 0,
+      "layoutFrames": 0
+    },
+    "errors": [],
+    "setSizeAtLeast100ms": 0,
+    "secondaryNoHandlerExceptions": 0
+  },
+  {
+    "path": "build\\window_resize_20261027_followup\\empty-merged\\results.json",
+    "release": true,
+    "mode": "script",
+    "scene": "empty",
+    "titlebar": "hidden",
+    "separateUiOverride": "0",
+    "dwmTraceInstrumented": false,
+    "displayRefreshRate": 144.0,
+    "devicePixelRatio": 1.25,
+    "timingFrames": 588,
+    "matchedTimingFrames": 588,
+    "script": {
+      "buildMs": {
+        "count": 577,
+        "p50": 0.19,
+        "p95": 0.37,
+        "max": 0.83,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "rasterMs": {
+        "count": 577,
+        "p50": 13.079,
+        "p95": 21.741,
+        "max": 35.143,
+        "over16_67ms": 146,
+        "overDisplayBudget": 568
+      },
+      "totalMs": {
+        "count": 577,
+        "p50": 15.197,
+        "p95": 23.344,
+        "max": 166.163
+      },
+      "vsyncOverheadMs": {
+        "count": 577,
+        "p50": 1.177,
+        "p95": 4.003,
+        "max": 159.02
+      },
+      "panelErrorLogicalPx": {
+        "count": 577,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 582,
+        "p50": 25.32,
+        "p95": 36.108,
+        "max": 159.652
+      },
+      "metricsCount": 576,
+      "layoutFrames": 577
+    },
+    "settle": {
+      "buildMs": {
+        "count": 6,
+        "p50": 0.072,
+        "p95": 0.105,
+        "max": 0.124,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "rasterMs": {
+        "count": 6,
+        "p50": 1.113,
+        "p95": 1.341,
+        "max": 2.004,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "totalMs": {
+        "count": 6,
+        "p50": 2.048,
+        "p95": 2.943,
+        "max": 11.129
+      },
+      "vsyncOverheadMs": {
+        "count": 6,
+        "p50": 0.868,
+        "p95": 1.798,
+        "max": 9.013
+      },
+      "panelErrorLogicalPx": {
+        "count": 6,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 0
+      },
+      "metricsCount": 0,
+      "layoutFrames": 6
+    },
+    "native": {
+      "buildMs": {
+        "count": 0,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "rasterMs": {
+        "count": 0,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "totalMs": {
+        "count": 0
+      },
+      "vsyncOverheadMs": {
+        "count": 0
+      },
+      "panelErrorLogicalPx": {
+        "count": 0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 0
+      },
+      "metricsCount": 0,
+      "layoutFrames": 0
+    },
+    "errors": [],
+    "setSizeAtLeast100ms": 1,
+    "secondaryNoHandlerExceptions": 0
+  },
+  {
+    "path": "build\\window_resize_20261027_followup\\empty-separate\\results.json",
+    "release": true,
+    "mode": "script",
+    "scene": "empty",
+    "titlebar": "hidden",
+    "separateUiOverride": "1",
+    "dwmTraceInstrumented": false,
+    "displayRefreshRate": 144.0,
+    "devicePixelRatio": 1.25,
+    "timingFrames": 591,
+    "matchedTimingFrames": 590,
+    "script": {
+      "buildMs": {
+        "count": 578,
+        "p50": 0.196,
+        "p95": 0.384,
+        "max": 0.589,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "rasterMs": {
+        "count": 578,
+        "p50": 9.825,
+        "p95": 19.637,
+        "max": 29.616,
+        "over16_67ms": 92,
+        "overDisplayBudget": 577
+      },
+      "totalMs": {
+        "count": 578,
+        "p50": 10.543,
+        "p95": 20.516,
+        "max": 30.095
+      },
+      "vsyncOverheadMs": {
+        "count": 578,
+        "p50": 0.531,
+        "p95": 1.03,
+        "max": 1.517
+      },
+      "panelErrorLogicalPx": {
+        "count": 578,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 582,
+        "p50": 21.718,
+        "p95": 30.947,
+        "max": 41.777
+      },
+      "metricsCount": 576,
+      "layoutFrames": 578
+    },
+    "settle": {
+      "buildMs": {
+        "count": 6,
+        "p50": 0.082,
+        "p95": 0.127,
+        "max": 0.127,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "rasterMs": {
+        "count": 6,
+        "p50": 1.145,
+        "p95": 1.471,
+        "max": 1.507,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "totalMs": {
+        "count": 6,
+        "p50": 2.194,
+        "p95": 3.229,
+        "max": 4.337
+      },
+      "vsyncOverheadMs": {
+        "count": 6,
+        "p50": 0.351,
+        "p95": 0.622,
+        "max": 1.002
+      },
+      "panelErrorLogicalPx": {
+        "count": 6,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 0
+      },
+      "metricsCount": 0,
+      "layoutFrames": 6
+    },
+    "native": {
+      "buildMs": {
+        "count": 0,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "rasterMs": {
+        "count": 0,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "totalMs": {
+        "count": 0
+      },
+      "vsyncOverheadMs": {
+        "count": 0
+      },
+      "panelErrorLogicalPx": {
+        "count": 0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 0
+      },
+      "metricsCount": 0,
+      "layoutFrames": 0
+    },
+    "errors": [],
+    "setSizeAtLeast100ms": 0,
+    "secondaryNoHandlerExceptions": 0
+  },
+  {
+    "path": "build\\window_resize_20261027_followup\\merged-trace-2\\results.json",
+    "release": true,
+    "mode": "script",
+    "scene": "production",
+    "titlebar": "hidden",
+    "separateUiOverride": "0",
+    "dwmTraceInstrumented": false,
+    "displayRefreshRate": 144.0,
+    "devicePixelRatio": 1.25,
+    "timingFrames": 1022,
+    "matchedTimingFrames": 1022,
+    "script": {
+      "buildMs": {
+        "count": 1008,
+        "p50": 4.07,
+        "p95": 7.261,
+        "max": 12.143,
+        "over16_67ms": 0,
+        "overDisplayBudget": 74
+      },
+      "rasterMs": {
+        "count": 1008,
+        "p50": 11.278,
+        "p95": 19.291,
+        "max": 39.325,
+        "over16_67ms": 143,
+        "overDisplayBudget": 686
+      },
+      "totalMs": {
+        "count": 1008,
+        "p50": 19.189,
+        "p95": 29.672,
+        "max": 209.202
+      },
+      "vsyncOverheadMs": {
+        "count": 1008,
+        "p50": 2.038,
+        "p95": 9.182,
+        "max": 188.496
+      },
+      "panelErrorLogicalPx": {
+        "count": 1008,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 582,
+        "p50": 29.18,
+        "p95": 41.985,
+        "max": 216.87
+      },
+      "metricsCount": 576,
+      "layoutFrames": 1008,
+      "nativeWmSizeMs": {
+        "count": 576,
+        "p50": 22.879200012207033,
+        "p95": 32.235799987792966,
+        "max": 189.3516999511719
+      },
+      "dwmFlushMs": {
+        "count": 0
+      }
+    },
+    "settle": {
+      "buildMs": {
+        "count": 8,
+        "p50": 0.119,
+        "p95": 0.206,
+        "max": 0.25,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "rasterMs": {
+        "count": 8,
+        "p50": 2.902,
+        "p95": 3.381,
+        "max": 4.143,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "totalMs": {
+        "count": 8,
+        "p50": 4.657,
+        "p95": 6.433,
+        "max": 7.012
+      },
+      "vsyncOverheadMs": {
+        "count": 8,
+        "p50": 0.98,
+        "p95": 2.04,
+        "max": 2.915
+      },
+      "panelErrorLogicalPx": {
+        "count": 8,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 0
+      },
+      "metricsCount": 0,
+      "layoutFrames": 8,
+      "nativeWmSizeMs": {
+        "count": 21,
+        "p50": 23.23639996337891,
+        "p95": 28.99809997558594,
+        "max": 65.486
+      },
+      "dwmFlushMs": {
+        "count": 0
+      }
+    },
+    "native": {
+      "buildMs": {
+        "count": 0,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "rasterMs": {
+        "count": 0,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "totalMs": {
+        "count": 0
+      },
+      "vsyncOverheadMs": {
+        "count": 0
+      },
+      "panelErrorLogicalPx": {
+        "count": 0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 0
+      },
+      "metricsCount": 0,
+      "layoutFrames": 0,
+      "nativeWmSizeMs": {
+        "count": 0
+      },
+      "dwmFlushMs": {
+        "count": 0
+      }
+    },
+    "errors": [],
+    "setSizeAtLeast100ms": 22,
+    "secondaryNoHandlerExceptions": 1
+  },
+  {
+    "path": "build\\window_resize_20261027_followup\\separate-trace-2\\results.json",
+    "release": true,
+    "mode": "script",
+    "scene": "production",
+    "titlebar": "hidden",
+    "separateUiOverride": "1",
+    "dwmTraceInstrumented": false,
+    "displayRefreshRate": 144.0,
+    "devicePixelRatio": 1.25,
+    "timingFrames": 1177,
+    "matchedTimingFrames": 1176,
+    "script": {
+      "buildMs": {
+        "count": 1156,
+        "p50": 0.754,
+        "p95": 8.668,
+        "max": 14.942,
+        "over16_67ms": 0,
+        "overDisplayBudget": 205
+      },
+      "rasterMs": {
+        "count": 1156,
+        "p50": 10.203,
+        "p95": 19.335,
+        "max": 34.48,
+        "over16_67ms": 147,
+        "overDisplayBudget": 708
+      },
+      "totalMs": {
+        "count": 1156,
+        "p50": 18.104,
+        "p95": 28.28,
+        "max": 40.772
+      },
+      "vsyncOverheadMs": {
+        "count": 1156,
+        "p50": 0.499,
+        "p95": 1.082,
+        "max": 1.532
+      },
+      "panelErrorLogicalPx": {
+        "count": 1156,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 582,
+        "p50": 28.752,
+        "p95": 39.911,
+        "max": 151.761
+      },
+      "metricsCount": 576,
+      "layoutFrames": 1156,
+      "nativeWmSizeMs": {
+        "count": 576,
+        "p50": 22.345699951171877,
+        "p95": 30.64190002441406,
+        "max": 141.50870001220702
+      },
+      "dwmFlushMs": {
+        "count": 0
+      }
+    },
+    "settle": {
+      "buildMs": {
+        "count": 6,
+        "p50": 0.106,
+        "p95": 0.139,
+        "max": 0.165,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "rasterMs": {
+        "count": 6,
+        "p50": 3.272,
+        "p95": 3.63,
+        "max": 3.906,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "totalMs": {
+        "count": 6,
+        "p50": 4.767,
+        "p95": 5.023,
+        "max": 5.571
+      },
+      "vsyncOverheadMs": {
+        "count": 6,
+        "p50": 0.784,
+        "p95": 0.994,
+        "max": 1.34
+      },
+      "panelErrorLogicalPx": {
+        "count": 6,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 0
+      },
+      "metricsCount": 0,
+      "layoutFrames": 6,
+      "nativeWmSizeMs": {
+        "count": 23,
+        "p50": 21.8995,
+        "p95": 25.37090002441406,
+        "max": 26.44050006103516
+      },
+      "dwmFlushMs": {
+        "count": 0
+      }
+    },
+    "native": {
+      "buildMs": {
+        "count": 0,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "rasterMs": {
+        "count": 0,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "totalMs": {
+        "count": 0
+      },
+      "vsyncOverheadMs": {
+        "count": 0
+      },
+      "panelErrorLogicalPx": {
+        "count": 0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 0
+      },
+      "metricsCount": 0,
+      "layoutFrames": 0,
+      "nativeWmSizeMs": {
+        "count": 0
+      },
+      "dwmFlushMs": {
+        "count": 0
+      }
+    },
+    "errors": [],
+    "setSizeAtLeast100ms": 1,
+    "secondaryNoHandlerExceptions": 0
+  },
+  {
+    "path": "build\\window_resize_20261027_followup\\empty-separate-trace\\results.json",
+    "release": true,
+    "mode": "script",
+    "scene": "empty",
+    "titlebar": "hidden",
+    "separateUiOverride": "1",
+    "dwmTraceInstrumented": false,
+    "displayRefreshRate": 144.0,
+    "devicePixelRatio": 1.25,
+    "timingFrames": 594,
+    "matchedTimingFrames": 593,
+    "script": {
+      "buildMs": {
+        "count": 580,
+        "p50": 0.197,
+        "p95": 0.39,
+        "max": 0.94,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "rasterMs": {
+        "count": 580,
+        "p50": 11.196,
+        "p95": 19.554,
+        "max": 36.46,
+        "over16_67ms": 81,
+        "overDisplayBudget": 577
+      },
+      "totalMs": {
+        "count": 580,
+        "p50": 11.985,
+        "p95": 20.511,
+        "max": 37.416
+      },
+      "vsyncOverheadMs": {
+        "count": 580,
+        "p50": 0.517,
+        "p95": 1.064,
+        "max": 1.543
+      },
+      "panelErrorLogicalPx": {
+        "count": 580,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 582,
+        "p50": 21.77,
+        "p95": 31.495,
+        "max": 48.775
+      },
+      "metricsCount": 576,
+      "layoutFrames": 580,
+      "nativeWmSizeMs": {
+        "count": 576,
+        "p50": 12.59040002441406,
+        "p95": 18.39,
+        "max": 37.90379998779297
+      },
+      "dwmFlushMs": {
+        "count": 0
+      }
+    },
+    "settle": {
+      "buildMs": {
+        "count": 6,
+        "p50": 0.067,
+        "p95": 0.073,
+        "max": 0.166,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "rasterMs": {
+        "count": 6,
+        "p50": 1.227,
+        "p95": 1.747,
+        "max": 1.902,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "totalMs": {
+        "count": 6,
+        "p50": 2.104,
+        "p95": 2.441,
+        "max": 5.385
+      },
+      "vsyncOverheadMs": {
+        "count": 6,
+        "p50": 0.423,
+        "p95": 0.862,
+        "max": 1.07
+      },
+      "panelErrorLogicalPx": {
+        "count": 6,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 0
+      },
+      "metricsCount": 0,
+      "layoutFrames": 6,
+      "nativeWmSizeMs": {
+        "count": 30,
+        "p50": 12.83899993896484,
+        "p95": 16.26329998779297,
+        "max": 19.13910003662109
+      },
+      "dwmFlushMs": {
+        "count": 0
+      }
+    },
+    "native": {
+      "buildMs": {
+        "count": 0,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "rasterMs": {
+        "count": 0,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "totalMs": {
+        "count": 0
+      },
+      "vsyncOverheadMs": {
+        "count": 0
+      },
+      "panelErrorLogicalPx": {
+        "count": 0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 0
+      },
+      "metricsCount": 0,
+      "layoutFrames": 0,
+      "nativeWmSizeMs": {
+        "count": 0
+      },
+      "dwmFlushMs": {
+        "count": 0
+      }
+    },
+    "errors": [],
+    "setSizeAtLeast100ms": 0,
+    "secondaryNoHandlerExceptions": 0
+  },
+  {
+    "path": "build\\window_resize_20261027_followup\\separate-dwm-3\\results.json",
+    "release": true,
+    "mode": "script",
+    "scene": "production",
+    "titlebar": "hidden",
+    "separateUiOverride": "1",
+    "dwmTraceInstrumented": true,
+    "displayRefreshRate": 144.0,
+    "devicePixelRatio": 1.25,
+    "timingFrames": 1191,
+    "matchedTimingFrames": 1190,
+    "script": {
+      "buildMs": {
+        "count": 1169,
+        "p50": 0.39,
+        "p95": 13.715,
+        "max": 18.44,
+        "over16_67ms": 5,
+        "overDisplayBudget": 538
+      },
+      "rasterMs": {
+        "count": 1169,
+        "p50": 13.035,
+        "p95": 22.778,
+        "max": 27.407,
+        "over16_67ms": 423,
+        "overDisplayBudget": 833
+      },
+      "totalMs": {
+        "count": 1169,
+        "p50": 23.474,
+        "p95": 36.371,
+        "max": 44.565
+      },
+      "vsyncOverheadMs": {
+        "count": 1169,
+        "p50": 0.512,
+        "p95": 1.087,
+        "max": 1.624
+      },
+      "panelErrorLogicalPx": {
+        "count": 1169,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 582,
+        "p50": 37.366,
+        "p95": 46.171,
+        "max": 56.727
+      },
+      "metricsCount": 576,
+      "layoutFrames": 1169,
+      "nativeWmSizeMs": {
+        "count": 576,
+        "p50": 30.540300048828122,
+        "p95": 37.251500061035166,
+        "max": 47.03739996337892
+      },
+      "dwmFlushMs": {
+        "count": 576,
+        "p50": 6.691900024414061,
+        "p95": 10.767,
+        "max": 14.277100036621091
+      }
+    },
+    "settle": {
+      "buildMs": {
+        "count": 6,
+        "p50": 0.179,
+        "p95": 0.209,
+        "max": 0.211,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "rasterMs": {
+        "count": 6,
+        "p50": 3.376,
+        "p95": 4.505,
+        "max": 5.004,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "totalMs": {
+        "count": 6,
+        "p50": 5.043,
+        "p95": 6.262,
+        "max": 7.073
+      },
+      "vsyncOverheadMs": {
+        "count": 6,
+        "p50": 0.482,
+        "p95": 1.065,
+        "max": 1.556
+      },
+      "panelErrorLogicalPx": {
+        "count": 6,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 0
+      },
+      "metricsCount": 0,
+      "layoutFrames": 6,
+      "nativeWmSizeMs": {
+        "count": 18,
+        "p50": 30.26539996337891,
+        "p95": 34.40620001220703,
+        "max": 40.602299926757816
+      },
+      "dwmFlushMs": {
+        "count": 18,
+        "p50": 6.334200012207031,
+        "p95": 10.57420001220703,
+        "max": 10.61340002441406
+      }
+    },
+    "native": {
+      "buildMs": {
+        "count": 0,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "rasterMs": {
+        "count": 0,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "totalMs": {
+        "count": 0
+      },
+      "vsyncOverheadMs": {
+        "count": 0
+      },
+      "panelErrorLogicalPx": {
+        "count": 0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 0
+      },
+      "metricsCount": 0,
+      "layoutFrames": 0,
+      "nativeWmSizeMs": {
+        "count": 0
+      },
+      "dwmFlushMs": {
+        "count": 0
+      }
+    },
+    "errors": [],
+    "setSizeAtLeast100ms": 0,
+    "secondaryNoHandlerExceptions": 0
+  },
+  {
+    "path": "build\\window_resize_20261027_followup\\separate-native-titlebar\\results.json",
+    "release": true,
+    "mode": "script",
+    "scene": "production",
+    "titlebar": "normal",
+    "separateUiOverride": "1",
+    "dwmTraceInstrumented": true,
+    "displayRefreshRate": 144.0,
+    "devicePixelRatio": 1.25,
+    "timingFrames": 1186,
+    "matchedTimingFrames": 1185,
+    "script": {
+      "buildMs": {
+        "count": 1165,
+        "p50": 0.444,
+        "p95": 12.244,
+        "max": 17.477,
+        "over16_67ms": 1,
+        "overDisplayBudget": 493
+      },
+      "rasterMs": {
+        "count": 1165,
+        "p50": 11.954,
+        "p95": 21.746,
+        "max": 28.279,
+        "over16_67ms": 373,
+        "overDisplayBudget": 776
+      },
+      "totalMs": {
+        "count": 1165,
+        "p50": 22.628,
+        "p95": 31.923,
+        "max": 38.653
+      },
+      "vsyncOverheadMs": {
+        "count": 1165,
+        "p50": 0.536,
+        "p95": 1.157,
+        "max": 2.526
+      },
+      "panelErrorLogicalPx": {
+        "count": 1165,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 582,
+        "p50": 34.561,
+        "p95": 45.043,
+        "max": 124.431
+      },
+      "metricsCount": 576,
+      "layoutFrames": 1165,
+      "nativeWmSizeMs": {
+        "count": 576,
+        "p50": 28.50409997558594,
+        "p95": 35.50890002441406,
+        "max": 116.7656000366211
+      },
+      "dwmFlushMs": {
+        "count": 576,
+        "p50": 7.018800048828125,
+        "p95": 10.965000061035159,
+        "max": 14.01149993896484
+      }
+    },
+    "settle": {
+      "buildMs": {
+        "count": 6,
+        "p50": 0.096,
+        "p95": 0.107,
+        "max": 0.128,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "rasterMs": {
+        "count": 6,
+        "p50": 3.631,
+        "p95": 4.302,
+        "max": 5.079,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "totalMs": {
+        "count": 6,
+        "p50": 6.45,
+        "p95": 7.449,
+        "max": 7.68
+      },
+      "vsyncOverheadMs": {
+        "count": 6,
+        "p50": 0.411,
+        "p95": 0.439,
+        "max": 0.461
+      },
+      "panelErrorLogicalPx": {
+        "count": 6,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 0
+      },
+      "metricsCount": 0,
+      "layoutFrames": 6,
+      "nativeWmSizeMs": {
+        "count": 20,
+        "p50": 28.010400024414057,
+        "p95": 32.2375,
+        "max": 33.29370001220703
+      },
+      "dwmFlushMs": {
+        "count": 21,
+        "p50": 6.9945,
+        "p95": 9.919100036621094,
+        "max": 10.74610003662109
+      }
+    },
+    "native": {
+      "buildMs": {
+        "count": 0,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "rasterMs": {
+        "count": 0,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "totalMs": {
+        "count": 0
+      },
+      "vsyncOverheadMs": {
+        "count": 0
+      },
+      "panelErrorLogicalPx": {
+        "count": 0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 0
+      },
+      "metricsCount": 0,
+      "layoutFrames": 0,
+      "nativeWmSizeMs": {
+        "count": 0
+      },
+      "dwmFlushMs": {
+        "count": 0
+      }
+    },
+    "errors": [],
+    "setSizeAtLeast100ms": 5,
+    "secondaryNoHandlerExceptions": 0
+  },
+  {
+    "path": "build\\window_resize_20261027_followup\\merged-dwm-3\\results.json",
+    "release": true,
+    "mode": "script",
+    "scene": "production",
+    "titlebar": "hidden",
+    "separateUiOverride": "0",
+    "dwmTraceInstrumented": true,
+    "displayRefreshRate": 144.0,
+    "devicePixelRatio": 1.25,
+    "timingFrames": 996,
+    "matchedTimingFrames": 996,
+    "script": {
+      "buildMs": {
+        "count": 981,
+        "p50": 4.526,
+        "p95": 9.788,
+        "max": 19.675,
+        "over16_67ms": 1,
+        "overDisplayBudget": 154
+      },
+      "rasterMs": {
+        "count": 981,
+        "p50": 12.195,
+        "p95": 19.894,
+        "max": 32.312,
+        "over16_67ms": 195,
+        "overDisplayBudget": 717
+      },
+      "totalMs": {
+        "count": 981,
+        "p50": 20.259,
+        "p95": 35.302,
+        "max": 203.675
+      },
+      "vsyncOverheadMs": {
+        "count": 981,
+        "p50": 2.152,
+        "p95": 9.852,
+        "max": 182.247
+      },
+      "panelErrorLogicalPx": {
+        "count": 981,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 582,
+        "p50": 30.603,
+        "p95": 150.467,
+        "max": 201.518
+      },
+      "metricsCount": 576,
+      "layoutFrames": 981,
+      "nativeWmSizeMs": {
+        "count": 576,
+        "p50": 24.76360003662109,
+        "p95": 143.008799987793,
+        "max": 190.742200012207
+      },
+      "dwmFlushMs": {
+        "count": 548,
+        "p50": 6.052799987792969,
+        "p95": 9.796700012207031,
+        "max": 13.06929998779297
+      }
+    },
+    "settle": {
+      "buildMs": {
+        "count": 10,
+        "p50": 0.077,
+        "p95": 0.138,
+        "max": 4.213,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "rasterMs": {
+        "count": 10,
+        "p50": 2.967,
+        "p95": 4.682,
+        "max": 9.857,
+        "over16_67ms": 0,
+        "overDisplayBudget": 1
+      },
+      "totalMs": {
+        "count": 10,
+        "p50": 6.196,
+        "p95": 63.28,
+        "max": 171.455
+      },
+      "vsyncOverheadMs": {
+        "count": 10,
+        "p50": 1.807,
+        "p95": 60.573,
+        "max": 157.308
+      },
+      "panelErrorLogicalPx": {
+        "count": 10,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 0
+      },
+      "metricsCount": 0,
+      "layoutFrames": 10,
+      "nativeWmSizeMs": {
+        "count": 23,
+        "p50": 26.043,
+        "p95": 42.103100036621086,
+        "max": 190.742200012207
+      },
+      "dwmFlushMs": {
+        "count": 23,
+        "p50": 5.0695,
+        "p95": 8.14579998779297,
+        "max": 8.915799987792969
+      }
+    },
+    "native": {
+      "buildMs": {
+        "count": 0,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "rasterMs": {
+        "count": 0,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "totalMs": {
+        "count": 0
+      },
+      "vsyncOverheadMs": {
+        "count": 0
+      },
+      "panelErrorLogicalPx": {
+        "count": 0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 0
+      },
+      "metricsCount": 0,
+      "layoutFrames": 0,
+      "nativeWmSizeMs": {
+        "count": 0
+      },
+      "dwmFlushMs": {
+        "count": 0
+      }
+    },
+    "errors": [],
+    "setSizeAtLeast100ms": 36,
+    "secondaryNoHandlerExceptions": 1
+  },
+  {
+    "path": "build\\window_resize_20261027_followup\\cached-1\\results.json",
+    "release": true,
+    "mode": "script",
+    "scene": "production",
+    "titlebar": "hidden",
+    "separateUiOverride": "1",
+    "dwmTraceInstrumented": true,
+    "displayRefreshRate": 144.0,
+    "devicePixelRatio": 1.25,
+    "timingFrames": 1176,
+    "matchedTimingFrames": 1175,
+    "script": {
+      "buildMs": {
+        "count": 1154,
+        "p50": 0.735,
+        "p95": 6.992,
+        "max": 10.996,
+        "over16_67ms": 0,
+        "overDisplayBudget": 62
+      },
+      "rasterMs": {
+        "count": 1154,
+        "p50": 10.401,
+        "p95": 19.039,
+        "max": 37.976,
+        "over16_67ms": 162,
+        "overDisplayBudget": 710
+      },
+      "totalMs": {
+        "count": 1154,
+        "p50": 16.741,
+        "p95": 24.879,
+        "max": 43.996
+      },
+      "vsyncOverheadMs": {
+        "count": 1154,
+        "p50": 0.531,
+        "p95": 1.085,
+        "max": 1.974
+      },
+      "panelErrorLogicalPx": {
+        "count": 1154,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 582,
+        "p50": 27.286,
+        "p95": 38.189,
+        "max": 92.531
+      },
+      "metricsCount": 576,
+      "layoutFrames": 1154,
+      "nativeWmSizeMs": {
+        "count": 576,
+        "p50": 20.70609991455078,
+        "p95": 29.130699951171877,
+        "max": 82.21250006103516
+      },
+      "dwmFlushMs": {
+        "count": 576,
+        "p50": 5.4625,
+        "p95": 9.678600036621093,
+        "max": 12.56639996337891
+      }
+    },
+    "settle": {
+      "buildMs": {
+        "count": 6,
+        "p50": 0.095,
+        "p95": 0.128,
+        "max": 0.148,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "rasterMs": {
+        "count": 6,
+        "p50": 3.07,
+        "p95": 3.621,
+        "max": 3.649,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "totalMs": {
+        "count": 6,
+        "p50": 3.903,
+        "p95": 3.994,
+        "max": 4.444
+      },
+      "vsyncOverheadMs": {
+        "count": 6,
+        "p50": 0.492,
+        "p95": 0.73,
+        "max": 1.263
+      },
+      "panelErrorLogicalPx": {
+        "count": 6,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 0
+      },
+      "metricsCount": 0,
+      "layoutFrames": 6,
+      "nativeWmSizeMs": {
+        "count": 23,
+        "p50": 20.523299987792967,
+        "p95": 26.53870001220703,
+        "max": 27.82849993896484
+      },
+      "dwmFlushMs": {
+        "count": 25,
+        "p50": 6.4195,
+        "p95": 8.599399963378906,
+        "max": 10.25129998779297
+      }
+    },
+    "native": {
+      "buildMs": {
+        "count": 0,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "rasterMs": {
+        "count": 0,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "totalMs": {
+        "count": 0
+      },
+      "vsyncOverheadMs": {
+        "count": 0
+      },
+      "panelErrorLogicalPx": {
+        "count": 0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 0
+      },
+      "metricsCount": 0,
+      "layoutFrames": 0,
+      "nativeWmSizeMs": {
+        "count": 0
+      },
+      "dwmFlushMs": {
+        "count": 0
+      }
+    },
+    "errors": [],
+    "setSizeAtLeast100ms": 0,
+    "secondaryNoHandlerExceptions": 0
+  },
+  {
+    "path": "build\\window_resize_20261027_followup\\uncached-confirm\\results.json",
+    "release": true,
+    "mode": "script",
+    "scene": "production",
+    "titlebar": "hidden",
+    "separateUiOverride": "1",
+    "dwmTraceInstrumented": true,
+    "displayRefreshRate": 144.0,
+    "devicePixelRatio": 1.25,
+    "timingFrames": 1172,
+    "matchedTimingFrames": 1171,
+    "script": {
+      "buildMs": {
+        "count": 1152,
+        "p50": 2.408,
+        "p95": 8.634,
+        "max": 13.952,
+        "over16_67ms": 0,
+        "overDisplayBudget": 193
+      },
+      "rasterMs": {
+        "count": 1152,
+        "p50": 10.258,
+        "p95": 19.019,
+        "max": 36.396,
+        "over16_67ms": 178,
+        "overDisplayBudget": 695
+      },
+      "totalMs": {
+        "count": 1152,
+        "p50": 17.207,
+        "p95": 27.729,
+        "max": 43.746
+      },
+      "vsyncOverheadMs": {
+        "count": 1152,
+        "p50": 0.502,
+        "p95": 1.112,
+        "max": 1.584
+      },
+      "panelErrorLogicalPx": {
+        "count": 1152,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 582,
+        "p50": 27.972,
+        "p95": 41.308,
+        "max": 110.616
+      },
+      "metricsCount": 576,
+      "layoutFrames": 1152,
+      "nativeWmSizeMs": {
+        "count": 576,
+        "p50": 22.06789996337891,
+        "p95": 31.825,
+        "max": 106.2316999511719
+      },
+      "dwmFlushMs": {
+        "count": 576,
+        "p50": 5.954,
+        "p95": 9.787299987792968,
+        "max": 13.46169995117188
+      }
+    },
+    "settle": {
+      "buildMs": {
+        "count": 6,
+        "p50": 0.12,
+        "p95": 0.171,
+        "max": 0.233,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "rasterMs": {
+        "count": 6,
+        "p50": 3.279,
+        "p95": 4.018,
+        "max": 4.54,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "totalMs": {
+        "count": 6,
+        "p50": 4.462,
+        "p95": 5.035,
+        "max": 8.694
+      },
+      "vsyncOverheadMs": {
+        "count": 6,
+        "p50": 0.463,
+        "p95": 0.711,
+        "max": 0.915
+      },
+      "panelErrorLogicalPx": {
+        "count": 6,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 0
+      },
+      "metricsCount": 0,
+      "layoutFrames": 6,
+      "nativeWmSizeMs": {
+        "count": 21,
+        "p50": 20.92250006103516,
+        "p95": 27.76809997558594,
+        "max": 77.58170001220704
+      },
+      "dwmFlushMs": {
+        "count": 22,
+        "p50": 5.8125000610351565,
+        "p95": 9.0735,
+        "max": 9.401799987792968
+      }
+    },
+    "native": {
+      "buildMs": {
+        "count": 0,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "rasterMs": {
+        "count": 0,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "totalMs": {
+        "count": 0
+      },
+      "vsyncOverheadMs": {
+        "count": 0
+      },
+      "panelErrorLogicalPx": {
+        "count": 0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 0
+      },
+      "metricsCount": 0,
+      "layoutFrames": 0,
+      "nativeWmSizeMs": {
+        "count": 0
+      },
+      "dwmFlushMs": {
+        "count": 0
+      }
+    },
+    "errors": [],
+    "setSizeAtLeast100ms": 1,
+    "secondaryNoHandlerExceptions": 0
+  },
+  {
+    "path": "build\\window_resize_20261027_followup\\cached-2\\results.json",
+    "release": true,
+    "mode": "script",
+    "scene": "production",
+    "titlebar": "hidden",
+    "separateUiOverride": "1",
+    "dwmTraceInstrumented": true,
+    "displayRefreshRate": 144.0,
+    "devicePixelRatio": 1.25,
+    "timingFrames": 1176,
+    "matchedTimingFrames": 1175,
+    "script": {
+      "buildMs": {
+        "count": 1155,
+        "p50": 1.318,
+        "p95": 6.806,
+        "max": 11.516,
+        "over16_67ms": 0,
+        "overDisplayBudget": 54
+      },
+      "rasterMs": {
+        "count": 1155,
+        "p50": 10.164,
+        "p95": 18.992,
+        "max": 35.377,
+        "over16_67ms": 144,
+        "overDisplayBudget": 682
+      },
+      "totalMs": {
+        "count": 1155,
+        "p50": 16.779,
+        "p95": 24.966,
+        "max": 43.032
+      },
+      "vsyncOverheadMs": {
+        "count": 1155,
+        "p50": 0.484,
+        "p95": 1.154,
+        "max": 1.675
+      },
+      "panelErrorLogicalPx": {
+        "count": 1155,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 582,
+        "p50": 26.117,
+        "p95": 37.203,
+        "max": 76.265
+      },
+      "metricsCount": 576,
+      "layoutFrames": 1155,
+      "nativeWmSizeMs": {
+        "count": 576,
+        "p50": 20.35420001220703,
+        "p95": 28.12579998779297,
+        "max": 70.06160003662109
+      },
+      "dwmFlushMs": {
+        "count": 576,
+        "p50": 5.148900024414061,
+        "p95": 9.874699951171875,
+        "max": 14.62319995117188
+      }
+    },
+    "settle": {
+      "buildMs": {
+        "count": 6,
+        "p50": 0.118,
+        "p95": 0.167,
+        "max": 0.193,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "rasterMs": {
+        "count": 6,
+        "p50": 2.275,
+        "p95": 2.597,
+        "max": 2.719,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "totalMs": {
+        "count": 6,
+        "p50": 3.592,
+        "p95": 4.482,
+        "max": 5.514
+      },
+      "vsyncOverheadMs": {
+        "count": 6,
+        "p50": 0.48,
+        "p95": 0.73,
+        "max": 1.06
+      },
+      "panelErrorLogicalPx": {
+        "count": 6,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 0
+      },
+      "metricsCount": 0,
+      "layoutFrames": 6,
+      "nativeWmSizeMs": {
+        "count": 23,
+        "p50": 19.40120001220703,
+        "p95": 27.25259997558594,
+        "max": 31.86970001220703
+      },
+      "dwmFlushMs": {
+        "count": 24,
+        "p50": 4.392999938964843,
+        "p95": 7.841199951171875,
+        "max": 10.306099975585939
+      }
+    },
+    "native": {
+      "buildMs": {
+        "count": 0,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "rasterMs": {
+        "count": 0,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "totalMs": {
+        "count": 0
+      },
+      "vsyncOverheadMs": {
+        "count": 0
+      },
+      "panelErrorLogicalPx": {
+        "count": 0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 0
+      },
+      "metricsCount": 0,
+      "layoutFrames": 0,
+      "nativeWmSizeMs": {
+        "count": 0
+      },
+      "dwmFlushMs": {
+        "count": 0
+      }
+    },
+    "errors": [],
+    "setSizeAtLeast100ms": 0,
+    "secondaryNoHandlerExceptions": 0
+  },
+  {
+    "path": "build\\window_resize_20261027_followup\\native-keyboard-separate\\results.json",
+    "release": true,
+    "mode": "native-keyboard",
+    "scene": "production",
+    "titlebar": "hidden",
+    "separateUiOverride": "1",
+    "dwmTraceInstrumented": true,
+    "displayRefreshRate": 144.0,
+    "devicePixelRatio": 1.25,
+    "timingFrames": 33,
+    "matchedTimingFrames": 32,
+    "script": {
+      "buildMs": {
+        "count": 0,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "rasterMs": {
+        "count": 0,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "totalMs": {
+        "count": 0
+      },
+      "vsyncOverheadMs": {
+        "count": 0
+      },
+      "panelErrorLogicalPx": {
+        "count": 0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 0
+      },
+      "metricsCount": 0,
+      "layoutFrames": 0,
+      "nativeWmSizeMs": {
+        "count": 0
+      },
+      "dwmFlushMs": {
+        "count": 0
+      }
+    },
+    "settle": {
+      "buildMs": {
+        "count": 0,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "rasterMs": {
+        "count": 0,
+        "over16_67ms": 0,
+        "overDisplayBudget": 0
+      },
+      "totalMs": {
+        "count": 0
+      },
+      "vsyncOverheadMs": {
+        "count": 0
+      },
+      "panelErrorLogicalPx": {
+        "count": 0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 0
+      },
+      "metricsCount": 0,
+      "layoutFrames": 0,
+      "nativeWmSizeMs": {
+        "count": 0
+      },
+      "dwmFlushMs": {
+        "count": 0
+      }
+    },
+    "native": {
+      "buildMs": {
+        "count": 18,
+        "p50": 0.226,
+        "p95": 6.684,
+        "max": 9.016,
+        "over16_67ms": 0,
+        "overDisplayBudget": 1
+      },
+      "rasterMs": {
+        "count": 18,
+        "p50": 3.168,
+        "p95": 19.455,
+        "max": 20.511,
+        "over16_67ms": 5,
+        "overDisplayBudget": 6
+      },
+      "totalMs": {
+        "count": 18,
+        "p50": 13.731,
+        "p95": 26.94,
+        "max": 29.355
+      },
+      "vsyncOverheadMs": {
+        "count": 18,
+        "p50": 0.48,
+        "p95": 0.965,
+        "max": 1.172
+      },
+      "panelErrorLogicalPx": {
+        "count": 18,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "nativeSetSizeCallMs": {
+        "count": 0
+      },
+      "metricsCount": 6,
+      "layoutFrames": 18,
+      "nativeWmSizeMs": {
+        "count": 6,
+        "p50": 20.266400024414057,
+        "p95": 22.20789990234375,
+        "max": 23.41179992675781
+      },
+      "dwmFlushMs": {
+        "count": 6,
+        "p50": 8.588299987792968,
+        "p95": 9.422200012207032,
+        "max": 12.71089996337891
+      }
+    },
+    "errors": [],
+    "setSizeAtLeast100ms": 0,
+    "secondaryNoHandlerExceptions": 0
+  }
+]

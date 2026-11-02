@@ -87,10 +87,20 @@ void main() {
   }
 
   final realElf = Platform.environment['TAL_TEST_ELF'];
+  final packagedBackend = Platform.environment['TAL_TEST_BACKEND'];
+  final expectedDefinition = Platform.environment['TAL_TEST_DEFINITION'];
   test(
     'packaged backend loads a real ELF through the application controller',
     () async {
-      final backend = BackendClient();
+      final backend = BackendClient(
+        processStarter: packagedBackend == null
+            ? null
+            : () => Process.start(
+                packagedBackend,
+                const [],
+                workingDirectory: Directory.systemTemp.path,
+              ),
+      );
       final controller = TakeALookController(backendCommand: backend.command);
       backend.eventHandler = controller.applyBackendEvent;
       addTearDown(() async {
@@ -109,6 +119,17 @@ void main() {
       expect(controller.lastBackendError, isNull);
       expect(controller.symbols, isNotEmpty);
       expect(controller.debugState.sourceFiles, isNotEmpty);
+      expect(controller.debugState.hasSourceDefinitionIndex, isTrue);
+      expect(controller.debugState.sourceDefinitions, isNotEmpty);
+      if (expectedDefinition != null) {
+        final definitions = findSourceDefinitions(
+          controller.debugState.sourceDefinitions,
+          expectedDefinition,
+          isCurrentFile: (_) => false,
+        );
+        expect(definitions, isNotEmpty);
+        expect(definitions.first.isDeclaration, isFalse);
+      }
       expect(controller.symbolLoadProgress!.status, SymbolLoadStatus.complete);
       expect(
         phases,

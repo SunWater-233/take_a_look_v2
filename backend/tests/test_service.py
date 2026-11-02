@@ -149,10 +149,55 @@ class BackendServiceTests(unittest.TestCase):
                 self.assertTrue(self.service._lock.acquire(timeout=0.2))
                 self.service._lock.release()
                 release.set()
-                self.service._recording_worker.drain()
+                self.service._pipeline.drain()
             self.assertEqual(self.service._recording.sample_count, 1)
         finally:
             release.set()
+
+    def test_pending_explicit_write_precedes_the_next_high_frequency_read(self) -> None:
+        entered, release, written = threading.Event(), threading.Event(), threading.Event()
+        sequence = []
+        original_read, original_write = self.memory.read_symbols, self.memory.write_symbol
+        def read(symbols):
+            sequence.append("read")
+            if len(sequence) == 1:
+                entered.set()
+                self.assertTrue(release.wait(2))
+            return original_read(symbols)
+        def write(symbol, value):
+            sequence.append("write")
+            return original_write(symbol, value)
+        key = self.symbols[0].key
+        with self.service._lock:
+            self.service._symbols = {item.key: item for item in self.symbols}
+        self.service.handle(RpcMethod.SET_WATCHES, {"watches": [{"key": key}]})
+        self.service.handle(RpcMethod.SET_CONFIG, {"sampleRateHz": 10000})
+        def command():
+            try:
+                self.service.handle(RpcMethod.WRITE_WATCH, {"key": key, "value": "42"})
+            finally:
+                written.set()
+        worker = threading.Thread(target=command)
+        try:
+            with patch.object(self.memory, "read_symbols", side_effect=read), \
+                 patch.object(self.memory, "write_symbol", side_effect=write):
+                self.service.handle(RpcMethod.CONNECT, {})
+                self.assertTrue(self.service.state_snapshot()["samplingPaused"])
+                self.service.handle(RpcMethod.SET_SAMPLING_PAUSED, {"paused": False})
+                self.assertTrue(entered.wait(1))
+                worker.start()
+                deadline = time.perf_counter() + 1
+                while self.service._controls_idle.is_set() and time.perf_counter() < deadline:
+                    time.sleep(.001)
+                self.assertFalse(self.service._controls_idle.is_set())
+                release.set()
+                self.assertTrue(written.wait(1))
+                self.service.handle(RpcMethod.SET_SAMPLING_PAUSED, {"paused": True})
+            self.assertEqual(sequence[:2], ["read", "write"])
+        finally:
+            release.set()
+            if worker.ident is not None:
+                worker.join(2)
 
     def test_export_fence_survives_later_samples_and_clear(self) -> None:
         key = self.symbols[0].key
@@ -224,7 +269,9 @@ class BackendServiceTests(unittest.TestCase):
             self.assertNotIn("symbols", watch_result["state"])  # type: ignore[operator]
             connected = self.service.handle(RpcMethod.CONNECT, {"targetName": "STM32F407", "swdClock": "2 MHz"})
             self.assertEqual(connected["state"]["connectionStatus"], "connected")  # type: ignore[index]
+            self.assertTrue(connected["state"]["samplingPaused"])  # type: ignore[index]
             self.assertEqual(self.memory.connected.frequency_hz, 2_000_000)  # type: ignore[union-attr]
+            self.service.handle(RpcMethod.SET_SAMPLING_PAUSED, {"paused": False})
 
             samples = self._eventually(EventName.SAMPLES)
             self.assertGreaterEqual(len(samples["frames"]), 1)  # type: ignore[index]
@@ -315,7 +362,7 @@ class BackendServiceTests(unittest.TestCase):
                     self.service.handle(RpcMethod.LOAD_SYMBOLS, {"path": str(path), "loadId": "slow"})
             self.assertEqual(caught.exception.code, "symbol_load_timeout")
             after = self.service.state_snapshot()
-            for key in ("symbols", "watches", "symbolFile", "debug"):
+            for key in ("symbols", "watches", "symbolFile", "sourceProject", "debug"):
                 self.assertEqual(after[key], before[key])
 
     def test_source_index_failure_remains_a_warning_and_load_completes(self) -> None:

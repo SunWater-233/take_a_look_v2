@@ -49,10 +49,39 @@ def test_profiles_restore_by_full_project_root_without_executing(tmp_path):
     projects.select({'sourceRoot': str(roots[0]), 'buildCommand': 'project A'})
     projects.select({'sourceRoot': str(roots[1]), 'buildCommand': 'project B'})
     assert projects.select({'sourceRoot': str(roots[0])})['buildCommand'] == 'project A'
-    assert SourceProjects(file).current['buildCommand'] == 'project A'
+    restored = SourceProjects(file)
+    assert restored.current == default_config()
+    assert restored.select({'sourceRoot': str(roots[1])})['buildCommand'] == 'project B'
     with pytest.raises(ProtocolError):
-        projects.select({'sourceRoot': str(tmp_path / 'missing')})
-    assert SourceProjects(file).current['buildCommand'] == 'project A'
+        restored.select({'sourceRoot': str(tmp_path / 'missing')})
+    assert restored.current['buildCommand'] == 'project B'
+    assert SourceProjects(file).current == default_config()
+    saved = json.loads(file.read_text(encoding='utf-8'))
+    assert 'lastRoot' not in saved['platforms'][projects.platform]
+
+
+@pytest.mark.parametrize('legacy_layout', [False, True])
+@pytest.mark.parametrize('root_exists', [False, True])
+def test_startup_ignores_saved_last_root_but_keeps_project_profiles(tmp_path, legacy_layout, root_exists):
+    root = tmp_path / 'project'
+    if root_exists:
+        root.mkdir()
+    file = tmp_path / 'settings.json'
+    projects = SourceProjects(file)
+    key = os.path.normcase(str(root.resolve()))
+    profile = {**default_config(str(root)), 'buildCommand': 'saved build command'}
+    local = {'lastRoot': key, 'projects': {key: profile}}
+    data = ({'version': 1, 'platform': projects.platform, **local} if legacy_layout else
+            {'version': 1, 'platforms': {projects.platform: local}})
+    original = json.dumps(data)
+    file.write_text(original, encoding='utf-8')
+
+    restored = SourceProjects(file)
+    assert restored.snapshot()['sourceRoot'] == ''
+    assert restored.current == default_config()
+    assert file.read_text(encoding='utf-8') == original
+    if root_exists:
+        assert restored.select({'sourceRoot': str(root)})['buildCommand'] == 'saved build command'
 
 
 def test_platform_defaults_and_shell_arguments(tmp_path):
@@ -172,6 +201,8 @@ def test_flash_reserves_probe_keeps_rpc_responsive_and_rebinds_symbols(tmp_path,
         assert release.wait(5)
         if fails:
             raise RuntimeError('probe unplugged')
+        memory.last_flash_stats = {'data_bytes': 139216, 'skipped_sectors': 2, 'skipped_bytes': 139216,
+                                   'compare_s': .12, 'program_s': 0, 'verify_s': 0, 'total_s': .2}
         progress(1)
     memory.program_firmware = program
     old = SymbolInfo('speed', 0x20000000, 4, 'float', '.data', 'motor.c')
@@ -207,9 +238,82 @@ def test_flash_reserves_probe_keeps_rpc_responsive_and_rebinds_symbols(tmp_path,
             assert service._watches[new.key].color == '#123456'
             assert service._symbol_file == str(firmware)
             assert memory.reset_calls == [True]
+            assert any('跳过 2 个相同扇区' in line['text']
+                       for line in service._source_tasks.snapshot()['lines'])
     finally:
         release.set()
         service.close()
+
+
+@pytest.mark.parametrize('configured', [False, True])
+@pytest.mark.parametrize('root', ['', 'missing-source-root'])
+def test_download_uses_loaded_elf_without_source_settings_and_prefers_explicit_firmware(tmp_path, configured, root):
+    loaded = tmp_path / 'loaded.elf'
+    explicit = tmp_path / 'configured.axf'
+    loaded.write_bytes(b'loaded firmware')
+    explicit.write_bytes(b'configured firmware')
+    downloads = []
+    memory = _FakeMemory()
+    memory.program_firmware = lambda path, progress: downloads.append(Path(path).read_bytes())
+    service = BackendService(lambda *_: None, memory_backend=memory,
+        normal_rtt_backend=_FakeRtt(), plus_rtt_backend=_FakeRtt(),
+        recording_directory=tmp_path / 'records', symbol_loader=lambda *a, **k: [],
+        debug_info_loader=lambda *a, **k: DebugInfoIndex())
+    try:
+        service.handle(RpcMethod.CONNECT, {})
+        service.handle(RpcMethod.LOAD_SYMBOLS, {'path': str(loaded)})
+        service._source_projects.current.update(sourceRoot=root,
+            firmwarePath=str(explicit) if configured else '')
+        original_config = dict(service._source_projects.current)
+        service.handle(RpcMethod.START_SOURCE_TASK, {'kind': 'download'})
+        wait_for(lambda: not service._source_tasks.running)
+        assert service._source_tasks.snapshot()['status'] == 'succeeded', service._source_tasks.snapshot()
+        assert downloads == [b'configured firmware' if configured else b'loaded firmware']
+        assert service._symbol_file == str(explicit if configured else loaded)
+        assert service._source_projects.current == {
+            **original_config, 'firmwarePath': str(explicit if configured else loaded),
+        }
+    finally:
+        service.close()
+
+
+def test_download_fallback_requires_an_existing_selected_elf(tmp_path):
+    service = BackendService(lambda *_: None, recording_directory=tmp_path / 'records',
+        symbol_loader=lambda *a, **k: [], debug_info_loader=lambda *a, **k: DebugInfoIndex())
+    try:
+        service._connection_status = 'connected'
+        with pytest.raises(ProtocolError) as error:
+            service.handle(RpcMethod.START_SOURCE_TASK, {'kind': 'download'})
+        assert error.value.code == 'firmware_required'
+        selected = tmp_path / 'selected.elf'
+        selected.write_bytes(b'firmware')
+        service.handle(RpcMethod.LOAD_SYMBOLS, {'path': str(selected)})
+        selected.unlink()
+        with pytest.raises(ProtocolError) as error:
+            service.handle(RpcMethod.START_SOURCE_TASK, {'kind': 'download'})
+        assert error.value.code == 'firmware_missing'
+        assert not service._source_tasks.running
+    finally:
+        service.close()
+
+
+@pytest.mark.parametrize('kind', ['build', 'buildAndDownload'])
+def test_build_still_requires_a_source_root(tmp_path, kind):
+    task = SourceTasks(lambda _: None, lambda *_: None)
+    try:
+        with pytest.raises(ProtocolError) as error:
+            task.start(kind, {**default_config(), 'buildCommand': 'echo build',
+                              'firmwarePath': str(tmp_path / 'motor.elf')})
+        assert error.value.code == 'source_root_required'
+        assert not task.running
+    finally:
+        task.close()
+
+
+def test_relative_firmware_still_requires_a_source_root():
+    with pytest.raises(ProtocolError) as error:
+        firmware_file({**default_config(), 'firmwarePath': 'motor.elf'})
+    assert error.value.code == 'source_root_required'
 
 
 def test_missing_firmware_and_remote_download_are_explicit(tmp_path):

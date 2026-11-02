@@ -118,6 +118,12 @@ extension TakeALookControllerSourceWorkspace on TakeALookController {
     _notifySourceWorkspace();
   }
 
+  void revealSourceLocation(String path, int line) {
+    sourceLocationRequest = (path: path, line: line);
+    openSourceFile(path);
+    _notifySourceWorkspace();
+  }
+
   void markSourceFileRead(String path) {
     final source = openSourcePathFor(path);
     if (source == null || !sourceWorkspace.unreadPaths.remove(source)) return;

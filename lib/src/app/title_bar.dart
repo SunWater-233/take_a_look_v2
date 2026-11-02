@@ -5,6 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../controller/controller.dart';
+import '../panels/panels.dart';
+import '../telemetry/recording_storage.dart';
 import '../workspace/keyboard_shortcuts.dart';
 import '../workspace/panel_types.dart';
 import '../theme/theme.dart';
@@ -15,12 +17,16 @@ class TalWindowTitleBar extends StatefulWidget {
     this.subtitle,
     this.controller,
     this.workspaceKey,
+    this.workbench = false,
+    this.recordingStorage,
     super.key,
   });
 
   final String? subtitle;
   final TakeALookController? controller;
   final GlobalKey<DockingWorkspaceState>? workspaceKey;
+  final bool workbench;
+  final RecordingStorage? recordingStorage;
 
   @override
   State<TalWindowTitleBar> createState() => _TalWindowTitleBarState();
@@ -39,9 +45,12 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
     WorkspacePanelId.symbols,
     WorkspacePanelId.watch,
     WorkspacePanelId.log,
+    WorkspacePanelId.buildOutput,
+    WorkspacePanelId.registers,
   ];
 
-  bool gridMode = false;
+  bool _gridMode = false;
+  bool get gridMode => widget.workspaceKey?.currentState?.gridMode ?? _gridMode;
   double get uiScale => widget.controller?.uiScale ?? 1;
 
   @override
@@ -73,7 +82,7 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
     final detached = widget.subtitle != null;
     return Container(
       height: TalUiTheme.of(context).titleBarHeight,
-      color: TalColors.input,
+      color: TalColors.background,
       child: Row(
         children: [
           if (detached)
@@ -81,9 +90,14 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
           else
             _buildMainTitle(),
           if (!detached) ...[
+            if (widget.workbench)
+              _TitleMenu(label: '文件', menuChildren: _buildFileMenu()),
+            if (widget.workbench)
+              _TitleMenu(label: '采集', menuChildren: _buildVariableMenu()),
             _TitleMenu(label: '视图', menuChildren: _buildViewMenu()),
             const SizedBox(width: 4),
-            _TitleMenu(label: '实时变量', menuChildren: _buildVariableMenu()),
+            if (!widget.workbench)
+              _TitleMenu(label: '实时变量', menuChildren: _buildVariableMenu()),
             const Expanded(child: DragToMoveArea(child: SizedBox.expand())),
           ],
           _CaptionButton(
@@ -160,7 +174,7 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
   }
 
   static const _brandStyle = TextStyle(
-    color: TalColors.text,
+    color: TalColors.heading,
     fontSize: 18,
     fontWeight: FontWeight.w800,
     fontFamily: talBrandFontFamily,
@@ -246,6 +260,20 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
   List<Widget> _buildVariableMenu() {
     final state = widget.controller;
     return [
+      if (widget.workbench) ...[
+        _menuItem(
+          label: state?.samplingPaused == true ? '继续采集' : '暂停采集',
+          onPressed: state?.toggleSampling,
+        ),
+        _menuItem(label: '清空采样', onPressed: state?.clearSamples),
+        _menuItem(
+          label: '采集设置',
+          onPressed: state == null
+              ? null
+              : () => showWorkbenchSamplingSettings(context, state),
+        ),
+        const _MenuDivider(),
+      ],
       SubmenuButton(
         menuStyle: Theme.of(
           context,
@@ -345,6 +373,56 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
     ];
   }
 
+  List<Widget> _buildFileMenu() {
+    final state = widget.controller;
+    return [
+      _menuItem(
+        label: '打开项目',
+        shortcut: WorkspaceShortcut.openProject.menuActivator,
+        onPressed: () => unawaited(
+          widget.workspaceKey?.currentState?.openProject() ?? Future.value(),
+        ),
+      ),
+      _menuItem(
+        label: '保存项目',
+        shortcut: WorkspaceShortcut.saveProject.menuActivator,
+        onPressed: () => unawaited(
+          widget.workspaceKey?.currentState?.saveProject() ?? Future.value(),
+        ),
+      ),
+      _menuItem(
+        label: '项目另存为',
+        onPressed: () => unawaited(
+          widget.workspaceKey?.currentState?.saveProject(saveAs: true) ??
+              Future.value(),
+        ),
+      ),
+      const _MenuDivider(),
+      _menuItem(label: '打开 ELF / AXF', onPressed: state?.chooseSymbolFile),
+      _menuItem(
+        label: '工程设置',
+        onPressed: state == null
+            ? null
+            : () => showWorkbenchProjectSettings(context, state),
+      ),
+      const _MenuDivider(),
+      _menuItem(
+        label: '数据分析',
+        onPressed: () => unawaited(
+          widget.workspaceKey?.currentState?.activateWorkbenchView(
+                WorkspacePanelId.analysis,
+              ) ??
+              Future.value(),
+        ),
+      ),
+      _menuItem(label: '导出原始采样 CSV', onPressed: state?.exportCsv),
+      _menuItem(
+        label: '打开录制目录',
+        onPressed: widget.recordingStorage?.openDirectory,
+      ),
+    ];
+  }
+
   void _stepUiScale(int direction) {
     final currentIndex = _uiScales.indexOf(uiScale);
     final nextIndex = (currentIndex + direction).clamp(0, _uiScales.length - 1);
@@ -357,9 +435,10 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
   }
 
   void _toggleGridMode() {
-    setState(() => gridMode = !gridMode);
-    widget.workspaceKey?.currentState?.setGridMode(gridMode);
-    widget.controller?.report(gridMode ? '网格模式已开启。' : '网格模式已关闭。');
+    final next = !gridMode;
+    widget.workspaceKey?.currentState?.setGridMode(next);
+    setState(() => _gridMode = next);
+    widget.controller?.report(next ? '网格模式已开启。' : '网格模式已关闭。');
   }
 
   void _setRttProtocol(String protocol) {
@@ -533,24 +612,11 @@ class _CaptionButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ui = TalUiTheme.of(context);
-    return Tooltip(
-      message: tooltip,
-      // Paint ink above the title bar's opaque background.
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: ui.controlRadius,
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onPressed,
-          borderRadius: ui.controlRadius,
-          hoverColor: close ? TalColors.accent : TalColors.hover,
-          child: SizedBox(
-            width: ui.touchOptimized ? 48 : 44,
-            height: ui.titleButtonHeight,
-            child: Icon(icon, size: 18, color: TalColors.text),
-          ),
-        ),
-      ),
+    return TalIconButton(
+      tooltip: tooltip,
+      onPressed: onPressed,
+      style: talCaptionButtonStyle(ui, close: close),
+      icon: Icon(icon, size: 18),
     );
   }
 }

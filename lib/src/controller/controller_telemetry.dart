@@ -12,6 +12,8 @@ extension TakeALookControllerTelemetry on TakeALookController {
       final watch = watchesByKey[item['key'] as String?];
       if (watch == null) continue;
       watch.value = _numericValue(item['value'], fallback: watch.value);
+      watch.updatedAtMs =
+          (item['updatedAtMs'] as num?)?.toInt() ?? watch.updatedAtMs;
       final samples = item['samples'];
       if (samples != null) {
         watch.samples.clear();
@@ -34,6 +36,8 @@ extension TakeALookControllerTelemetry on TakeALookController {
       final watch = watchesByKey[item['key'] as String?];
       if (watch == null) continue;
       watch.value = _numericValue(item['value'], fallback: watch.value);
+      watch.updatedAtMs =
+          (item['updatedAtMs'] as num?)?.toInt() ?? watch.updatedAtMs;
       final sampleStart = item['sampleStart'] as int? ?? 0;
       final sampleCursor = item['sampleCursor'] as int? ?? sampleStart;
       if (item['reset'] == true ||
@@ -70,6 +74,9 @@ extension TakeALookControllerTelemetry on TakeALookController {
         }
       case BackendEventType.samplesCleared:
         applyBackendSamplesCleared();
+      case BackendEventType.watchValues:
+        final payload = _asMap(params);
+        if (payload != null) applyWatchValues(payload);
       case BackendEventType.log:
         final payload = _asMap(params);
         final message = payload?['message'];
@@ -104,11 +111,32 @@ extension TakeALookControllerTelemetry on TakeALookController {
           final watchCount = (payload['watchCount'] as num?)?.toInt() ?? 0;
           final blockCount = (payload['readBlockCount'] as num?)?.toInt() ?? 0;
           final byteCount = (payload['readByteCount'] as num?)?.toInt() ?? 0;
+          final memoryDropped =
+              (payload['memoryDroppedSamples'] as num?)?.toInt() ?? 0;
+          final memorySkipped =
+              (payload['memorySkippedTicks'] as num?)?.toInt() ?? 0;
+          final memoryTiming = connectionKind == 'ember'
+              ? '，传输跳样 $memoryDropped，采样错过周期 $memorySkipped'
+              : '';
+          final phoneReadUs =
+              (payload['memoryPhoneReadUs'] as num?)?.toInt() ?? 0;
+          final samplingMode = payload['memorySamplingMode'] as String?;
+          final modeLabel = samplingMode == 'full' ? '全速' : '定时';
+          final burst = (payload['memoryBurst'] as num?)?.toInt() ?? 1;
+          final burstTiming =
+              payload['memoryTimeQuality'] == 'transaction_window';
+          final deliveredLabel = burstTiming
+              ? '读取吞吐 ${effectiveHz.toStringAsFixed(1)} 次/秒（每批 $burst 次，子读时刻未知）'
+              : '实际 ${effectiveHz.toStringAsFixed(1)} Hz';
+          final ceiling = samplingMode != null && phoneReadUs > 0
+              ? '，手机每批读取 ${(phoneReadUs / 1000).toStringAsFixed(1)} ms'
+                    '（$modeLabel）'
+              : '';
           _appendLog(
             '采样性能：目标 ${sampleRateHz.toStringAsFixed(0)} Hz，'
-            '实际 ${effectiveHz.toStringAsFixed(1)} Hz，'
+            '$deliveredLabel，'
             '样本 $sampleCount，变量 $watchCount，'
-            '读块 $blockCount，字节 $byteCount。',
+            '读块 $blockCount，字节 $byteCount$memoryTiming$ceiling。',
           );
           _emitState([signals.logs]);
         }
@@ -124,10 +152,31 @@ extension TakeALookControllerTelemetry on TakeALookController {
     }
   }
 
+  void applyWatchValues(Map<String, dynamic> payload) {
+    final byKey = {
+      for (final watch in acquisitionWatches) watch.symbol.key: watch,
+    };
+    for (final raw in payload['values'] as List? ?? const []) {
+      if (raw is! Map) continue;
+      final watch = byKey[raw['key']];
+      if (watch == null) continue;
+      final updated = (raw['updatedAtMs'] as num?)?.toInt();
+      if (updated != null &&
+          watch.updatedAtMs != null &&
+          updated < watch.updatedAtMs!) {
+        continue;
+      }
+      watch.value = _numericValue(raw['value'], fallback: watch.value);
+      watch.updatedAtMs = updated ?? DateTime.now().millisecondsSinceEpoch;
+    }
+    // Latest-only values never enter the plot buffer or recording history.
+    _emitTelemetry();
+  }
+
   void applyBackendSamples(Map<String, dynamic> payload) {
     elapsedSeconds = telemetryStore.applyJsonFrames(
       payload,
-      _watches,
+      acquisitionWatches,
       currentElapsed: elapsedSeconds,
     );
     _emitTelemetry();
@@ -136,15 +185,17 @@ extension TakeALookControllerTelemetry on TakeALookController {
   void applyBackendSampleBatch(BackendSampleBatch batch) {
     elapsedSeconds = telemetryStore.applyBinaryBatch(
       batch,
-      _watches,
+      acquisitionWatches,
       currentElapsed: elapsedSeconds,
     );
     _emitTelemetry();
   }
 
   void applyBackendSamplesCleared() {
+    plotHistory.clear();
+    state.acquisition.rawRecording = {};
     elapsedSeconds = 0;
-    telemetryStore.clear(_watches);
+    telemetryStore.clear(_allRetainedWatches);
     _frozenPlotSamples.clear();
     if (plottingPaused || !followLatest) _frozenPlotEndSeconds = 0;
     _emitState([signals.sampling, signals.telemetry, signals.plot]);

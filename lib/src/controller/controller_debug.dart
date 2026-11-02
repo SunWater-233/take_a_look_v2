@@ -105,9 +105,10 @@ extension TakeALookControllerDebug on TakeALookController {
     if (normalize(left) == normalize(right)) return true;
     final name = basename(left);
     if (name != basename(right)) return false;
-    final matchingDebugPaths = debugState.executableLines.keys
-        .where((path) => basename(path) == name)
-        .length;
+    final matchingDebugPaths = {
+      ...debugState.sourceFiles,
+      ...debugState.executableLines.keys,
+    }.map(normalize).toSet().where((path) => basename(path) == name).length;
     return matchingDebugPaths == 1;
   }
 
@@ -125,6 +126,20 @@ extension TakeALookControllerDebug on TakeALookController {
       debugState.sourceFiles
         ..clear()
         ..addAll(rawFiles.whereType<String>());
+    }
+    if (data.containsKey('sourceDefinitions')) {
+      final rawDefinitions = data['sourceDefinitions'];
+      debugState.hasSourceDefinitionIndex = rawDefinitions is List;
+      debugState.sourceDefinitions
+        ..clear()
+        ..addAll(
+          (rawDefinitions is List ? rawDefinitions : const [])
+              .whereType<Map>()
+              .map(
+                (raw) =>
+                    SourceDefinition.fromJson(Map<String, dynamic>.from(raw)),
+              ),
+        );
     }
     if (data['executableLines'] case final Map rawLines) {
       debugState.executableLines

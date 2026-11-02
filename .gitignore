@@ -34,6 +34,7 @@ migrate_working_dir/
 /coverage/
 /backend/.venv/
 /backend/runtime/take_a_look_backend/
+/backend/bundled_packs/
 /build/backend_pyinstaller/
 
 # Persistent raw samples beside portable executables or the source backend.

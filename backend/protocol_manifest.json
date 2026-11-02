@@ -1,6 +1,14 @@
 {
   "version": 2,
   "methods": [
+    "ember",
+    "listTargets",
+    "onlineTargetPacks",
+    "inspectTargetPack",
+    "importTargetPack",
+    "discardTargetPackPreview",
+    "removeTargetPack",
+    "selectTarget",
     "handshake",
     "getState",
     "connect",
@@ -9,7 +17,10 @@
     "loadSymbols",
     "setConfig",
     "setWatches",
+    "setMonitorVisibility",
     "writeWatch",
+    "writeWatches",
+    "readWatch",
     "setSamplingPaused",
     "setRtt",
     "clearSamples",
@@ -26,6 +37,7 @@
   "events": [
     "state",
     "samples",
+    "watchValues",
     "samplesCleared",
     "sampleSchema",
     "log",

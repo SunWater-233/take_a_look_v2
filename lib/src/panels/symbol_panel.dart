@@ -1,4 +1,19 @@
-part of 'panels.dart';
+import 'dart:async';
+import 'dart:math' as math;
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
+
+import 'package:flutter/services.dart';
+
+import '../controller/controller.dart';
+import '../models/models.dart';
+import '../theme/theme.dart';
+import 'table_layout.dart';
+
+import 'shared_controls.dart';
+import 'source_file_drag_data.dart';
 
 enum _SymbolTreeNodeKind { folder, sourceFile, symbol }
 
@@ -34,16 +49,23 @@ final Expando<_SymbolTreeCache> _symbolTreeCaches = Expando<_SymbolTreeCache>(
   'symbol-tree-cache',
 );
 
-class _SymbolPanel extends StatefulWidget {
-  const _SymbolPanel({required this.controller});
+class SymbolPanel extends StatefulWidget {
+  const SymbolPanel({
+    super.key,
+    required this.controller,
+    this.defaultMonitor = false,
+    this.onShowSource,
+  });
 
   final TakeALookController controller;
+  final bool defaultMonitor;
+  final VoidCallback? onShowSource;
 
   @override
-  State<_SymbolPanel> createState() => _SymbolPanelState();
+  State<SymbolPanel> createState() => _SymbolPanelState();
 }
 
-class _SymbolPanelState extends State<_SymbolPanel> {
+class _SymbolPanelState extends State<SymbolPanel> {
   final ResizableTableLayout _tableLayout = ResizableTableLayout(
     widths: const [320, 145, 68, 100, 160],
     minimumWidths: const [120, 80, 48, 60, 80],
@@ -372,10 +394,20 @@ class _SymbolPanelState extends State<_SymbolPanel> {
     _lastTappedNodeKey = isDoubleTap ? null : node.key;
     _lastTapAt = isDoubleTap ? null : now;
 
+    if (isDoubleTap &&
+        node.kind == _SymbolTreeNodeKind.sourceFile &&
+        node.sourcePath != null) {
+      widget.controller.openSourceFile(
+        widget.controller.canonicalSourcePath(node.sourcePath!),
+      );
+      widget.onShowSource?.call();
+      return;
+    }
+
     if (node.expandable) {
       final symbol = node.symbol;
       if (isDoubleTap && symbol != null) {
-        widget.controller.activateSymbol(symbol.key);
+        _addSymbol(symbol.key);
       } else {
         _toggleNode(node);
       }
@@ -396,8 +428,17 @@ class _SymbolPanelState extends State<_SymbolPanel> {
     }
     final symbol = node.symbol;
     if (isDoubleTap && symbol != null) {
-      widget.controller.activateSymbol(symbol.key);
+      _addSymbol(symbol.key);
     }
+  }
+
+  void _addSymbol(String key) {
+    widget.controller.selectSymbols([key]);
+    widget.controller.addSelectedToWatch(
+      mode: widget.defaultMonitor
+          ? WatchReadMode.monitor
+          : WatchReadMode.capture,
+    );
   }
 
   @override
@@ -487,7 +528,7 @@ class _SymbolPanelState extends State<_SymbolPanel> {
                       BorderSide(color: TalColors.border),
                     ),
                   ),
-                  child: _ResizableTableViewport(
+                  child: ResizableTableViewport(
                     layout: _tableLayout,
                     contentWidth: _tableWidth,
                     contentKey: const ValueKey('symbol-table-content'),
@@ -548,12 +589,16 @@ class _SymbolPanelState extends State<_SymbolPanel> {
                   ),
                   const SizedBox(width: 8),
                   SizedBox(
-                    width: 160,
+                    width: widget.defaultMonitor ? 116 : 160,
                     child: TalButton(
                       onPressed: widget.controller.selectedSymbols.isEmpty
                           ? null
-                          : widget.controller.addSelectedToWatch,
-                      child: const Text('加入实时调参'),
+                          : () => widget.controller.addSelectedToWatch(
+                              mode: widget.defaultMonitor
+                                  ? WatchReadMode.monitor
+                                  : WatchReadMode.capture,
+                            ),
+                      child: Text(widget.defaultMonitor ? '加入监视' : '加入实时调参'),
                     ),
                   ),
                 ],
@@ -581,41 +626,41 @@ class _SymbolTableHeader extends StatelessWidget {
   final double sizeWidth;
   final double sectionWidth;
   final double typeWidth;
-  final _ColumnResizeCallback onResizeColumn;
+  final ColumnResizeCallback onResizeColumn;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
-        _ResizableTableHeaderCell(
+        ResizableTableHeaderCell(
           label: '来源文件 / 变量',
           width: nameWidth,
           columnIndex: 0,
           keyPrefix: 'symbol',
           onResize: onResizeColumn,
         ),
-        _ResizableTableHeaderCell(
+        ResizableTableHeaderCell(
           label: '地址',
           width: addressWidth,
           columnIndex: 1,
           keyPrefix: 'symbol',
           onResize: onResizeColumn,
         ),
-        _ResizableTableHeaderCell(
+        ResizableTableHeaderCell(
           label: '大小',
           width: sizeWidth,
           columnIndex: 2,
           keyPrefix: 'symbol',
           onResize: onResizeColumn,
         ),
-        _ResizableTableHeaderCell(
+        ResizableTableHeaderCell(
           label: '段',
           width: sectionWidth,
           columnIndex: 3,
           keyPrefix: 'symbol',
           onResize: onResizeColumn,
         ),
-        _ResizableTableHeaderCell(
+        ResizableTableHeaderCell(
           label: '类型',
           width: typeWidth,
           columnIndex: 4,
@@ -681,13 +726,17 @@ class _SymbolTreeRow extends StatelessWidget {
       ),
     );
 
-    return Material(
+    final row = Material(
       key: ValueKey('symbol-tree-row-${node.key}'),
       color: rowColor,
       child: InkWell(
         onTap: () => onSelectNode(node),
-        onSecondaryTapDown: node.kind == _SymbolTreeNodeKind.sourceFile
-            ? (details) => onFileContextMenu(node, details.globalPosition)
+        onSecondaryTapUp: node.kind == _SymbolTreeNodeKind.sourceFile
+            ? (details) {
+                if (details.kind != PointerDeviceKind.mouse) {
+                  onFileContextMenu(node, details.globalPosition);
+                }
+              }
             : null,
         onLongPress: node.kind == _SymbolTreeNodeKind.sourceFile
             ? () {
@@ -761,6 +810,46 @@ class _SymbolTreeRow extends StatelessWidget {
           ),
         ),
       ),
+    );
+    if (node.kind != _SymbolTreeNodeKind.sourceFile) return row;
+    return Listener(
+      onPointerDown: (event) {
+        if (event.kind != PointerDeviceKind.mouse ||
+            event.buttons & kSecondaryMouseButton == 0) {
+          return;
+        }
+        RightDragResizeRegion.registerContextMenu(context, event.pointer, (
+          position,
+        ) {
+          if (context.mounted) onFileContextMenu(node, position);
+        });
+      },
+      child: node.sourcePath == null
+          ? row
+          : Draggable<SourceFileDragData>(
+              data: SourceFileDragData(node.sourcePath!),
+              allowedButtonsFilter: (buttons) => buttons == kPrimaryMouseButton,
+              maxSimultaneousDrags: 1,
+              feedback: Material(
+                color: TalColors.surfaceAlt,
+                borderRadius: BorderRadius.circular(4),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.code, size: 16, color: TalColors.accent),
+                      const SizedBox(width: 6),
+                      Text(node.label, style: talStrong),
+                    ],
+                  ),
+                ),
+              ),
+              child: row,
+            ),
     );
   }
 }

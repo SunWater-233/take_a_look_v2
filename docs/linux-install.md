@@ -3,6 +3,8 @@
 发布文件为 `take-a-look-v2-<版本>-git.<提交>-linux-<架构>.tar.gz`，旁边的 `.sha256`
 文件用于校验。包内包含 Flutter Release 程序、字体、Python 解释器、pyOCD、
 ELF/DWARF 解析库、libusb 和安装脚本；使用者不需要安装 Flutter、Dart、Python 或 pip。
+同时自带 STM32F1、STM32F4、STM32H7 的官方芯片包，覆盖 STM32F103、STM32F407、
+STM32H723，首次打开即可离线搜索和选择。芯片包管理中标记为“软件自带”。
 
 ## 快速安装
 
@@ -64,10 +66,19 @@ Windows/macOS 需要分别在对应系统构建前端和 Python 后端。
 
 ## 显示与 GPU
 
-推荐 X11 或带 XWayland 的 Wayland 桌面；多窗口插件包含 X11 操作，因此启动器在
-存在 `DISPLAY` 时默认使用 XWayland/X11。Arch Wayland 用户请确保已安装
-`xorg-xwayland`，且合成器启用了 XWayland。原生 Wayland 可以用
-`GDK_BACKEND=wayland ./take-a-look` 尝试，但不承诺全部窗口管理功能可用。
+Wayland 桌面（包括 niri）默认优先使用 GTK 原生 Wayland，无需为本程序安装 XWayland。
+面板跨窗口拖动使用系统拖放协议；窗口初始位置由合成器决定。标签排序、组合、拆分和
+侧栏／底部停靠继续可用，拖动预览由合成器显示。X11 会话继续使用原有窗口交互。
+
+可用下面的命令明确选择后端进行对照排查；这些设置只影响本次启动：
+
+```bash
+GDK_BACKEND=wayland ./take-a-look
+GDK_BACKEND=x11 ./take-a-look
+```
+
+在 Wayland 桌面选择 X11 后端时，仍需桌面提供 XWayland；niri 使用 xwayland-satellite。
+启动器保留显式设置的 `GDK_BACKEND`。原生适配与验证范围见 [Wayland 说明](linux-wayland.md)。
 
 图形驱动由系统提供，不打包 glibc 或显卡驱动，以便使用系统的 Mesa/NVIDIA 驱动。
 请在有窗口管理器的正常桌面会话中运行；只启动 X server 的裸环境不作为支持的桌面配置。
@@ -96,7 +107,8 @@ CMSIS-DAP USB VID/PID，需要管理员按照探针厂商说明配置权限。
 
 J-Link 的原生 RTT/连接还需要从 [SEGGER 官网](https://www.segger.com/downloads/jlink/)
 安装对应架构的 J-Link Software and Documentation Pack；其专有运行库不在本包中再分发。
-首次使用没有内置支持的芯片时，也可能需要另外安装相应 CMSIS Device Family Pack。
+其他没有内置或随附支持的芯片，可在“在线下载”中安装相应 CMSIS Device Family Pack，
+也可以通过“添加芯片包”导入本地 `.pack` 文件。
 
 WSL 可以编译并通过 WSLg 启动界面；使用真实 USB 调试器还需要 Windows 主机向 WSL
 转发 USB 设备。没有连接硬件时，自检通过只说明运行库和协议正常，不代表完成了采样验证。
@@ -183,12 +195,18 @@ bash tool/build_release_wsl.sh --version 1.2.3
 压缩包名称及 `BUILD-INFO.json`；不会修改工作区的 `pubspec.yaml`。
 例如 `1.2.3` 会生成 `take-a-look-v2-1.2.3-git.<提交>-linux-<架构>.tar.gz`。
 
-默认复用此前配置的 `~/.cache/take-a-look-linux/bullseye` Debian 11 chroot 和
-`~/.cache/take-a-look-linux/flutter-3.44.9` Linux SDK；chroot 内的
-`/opt/tal-python-path` 保存 Python 3.11+ 可执行文件路径。本机的这些缓存位于 WSL
-root 用户下，因此使用该环境需要以 WSL root 用户运行；Linux 普通用户可使用
-`sudo -E bash tool/build_release_wsl.sh`，并通过下面的变量指定实际缓存位置。
-脚本会检查缓存，不会自动下载或安装系统环境。
+PowerShell 入口在默认 chroot 模式下自动选择 WSL root 用户，以运行独立挂载
+命名空间和 chroot；`-Native` 模式仍使用发行版的默认用户。直接在 WSL 普通用户
+终端使用 chroot 时，请运行 `sudo -E bash tool/build_release_wsl.sh`。
+
+默认依次查找 `<缓存>/bullseye`、`/root/.cache/take-a-look-linux/bullseye` 和
+本机旧布局 `/opt/take-a-look-build/debian11`。Linux SDK 依次查找
+`<缓存>/flutter-3.44.9`、`/root/.cache/take-a-look-linux/flutter-3.44.9` 和所选
+chroot 内的 `/opt/flutter`。日志打印实际路径和 Flutter 版本。
+chroot 内的 `/opt/tal-python-path` 保存 Python 3.11+ 可执行文件路径；
+兼容旧环境缺少该文件时使用 `/opt/python311/bin/python3.11`。
+脚本会检查已有环境，不会自动下载或安装系统环境；所有候选目录均不存在时需先
+配置 Debian 11 环境，或使用已配好开发依赖的原生 Linux 环境。
 
 可以用 Linux 环境变量 `TAL_LINUX_CACHE`、`TAL_LINUX_ROOTFS`、
 `TAL_LINUX_FLUTTER_ROOT` 覆盖缓存、chroot 和 SDK 路径。默认以 `TAL_MAX_GLIBC=2.31`

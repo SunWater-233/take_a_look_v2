@@ -13,11 +13,71 @@ enum WorkspacePanelId {
   analysis,
   sourceDebug,
   log,
+  buildOutput,
+  registers,
 }
+
+const workspaceOutputPanels = <WorkspacePanelId>[
+  WorkspacePanelId.log,
+  WorkspacePanelId.buildOutput,
+  WorkspacePanelId.registers,
+];
 
 enum SecondaryWindowRole { detachedPanel, dragPreview }
 
+enum WorkspaceSidebarSide { left, right }
+
+enum WorkspaceDockEdge {
+  left,
+  right,
+  bottom;
+
+  WorkspaceSidebarSide? get sidebar => switch (this) {
+    left => WorkspaceSidebarSide.left,
+    right => WorkspaceSidebarSide.right,
+    bottom => null,
+  };
+
+  String get label => switch (this) {
+    left => '左侧栏',
+    right => '右侧栏',
+    bottom => '底部区域',
+  };
+}
+
+enum WorkspacePanelAction {
+  dockLeft,
+  dockRight,
+  dockBottom,
+  moveToWorkspace,
+  collapse,
+}
+
+/// Kept-alive panel bodies must not consume shortcuts or read notifications
+/// while their tab or sidebar is hidden.
+class WorkspacePanelVisibility extends InheritedWidget {
+  const WorkspacePanelVisibility({
+    required this.visible,
+    required super.child,
+    super.key,
+  });
+
+  final bool visible;
+
+  static bool of(BuildContext context) =>
+      context
+          .dependOnInheritedWidgetOfExactType<WorkspacePanelVisibility>()
+          ?.visible ??
+      true;
+
+  @override
+  bool updateShouldNotify(WorkspacePanelVisibility oldWidget) =>
+      visible != oldWidget.visible;
+}
+
 extension WorkspacePanelInfo on WorkspacePanelId {
+  bool get isWorkbenchOutput => workspaceOutputPanels.contains(this);
+
   String get title => switch (this) {
     WorkspacePanelId.header => '主标题',
     WorkspacePanelId.runControl => '运行控制',
@@ -29,6 +89,8 @@ extension WorkspacePanelInfo on WorkspacePanelId {
     WorkspacePanelId.analysis => '分析图表',
     WorkspacePanelId.sourceDebug => '源码调试',
     WorkspacePanelId.log => '事件日志',
+    WorkspacePanelId.buildOutput => '编译 / 下载',
+    WorkspacePanelId.registers => '寄存器',
   };
 
   IconData get icon => switch (this) {
@@ -42,6 +104,8 @@ extension WorkspacePanelInfo on WorkspacePanelId {
     WorkspacePanelId.analysis => Icons.analytics_outlined,
     WorkspacePanelId.sourceDebug => Icons.code,
     WorkspacePanelId.log => Icons.terminal,
+    WorkspacePanelId.buildOutput => Icons.build_outlined,
+    WorkspacePanelId.registers => Icons.memory_outlined,
   };
 
   Size get preferredWindowSize => switch (this) {
@@ -55,6 +119,8 @@ extension WorkspacePanelInfo on WorkspacePanelId {
     WorkspacePanelId.analysis => const Size(1050, 700),
     WorkspacePanelId.sourceDebug => const Size(1100, 760),
     WorkspacePanelId.log => const Size(900, 340),
+    WorkspacePanelId.buildOutput => const Size(900, 340),
+    WorkspacePanelId.registers => const Size(640, 400),
   };
 }
 
@@ -188,6 +254,10 @@ class PanelChrome {
     this.onTabDragUpdate,
     this.onTabDragEnd,
     this.tabsDraggable = false,
+    this.headerLeading,
+    this.sidebar,
+    this.onWorkspaceAction,
+    this.tabsAtBottom = false,
   });
 
   final List<WorkspacePanelId> tabs;
@@ -208,4 +278,8 @@ class PanelChrome {
   final void Function(PanelTabDragData, DragUpdateDetails)? onTabDragUpdate;
   final void Function(PanelTabDragData, DraggableDetails)? onTabDragEnd;
   final bool tabsDraggable;
+  final Widget? headerLeading;
+  final WorkspaceSidebarSide? sidebar;
+  final ValueChanged<WorkspacePanelAction>? onWorkspaceAction;
+  final bool tabsAtBottom;
 }

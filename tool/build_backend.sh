@@ -12,6 +12,8 @@ if [[ ! -x "$backend_python" ]]; then
   exit 1
 fi
 
+"$backend_python" "$project_root/tool/prepare_bundled_packs.py"
+
 "$backend_python" -m PyInstaller \
   --clean \
   --noconfirm \
@@ -26,6 +28,9 @@ fi
   --collect-all cmsis_pack_manager \
   --collect-all elftools \
   --collect-submodules pylink \
+  --collect-all zeroconf \
   "$backend_root/take_a_look_backend/stdio.py"
+
+cp -a "$backend_root/bundled_packs" "$dist_root/take_a_look_backend/"
 
 echo "Packaged backend: $dist_root/take_a_look_backend"

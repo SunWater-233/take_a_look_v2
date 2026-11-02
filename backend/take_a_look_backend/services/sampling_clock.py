@@ -14,7 +14,7 @@ def advance_deadline(previous: float, now: float, period: float) -> float:
     return previous + max(1, int((now - previous) / period) + 1) * period
 
 
-def wait_until(wake: Event, deadline: float) -> None:
+def wait_until(wake: Event, deadline: float, *, precise: bool = False) -> None:
     # Event.wait uses coarse Windows timeout granularity. Python 3.11+ sleep
     # uses the high-resolution timer. Short sleeps also release the GIL and
     # bound command/shutdown latency without busy-spinning a CPU core.
@@ -24,6 +24,12 @@ def wait_until(wake: Event, deadline: float) -> None:
             break
         if remaining > 0.020:
             wake.wait(remaining - 0.016)
+        elif precise and remaining <= 0.0008:
+            # Yield instead of spinning or accepting an oversleep of ~0.5 ms.
+            # The sampler enables this only for active >1 kHz memory capture.
+            time.sleep(0)
+        elif precise:
+            time.sleep(min(remaining - 0.0008, 0.002))
         else:
             time.sleep(min(remaining, 0.002))
     wake.clear()

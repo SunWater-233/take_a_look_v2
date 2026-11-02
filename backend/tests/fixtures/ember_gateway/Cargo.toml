@@ -1,0 +1,10 @@
+[package]
+name = "tal-ember-fixture"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ember-v2 = { path = "../../../../../EmberMobile/native/ember-v2" }
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = ["full"] }

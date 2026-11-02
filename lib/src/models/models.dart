@@ -1,8 +1,10 @@
 import 'dart:ui';
+import 'dart:typed_data';
 
 import '../telemetry/sample_buffer.dart';
 
 export 'symbol_load_progress.dart';
+export 'source_definition.dart';
 
 enum ConnectionStatus { disconnected, connecting, connected }
 
@@ -110,6 +112,22 @@ class SymbolItem {
   }
 }
 
+enum WatchReadMode {
+  monitor,
+  capture,
+  manual;
+
+  String get label => switch (this) {
+    monitor => '仅监视',
+    capture => '采集',
+    manual => '手动读取',
+  };
+
+  static WatchReadMode parse(Object? value, {bool sampling = true}) =>
+      values.where((mode) => mode.name == value).firstOrNull ??
+      (sampling ? capture : monitor);
+}
+
 class WatchItem {
   WatchItem({required this.symbol, required this.color, SampleBuffer? samples})
     : samples = samples ?? SampleBuffer();
@@ -118,15 +136,36 @@ class WatchItem {
   Color color;
   final SampleBuffer samples;
   int totalSampleCount = 0;
-  bool samplingEnabled = true;
-  bool plotted = true;
+  double historyStartSeconds = 0;
+  WatchReadMode readMode = WatchReadMode.capture;
+  double? monitorRateHz;
+  int? updatedAtMs;
+  bool get samplingEnabled => readMode == WatchReadMode.capture;
+  set samplingEnabled(bool value) =>
+      readMode = value ? WatchReadMode.capture : WatchReadMode.monitor;
+  bool plotted = false;
+  bool pinned = false;
   double value = 0;
+
+  bool get isFloatingPoint =>
+      symbol.type.contains('float') || symbol.type.contains('double');
+
+  /// Decimal digits sufficient to round-trip the target's IEEE floating type.
+  int get valuePrecision => symbol.size == 8 ? 17 : 9;
+
+  String get editValueLabel {
+    if (!isFloatingPoint) return valueLabel;
+    final typedValue = symbol.size == 4
+        ? Float32List.fromList([value]).single
+        : value;
+    return typedValue.toStringAsPrecision(valuePrecision);
+  }
 
   String get valueLabel {
     if (symbol.type == 'bool') {
       return value >= 0.5 ? 'true' : 'false';
     }
-    if (symbol.type.contains('float') || symbol.type.contains('double')) {
+    if (isFloatingPoint) {
       return value.toStringAsFixed(4);
     }
     return value.round().toString();

@@ -11,3 +11,4 @@ export 'interaction.dart';
 export 'material_theme.dart';
 export 'menus.dart';
 export 'tokens.dart';
+export 'workbench_style.dart';

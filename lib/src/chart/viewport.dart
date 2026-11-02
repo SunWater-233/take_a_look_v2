@@ -33,6 +33,7 @@ class TelemetryViewport {
 
 TelemetryViewport telemetryViewport(TakeALookController controller, Size size) {
   final plot = telemetryPlotRect(size);
+  controller.preparePlotHistory(pixelWidth: plot.width);
   final plotted = controller.watches.where((item) => item.plotted);
   var xMax = controller.plotWindowEndSeconds;
   final window = math.max(0.2, controller.plotVisibleWindowSeconds);

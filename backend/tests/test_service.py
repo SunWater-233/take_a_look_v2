@@ -182,6 +182,8 @@ class BackendServiceTests(unittest.TestCase):
             with patch.object(self.memory, "read_symbols", side_effect=read), \
                  patch.object(self.memory, "write_symbol", side_effect=write):
                 self.service.handle(RpcMethod.CONNECT, {})
+                self.assertTrue(self.service.state_snapshot()["samplingPaused"])
+                self.service.handle(RpcMethod.SET_SAMPLING_PAUSED, {"paused": False})
                 self.assertTrue(entered.wait(1))
                 worker.start()
                 deadline = time.perf_counter() + 1
@@ -267,7 +269,9 @@ class BackendServiceTests(unittest.TestCase):
             self.assertNotIn("symbols", watch_result["state"])  # type: ignore[operator]
             connected = self.service.handle(RpcMethod.CONNECT, {"targetName": "STM32F407", "swdClock": "2 MHz"})
             self.assertEqual(connected["state"]["connectionStatus"], "connected")  # type: ignore[index]
+            self.assertTrue(connected["state"]["samplingPaused"])  # type: ignore[index]
             self.assertEqual(self.memory.connected.frequency_hz, 2_000_000)  # type: ignore[union-attr]
+            self.service.handle(RpcMethod.SET_SAMPLING_PAUSED, {"paused": False})
 
             samples = self._eventually(EventName.SAMPLES)
             self.assertGreaterEqual(len(samples["frames"]), 1)  # type: ignore[index]

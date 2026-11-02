@@ -5,13 +5,17 @@ Build the Windows x64 application and a self-contained, per-user MSI.
 .\tool\build_release_windows.ps1
 .EXAMPLE
 .\tool\build_release_windows.ps1 -SkipBuild
+.EXAMPLE
+.\tool\build_release_windows.ps1 -Version 1.2.3
 #>
 [CmdletBinding()]
 param(
   [string]$Python = 'python',
   [string]$Flutter = 'flutter',
   [string]$VcRuntimeDirectory = '',
-  [switch]$SkipBuild
+  [switch]$SkipBuild,
+  [ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+(?:\+[0-9]+)?$')]
+  [string]$Version = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -165,9 +169,13 @@ try {
   Start-Transcript -LiteralPath $logPath | Out-Null
   $transcribing = $true
   $pubspec = Get-Content -LiteralPath (Join-Path $projectDirectory 'pubspec.yaml') -Raw
-  $match = [regex]::Match($pubspec, '(?m)^version:\s*(\d+)\.(\d+)\.(\d+)(?:\+\d+)?\s*$')
+  $versionText = if ($Version) { $Version } else {
+    $sourceMatch = [regex]::Match($pubspec, '(?m)^version:\s*([^\r\n]+)\s*$')
+    if (-not $sourceMatch.Success) { '' } else { $sourceMatch.Groups[1].Value.Trim() }
+  }
+  $match = [regex]::Match($versionText, '^(\d+)\.(\d+)\.(\d+)(?:\+\d+)?$')
   if (-not $match.Success) { throw 'pubspec.yaml version must be major.minor.patch[+build].' }
-  $version = '{0}.{1}.{2}' -f $match.Groups[1].Value, $match.Groups[2].Value, $match.Groups[3].Value
+  $msiVersion = '{0}.{1}.{2}' -f $match.Groups[1].Value, $match.Groups[2].Value, $match.Groups[3].Value
   if ([int64]$match.Groups[1].Value -gt 255 -or [int64]$match.Groups[2].Value -gt 255 -or [int64]$match.Groups[3].Value -gt 65535) {
     throw 'MSI versions must fit 0..255.0..255.0..65535.'
   }
@@ -212,6 +220,17 @@ try {
       New-Item -ItemType Directory -Path (Split-Path -Parent $outputPath) -Force | Out-Null
       Copy-Item -LiteralPath $inputPath -Destination $outputPath -Force
     }
+    if ($Version) {
+      $isolatedPubspecPath = Join-Path $sourceDirectory 'pubspec.yaml'
+      $isolatedPubspec = Get-Content -LiteralPath $isolatedPubspecPath -Raw
+      $versionRegex = [regex]::new('(?m)^version:\s*[^\r\n]+')
+      $updatedPubspec = $versionRegex.Replace($isolatedPubspec, "version: $Version", 1)
+      if ($updatedPubspec -eq $isolatedPubspec) {
+        throw 'The isolated pubspec.yaml does not contain a version field.'
+      }
+      [IO.File]::WriteAllText($isolatedPubspecPath, $updatedPubspec, [Text.UTF8Encoding]::new($false))
+      Write-Host "Using temporary application version $Version for this build."
+    }
     if (Test-Path -LiteralPath $buildStamp) { Remove-Item -LiteralPath $buildStamp }
     Invoke-Checked 'powershell.exe' @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
       (Join-Path $PSScriptRoot 'build_backend.ps1'), '-Python', $backendPython,
@@ -224,8 +243,8 @@ try {
       Invoke-Checked $flutterCommand @('pub', 'get')
       Invoke-Checked $flutterCommand @('build', 'windows', '--release', '--no-pub')
     } finally { Pop-Location }
-    Set-Content -LiteralPath $buildStamp -Value $version -Encoding ascii
-  } elseif (-not (Test-Path -LiteralPath $buildStamp) -or (Get-Content -LiteralPath $buildStamp -Raw).Trim() -ne $version) {
+    Set-Content -LiteralPath $buildStamp -Value $msiVersion -Encoding ascii
+  } elseif (-not (Test-Path -LiteralPath $buildStamp) -or (Get-Content -LiteralPath $buildStamp -Raw).Trim() -ne $msiVersion) {
     throw '-SkipBuild requires a successful MSI application build with the current pubspec.yaml version.'
   }
 
@@ -237,8 +256,8 @@ try {
     if (-not (Test-Path -LiteralPath (Join-Path $stageDirectory $required))) { throw "Missing release payload: $required" }
   }
   $exeVersion = (Get-Item -LiteralPath (Join-Path $stageDirectory 'take_a_look_v2.exe')).VersionInfo
-  if (("{0}.{1}.{2}" -f $exeVersion.FileMajorPart, $exeVersion.FileMinorPart, $exeVersion.FileBuildPart) -ne $version) {
-    throw 'The application EXE version does not match pubspec.yaml. Run a full build.'
+  if (("{0}.{1}.{2}" -f $exeVersion.FileMajorPart, $exeVersion.FileMinorPart, $exeVersion.FileBuildPart) -ne $msiVersion) {
+    throw 'The application EXE version does not match the requested release version. Run a full build.'
   }
   Write-Host 'Checking the packaged Python runtime (offline, without opening a probe)...'
   Invoke-Checked (Join-Path $stageDirectory 'backend\runtime\take_a_look_backend\take_a_look_backend.exe') @('--self-test')
@@ -254,12 +273,12 @@ try {
   $payloadXml.Save($payloadSource)
 
   $installerDirectory = Join-Path $projectDirectory 'windows\installer'
-  $packageName = "Take-A-Look-V2-$version-windows-x64.msi"
+  $packageName = "Take-A-Look-V2-$msiVersion-windows-x64.msi"
   $temporaryMsi = Join-Path $workDirectory $packageName
   Write-Host "Building $packageName..."
   Invoke-Checked $wix @('build', (Join-Path $installerDirectory 'Package.wxs'),
     (Join-Path $installerDirectory 'UI.wxs'), $payloadSource, '-arch', 'x64', '-culture', 'zh-CN',
-    '-ext', $uiExtension, '-d', "ProductVersion=$version", '-d', "AppIcon=$(Join-Path $projectDirectory 'windows\runner\resources\app_icon.ico')",
+    '-ext', $uiExtension, '-d', "ProductVersion=$msiVersion", '-d', "AppIcon=$(Join-Path $projectDirectory 'windows\runner\resources\app_icon.ico')",
     '-pdb', (Join-Path $workDirectory 'installer.wixpdb'), '-o', $temporaryMsi)
   & (Join-Path $PSScriptRoot 'verify_windows_msi.ps1') -MsiPath $temporaryMsi -PayloadDirectory $stageDirectory
 

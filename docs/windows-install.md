@@ -1,5 +1,22 @@
 # Take A Look V2：Windows MSI 打包与安装
 
+## Portable ZIP
+
+在 Windows x64 项目根目录运行：
+
+```powershell
+.\tool\build_release_windows_portable.ps1
+.\tool\build_release_windows_portable.ps1 -Version 1.2.3+4
+```
+
+也可以双击 `tool/build_release_windows_portable.cmd`，或给 CMD 入口传递相同参数。
+脚本在 `build/windows_portable/` 中隔离构建应用和 Python 后端，将 x64 Visual C++
+运行库一起打入 ZIP，并验证压缩包内每个文件的 SHA-256 及后端自检。产物和校验文件位于
+`build/releases/`；工作区的 `pubspec.yaml` 不会被版本覆盖修改。
+
+用户将 ZIP 解压到可写目录后运行 `take_a_look_v2.exe`。应保留完整目录结构；采样记录保存在
+可执行文件旁的 `recordings/` 中，不包含在发布压缩包内。
+
 ## 一键构建
 
 在项目根目录执行：

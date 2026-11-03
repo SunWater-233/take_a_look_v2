@@ -78,6 +78,10 @@ jobs:
           cache-dependency-path: backend/pyproject.toml
       - name: Build script regression checks
         run: python -m unittest discover -s tool/tests -p 'test_*.py' -v
+      - name: Windows packaging regression checks
+        if: matrix.target == 'windows'
+        shell: pwsh
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File tool/tests/windows_build_test.ps1
       - name: Cache verified CMSIS packs
         if: matrix.target != 'linux'
         uses: actions/cache@v4
@@ -107,7 +111,13 @@ jobs:
         shell: bash
         run: |
           brew list libusb >/dev/null 2>&1 || brew install libusb
+          brew list openssl@3 >/dev/null 2>&1 || brew install openssl@3
           echo "DYLD_FALLBACK_LIBRARY_PATH=$(brew --prefix libusb)/lib:/usr/local/lib:/usr/lib" >> "$GITHUB_ENV"
+          echo "OPENSSL_DIR=$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
+          echo "OPENSSL_STATIC=1" >> "$GITHUB_ENV"
+          # Intel cryptography builds from source; cached dynamic wheels can
+          # collide with the Python framework's older libssl. Build it statically.
+          echo "PIP_NO_CACHE_DIR=true" >> "$GITHUB_ENV"
       - name: Build macOS app ZIP / DMG
         if: matrix.target == 'macos'
         shell: bash

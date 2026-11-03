@@ -200,7 +200,13 @@ _fixture({
   String architecture = 'x64',
   bool missingFile = false,
 }) async {
-  final root = Directory.systemTemp.createTempSync('tal updater 中文 ');
+  // Hosted Windows TEMP can use an 8.3 alias (RUNNER~1). Positive fixtures
+  // must use the canonical path expected by the installer's link guard.
+  final root = Directory(
+    Directory.systemTemp
+        .createTempSync('tal updater 中文 ')
+        .resolveSymbolicLinksSync(),
+  );
   addTearDown(() => root.delete(recursive: true));
   final install = Directory(p.join(root.path, '应用 程序'))..createSync();
   final work = Directory(p.join(root.path, '下载'))..createSync();

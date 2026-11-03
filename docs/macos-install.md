@@ -24,8 +24,11 @@ macOS 发行包目前支持手动下载安装，应用内自动安装更新尚�
 在配有 Xcode、Flutter、Python 3.11+ 和 Homebrew libusb 的 Mac 上本地构建：
 
 ```bash
-brew install libusb
+brew install libusb openssl@3 rust
 export DYLD_FALLBACK_LIBRARY_PATH="$(brew --prefix libusb)/lib:/usr/local/lib:/usr/lib"
+export OPENSSL_DIR="$(brew --prefix openssl@3)"
+export OPENSSL_STATIC=1
+export PIP_NO_CACHE_DIR=true
 python3 tool/build.py --target macos --mode release --version 1.2.3+4
 ```
 

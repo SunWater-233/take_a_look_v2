@@ -10,7 +10,7 @@ $tokens = $null
 $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $project 'tool\package_windows.ps1'), [ref]$tokens, [ref]$errors)
 if ($errors) { throw ($errors | Out-String) }
-foreach ($name in @('Reset-WorkDirectory', 'Save-WorkRecordings')) {
+foreach ($name in @('Reset-WorkDirectory', 'Save-WorkRecordings', 'Get-FileHashHex')) {
   $definition = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true)
   Invoke-Expression $definition.Extent.Text
 }
@@ -27,6 +27,9 @@ try {
   Reset-WorkDirectory $source
   Assert (Test-Path -LiteralPath (Join-Path $external 'plugin.txt')) 'Reset followed a plugin junction.'
   Assert (@(Get-ChildItem -LiteralPath $source).Count -eq 0) 'The source was not fully reset.'
+  $hashFixture = Join-Path $source 'hash.txt'
+  [IO.File]::WriteAllText($hashFixture, 'abc', [Text.Encoding]::ASCII)
+  Assert ((Get-FileHashHex $hashFixture) -eq 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad') 'SHA-256 must work without Get-FileHash.'
 
   $recordings = Join-Path $source 'build\runner\recordings\session'
   $fixture = Join-Path $source 'backend\pytest-of-user\session'

@@ -220,7 +220,12 @@ function Add-PayloadDirectory([string]$Path, $DirectoryElement, [string]$Directo
   }
 }
 function Get-FileHashHex([string]$Path) {
-  return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+  # Windows PowerShell launched from pwsh can inherit an incompatible module
+  # search path on hosted runners. Hash without relying on cmdlet auto-loading.
+  $sha = [Security.Cryptography.SHA256]::Create()
+  $stream = [IO.File]::OpenRead($Path)
+  try { return ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '').ToLowerInvariant() }
+  finally { $stream.Dispose(); $sha.Dispose() }
 }
 
 

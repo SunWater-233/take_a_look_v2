@@ -48,6 +48,9 @@ Windows/Linux 使用现有统一入口，macOS 由同一入口调用原生打包
 Linux 容器从源码标签安装固定 Flutter SDK，构建镜像可缓存；打包时审计实际 glibc 需求。
 CMSIS 芯片包复用经过 SHA-256 校验的缓存。虚拟环境和发行 staging 不跨平台缓存。
 
+Intel macOS 的 cryptography 在 CI 中从源码构建并静态链接 OpenSSL，避免与 Python 自带的同名动态库冲突。
+macOS 安装阶段不复用 pip wheel 缓存，防止重新使用此前生成的动态链接 wheel。
+
 macOS 包目前是 ad-hoc 签名测试发行，包含独立后端；正式 Developer ID 签名、公证及应用内自动安装更新尚未接入。
 硬件后端通过离线自检和 RPC 检查；真实 USB 探针连接、固件下载仍需在实体设备上验证。
 更多信息见 [macOS 安装说明](macos-install.md)。

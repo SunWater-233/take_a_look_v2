@@ -26,8 +26,9 @@ void main() {
       matching: find.text('control.c'),
     );
 
+    // The tree's double-click window uses wall time. Deliver the two input
+    // events before rendering a frame, which can exceed that window on CI.
     await tester.tap(file);
-    await tester.pump(const Duration(milliseconds: 50));
     await tester.tap(file);
     await _waitForSource(tester, fixture.control);
     expect(controller.sourceWorkspace.selectedPath, fixture.control);
@@ -42,7 +43,6 @@ void main() {
     controller.openSourceFile(fixture.main);
     await _waitForSource(tester, fixture.main);
     await tester.tap(file);
-    await tester.pump(const Duration(milliseconds: 50));
     await tester.tap(file);
     await _waitForSource(tester, fixture.control);
     expect(controller.sourceWorkspace.openPaths, [
@@ -615,7 +615,7 @@ Future<void> _fileMenu(WidgetTester tester) async {
 }
 
 Future<void> _waitForSource(WidgetTester tester, String path) async {
-  for (var attempt = 0; attempt < 15; attempt++) {
+  for (var attempt = 0; attempt < 100; attempt++) {
     await tester.pump();
     if (find.byKey(ValueKey('source-view-$path')).evaluate().isNotEmpty) break;
     await tester.runAsync(

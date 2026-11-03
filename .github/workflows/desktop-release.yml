@@ -1,0 +1,158 @@
+name: Desktop release
+run-name: Desktop release · ${{ inputs.target || 'all' }} · ${{ inputs.mode || 'release' }} · ${{ inputs.version || github.ref_name }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Platform to build (macOS includes Intel and Apple Silicon)
+        type: choice
+        options: [all, windows, linux, macos]
+        default: all
+      mode:
+        description: Build mode
+        type: choice
+        options: [release, debug]
+        default: release
+      version:
+        description: major.minor.patch[+build]; blank uses pubspec.yaml
+        type: string
+        default: ''
+      windows_package:
+        description: Windows package type
+        type: choice
+        options: [all, msi, portable]
+        default: all
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - '.github/workflows/desktop-release.yml'
+      - 'tool/**'
+      - 'macos/**'
+      - 'backend/pyinstaller_hooks/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release-${{ github.event_name }}-${{ github.ref }}-${{ inputs.target || 'all' }}-${{ inputs.mode || 'release' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  configure:
+    runs-on: ubuntu-22.04
+    outputs:
+      matrix: ${{ steps.config.outputs.matrix }}
+      version: ${{ steps.config.outputs.version }}
+      mode: ${{ steps.config.outputs.mode }}
+      windows_package: ${{ steps.config.outputs.windows_package }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - id: config
+        run: python tool/ci/release_config.py
+
+  package:
+    needs: configure
+    name: ${{ matrix.target }} ${{ matrix.arch }} / ${{ needs.configure.outputs.mode }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.configure.outputs.matrix) }}
+    env:
+      TAL_RELEASE_VERSION: ${{ needs.configure.outputs.version }}
+      TAL_BUILD_MODE: ${{ needs.configure.outputs.mode }}
+      TAL_WINDOWS_PACKAGE: ${{ needs.configure.outputs.windows_package }}
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          architecture: ${{ matrix.arch }}
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - name: Build script regression checks
+        run: python -m unittest discover -s tool/tests -p 'test_*.py' -v
+      - name: Cache verified CMSIS packs
+        if: matrix.target != 'linux'
+        uses: actions/cache@v4
+        with:
+          path: backend/bundled_packs
+          key: cmsis-packs-${{ hashFiles('tool/bundled_packs.json') }}
+      - name: Install Flutter
+        if: matrix.target != 'linux'
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ matrix.flutter }}
+          channel: stable
+          cache: true
+          architecture: ${{ matrix.arch }}
+      - name: Install WiX runtime
+        if: matrix.target == 'windows'
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build Windows MSI / portable
+        if: matrix.target == 'windows'
+        shell: pwsh
+        run: |
+          ./tool/build.ps1 -Target windows -Mode $env:TAL_BUILD_MODE -Version $env:TAL_RELEASE_VERSION -WindowsPackage $env:TAL_WINDOWS_PACKAGE
+      - name: Install macOS backend dependencies
+        if: matrix.target == 'macos'
+        shell: bash
+        run: |
+          brew list libusb >/dev/null 2>&1 || brew install libusb
+          echo "DYLD_FALLBACK_LIBRARY_PATH=$(brew --prefix libusb)/lib:/usr/local/lib:/usr/lib" >> "$GITHUB_ENV"
+      - name: Build macOS app ZIP / DMG
+        if: matrix.target == 'macos'
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p build/logs
+          python tool/build.py --target macos --mode "$TAL_BUILD_MODE" --version "$TAL_RELEASE_VERSION" 2>&1 | tee "build/logs/macos-${{ matrix.arch }}.log"
+      - name: Set up Linux container builder
+        if: matrix.target == 'linux'
+        uses: docker/setup-buildx-action@v3
+      - name: Prepare Debian 11 build image
+        if: matrix.target == 'linux'
+        uses: docker/build-push-action@v6
+        with:
+          context: tool/ci
+          file: tool/ci/linux.Dockerfile
+          load: true
+          tags: take-a-look-linux-build:local
+          build-args: FLUTTER_VERSION=${{ matrix.flutter }}
+          cache-from: type=gha,scope=linux-build-image
+          cache-to: type=gha,scope=linux-build-image,mode=max
+      - name: Build Linux archive in Debian 11
+        if: matrix.target == 'linux'
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p build/logs
+          docker run --rm --volume "$GITHUB_WORKSPACE:/workspace" --workdir /workspace \
+            --env TAL_MAX_GLIBC=2.31 --env TAL_RELEASE_VERSION --env TAL_BUILD_MODE \
+            take-a-look-linux-build:local \
+            bash -c 'git config --global --add safe.directory /workspace; python3 tool/build.py --target linux --native --mode "$TAL_BUILD_MODE" --version "$TAL_RELEASE_VERSION"' \
+            2>&1 | tee build/logs/linux-container.log
+      - name: Upload packages (version / platform folders)
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-${{ env.TAL_RELEASE_VERSION }}-${{ matrix.target }}-${{ matrix.arch }}-${{ env.TAL_BUILD_MODE }}
+          path: build/releases/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: logs-${{ env.TAL_RELEASE_VERSION }}-${{ matrix.target }}-${{ matrix.arch }}-${{ env.TAL_BUILD_MODE }}
+          path: build/logs/
+          if-no-files-found: ignore
+          retention-days: 7

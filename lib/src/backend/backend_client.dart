@@ -519,6 +519,10 @@ class BackendClient {
         '${File(Platform.resolvedExecutable).parent.path}${Platform.pathSeparator}backend',
       ),
       Directory(
+        '${File(Platform.resolvedExecutable).parent.parent.path}${Platform.pathSeparator}Resources'
+        '${Platform.pathSeparator}backend',
+      ),
+      Directory(
         '${File(Platform.resolvedExecutable).parent.path}${Platform.pathSeparator}data'
         '${Platform.pathSeparator}flutter_assets${Platform.pathSeparator}backend',
       ),

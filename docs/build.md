@@ -1,7 +1,9 @@
 # 桌面构建
 
-统一入口为 `tool/build.py`，无需额外 Python 包。Windows 提供 PowerShell/CMD 包装，Linux 提供 Bash 包装。
+统一入口为 `tool/build.py`，无需额外 Python 包。Windows 提供 PowerShell/CMD 包装，Linux/macOS 提供 Bash 包装。
 编译当前工作区的代码，包含未提交改动；版本覆盖只写入隔离源码，不修改工作区的 `pubspec.yaml`。
+
+云端三平台构建见 [GitHub Actions 接入与使用](github-actions.md)，macOS 本地构建见 [macOS 安装说明](macos-install.md)。
 
 ## 常用命令
 
@@ -49,14 +51,14 @@ sudo -E bash tool/build.sh --target linux --mode release
 python3 tool/build.py --clean-only --dry-run
 ```
 
-`all` 表示 Windows MSI、Windows portable ZIP 和 Linux tar.gz。在 Windows 主机上通过 WSL 完成 Linux 构建。
-Linux 主机只支持原生 Linux 构建，选择 `windows` / `all` 会在编译前报错。
+本地 Windows 的 `all` 表示 Windows MSI、portable ZIP 和 WSL Linux tar.gz；macOS 的 `all` 构建本机 macOS 包。
+Linux 主机使用 `--target linux`。GitHub Actions 的 `target: all` 会分发到全部系统的原生 runner，包含 macOS 两种架构。
 
 ## 参数
 
 | PowerShell | Python / Bash | 用途 |
 | --- | --- | --- |
-| `-Target windows/linux/all` | `--target windows/linux/all` | 默认当前主机系统 |
+| `-Target windows/linux/macos/all` | `--target windows/linux/macos/all` | 需要相应的原生主机；默认当前系统 |
 | `-Mode release/debug` | `--mode release/debug` | 默认 release |
 | `-Version 1.2.3+4` | `--version 1.2.3+4` | 默认读取 pubspec.yaml；构建号可省略 |
 | `-WindowsPackage all/msi/portable` | `--windows-package all/msi/portable` | 默认 all，仅控制 Windows 包 |
@@ -80,6 +82,7 @@ Linux 主机只支持原生 Linux 构建，选择 `windows` / `all` 会在编译
 ```text
 build/releases/<版本>/windows/               # Windows MSI、ZIP 和 SHA-256
 build/releases/<版本>/linux/                 # Linux tar.gz、SHA-256、构建清单和安装说明
+build/releases/<版本>/macos/                 # macOS app ZIP、DMG、SHA-256 和构建清单
 build/logs/                                  # 编译与验证日志
 build/tools/wix-5.0.2/                        # 可复用的工具缓存
 build/work/windows/release/source/           # 隔离的 Windows Release 源码、构建结果

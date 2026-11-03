@@ -20,8 +20,8 @@ KEEP_BUILD_ENTRIES = {"releases", "logs", "tools", ".desktop-build.lock", "linux
 
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
-    result.add_argument("--target", choices=("windows", "linux", "all"),
-                        default="windows" if os.name == "nt" else "linux")
+    result.add_argument("--target", choices=("windows", "linux", "macos", "all"),
+                        default="windows" if os.name == "nt" else "macos" if sys.platform == "darwin" else "linux")
     result.add_argument("--mode", choices=("release", "debug"), default="release")
     result.add_argument("--version", help="major.minor.patch[+build]; defaults to pubspec.yaml")
     result.add_argument("--windows-package", choices=("all", "msi", "portable"), default="all")
@@ -32,7 +32,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--skip-build", action="store_true", help="repackage the last Windows build of this mode/version")
     result.add_argument("--distribution", default=os.environ.get("TAL_WSL_DISTRO"), help="WSL distribution")
     result.add_argument("--native", action="store_true", help="use the Linux host instead of the prepared Debian chroot")
-    result.add_argument("--keep-build", action="store_true", help="retain the Linux temporary build after success")
+    result.add_argument("--keep-build", action="store_true", help="retain the Linux/macOS temporary build after success")
     result.add_argument("--python", default="python", help="Windows backend setup interpreter")
     result.add_argument("--flutter", default="flutter", help="Windows Flutter executable")
     result.add_argument("--vc-runtime-directory", default="", help="Windows x64 Release CRT directory")
@@ -151,11 +151,18 @@ def build_lock(project: Path):
                 fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
 
-def build_commands(options, project: Path, host: str) -> list[list[str]]:
-    targets = ("windows", "linux") if options.target == "all" else (options.target,)
+def build_commands(options, project: Path, host: str, platform_name: str | None = None) -> list[list[str]]:
+    platform_name = platform_name or sys.platform
+    # The cloud workflow distributes all platforms across native runners. Locally
+    # retain Windows+WSL all; macOS can build only its own native package.
+    targets = (("macos",) if platform_name == "darwin" else ("windows", "linux")) if options.target == "all" else (options.target,)
     if "windows" in targets and host != "nt":
         raise ValueError("Windows packages require a Windows host. Use --target linux here; --target all runs on Windows with WSL.")
-    if options.skip_build and ("linux" in targets or options.clean):
+    if "macos" in targets and platform_name != "darwin":
+        raise ValueError("macOS packages require a macOS host. Use the GitHub Actions macOS runner from Windows/Linux.")
+    if "linux" in targets and platform_name == "darwin":
+        raise ValueError("Linux packages require Linux/WSL. Use the GitHub Actions Linux runner from macOS.")
+    if options.skip_build and (targets != ("windows",) or options.clean):
         raise ValueError("--skip-build requires --target windows and cannot be combined with --clean")
     if options.windows_package in ("msi", "all") and "windows" in targets:
         parts = [int(part) for part in options.version.split("+")[0].split(".")]
@@ -178,6 +185,13 @@ def build_commands(options, project: Path, host: str) -> list[list[str]]:
                 command += ["-SkipBuild"]
             if options.check:
                 command += ["-Check"]
+        elif target == "macos":
+            command = [sys.executable, str(project / "tool/package_macos.py"),
+                       "--mode", options.mode, "--version", options.version, "--flutter", options.flutter]
+            if options.check:
+                command += ["--check"]
+            if options.keep_build:
+                command += ["--keep-build"]
         elif host == "nt":
             command = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
                        str(project / "tool/build_release_wsl.ps1"), "-Mode", options.mode,

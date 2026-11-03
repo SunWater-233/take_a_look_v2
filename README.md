@@ -101,6 +101,9 @@ flutter test
 
 ## 打包
 
+GitHub 云端三平台打包见 [Actions 发行构建](docs/github-actions.md)：支持选择系统、Release/Debug 和版本号，
+Windows、Linux、macOS Intel / Apple Silicon 分别在原生 runner 构建，产物按“版本 → 系统”分类。
+
 ```powershell
 .\tool\build.ps1 -Target windows   # MSI + 便携 ZIP
 .\tool\build.ps1 -Target linux     # 通过 WSL 构建

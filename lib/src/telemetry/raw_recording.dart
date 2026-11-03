@@ -19,6 +19,18 @@ class RawSampleRecording {
     if (configured != null && configured.isNotEmpty) {
       return Directory(configured);
     }
+    // Keep signed/installed .app bundles immutable. The backend receives this
+    // same directory through TAL_RECORDINGS_DIR when the client launches it.
+    if (Platform.isMacOS &&
+        Platform.resolvedExecutable.contains('/Contents/MacOS/')) {
+      final home = Platform.environment['HOME'];
+      if (home == null || !home.startsWith('/')) {
+        throw StateError('Cannot find the macOS user home directory.');
+      }
+      return Directory(
+        '$home/Library/Application Support/Take A Look V2/recordings',
+      );
+    }
     return Directory(
       '${File(Platform.resolvedExecutable).parent.path}/recordings',
     );

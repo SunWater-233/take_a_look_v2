@@ -22,7 +22,7 @@ class BuildRoutingTest(unittest.TestCase):
     def test_all_builds_windows_once_and_forwards_linux_arguments(self):
         options = self.options("--target", "all", "--mode", "debug", "--distribution", "Ubuntu 中文",
                                "--native", "--keep-build")
-        windows, linux = build.build_commands(options, Path("project with spaces"), "nt")
+        windows, linux = build.build_commands(options, Path("project with spaces"), "nt", "win32")
         self.assertEqual(windows[windows.index("-Package") + 1], "all")
         for command in (windows, linux):
             self.assertEqual(command[command.index("-Mode") + 1], "debug")
@@ -32,7 +32,7 @@ class BuildRoutingTest(unittest.TestCase):
         self.assertIn("-KeepBuild", linux)
 
     def test_native_linux_routes_without_windows_powershell(self):
-        (command,) = build.build_commands(self.options("--target", "linux", "--native", "--check"), Path("repo"), "posix")
+        (command,) = build.build_commands(self.options("--target", "linux", "--native", "--check"), Path("repo"), "posix", "linux")
         self.assertEqual(command[0], "bash")
         self.assertIn("--native", command)
         self.assertIn("--check", command)
@@ -43,7 +43,20 @@ class BuildRoutingTest(unittest.TestCase):
                                 (("--target", "linux", "--skip-build"), "nt"),
                                 (("--target", "windows", "--skip-build", "--clean"), "nt")]:
             with self.subTest(arguments=arguments), self.assertRaises(ValueError):
-                build.build_commands(self.options(*arguments), Path("repo"), host)
+                build.build_commands(self.options(*arguments), Path("repo"), host, "linux" if host == "posix" else "win32")
+
+    def test_macos_uses_native_python_worker_and_forwards_options(self):
+        (command,) = build.build_commands(self.options("--target", "macos", "--mode", "debug", "--check", "--keep-build"), Path("repo"), "posix", "darwin")
+        self.assertEqual(command[0], sys.executable)
+        self.assertTrue(command[1].endswith("package_macos.py"))
+        self.assertEqual(command[command.index("--mode") + 1], "debug")
+        self.assertIn("--check", command)
+        self.assertIn("--keep-build", command)
+
+    def test_macos_target_is_rejected_on_windows_and_linux(self):
+        for host, platform_name in (("nt", "win32"), ("posix", "linux")):
+            with self.assertRaises(ValueError):
+                build.build_commands(self.options("--target", "macos"), Path("repo"), host, platform_name)
 
     def test_msi_and_exe_version_limits(self):
         for arguments in [("--target", "windows", "--version", "256.0.0"),

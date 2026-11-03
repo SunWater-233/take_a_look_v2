@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-Build Windows/Linux desktop packages through the shared Python entry point.
+Build desktop packages through the shared Python entry point (native OS required).
 .EXAMPLE
 .\tool\build.ps1 -Target all -Mode release -Version 1.2.3+4
 .EXAMPLE
@@ -10,7 +10,7 @@ Build Windows/Linux desktop packages through the shared Python entry point.
 #>
 [CmdletBinding()]
 param(
-  [ValidateSet('windows', 'linux', 'all')][string]$Target = 'windows',
+  [ValidateSet('windows', 'linux', 'macos', 'all')][string]$Target = 'windows',
   [ValidateSet('release', 'debug')][string]$Mode = 'release',
   [string]$Version = '',
   [ValidateSet('all', 'msi', 'portable')][string]$WindowsPackage = 'all',

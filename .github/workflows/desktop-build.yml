@@ -51,4 +51,7 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
+      - name: Verify native macOS automatic update lifecycle
+        if: matrix.target == 'macos'
+        run: dart run tool/tests/update_macos_lifecycle_test.dart
       - run: flutter build ${{ matrix.target }} --debug

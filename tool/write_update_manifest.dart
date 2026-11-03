@@ -10,7 +10,10 @@ Future<void> main(List<String> args) async {
     throw ArgumentError('Usage: write_update_manifest ROOT KIND VERSION ARCH');
   }
   final root = Directory(args[0]);
-  final files = <String>{updateManifestName};
+  final manifestPath = args[1] == 'macos-app'
+      ? 'Contents/Resources/$updateManifestName'
+      : updateManifestName;
+  final files = <String>{manifestPath};
   await for (final entity in root.list(recursive: true, followLinks: false)) {
     if (entity is! Directory) {
       files.add(p.relative(entity.path, from: root.path).replaceAll('\\', '/'));
@@ -26,7 +29,9 @@ Future<void> main(List<String> args) async {
       !files.contains(manifest.helper)) {
     throw StateError('Package is missing its application or updater.');
   }
-  await File(p.join(root.path, updateManifestName)).writeAsString(
+  final file = File(p.join(root.path, manifest.manifestPath));
+  await file.parent.create(recursive: true);
+  await file.writeAsString(
     const JsonEncoder.withIndent('  ').convert(manifest.toJson()),
   );
 }

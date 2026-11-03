@@ -6,6 +6,7 @@ import 'package:pub_semver/pub_semver.dart';
 
 const updateManifestName = 'UPDATE-MANIFEST.json';
 const updateHelperName = 'take_a_look_updater';
+const macosBundleIdentifier = 'com.example.takeALookV2';
 const updateRepository = String.fromEnvironment(
   'TAL_UPDATE_REPOSITORY',
   defaultValue: 'SunWater-233/take_a_look_v2',
@@ -33,7 +34,12 @@ class UpdatePackageManifest {
     required this.architecture,
     required this.files,
   }) {
-    if (!['windows-msi', 'windows-portable', 'linux-archive'].contains(kind) ||
+    if (![
+          'windows-msi',
+          'windows-portable',
+          'linux-archive',
+          'macos-app',
+        ].contains(kind) ||
         !['x64', 'arm64'].contains(architecture) ||
         files.isEmpty ||
         files.any((file) => !safePackagePath(file))) {
@@ -46,10 +52,17 @@ class UpdatePackageManifest {
   final String version;
   final String architecture;
   final Set<String> files;
-  String get executable =>
-      kind.startsWith('windows-') ? 'take_a_look_v2.exe' : 'take-a-look';
-  String get helper =>
-      '$updateHelperName${kind.startsWith('windows-') ? '.exe' : ''}';
+  String get executable => switch (kind) {
+    'macos-app' => 'Contents/MacOS/take_a_look_v2',
+    'linux-archive' => 'take-a-look',
+    _ => 'take_a_look_v2.exe',
+  };
+  String get helper => kind == 'macos-app'
+      ? 'Contents/Helpers/$updateHelperName'
+      : '$updateHelperName${kind.startsWith('windows-') ? '.exe' : ''}';
+  String get manifestPath => kind == 'macos-app'
+      ? 'Contents/Resources/$updateManifestName'
+      : updateManifestName;
 
   factory UpdatePackageManifest.fromJson(Map<String, dynamic> json) {
     if (json['schema'] != 1) throw const FormatException('不支持的更新包清单。');
@@ -69,13 +82,33 @@ class UpdatePackageManifest {
     'files': files.toList()..sort(),
   };
 
-  static Future<UpdatePackageManifest> read(Directory root) async =>
-      UpdatePackageManifest.fromJson(
-        jsonDecode(
-              await File(p.join(root.path, updateManifestName)).readAsString(),
-            )
-            as Map<String, dynamic>,
-      );
+  static Future<UpdatePackageManifest> read(Directory root) async {
+    final bundleManifest = File(
+      p.join(root.path, 'Contents', 'Resources', updateManifestName),
+    );
+    final file = await bundleManifest.exists()
+        ? bundleManifest
+        : File(p.join(root.path, updateManifestName));
+    return UpdatePackageManifest.fromJson(
+      jsonDecode(await file.readAsString()) as Map<String, dynamic>,
+    );
+  }
+}
+
+/// macOS runs an executable inside Contents/MacOS; upgrades replace the .app.
+String updateInstallationPath(String executable, {required bool macos}) {
+  if (macos) {
+    final paths = p.posix;
+    final directory = paths.dirname(executable);
+    final contents = paths.dirname(directory);
+    final bundle = paths.dirname(contents);
+    if (paths.basename(directory) == 'MacOS' &&
+        paths.basename(contents) == 'Contents' &&
+        bundle.endsWith('.app')) {
+      return bundle;
+    }
+  }
+  return p.dirname(executable);
 }
 
 class ReleaseAsset {
@@ -150,6 +183,10 @@ class GitHubRelease {
       ),
       'windows-portable' => RegExp(
         '^Take-A-Look-V2-${RegExp.escape(version)}(?:\\+[0-9]+)?-windows-$architecture-portable\\.zip\$',
+        caseSensitive: false,
+      ),
+      'macos-app' => RegExp(
+        '^Take-A-Look-V2-${RegExp.escape(version)}(?:\\+[0-9]+)?-macos-$architecture\\.zip\$',
         caseSensitive: false,
       ),
       _ => RegExp(

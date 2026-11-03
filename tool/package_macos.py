@@ -140,6 +140,15 @@ def main() -> None:
                 "source_revision": run("git", "-C", PROJECT, "rev-parse", "HEAD", capture=True).strip(),
                 "python": platform.python_version(), "signing": "ad-hoc", "notarized": False}
         (resources / "BUILD-INFO.json").write_text(json.dumps(info, indent=2) + "\n", encoding="utf-8")
+        # Copy this standalone helper out of the bundle before updating it.
+        dart = Path(flutter).resolve().with_name("dart")
+        helper = app / "Contents/Helpers/take_a_look_updater"
+        helper.parent.mkdir(parents=True, exist_ok=True)
+        run(dart, "compile", "exe", "tool/update_helper.dart", "-o", helper, cwd=source)
+        run("codesign", "--force", "--sign", "-", "--timestamp=none", helper)
+        run(helper, "--self-test")
+        # This manifest is a signed resource: write it before the outer signature.
+        run(dart, "run", "tool/write_update_manifest.dart", app, "macos-app", version, architecture, cwd=source)
         run("xattr", "-cr", app)
         from verify_macos_package import macho_files, verify_app
         for binary in macho_files(backend):

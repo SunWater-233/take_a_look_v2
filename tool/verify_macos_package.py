@@ -24,12 +24,21 @@ def command(*arguments, **kwargs):
     return subprocess.check_output(list(map(str, arguments)), text=True, timeout=60, **kwargs)
 
 
+def verify_update_metadata(app: Path, architecture: str, version: str) -> None:
+    updates = json.loads((app / 'Contents/Resources/UPDATE-MANIFEST.json').read_text())
+    assert (updates['schema'], updates['kind'], updates['version'], updates['architecture']) == (1, 'macos-app', version, architecture)
+    for relative in ('Contents/MacOS/take_a_look_v2', 'Contents/Helpers/take_a_look_updater',
+                     'Contents/Resources/UPDATE-MANIFEST.json'):
+        assert relative in updates['files'] and (app / relative).is_file(), relative
+
+
 def verify_app(app: Path, architecture: str, version: str, mode: str) -> None:
     with (app / 'Contents/Info.plist').open('rb') as stream:
         info = plistlib.load(stream)
     core, _, number = version.partition('+')
     assert info['CFBundleShortVersionString'] == core, info
     assert str(info['CFBundleVersion']) == (number or '0'), info
+    assert info['CFBundleIdentifier'] == 'com.example.takeALookV2', info
     executable = app / 'Contents/MacOS' / info['CFBundleExecutable']
     expected_arch = 'arm64' if architecture == 'arm64' else 'x86_64'
     assert command('lipo', '-archs', executable).strip().split() == [expected_arch]
@@ -38,6 +47,10 @@ def verify_app(app: Path, architecture: str, version: str, mode: str) -> None:
     assert command('lipo', '-archs', backend).strip().split() == [expected_arch]
     manifest = json.loads((app / 'Contents/Resources/BUILD-INFO.json').read_text())
     assert (manifest['version'], manifest['build_mode'], manifest['architecture']) == (version, mode, architecture)
+    verify_update_metadata(app, architecture, version)
+    helper = app / 'Contents/Helpers/take_a_look_updater'
+    assert command('lipo', '-archs', helper).strip().split() == [expected_arch]
+    assert 'updater schema 1' in command(helper, '--self-test')
     for binary in macho_files(app):
         dependencies = command('otool', '-L', binary).splitlines()[1:]
         for dependency in dependencies:

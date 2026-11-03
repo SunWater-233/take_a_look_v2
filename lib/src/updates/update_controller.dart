@@ -28,7 +28,14 @@ class AppUpdateController extends ChangeNotifier {
                'updates.json',
              ),
            ),
-       installation = installation ?? File(Platform.resolvedExecutable).parent,
+       installation =
+           installation ??
+           Directory(
+             updateInstallationPath(
+               Platform.resolvedExecutable,
+               macos: Platform.isMacOS,
+             ),
+           ),
        _readVersion = readVersion ?? _platformVersion,
        _now = now ?? DateTime.now;
 
@@ -274,8 +281,15 @@ class AppUpdateController extends ChangeNotifier {
       final helper = File(p.join(installation.path, package!.helper));
       if (!await helper.exists()) throw StateError('安装包缺少独立更新程序，请重新安装完整发布包。');
       final executable = await helper.copy(
-        p.join(attempt.path, package!.helper),
+        p.join(attempt.path, p.basename(package!.helper)),
       );
+      if (Platform.isMacOS) {
+        final permissions = await Process.run('/bin/chmod', [
+          'u+x',
+          executable.path,
+        ]);
+        if (permissions.exitCode != 0) throw StateError('无法设置 Mac 更新程序的执行权限。');
+      }
       final job = File(p.join(attempt.path, 'job.json'));
       await job.writeAsString(
         jsonEncode({

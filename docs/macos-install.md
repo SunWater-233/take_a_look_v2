@@ -19,7 +19,12 @@ GDB 和 SEGGER J-Link 软件仍需按使用场景单独安装。
 ```
 
 替换或删除 `.app` 不影响该目录。`TAL_RECORDINGS_DIR` 可覆盖保存位置。
-macOS 发行包目前支持手动下载安装，应用内自动安装更新尚未适配 macOS。
+点击左上角 **Take A Look** 可打开“关于与更新”，启用或关闭自动检测，下载 GitHub
+Release 中与当前安装架构对应的正式 ZIP，并在保存工作区、关闭硬件后端后安装重启。
+首次需安装包含独立更新程序的新包，之后即可应用内更新；DMG 仍用于首次安装。
+更新过程校验包摘要、应用标识、版本、架构及代码签名，整包替换 `.app` 并保留旧包备份，
+不影响 Application Support 中的采样记录。目标 Applications 目录不可写时会出现系统
+管理员授权；从只读 DMG 运行时请先拖到 Applications。细节见 [应用内更新](app-updates.md)。
 
 在配有 Xcode、Flutter、Python 3.11+ 和 Homebrew libusb 的 Mac 上本地构建：
 
@@ -34,4 +39,6 @@ python3 tool/build.py --target macos --mode release --version 1.2.3+4
 
 构建脚本在临时源码中编译，版本覆盖只影响该副本；CPU 架构跟随当前 Mac。
 脚本验证原始 app、ZIP 解压后的 app 和只读 DMG 内的 app，包括签名、版本、架构、动态库依赖及离线后端 RPC。
+包内包含 `Contents/Helpers/take_a_look_updater` 与签名资源 `Contents/Resources/UPDATE-MANIFEST.json`，
+构建时会验证更新程序的架构和自检。Mac CI 还会运行真实 `.app` 的自动更新生命周期测试。
 成功后自动删除临时文件，失败时保留路径用于诊断；`--keep-build` 可保留成功构建目录。

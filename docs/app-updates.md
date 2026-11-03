@@ -30,17 +30,22 @@
 | Windows x64 便携包 | `Take-A-Look-V2-1.2.3+4-windows-x64-portable.zip` |
 | Linux x64 | `take-a-look-v2-1.2.3+4-git.abcdef0-linux-x86_64.tar.gz` |
 | Linux ARM64 | `take-a-look-v2-1.2.3+4-git.abcdef0-linux-aarch64.tar.gz` |
+| macOS Apple Silicon | `Take-A-Look-V2-1.2.3+4-macos-arm64.zip` |
+| macOS Intel | `Take-A-Look-V2-1.2.3+4-macos-x64.zip` |
 
 Linux 文件名中的构建号和 `-git.<提交>` 后缀均可省略。
 MSI 安装版始终选择 MSI，便携版始终选择 ZIP。
 
 ## 安装与恢复
 
-Windows/Linux 打包脚本现在会编译独立的 `take_a_look_updater[.exe]`，并生成
+Windows/Linux/macOS 打包脚本会编译独立的 `take_a_look_updater[.exe]`，并生成
 `UPDATE-MANIFEST.json`，记录版本、架构、安装类型及受包管理的文件。
 请重新完整构建首个支持更新的发布包。旧版包、普通 Flutter 开发构建、缺失清单或
 更新程序的目录提供检测和发布页入口；自动安装需要完整的新版打包产物。
-macOS 目前提供检测和发布页入口，尚无对应的自动安装打包流程。
+macOS 更新程序位于 `.app/Contents/Helpers/`，清单位于 `Contents/Resources/`，
+在应用签名前生成并随签名一起校验。Mac 自动更新选择与当前安装架构对应的正式 ZIP，
+DMG 用于首次安装；`-debug.zip` 不会被选为正式更新。现有旧 Mac 包需要先手动安装一次
+包含更新程序的新包，之后即可在应用内更新。
 
 更新包流式下载到系统临时目录，支持取消和重试；通过大小及 SHA-256 校验后才出现
 “重启并更新”。独立程序再次验证校验值，检查清单、包类型和版本。MSI 还会只读检查
@@ -60,8 +65,15 @@ Linux 在切换前执行新版包的 `--doctor`，验证平台和运行库。
   用户文件与新版程序路径冲突时中止更新。目录切换失败会恢复原目录。
 - **Linux 系统安装**：目录不可写时通过 `pkexec` 请求管理员授权；缺少 polkit
   时提示手动安装。权限不足或授权取消后保留旧安装。
+- **macOS**：使用系统 `ditto` 解压和复制完整 `.app`，保留 framework 符号链接、权限及
+  签名，不将旧应用中的散装文件混入新版。检查 Bundle ID、版本、原生 CPU 架构及
+  `codesign --verify --deep --strict`；正式签名的旧版还要求相同 Apple 签名发布者并通过
+  Gatekeeper 校验，拒绝降级为 ad-hoc 签名。当前测试发行的 ad-hoc 包可相互升级。
+  替换前保留整个旧 `.app`，替换失败恢复原目录；成功后通过 Launch Services 重新启动，
+  传回工作区快照参数。需要写入受保护的 Applications 目录时由系统请求管理员授权；
+  从只读 DMG 或 App Translocation 目录运行时须先把应用移到 Applications。
 
-便携包和 Linux 成功升级后保留完整的 `.take-a-look-backup-*` 相邻目录，
+便携包、Linux 和 macOS 成功升级后保留完整的 `.take-a-look-backup-*` 相邻目录，
 备份路径可在更新窗口查看。确认新版正常后可手动清理备份和临时下载目录。
 重新启动会恢复更新前的工作区，设备保持断开，不会自动开始采集或写入变量。
 结果保存在用户配置目录 `TakeALook/update-result.json`，安装失败会显示通知；
@@ -73,6 +85,8 @@ Linux 在切换前执行新版包的 `--doctor`，验证平台和运行库。
 flutter analyze
 flutter test
 dart run tool/tests/update_helper_lifecycle_test.dart
+# 在 Mac 上验证真实签名、ZIP、符号链接、整包替换及 Launch Services 重启：
+dart run tool/tests/update_macos_lifecycle_test.dart
 # 只读校验现有 MSI，不执行安装：
 dart run tool/tests/update_msi_preflight_test.dart build/releases/Take-A-Look-V2-1.2.3-windows-x64.msi 1.2.3
 ```

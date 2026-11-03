@@ -125,6 +125,12 @@ jobs:
           set -o pipefail
           mkdir -p build/logs
           python tool/build.py --target macos --mode "$TAL_BUILD_MODE" --version "$TAL_RELEASE_VERSION" 2>&1 | tee "build/logs/macos-${{ matrix.arch }}.log"
+      - name: Verify native macOS automatic update lifecycle
+        if: matrix.target == 'macos'
+        shell: bash
+        run: |
+          flutter pub get
+          dart run tool/tests/update_macos_lifecycle_test.dart
       - name: Set up Linux container builder
         if: matrix.target == 'linux'
         uses: docker/setup-buildx-action@v3

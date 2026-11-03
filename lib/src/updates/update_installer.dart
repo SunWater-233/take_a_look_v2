@@ -9,6 +9,7 @@ import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
 import 'update_models.dart';
+import 'macos_update.dart';
 
 class UpdateInstaller {
   UpdateInstaller(this.job, {this.moveDirectory});
@@ -38,7 +39,8 @@ class UpdateInstaller {
     }
     installed = await UpdatePackageManifest.read(installation);
     if ((installed.kind.startsWith('windows-') && !Platform.isWindows) ||
-        (installed.kind == 'linux-archive' && !Platform.isLinux)) {
+        (installed.kind == 'linux-archive' && !Platform.isLinux) ||
+        (installed.kind == 'macos-app' && !Platform.isMacOS)) {
       throw const FormatException('安装包平台与当前系统不匹配。');
     }
     if (!await File(p.join(root, installed.executable)).exists() ||
@@ -71,6 +73,13 @@ class UpdateInstaller {
           throw FormatException('更新包缺少文件：$path');
         }
       }
+      if (installed.kind == 'macos-app') {
+        await MacosBundleUpdater().validate(
+          installation,
+          payload!,
+          replacement,
+        );
+      }
       if (Platform.isLinux) {
         final check = await Process.run(p.join(payload!.path, 'take-a-look'), [
           '--doctor',
@@ -84,7 +93,14 @@ class UpdateInstaller {
           '.take-a-look-probe-',
         );
         await probe.delete();
-      } on FileSystemException {
+      } on FileSystemException catch (error) {
+        if (Platform.isMacOS) {
+          if (error.osError?.errorCode == 30) {
+            throw StateError('应用位于只读磁盘或临时转移目录，请先将 .app 移到 Applications，再进行更新。');
+          }
+          needsElevation = true;
+          return;
+        }
         if (!Platform.isLinux) rethrow;
         needsElevation = true;
         final polkit = await Process.run('sh', ['-c', 'command -v pkexec']);
@@ -96,6 +112,9 @@ class UpdateInstaller {
   }
 
   Future<Directory> _extract() async {
+    if (installed.kind == 'macos-app') {
+      return MacosBundleUpdater().extract(archive, work);
+    }
     final extracted = await work.createTemp('payload-');
     File inputFile = archive;
     if (installed.kind == 'linux-archive') {
@@ -207,6 +226,16 @@ class UpdateInstaller {
         throw StateError('安装后的版本与下载版本不符。安装日志：$log');
       }
       return {'status': 'success', 'restartRequired': result.exitCode == 3010};
+    }
+    if (installed.kind == 'macos-app') {
+      final replacement = await UpdatePackageManifest.read(payload!);
+      return MacosBundleUpdater().install(
+        installation,
+        payload!,
+        replacement,
+        moveDirectory: moveDirectory,
+        cancelled: () => File(p.join(work.path, 'abort')).exists(),
+      );
     }
     return applyArchive();
   }
@@ -387,6 +416,17 @@ Future<void> writeUpdateResult(
 
 Future<bool> updateParentIsAlive(int parentPid) async {
   if (Platform.isLinux) return Directory('/proc/$parentPid').exists();
+  if (Platform.isMacOS) {
+    final result = await Process.run('/bin/ps', [
+      '-p',
+      '$parentPid',
+      '-o',
+      'pid=',
+    ]);
+    if (result.exitCode == 1) return false;
+    if (result.exitCode != 0) throw StateError('无法确认 Mac 主程序已退出。');
+    return int.tryParse(result.stdout.toString().trim()) == parentPid;
+  }
   final result = await Process.run('tasklist.exe', [
     '/FI',
     'PID eq $parentPid',
@@ -428,11 +468,16 @@ Future<void> runUpdateHelper(File jobFile, {bool elevated = false}) async {
       parentExited = true;
     }
     if (installer.needsElevation && !elevated) {
-      final process = await Process.run('pkexec', [
-        Platform.resolvedExecutable,
-        '--apply',
-        jobFile.path,
-      ]);
+      final process = Platform.isMacOS
+          ? await MacosBundleUpdater().authorize(
+              Platform.resolvedExecutable,
+              jobFile.path,
+            )
+          : await Process.run('pkexec', [
+              Platform.resolvedExecutable,
+              '--apply',
+              jobFile.path,
+            ]);
       if (process.exitCode != 0) {
         throw StateError('管理员授权或更新安装未完成：${process.stderr}');
       }
@@ -440,6 +485,13 @@ Future<void> runUpdateHelper(File jobFile, {bool elevated = false}) async {
       await writeUpdateResult(job, await installer.apply());
     }
   } catch (error, stack) {
+    if (!elevated) {
+      // A late administrator response must not install after restarting the
+      // old app. The privileged worker checks this before swapping bundles.
+      await File(
+        p.join(installer.work.path, 'abort'),
+      ).writeAsString('abort', flush: true);
+    }
     await writeUpdateResult(job, {
       'status': 'failed',
       'message': error.toString(),
@@ -454,12 +506,19 @@ Future<void> runUpdateHelper(File jobFile, {bool elevated = false}) async {
   if (committed && parentExited && !elevated) {
     try {
       final manifest = await UpdatePackageManifest.read(installer.installation);
-      await Process.start(
-        p.join(installer.installation.path, manifest.executable),
-        (job['restartArguments'] as List? ?? []).cast<String>(),
-        workingDirectory: installer.installation.path,
-        mode: ProcessStartMode.detached,
-      );
+      if (Platform.isMacOS) {
+        await MacosBundleUpdater().relaunch(
+          installer.installation,
+          (job['restartArguments'] as List? ?? []).cast<String>(),
+        );
+      } else {
+        await Process.start(
+          p.join(installer.installation.path, manifest.executable),
+          (job['restartArguments'] as List? ?? []).cast<String>(),
+          workingDirectory: installer.installation.path,
+          mode: ProcessStartMode.detached,
+        );
+      }
     } catch (error) {
       await writeUpdateResult(job, {
         'status': 'failed',

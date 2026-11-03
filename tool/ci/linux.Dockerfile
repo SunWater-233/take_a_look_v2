@@ -8,7 +8,10 @@ ENV DEBIAN_FRONTEND=noninteractive \
     FLUTTER=/opt/flutter/bin/flutter \
     PYTHON=/opt/python/bin/python3 \
     TAL_MAX_GLIBC=2.31
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN printf 'deb http://archive.debian.org/debian bullseye main\ndeb http://archive.debian.org/debian-security bullseye-security main\n' > /etc/apt/sources.list \
+    && rm -f /etc/apt/sources.list.d/* \
+    && apt-get -o Acquire::Check-Valid-Until=false update \
+    && apt-get install -y --no-install-recommends \
     ca-certificates curl git unzip xz-utils zip rsync clang cmake ninja-build \
     pkg-config libgtk-3-dev liblzma-dev libusb-1.0-0-dev libgl1-mesa-dev \
     libglu1-mesa libegl1-mesa libasound2 binutils gzip tar \

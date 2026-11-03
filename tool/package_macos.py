@@ -131,7 +131,7 @@ def main() -> None:
         app = apps[0]
         resources = app / "Contents/Resources"
         backend = resources / "backend"
-        shutil.copytree(source / "backend/runtime", backend / "runtime")
+        shutil.copytree(source / "backend/runtime", backend / "runtime", symlinks=True)
         shutil.copy2(source / "backend/pyproject.toml", backend / "pyproject.toml")
         # Include notices and dependency records in the delivered bundle.
         (resources / "PYTHON-PACKAGES.txt").write_text(run(python, "-m", "pip", "freeze", capture=True), encoding="utf-8")

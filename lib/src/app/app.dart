@@ -3,7 +3,7 @@ import 'dart:io';
 
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, kReleaseMode;
 import 'package:tal_drag_preview/tal_drag_preview.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -13,6 +13,8 @@ import 'workbench_feedback.dart';
 import '../backend/backend_client.dart';
 import '../controller/controller.dart';
 import '../telemetry/recording_storage.dart';
+import '../updates/update_controller.dart';
+import '../updates/update_dialog.dart';
 import '../workspace/keyboard_shortcuts.dart';
 import '../workspace/native_panel_drag.dart';
 import '../workspace/panel_types.dart';
@@ -33,6 +35,7 @@ class TakeALookApp extends StatefulWidget {
     this.workbenchToolbar,
     this.layoutFile,
     this.inputModeOverride,
+    this.updateSession,
     super.key,
   }) : assert(controller == null || (!enableBackend && detachedPanel == null));
 
@@ -46,6 +49,7 @@ class TakeALookApp extends StatefulWidget {
   final Widget? workbenchToolbar;
   final File? layoutFile;
   final TalInputMode? inputModeOverride;
+  final File? updateSession;
 
   @override
   State<TakeALookApp> createState() => _TakeALookAppState();
@@ -56,6 +60,7 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
   final _recordingStorage = RecordingStorage();
   MainWindowSync? windowSync;
   BackendClient? backendClient;
+  AppUpdateController? updates;
   WorkspacePanelId? detachedPanel;
   List<WorkspacePanelId> detachedPanels = const <WorkspacePanelId>[];
   bool detachedWindowAssigned = false;
@@ -93,6 +98,12 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
       }
       windowSync = MainWindowSync(controller);
       unawaited(windowSync!.start());
+      updates = AppUpdateController();
+      // Secondary engines never initialize/check updates. Debug builds support
+      // explicit checks only, so developing never contacts GitHub on startup.
+      if (widget.enableBackend) {
+        unawaited(updates!.initialize(automatic: kReleaseMode));
+      }
     } else {
       detachedPanel = widget.detachedPanel;
       detachedPanels = widget.detachedPanels ?? const <WorkspacePanelId>[];
@@ -290,6 +301,7 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
     backendClient?.eventHandler = null;
     unawaited(backendClient?.close());
     if (widget.controller == null) controller.dispose();
+    updates?.dispose();
     super.dispose();
   }
 
@@ -322,6 +334,11 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
                 layoutFile: widget.layoutFile,
                 toolbar: widget.workbenchToolbar,
                 recordingStorage: _recordingStorage,
+                updates: updates,
+                beforeUpdateExit: () async {
+                  await backendClient?.closeForUpdate();
+                },
+                updateSession: widget.updateSession,
               )
             : widget.secondaryWindowRole == SecondaryWindowRole.dragPreview
             ? TabContentDragPreviewWindow(
@@ -449,6 +466,9 @@ class MainWorkbench extends StatefulWidget {
     this.recordingStorage,
     this.projectOpenPathPicker,
     this.projectSavePathPicker,
+    this.updates,
+    this.beforeUpdateExit,
+    this.updateSession,
     super.key,
   });
 
@@ -459,6 +479,9 @@ class MainWorkbench extends StatefulWidget {
   final RecordingStorage? recordingStorage;
   final PathPicker? projectOpenPathPicker;
   final PathPicker? projectSavePathPicker;
+  final AppUpdateController? updates;
+  final Future<void> Function()? beforeUpdateExit;
+  final File? updateSession;
 
   @override
   State<MainWorkbench> createState() => _MainWorkbenchState();
@@ -467,6 +490,41 @@ class MainWorkbench extends StatefulWidget {
 class _MainWorkbenchState extends State<MainWorkbench> {
   final workspaceKey = GlobalKey<DockingWorkspaceState>();
   String _shownSourceTask = '';
+
+  Future<void> _showUpdates() async {
+    final updates = widget.updates;
+    if (updates == null) return;
+    await showAppUpdateDialog(
+      context,
+      updates,
+      onInstall: () async {
+        // Block shutdown while a flash/build/symbol operation is still active.
+        if (widget.controller.sourceTask.running ||
+            widget.controller.isSymbolLoading) {
+          updates.reportError('请先等待当前构建、下载或符号加载任务结束，再安装更新。');
+          return;
+        }
+        final work = updates.work!;
+        final session = File(
+          '${work.path}${Platform.pathSeparator}session.json',
+        );
+        await updates.install(
+          restartArguments: ['--restore-after-update', session.path],
+          beforeExit: () async {
+            if (widget.controller.sourceTask.running ||
+                widget.controller.isSymbolLoading) {
+              throw StateError('当前任务尚未完成，请稍后重启更新。');
+            }
+            final workspace = workspaceKey.currentState;
+            if (workspace == null) throw StateError('工作区尚未就绪。');
+            await workspace.saveUpdateSession(session);
+            await widget.beforeUpdateExit?.call();
+          },
+          quit: () => exit(0),
+        );
+      },
+    );
+  }
 
   @override
   void initState() {
@@ -530,6 +588,8 @@ class _MainWorkbenchState extends State<MainWorkbench> {
     return WorkbenchFeedback(
       controller: widget.controller,
       recordingStorage: widget.recordingStorage,
+      updates: widget.updates,
+      onShowUpdates: _showUpdates,
       child: WorkspaceKeyboardShortcuts(
         onKeyEvent: _handleWorkbenchShortcut,
         child: Scaffold(
@@ -541,6 +601,7 @@ class _MainWorkbenchState extends State<MainWorkbench> {
                 workspaceKey: workspaceKey,
                 workbench: true,
                 recordingStorage: widget.recordingStorage,
+                onShowUpdates: _showUpdates,
               ),
               if (widget.toolbar != null) widget.toolbar!,
               WorkbenchToolbar(controller: widget.controller),
@@ -553,6 +614,7 @@ class _MainWorkbenchState extends State<MainWorkbench> {
                   workbenchLayout: true,
                   projectOpenPathPicker: widget.projectOpenPathPicker,
                   projectSavePathPicker: widget.projectSavePathPicker,
+                  updateSession: widget.updateSession,
                   onPanelVisibilityChanged: () {
                     if (mounted) setState(() {});
                   },

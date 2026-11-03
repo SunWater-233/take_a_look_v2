@@ -326,6 +326,19 @@ class BackendClient {
     }
   }
 
+  /// Updates must wait for the frozen backend to release its executable/DLLs.
+  Future<void> closeForUpdate() async {
+    final process = _process;
+    await close();
+    if (process == null) return;
+    try {
+      await process.exitCode.timeout(const Duration(seconds: 5));
+    } on TimeoutException {
+      process.kill();
+      await process.exitCode.timeout(const Duration(seconds: 5));
+    }
+  }
+
   Future<void> close({bool force = false}) async {
     if (_closing) return;
     _closing = true;

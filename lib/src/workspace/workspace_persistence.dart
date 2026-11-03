@@ -18,6 +18,7 @@ class WorkspacePersistence {
   String? _projectPath;
 
   String? get projectPath => _projectPath;
+  void restoreProjectPath(String? path) => _projectPath = path;
   bool get hasPendingSave => _saveTimer?.isActive == true;
 
   void scheduleLayoutSave(Future<void> Function() save) {

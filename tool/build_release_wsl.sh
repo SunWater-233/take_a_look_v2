@@ -4,17 +4,18 @@ set -euo pipefail
 
 usage() {
   cat <<'HELP'
-Usage: bash tool/build_release_wsl.sh [--version <version>] [--check] [--native] [--keep-build]
+Usage: bash tool/build_release_wsl.sh [--mode release|debug] [--version <version>] [--check] [--native] [--keep-build]
 
 Default: discover a prepared Debian 11 chroot and its Linux Flutter SDK.
   --version     Override major.minor.patch[+build] for this build only.
                 Defaults to pubspec.yaml; the source checkout is not changed.
+  --mode        Build release (default) or debug packages.
   --check       Check the build environment without compiling.
   --native      Build with the current Linux system instead of the chroot.
   --keep-build  Keep the isolated source/build directory after success.
   --help        Show this help.
 
-Outputs: build/releases/*.tar.gz, SHA-256 and build manifest.
+Outputs: build/releases/<version>/linux/*.tar.gz, SHA-256 and build manifest.
 Logs:    build/logs/linux-release-<timestamp>-<pid>.log
 
 Optional Linux environment variables:
@@ -34,12 +35,20 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 check_only=0
 native=0
 package_arguments=()
+release_version=""
 while (( $# )); do
   case "$1" in
     --version)
       (( $# >= 2 )) || die '--version requires major.minor.patch[+build].'
       [[ "$2" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\+[0-9]+)?$ ]] || die 'Invalid version; expected major.minor.patch[+build].'
-      package_arguments=(--version "$2")
+      package_arguments+=(--version "$2")
+      release_version=$2
+      shift
+      ;;
+    --mode)
+      (( $# >= 2 )) || die '--mode requires release or debug.'
+      [[ "$2" == release || "$2" == debug ]] || die 'Invalid mode; expected release or debug.'
+      package_arguments+=(--mode "$2")
       shift
       ;;
     --check) check_only=1 ;;
@@ -53,6 +62,9 @@ done
 
 [[ "$(uname -s)" == Linux ]] || die 'Run this script in Linux/WSL, or use tool/build_release_wsl.cmd on Windows.'
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ -z "$release_version" ]]; then
+  release_version="$(awk '/^version:/ {print $2; exit}' "$project_root/pubspec.yaml" | tr -d '\r')"
+fi
 cache_root="${TAL_LINUX_CACHE:-$HOME/.cache/take-a-look-linux}"
 rootfs="${TAL_LINUX_ROOTFS:-}"
 sdk_root="${TAL_LINUX_FLUTTER_ROOT:-}"
@@ -167,6 +179,7 @@ chroot "$rootfs" /usr/bin/env \
   PATH=/opt/flutter/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
   FLUTTER=/opt/flutter/bin/flutter PYTHON="$backend_python" \
   TAL_MAX_GLIBC="${TAL_MAX_GLIBC:-2.31}" TAL_OUTPUT_DIR=/workspace/build/releases \
+  TAL_KEEP_BUILD="${TAL_KEEP_BUILD:-0}" \
   bash -s -- "$check_only" "$@" <<'BUILD'
 set -euo pipefail
 check_only=$1
@@ -197,8 +210,8 @@ trap 'result=$?; if (( result != 0 )); then echo "Release build failed (exit $re
 run_build 2>&1 | tee "$log_file"
 if (( ! check_only )); then
   if (( native )); then
-    echo "Release files: ${TAL_OUTPUT_DIR:-$project_root/build/releases}"
+    echo "Release files: ${TAL_OUTPUT_DIR:-$project_root/build/releases}/$release_version/linux"
   else
-    echo "Release files: $project_root/build/releases"
+    echo "Release files: $project_root/build/releases/$release_version/linux"
   fi
 fi

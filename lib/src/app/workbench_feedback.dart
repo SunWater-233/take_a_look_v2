@@ -7,6 +7,7 @@ import '../controller/controller.dart';
 import '../models/models.dart';
 import '../telemetry/recording_storage.dart';
 import '../theme/theme.dart';
+import '../updates/update_controller.dart';
 
 /// Orders load progress and error feedback in both main and detached windows.
 class WorkbenchFeedback extends StatefulWidget {
@@ -14,6 +15,8 @@ class WorkbenchFeedback extends StatefulWidget {
     required this.controller,
     required this.child,
     this.recordingStorage,
+    this.updates,
+    this.onShowUpdates,
     super.key,
   });
 
@@ -23,6 +26,8 @@ class WorkbenchFeedback extends StatefulWidget {
   /// Supplied only by the main window, so detached engines never rescan or
   /// repeat the startup housekeeping notice.
   final RecordingStorage? recordingStorage;
+  final AppUpdateController? updates;
+  final Future<void> Function()? onShowUpdates;
 
   @override
   State<WorkbenchFeedback> createState() => _WorkbenchFeedbackState();
@@ -40,6 +45,7 @@ class _WorkbenchFeedbackState extends State<WorkbenchFeedback> {
   bool _showingError = false;
   bool _finishing = false;
   int? _pendingRecordingBytes;
+  String? _notifiedUpdate;
 
   @override
   void initState() {
@@ -98,6 +104,7 @@ class _WorkbenchFeedbackState extends State<WorkbenchFeedback> {
   }
 
   void _listen() {
+    widget.updates?.addListener(_changed);
     widget.controller.symbolLoadChanges.addListener(_changed);
     widget.controller.connectionChanges.addListener(_changed);
     _changed();
@@ -111,6 +118,11 @@ class _WorkbenchFeedbackState extends State<WorkbenchFeedback> {
   @override
   void didUpdateWidget(covariant WorkbenchFeedback oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.updates != widget.updates) {
+      oldWidget.updates?.removeListener(_changed);
+      widget.updates?.addListener(_changed);
+      _notifiedUpdate = null;
+    }
     if (oldWidget.controller == widget.controller) return;
     _unlisten(oldWidget.controller);
     _closeProgress();
@@ -231,12 +243,16 @@ class _WorkbenchFeedbackState extends State<WorkbenchFeedback> {
       }
     } finally {
       _showingError = false;
-      if (mounted) _showRecordingNotice();
+      if (mounted) {
+        _showRecordingNotice();
+        _showUpdateNotice();
+      }
     }
   }
 
   @override
   void dispose() {
+    widget.updates?.removeListener(_changed);
     _unlisten(widget.controller);
     final route = _loadRoute;
     // The parent navigator may itself be disposing in this frame.
@@ -247,6 +263,32 @@ class _WorkbenchFeedbackState extends State<WorkbenchFeedback> {
     });
     _feedback.dispose();
     super.dispose();
+  }
+
+  void _showUpdateNotice() {
+    final updates = widget.updates;
+    final action = widget.onShowUpdates;
+    if (updates == null ||
+        action == null ||
+        _feedback.isShowingNotice ||
+        _loadRoute != null ||
+        widget.controller.isSymbolLoading ||
+        updates.dialogOpen) {
+      return;
+    }
+    final failure =
+        updates.lastUpdateFailed && updates.lastUpdateMessage != null;
+    if (!failure && !updates.shouldNotify) return;
+    final key = failure ? updates.lastUpdateMessage! : updates.release!.tag;
+    if (key == _notifiedUpdate) return;
+    _notifiedUpdate = key;
+    _feedback.showActionNotice(
+      context: context,
+      title: failure ? '更新未完成' : '发现新版本 ${updates.release!.tag}',
+      message: failure ? updates.lastUpdateMessage! : '可查看更新说明，并在应用内下载和安装。',
+      actionLabel: '查看详情',
+      onAction: action,
+    );
   }
 
   @override

@@ -19,6 +19,7 @@ class TalWindowTitleBar extends StatefulWidget {
     this.workspaceKey,
     this.workbench = false,
     this.recordingStorage,
+    this.onShowUpdates,
     super.key,
   });
 
@@ -27,6 +28,7 @@ class TalWindowTitleBar extends StatefulWidget {
   final GlobalKey<DockingWorkspaceState>? workspaceKey;
   final bool workbench;
   final RecordingStorage? recordingStorage;
+  final VoidCallback? onShowUpdates;
 
   @override
   State<TalWindowTitleBar> createState() => _TalWindowTitleBarState();
@@ -131,16 +133,22 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
   }
 
   Widget _buildMainTitle() {
-    return DragToMoveArea(
-      child: Padding(
-        padding: const EdgeInsets.only(left: 14),
-        child: Row(
-          children: [
-            const Text('Take A Look', style: _brandStyle),
-            const SizedBox(width: 8),
-            Container(width: 2, height: 24, color: TalColors.accent),
-            const SizedBox(width: 8),
-          ],
+    return Tooltip(
+      message: '关于与更新',
+      child: InkWell(
+        key: const ValueKey('app-update-entry'),
+        onTap: widget.onShowUpdates,
+        borderRadius: BorderRadius.circular(4),
+        child: Padding(
+          padding: const EdgeInsets.only(left: 14),
+          child: Row(
+            children: [
+              const Text('Take A Look', style: _brandStyle),
+              const SizedBox(width: 8),
+              Container(width: 2, height: 24, color: TalColors.accent),
+              const SizedBox(width: 8),
+            ],
+          ),
         ),
       ),
     );

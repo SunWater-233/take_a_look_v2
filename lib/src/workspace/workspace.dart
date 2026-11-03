@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -37,6 +38,7 @@ class DockingWorkspace extends StatefulWidget {
     this.workbenchLayout = false,
     this.projectOpenPathPicker,
     this.projectSavePathPicker,
+    this.updateSession,
     super.key,
   });
 
@@ -47,6 +49,7 @@ class DockingWorkspace extends StatefulWidget {
   final bool workbenchLayout;
   final PathPicker? projectOpenPathPicker;
   final PathPicker? projectSavePathPicker;
+  final File? updateSession;
 
   @override
   DockingWorkspaceState createState() => DockingWorkspaceState();
@@ -430,7 +433,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_captureMainWindowOrigin());
     });
-    unawaited(_restoreLayout(reportMissing: false));
+    unawaited(_restoreStartupWorkspace());
   }
 
   @override
@@ -964,6 +967,56 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
       _layout.reset(detachedPanels: detachedWindows.windows.keys);
 
   Future<void> saveLayout() => _persistLayout(report: true);
+
+  Future<void> _restoreStartupWorkspace() async {
+    await _restoreLayout(reportMissing: false);
+    final file = widget.updateSession;
+    if (!mounted || file == null) return;
+    try {
+      final json =
+          jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+      final document = ProjectDocument.fromJson(
+        Map<String, dynamic>.from(json['document'] as Map),
+      );
+      await widget.controller.restoreProjectSettings(document.settings);
+      if (!mounted) return;
+      _persistence.restoreProjectPath(json['projectPath'] as String?);
+      _session.gridMode = document.gridMode;
+      _layout.focused = document.focused;
+      applyProjectLayout(document.layout);
+      _scheduleLayoutSave();
+      widget.controller.report('更新前的工作区已恢复，请按需重新连接设备。');
+    } catch (error) {
+      if (mounted) {
+        widget.controller.report('恢复更新前的工作区失败：$error；快照保留在 ${file.path}');
+      }
+    }
+  }
+
+  /// Keep unsaved watch/input/layout changes without overwriting the user's
+  /// project. The external updater passes this snapshot to the next launch.
+  Future<void> saveUpdateSession(File file) async {
+    await _nativeTransfers;
+    final document = ProjectDocument(
+      settings: widget.controller.projectSettings(),
+      layout: projectLayout(),
+      gridMode: _session.gridMode,
+      focused: _layout.focused,
+    );
+    await file.parent.create(recursive: true);
+    await file.writeAsString(
+      jsonEncode({'document': document.toJson(), 'projectPath': projectPath}),
+      flush: true,
+    );
+    await _persistence.saveLayout(
+      WorkspaceLayoutSnapshot(
+        groups: _session.groups,
+        uiScale: widget.controller.uiScale,
+        version: widget.workbenchLayout ? 4 : 1,
+        legacyPanels: _layout.legacyPanels,
+      ),
+    );
+  }
 
   WorkspaceLayoutSnapshot projectLayout() => _layout.projectLayout(
     uiScale: widget.controller.uiScale,

@@ -22,6 +22,12 @@ EmberMobile gateway / remote GDB Server; it does not expose a network listener.
 
 ## Development
 
+Click the **Take A Look** brand in the main window's top-left corner for version
+information, the automatic update-check switch, release notes, and in-app
+downloads. Windows MSI/portable and Linux release packages support installing
+updates after exit and reopening the saved workspace. See
+[application updates](docs/app-updates.md) for release assets, packaging and recovery.
+
 Open the target chip selector and choose **在线下载** to search by MCU part
 number, vendor or pack name. The current local search is carried into the
 online dialog. The first search builds a cached index from the official
@@ -700,14 +706,17 @@ The recorded baseline and refactor comparison are in
 
 ## Package
 
-Windows x64 MSI 一键打包：
+Windows / Linux 统一构建（完整参数见 [桌面构建说明](docs/build.md)）：
 
 ```powershell
-.\tool\build_release_windows.ps1
+.\tool\build.ps1 -Target windows  # 一次编译生成 MSI 和 portable ZIP
+.\tool\build.ps1 -Target all -Mode release -Version '1.2.3+4'
+.\tool\build.ps1 -Target windows -WindowsPackage portable -Mode debug
+.\tool\build.ps1 -CleanOnly  # 保留发行包、工具、日志和采样记录
 ```
 
-也可以双击 `tool/build_release_windows.cmd`。脚本自动打包 Python 后端、编译 Flutter Release、
-附带 Visual C++ 运行库并生成中文 MSI，输出到 `build/releases/`，日志在 `build/logs/`。
+也可以双击 `tool/build.cmd`。脚本自动打包 Python 后端、编译 Flutter、
+附带 Visual C++ 运行库并生成中文 MSI，输出到 `build/releases/<版本>/windows/`，日志在 `build/logs/`。
 首次运行自动下载项目内固定版本的 WiX；需要 Flutter、Visual Studio C++ 桌面开发工具、
 Git、Python 3.11+ 和 .NET SDK 8+。构建在独立目录进行，不包含本地采样记录。
 MSI 按当前用户安装，可在向导中自定义安装路径，创建开始菜单和桌面快捷方式；
@@ -717,15 +726,15 @@ MSI 按当前用户安装，可在向导中自定义安装路径，创建开始�
 在项目根目录的 Windows PowerShell 中运行 `tool` 下的脚本，即可通过 WSL 编译 Linux Release 安装包：
 
 ```powershell
-.\tool\build_release_wsl.ps1
-.\tool\build_release_wsl.ps1 -Version 1.2.3  # 指定本次发布版本
+.\tool\build.ps1 -Target linux
+.\tool\build.ps1 -Target linux -Version 1.2.3  # 指定本次发布版本
 ```
 
 双击 `tool/build_release_wsl.cmd` 也会调用同一个 PowerShell 脚本并在结束后保留窗口。
-WSL 内可直接执行 `bash tool/build_release_wsl.sh`。
+WSL 内可执行 `bash tool/build.sh --target linux`；原生 Linux 工具链加 `--native`。
 PowerShell/CMD 用 `-Version 1.2.3`，Bash 用 `--version 1.2.3` 指定版本，也支持
 `1.2.3+4` 形式的构建号；省略时读取 `pubspec.yaml`，指定版本不会改写工作区文件。
-默认复用已配置的 Debian 11 / Flutter 3.44.9 构建环境，产物在 `build/releases/`，
+默认复用已配置的 Debian 11 / Flutter 3.44.9 构建环境，产物在 `build/releases/<版本>/linux/`，
 日志在 `build/logs/`。脚本编译当前工作区（包含未提交改动），并运行完整打包验证。
 首次使用可加 `-Check` 检查环境，`-Distribution Ubuntu-24.04` 可选择发行版。
 环境路径和原生构建方式见
@@ -735,7 +744,7 @@ For a standalone Linux tar.gz (Arch Linux and other glibc distributions), run
 `bash tool/package_linux.sh` with a Linux Flutter SDK and Python 3.11+. The script
 builds in an isolated source copy, bundles the backend runtime, runs tests, and
 creates an installer, offline self-check, ABI manifest and SHA-256 checksum under
-`build/releases/`. See [Linux installation and packaging](docs/linux-install.md)
+`build/releases/<version>/linux/`. See [Linux installation and packaging](docs/linux-install.md)
 for dependency installation, USB permissions, WSL builds and compatibility limits.
 Run the extracted `./install.sh` to install or upgrade an existing installation.
 Upgrades keep acquisition recordings and replace obsolete application libraries;

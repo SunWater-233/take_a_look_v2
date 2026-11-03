@@ -41,6 +41,7 @@ if maximum and tuple(map(int, minimum.split("."))) > tuple(map(int, maximum.spli
 flutter_info = json.loads(subprocess.check_output([flutter, "--version", "--machine"], text=True))
 manifest = {
     "version": version,
+    "build_mode": sys.argv[4] if len(sys.argv) > 4 else "release",
     "built_at_utc": datetime.now(timezone.utc).isoformat(),
     "architecture": platform.machine(),
     "glibc_minimum": minimum,

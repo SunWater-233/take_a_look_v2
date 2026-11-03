@@ -4,22 +4,30 @@ set -euo pipefail
 
 usage() {
   cat <<'HELP'
-Usage: bash tool/package_linux.sh [--version <version>]
+Usage: bash tool/package_linux.sh [--mode release|debug] [--version <version>]
 
   --version  Override major.minor.patch[+build] for this build only.
              Defaults to pubspec.yaml; the source checkout is not changed.
+  --mode     Build release (default) or debug packages.
   --help     Show this help.
 HELP
 }
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 version=""
+mode=release
 while (( $# )); do
   case "$1" in
     --version)
       (( $# >= 2 )) || die '--version requires major.minor.patch[+build].'
       [[ "$2" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\+[0-9]+)?$ ]] || die 'Invalid version; expected major.minor.patch[+build].'
       version=$2
+      shift
+      ;;
+    --mode)
+      (( $# >= 2 )) || die '--mode requires release or debug.'
+      [[ "$2" == release || "$2" == debug ]] || die 'Invalid mode; expected release or debug.'
+      mode=$2
       shift
       ;;
     --help|-h) usage; exit 0 ;;
@@ -32,11 +40,11 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [[ -z "$version" ]]; then
   version="$(awk '/^version:/ {print $2; exit}' "$project_root/pubspec.yaml" | tr -d '\r')"
 fi
-[[ "$version" =~ ^[0-9A-Za-z.+-]+$ ]] || die 'Invalid package version in pubspec.yaml.'
-echo "Release version: $version"
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\+[0-9]+)?$ ]] || die 'Invalid package version in pubspec.yaml.'
+echo "Build version: $version ($mode)"
 flutter="${FLUTTER:-flutter}"
 python="${PYTHON:-python3}"
-output_dir="${TAL_OUTPUT_DIR:-$project_root/build/releases}"
+output_dir="${TAL_OUTPUT_DIR:-$project_root/build/releases}/$version/linux"
 source_revision="$(git -C "$project_root" rev-parse HEAD 2>/dev/null || echo unknown)"
 for command in "$flutter" "$python" rsync cmake ninja clang++ pkg-config readelf tar gzip; do
   command -v "$command" >/dev/null || { echo "Missing build tool: $command" >&2; exit 1; }
@@ -88,31 +96,37 @@ clang++ -std=c++17 -Wall -Wextra tool/tests/linux_gpu_preference_test.cc \
   linux/runner/gpu_preference.cc "${gtk_flags[@]}" -o "$work_root/gpu-preference-test"
 "$work_root/gpu-preference-test"
 PYTHON="$backend_python" bash tool/build_backend.sh
-"$flutter" build linux --release --target-platform "linux-$flutter_arch"
+"$flutter" build linux "--$mode" --no-pub --target-platform "linux-$flutter_arch"
+dart="$(dirname "$(readlink -f "$(command -v "$flutter")")")/dart"
+"$dart" compile exe tool/update_helper.dart -o "build/linux/$flutter_arch/$mode/bundle/take_a_look_updater"
+"build/linux/$flutter_arch/$mode/bundle/take_a_look_updater" --self-test
 
 revision_tag=""
 if [[ "$source_revision" != unknown ]]; then
   revision_tag="-git.${source_revision:0:7}"
 fi
-package_name="take-a-look-v2-$version$revision_tag-linux-$(uname -m)"
+mode_suffix=""
+if [[ "$mode" == debug ]]; then mode_suffix=-debug; fi
+package_name="take-a-look-v2-$version$revision_tag-linux-$(uname -m)$mode_suffix"
 package_root="$work_root/$package_name"
-cp -a "build/linux/$flutter_arch/release/bundle" "$package_root"
+cp -a "build/linux/$flutter_arch/$mode/bundle" "$package_root"
 cp packaging/linux/take-a-look packaging/linux/*.sh packaging/linux/*.rules "$package_root/"
 cp docs/linux-install.md "$package_root/INSTALL.md"
 cp docs/linux-wayland.md "$package_root/linux-wayland.md"
 cp macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_256.png "$package_root/take-a-look.png"
 find "$package_root" -type d -exec chmod 755 {} +
 find "$package_root" -type f -exec chmod 644 {} +
-chmod 755 "$package_root/take-a-look" "$package_root/"*.sh "$package_root/take_a_look_v2" \
+chmod 755 "$package_root/take-a-look" "$package_root/"*.sh "$package_root/take_a_look_v2" "$package_root/take_a_look_updater" \
   "$package_root/backend/runtime/take_a_look_backend/take_a_look_backend"
 printf 'Take A Look V2 portable package\n' > "$package_root/.take-a-look-package"
 # A frozen backend has its own ELF loader search path. Do not put its OpenSSL,
 # libstdc++ or libusb libraries into the UI's LD_LIBRARY_PATH.
 SOURCE_REVISION="$source_revision" \
-  "$backend_python" tool/linux_package_manifest.py "$package_root" "$version" "$flutter"
+  "$backend_python" tool/linux_package_manifest.py "$package_root" "$version" "$flutter" "$mode"
 "$package_root/take-a-look" --doctor
 "$backend_python" -m pip freeze --exclude-editable > "$package_root/PYTHON-PACKAGES.txt"
 cp pubspec.lock "$package_root/FLUTTER-PACKAGES.lock"
+"$dart" run tool/write_update_manifest.dart "$package_root" linux-archive "$version" "$flutter_arch"
 archive="$output_dir/$package_name.tar.gz"
 temporary_archive="$work_root/$package_name.tar.gz"
 tar --sort=name --owner=0 --group=0 --numeric-owner -czf "$temporary_archive" -C "$work_root" "$package_name"

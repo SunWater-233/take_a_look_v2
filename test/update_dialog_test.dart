@@ -42,6 +42,14 @@ void main() {
         expect(find.text('关于与更新'), findsOneWidget);
         expect(find.text('当前版本：1.9.0+5'), findsOneWidget);
         expect(updates.requests, 0);
+        expect(
+          tester
+              .widget<SwitchListTile>(
+                find.byKey(const ValueKey('update-include-prereleases')),
+              )
+              .value,
+          isFalse,
+        );
         await tester.tap(find.byKey(const ValueKey('update-auto-check')));
         await tester.pumpAndSettle();
         expect(updates.autoCheck, isFalse);
@@ -83,6 +91,39 @@ void main() {
       },
     );
   }
+
+  testWidgets(
+    'preview switch rechecks the channel and remains selected after reopening',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1000, 760));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final updates = _UiUpdates();
+      addTearDown(updates.dispose);
+      await tester.pumpWidget(_harness(updates, TalInputMode.mouseKeyboard));
+      await tester.tap(find.byKey(const ValueKey('app-update-entry')));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('update-include-prereleases')),
+      );
+      await tester.pumpAndSettle();
+      expect(updates.includePrereleases, isTrue);
+      expect(updates.requests, 1);
+      expect(find.text('发现新版本 v1.11.0-beta.1（预览版）'), findsOneWidget);
+      expect(find.text('下载更新'), findsOneWidget);
+      await tester.tap(find.text('关闭'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('app-update-entry')));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<SwitchListTile>(
+              find.byKey(const ValueKey('update-include-prereleases')),
+            )
+            .value,
+        isTrue,
+      );
+    },
+  );
 
   testWidgets(
     'download button changes to verified restart action and dismissing confirmation does not install',
@@ -200,16 +241,23 @@ class _UiUpdates extends AppUpdateController {
   }
 
   @override
+  Future<void> setIncludePrereleases(bool value) async {
+    includePrereleases = value;
+    await check();
+  }
+
+  @override
   Future<void> check({bool automatic = false}) async {
     requests++;
     checked = true;
     release = GitHubRelease(
-      tag: 'v1.10.0',
+      tag: includePrereleases ? 'v1.11.0-beta.1' : 'v1.10.0',
       name: '版本更新',
       notes: '修复连接问题\n改进采样体验',
       assets: [
         ReleaseAsset(
-          name: 'Take-A-Look-V2-1.10.0+1-windows-x64-portable.zip',
+          name:
+              'Take-A-Look-V2-${includePrereleases ? '1.11.0-beta.1' : '1.10.0'}+1-windows-x64-portable.zip',
           url: Uri.parse(
             'https://github.com/$updateRepository/releases/download/v1.10.0/package.zip',
           ),

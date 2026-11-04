@@ -90,9 +90,11 @@ class _UpdateDialogState extends State<_UpdateDialog> {
           : updates.currentVersion.isEmpty
           ? '无法读取当前版本，可前往 GitHub 下载完整发布包。'
           : updates.hasUpdate
-          ? '发现新版本 ${updates.release!.tag}'
+          ? '发现新版本 ${updates.release!.tag}${updates.release!.isPrerelease ? '（预览版）' : ''}'
           : updates.checked && updates.release == null
-          ? '尚无公开正式版本，或仓库暂不可访问。'
+          ? (updates.includePrereleases
+                ? '尚无可用的公开版本，或仓库暂不可访问。'
+                : '尚无公开正式版本，或仓库暂不可访问。')
           : updates.checked
           ? '当前已是最新版本。'
           : '点击“立即检查”获取最新版本。';
@@ -130,6 +132,17 @@ class _UpdateDialogState extends State<_UpdateDialog> {
                   onChanged: !updates.initialized || installing
                       ? null
                       : (value) => unawaited(updates.setAutoCheck(value)),
+                ),
+                SwitchListTile.adaptive(
+                  key: const ValueKey('update-include-prereleases'),
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('接收预览版更新'),
+                  subtitle: const Text('包含 GitHub 预发布及 beta、rc 等测试版本'),
+                  value: updates.includePrereleases,
+                  onChanged: !updates.initialized || updates.busy
+                      ? null
+                      : (value) =>
+                            unawaited(updates.setIncludePrereleases(value)),
                 ),
                 const Divider(),
                 const SizedBox(height: 8),

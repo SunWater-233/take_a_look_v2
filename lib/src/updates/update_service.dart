@@ -12,20 +12,28 @@ class UpdateCancelled implements Exception {
 }
 
 class UpdateService {
-  UpdateService({Uri? latestUri, this.allowLocalhost = false})
+  UpdateService({Uri? latestUri, Uri? releasesUri, this.allowLocalhost = false})
     : latestUri =
           latestUri ??
           Uri.https(
             'api.github.com',
             '/repos/$updateRepository/releases/latest',
-          );
+          ),
+      releasesUri =
+          releasesUri ??
+          Uri.https('api.github.com', '/repos/$updateRepository/releases');
 
   final Uri latestUri;
+  final Uri releasesUri;
   final bool allowLocalhost;
   HttpClient? _downloadClient;
   bool _cancelled = false;
 
-  Future<String> _text(Uri uri, {int limit = 1024 * 1024}) async {
+  Future<String> _text(
+    Uri uri, {
+    int limit = 1024 * 1024,
+    void Function(String?)? onLink,
+  }) async {
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 15);
     try {
@@ -37,6 +45,7 @@ class UpdateService {
         );
         request.headers.set(HttpHeaders.userAgentHeader, 'Take-A-Look-Updater');
         final response = await request.close();
+        onLink?.call(response.headers.value('link'));
         if (response.statusCode == 404) throw const HttpException('not-found');
         if ([403, 429].contains(response.statusCode)) {
           throw const HttpException('GitHub 请求受限，请稍后重试。');
@@ -58,16 +67,77 @@ class UpdateService {
     }
   }
 
-  Future<GitHubRelease?> latest() async {
+  Future<GitHubRelease?> latest({bool includePrereleases = false}) async {
     try {
+      if (includePrereleases) return await _latestIncludingPrereleases();
       final json = jsonDecode(await _text(latestUri)) as Map<String, dynamic>;
       if (json['draft'] == true || json['prerelease'] == true) return null;
       final release = GitHubRelease.fromJson(json);
-      return releaseVersion(release.tag).isPreRelease ? null : release;
+      return release.isPrerelease ? null : release;
     } on HttpException catch (error) {
       if (error.message == 'not-found') return null;
       rethrow;
     }
+  }
+
+  Future<GitHubRelease?> _latestIncludingPrereleases() async {
+    Uri? next = releasesUri.replace(
+      queryParameters: {...releasesUri.queryParameters, 'per_page': '100'},
+    );
+    final visited = <Uri>{};
+    final elapsed = Stopwatch()..start();
+    GitHubRelease? newest;
+    while (next != null) {
+      if (!visited.add(next) ||
+          visited.length > 20 ||
+          elapsed.elapsed > const Duration(seconds: 30)) {
+        throw const HttpException('发布记录检查未能完成，请稍后重试。');
+      }
+      final page = next;
+      String? link;
+      final rows =
+          jsonDecode(
+                await _text(
+                  page,
+                  limit: 8 * 1024 * 1024,
+                  onLink: (value) => link = value,
+                ),
+              )
+              as List;
+      for (final row in rows) {
+        final json = Map<String, dynamic>.from(row as Map);
+        if (json['draft'] == true) continue;
+        GitHubRelease candidate;
+        try {
+          candidate = GitHubRelease.fromJson(json);
+        } on FormatException {
+          // Repositories may also publish nightly/custom tags without SemVer.
+          continue;
+        }
+        final order = newest == null
+            ? 1
+            : releaseVersion(
+                candidate.tag,
+              ).compareTo(releaseVersion(newest.tag));
+        if (order > 0 ||
+            (order == 0 && newest!.isPrerelease && !candidate.isPrerelease)) {
+          newest = candidate;
+        }
+      }
+      final match = RegExp(r'<([^>]+)>;\s*rel="next"').firstMatch(link ?? '');
+      next = match == null ? null : page.resolve(match.group(1)!);
+      if (next != null &&
+          (next.scheme != releasesUri.scheme ||
+              next.host != releasesUri.host ||
+              next.port != releasesUri.port ||
+              (next.path != releasesUri.path &&
+                  !RegExp(
+                    r'^/repositories/[0-9]+/releases$',
+                  ).hasMatch(next.path)))) {
+        throw const FormatException('GitHub 发布列表分页地址无效。');
+      }
+    }
+    return newest;
   }
 
   void _validateAsset(ReleaseAsset asset) {

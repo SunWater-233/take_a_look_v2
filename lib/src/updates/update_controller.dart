@@ -43,6 +43,7 @@ class AppUpdateController extends ChangeNotifier {
   bool _disposed = false;
   bool initialized = false;
   bool autoCheck = true;
+  bool includePrereleases = false;
   bool dialogOpen = false;
   String currentVersion = '';
   String? ignoredTag;
@@ -70,6 +71,7 @@ class AppUpdateController extends ChangeNotifier {
   bool get hasUpdate =>
       currentVersion.isNotEmpty &&
       release != null &&
+      (includePrereleases || !release!.isPrerelease) &&
       releaseVersion(release!.tag) > releaseVersion(currentVersion);
   bool get shouldNotify =>
       !dialogOpen && hasUpdate && ignoredTag != release!.tag;
@@ -105,12 +107,17 @@ class AppUpdateController extends ChangeNotifier {
             jsonDecode(await preferencesFile.readAsString())
                 as Map<String, dynamic>;
         autoCheck = json['autoCheck'] as bool? ?? true;
+        includePrereleases = json['includePrereleases'] as bool? ?? false;
         ignoredTag = json['ignoredTag'] as String?;
         lastAttempt = DateTime.tryParse(json['lastAttempt'] as String? ?? '');
         if (json['release'] != null) {
           release = GitHubRelease.fromJson(
             Map<String, dynamic>.from(json['release'] as Map),
           );
+          if (!includePrereleases && release!.isPrerelease) {
+            release = null;
+            lastAttempt = null;
+          }
         }
       }
     } catch (failure) {
@@ -146,6 +153,7 @@ class AppUpdateController extends ChangeNotifier {
   Future<void> _persist() {
     final contents = jsonEncode({
       'autoCheck': autoCheck,
+      'includePrereleases': includePrereleases,
       'ignoredTag': ignoredTag,
       'lastAttempt': lastAttempt?.toUtc().toIso8601String(),
       'release': release?.toJson(),
@@ -183,6 +191,51 @@ class AppUpdateController extends ChangeNotifier {
     _changed();
   }
 
+  Future<void> setIncludePrereleases(bool value) async {
+    await initialize();
+    if (_disposed || busy || value == includePrereleases) return;
+    final previous = (
+      include: includePrereleases,
+      release: release,
+      attempt: lastAttempt,
+      checked: checked,
+      transfer: transfer,
+      file: downloadedFile,
+      hash: downloadedHash,
+      received: receivedBytes,
+      total: totalBytes,
+    );
+    includePrereleases = value;
+    release = null;
+    lastAttempt = null;
+    checked = false;
+    transfer = UpdateTransfer.idle;
+    downloadedFile = null;
+    downloadedHash = null;
+    receivedBytes = totalBytes = 0;
+    error = null;
+    _changed();
+    try {
+      await _persist();
+    } catch (failure) {
+      includePrereleases = previous.include;
+      release = previous.release;
+      lastAttempt = previous.attempt;
+      checked = previous.checked;
+      transfer = previous.transfer;
+      downloadedFile = previous.file;
+      downloadedHash = previous.hash;
+      receivedBytes = previous.received;
+      totalBytes = previous.total;
+      error = '无法保存预览版更新设置：$failure';
+      _changed();
+      return;
+    }
+    // Changing channels is an explicit check, independent of the startup switch
+    // and its 24-hour interval. Previously downloaded candidates are invalidated.
+    await check();
+  }
+
   Future<void> check({bool automatic = false}) async {
     await initialize();
     if (_disposed || transfer != UpdateTransfer.idle) return;
@@ -200,7 +253,7 @@ class AppUpdateController extends ChangeNotifier {
     try {
       error = null;
       lastAttempt = _now();
-      release = await service.latest();
+      release = await service.latest(includePrereleases: includePrereleases);
       checked = true;
       await _persist();
     } catch (failure) {

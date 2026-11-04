@@ -111,7 +111,119 @@ void main() {
     await expectLater(service.latest(), throwsA(isA<HttpException>()));
   });
 
+  test(
+    'preview selection follows pagination and compares versions rather than list order',
+    () async {
+      final requests = <Uri>[];
+      late HttpServer server;
+      server = await _server((request) async {
+        requests.add(request.uri);
+        if (request.uri.queryParameters['page'] == '2') {
+          request.response.write(
+            jsonEncode([
+              _releaseJson('v1.11.0-rc.10', prerelease: true),
+              _releaseJson('v1.11.0-rc.2', prerelease: true),
+              _releaseJson('v99.0.0', draft: true),
+            ]),
+          );
+        } else {
+          request.response.headers.set(
+            'link',
+            '<${_url(server, '/repositories/123/releases?page=2&per_page=100')}>; rel="next"',
+          );
+          request.response.write(
+            jsonEncode([
+              _releaseJson('v1.9.0'),
+              _releaseJson('v1.10.0'),
+              _releaseJson('nightly'),
+              _releaseJson('v1.11.0-beta.9', prerelease: true),
+            ]),
+          );
+        }
+        await request.response.close();
+      });
+      final service = UpdateService(releasesUri: _url(server, '/releases'));
+      final release = await service.latest(includePrereleases: true);
+      expect(release!.tag, 'v1.11.0-rc.10');
+      expect(release.isPrerelease, isTrue);
+      expect(requests, hasLength(2));
+      expect(requests.first.queryParameters['per_page'], '100');
+    },
+  );
+
+  test(
+    'preview channel includes flagged previews with stable tags; equal final versions win',
+    () async {
+      var rows = [
+        _releaseJson('v2.0.0', prerelease: true),
+        _releaseJson('v1.9.0'),
+      ];
+      final server = await _server((request) async {
+        request.response.write(jsonEncode(rows));
+        await request.response.close();
+      });
+      final service = UpdateService(releasesUri: _url(server, '/releases'));
+      final preview = (await service.latest(includePrereleases: true))!;
+      expect(preview.tag, 'v2.0.0');
+      expect(preview.isPrerelease, isTrue);
+      expect(GitHubRelease.fromJson(preview.toJson()).isPrerelease, isTrue);
+      rows = [
+        _releaseJson('v2.0.0-rc.9'),
+        _releaseJson('v2.0.0', prerelease: true),
+        _releaseJson('2.0.0'),
+      ];
+      final stable = (await service.latest(includePrereleases: true))!;
+      expect(stable.tag, '2.0.0');
+      expect(stable.isPrerelease, isFalse);
+    },
+  );
+
+  test(
+    'preview channel handles empty lists, no releases and rate limits',
+    () async {
+      var status = 200;
+      final server = await _server((request) async {
+        request.response.statusCode = status;
+        request.response.write('[]');
+        await request.response.close();
+      });
+      final service = UpdateService(releasesUri: _url(server, '/releases'));
+      expect(await service.latest(includePrereleases: true), isNull);
+      status = 404;
+      expect(await service.latest(includePrereleases: true), isNull);
+      status = 429;
+      await expectLater(
+        service.latest(includePrereleases: true),
+        throwsA(isA<HttpException>()),
+      );
+    },
+  );
+
+  test('preview pagination refuses cycles and foreign hosts', () async {
+    var foreign = false;
+    late HttpServer server;
+    server = await _server((request) async {
+      request.response.headers.set(
+        'link',
+        '<${foreign ? 'https://evil.example/releases' : _url(server, request.uri.toString())}>; rel="next"',
+      );
+      request.response.write('[]');
+      await request.response.close();
+    });
+    final service = UpdateService(releasesUri: _url(server, '/releases'));
+    await expectLater(
+      service.latest(includePrereleases: true),
+      throwsA(isA<HttpException>()),
+    );
+    foreign = true;
+    await expectLater(
+      service.latest(includePrereleases: true),
+      throwsFormatException,
+    );
+  });
+
   for (final useCompanion in [false, true]) {
+    // Checksum handling is identical for stable and preview release assets.
     test(
       'download streams and verifies ${useCompanion ? 'companion' : 'API digest'} checksum',
       () async {
@@ -245,6 +357,19 @@ void main() {
     );
   });
 }
+
+Map<String, dynamic> _releaseJson(
+  String tag, {
+  bool prerelease = false,
+  bool draft = false,
+}) => {
+  'tag_name': tag,
+  'name': tag,
+  'body': '',
+  'assets': [],
+  'prerelease': prerelease,
+  'draft': draft,
+};
 
 ReleaseAsset _asset(String name) => ReleaseAsset(
   name: name,

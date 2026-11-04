@@ -70,6 +70,103 @@ void main() {
     },
   );
 
+  test(
+    'preview preference survives restart and switching invalidates cache and downloaded candidates',
+    () async {
+      final folder = _temporary();
+      final prefs = File('${folder.path}/prefs');
+      final service = FakeUpdateService()
+        ..preview = GitHubRelease(
+          tag: 'v1.11.0-beta.1',
+          name: '',
+          notes: '',
+          assets: [],
+        );
+      var controller = _controller(folder, prefs, service, DateTime.now);
+      await controller.initialize();
+      expect(controller.includePrereleases, isFalse);
+      await controller.setAutoCheck(false);
+      await controller.check();
+      await controller.setIncludePrereleases(true);
+      expect(service.channels, [false, true]);
+      expect(controller.release!.tag, 'v1.11.0-beta.1');
+      expect(controller.shouldNotify, isTrue);
+      expect(
+        jsonDecode(prefs.readAsStringSync())['includePrereleases'],
+        isTrue,
+      );
+      controller.dispose();
+      controller = _controller(folder, prefs, service, DateTime.now);
+      await controller.initialize();
+      expect(controller.includePrereleases, isTrue);
+      expect(controller.release!.isPrerelease, isTrue);
+      controller.transfer = UpdateTransfer.ready;
+      controller.downloadedFile = File('${folder.path}/preview.zip');
+      controller.downloadedHash = 'old hash';
+      await controller.setIncludePrereleases(false);
+      expect(service.channels, [false, true, false]);
+      expect(controller.release!.tag, 'v1.10.0');
+      expect(controller.transfer, UpdateTransfer.idle);
+      expect(controller.downloadedFile, isNull);
+      expect(controller.downloadedHash, isNull);
+      expect(controller.autoCheck, isFalse);
+      controller.dispose();
+    },
+  );
+
+  test(
+    'stable channel discards cached GitHub-flagged previews and clears their throttle',
+    () async {
+      final folder = _temporary();
+      final prefs = File('${folder.path}/prefs');
+      final preview = GitHubRelease(
+        tag: 'v1.11.0',
+        name: '',
+        notes: '',
+        assets: [],
+        prerelease: true,
+      );
+      prefs.writeAsStringSync(
+        jsonEncode({
+          'autoCheck': true,
+          'includePrereleases': false,
+          'lastAttempt': DateTime.now().toUtc().toIso8601String(),
+          'release': preview.toJson(),
+        }),
+      );
+      final service = FakeUpdateService();
+      final controller = _controller(folder, prefs, service, DateTime.now);
+      await controller.initialize(automatic: true);
+      expect(service.channels, [false]);
+      expect(controller.release!.tag, 'v1.10.0');
+      controller.dispose();
+    },
+  );
+
+  test(
+    'preview preference cannot change during a request and rolls back on save failure',
+    () async {
+      final folder = _temporary();
+      File('${folder.path}/blocked').writeAsStringSync('file, not a directory');
+      final service = FakeUpdateService();
+      final controller = _controller(
+        folder,
+        File('${folder.path}/blocked/prefs'),
+        service,
+        DateTime.now,
+      );
+      await controller.initialize();
+      await controller.setIncludePrereleases(true);
+      expect(controller.includePrereleases, isFalse);
+      expect(controller.error, contains('无法保存预览版更新设置'));
+      expect(service.requests, 0);
+      controller.transfer = UpdateTransfer.downloading;
+      await controller.setIncludePrereleases(true);
+      expect(controller.includePrereleases, isFalse);
+      controller.dispose();
+    },
+  );
+
   test('missing helper does not invoke shutdown or quit', () async {
     final folder = _temporary();
     final controller = _controller(
@@ -162,10 +259,14 @@ void main() {
 
 class FakeUpdateService extends UpdateService {
   int requests = 0;
+  final channels = <bool>[];
+  GitHubRelease? preview;
   Future<GitHubRelease?>? pending;
   @override
-  Future<GitHubRelease?> latest() async {
+  Future<GitHubRelease?> latest({bool includePrereleases = false}) async {
     requests++;
+    channels.add(includePrereleases);
+    if (includePrereleases && preview != null) return preview;
     return pending ??
         GitHubRelease(tag: 'v1.10.0', name: '新版', notes: '更新说明', assets: []);
   }

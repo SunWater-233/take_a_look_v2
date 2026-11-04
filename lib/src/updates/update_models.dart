@@ -111,6 +111,7 @@ class GitHubRelease {
     required this.name,
     required this.notes,
     required this.assets,
+    this.prerelease = false,
   }) {
     releaseVersion(tag);
   }
@@ -118,6 +119,8 @@ class GitHubRelease {
   final String name;
   final String notes;
   final List<ReleaseAsset> assets;
+  final bool prerelease;
+  bool get isPrerelease => prerelease || releaseVersion(tag).isPreRelease;
   Uri get page =>
       Uri.https('github.com', '/$updateRepository/releases/tag/$tag');
 
@@ -125,6 +128,7 @@ class GitHubRelease {
     tag: json['tag_name'] as String,
     name: (json['name'] as String?)?.trim() ?? '',
     notes: json['body'] as String? ?? '',
+    prerelease: json['prerelease'] == true,
     assets: (json['assets'] as List? ?? [])
         .map(
           (item) =>
@@ -137,6 +141,7 @@ class GitHubRelease {
     'tag_name': tag,
     'name': name,
     'body': notes,
+    'prerelease': prerelease,
     'assets': assets.map((asset) => asset.toJson()).toList(),
   };
 

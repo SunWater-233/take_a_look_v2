@@ -120,6 +120,37 @@ def test_bundled_pack_hash_is_checked_before_connection(tmp_path):
         catalog.close()
 
 
+def test_compact_bundle_restores_older_selection_and_project_pack_identity(tmp_path):
+    source, directory, identity = bundled_fixture(tmp_path)
+    index = directory / "index.json"
+    data = json.loads(index.read_text(encoding="utf-8"))
+    original = tmp_path / "original.pack"
+    original.write_bytes(source.read_bytes() + b"original pack")
+    upstream = hashlib.sha256(original.read_bytes()).hexdigest()
+    data["packs"][identity]["sourceSha256"] = upstream
+    index.write_text(json.dumps(data), encoding="utf-8")
+    library = tmp_path / "user"
+    library.mkdir()
+    (library / "index.json").write_text(json.dumps({"version": 1, "packs": {},
+        "recent": [f"{upstream}:nrf52840"], "selected": {"name": "nrf52840", "packId": upstream}}), encoding="utf-8")
+    catalog = TargetCatalog(library, bundled_directory=directory)
+    try:
+        assert catalog.selected["packId"] == identity
+        assert catalog.snapshot()["recent"] == [f"{identity}:nrf52840"]
+        assert not catalog.selection_state()["targetPackMissing"]
+        assert Path(catalog.connection_pack()).name == f"{identity}.pack"
+        catalog.select("nrf52840", upstream)  # A saved project still carries the old identity.
+        assert catalog.selected["packId"] == identity
+        with pytest.raises(ProtocolError, match="target_pack_missing"):
+            catalog.select("removed_chip", upstream)
+        # A user-imported original stays independent and takes precedence.
+        assert install(catalog, original) == upstream
+        catalog.select("nrf52840", upstream)
+        assert catalog.selected["packId"] == upstream
+    finally:
+        catalog.close()
+
+
 def test_import_copies_metadata_without_registering_targets_and_restores_selection(tmp_path, catalog):
     original = dict(TARGET)
     path = make_pack(tmp_path, extra='<device Dname="Demo100"><variant Dvariant="Demo100A"/><variant Dvariant="Demo100B"/></device>')

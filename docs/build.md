@@ -79,6 +79,15 @@ Linux 主机使用 `--target linux`。GitHub Actions 的 `target: all` 会分发
 
 ## 产物与清理
 
+三平台构建都会从固定版本、经 SHA-256 校验的上游 CMSIS-Pack 生成精简运行包。
+内置支持范围为 STM32F103（29 个型号/变体）、STM32F4 全系列（360 个）和 STM32H7 全系列（166 个）。
+运行包保留芯片描述、烧录算法、SVD、调试配置与许可文件，移除文档、例程、驱动源码及未引用资源；
+三个 `.pack` 文件合计约 9 MiB。其他型号仍可通过芯片库导入完整支持包。
+
+完整上游包缓存在 `build/tools/cmsis-packs/`，不会进入应用发布包，清理构建目录时保留。
+`backend/bundled_packs/index.json` 分别记录原始 SHA-256 和精简文件 SHA-256；连接时校验实际发布文件。
+旧版本使用原始内置包标识保存的受支持芯片选择会自动映射到精简包；用户自行导入的完整包继续独立管理。
+
 ```text
 build/releases/<版本>/windows/               # Windows MSI、ZIP 和 SHA-256
 build/releases/<版本>/linux/                 # Linux tar.gz、SHA-256、构建清单和安装说明

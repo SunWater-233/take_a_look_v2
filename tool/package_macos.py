@@ -120,7 +120,8 @@ def main() -> None:
         # Reuse the checked pack cache; the preparation tool verifies every digest.
         run(python, PROJECT / "tool/prepare_bundled_packs.py")
         shutil.copytree(PROJECT / "backend/bundled_packs", source / "backend/bundled_packs")
-        environment = {**os.environ, "PYTHON": str(python)}
+        environment = {**os.environ, "PYTHON": str(python),
+                       "TAL_PACK_CACHE_DIR": str(PROJECT / "build/tools/cmsis-packs")}
         run("bash", "tool/build_backend.sh", cwd=source, env=environment)
         run(flutter, "pub", "get", cwd=source)
         run(flutter, "build", "macos", f"--{options.mode}", "--no-pub", cwd=source)

@@ -95,7 +95,7 @@ read -ra gtk_flags <<< "$(pkg-config --cflags --libs gtk+-3.0)"
 clang++ -std=c++17 -Wall -Wextra tool/tests/linux_gpu_preference_test.cc \
   linux/runner/gpu_preference.cc "${gtk_flags[@]}" -o "$work_root/gpu-preference-test"
 "$work_root/gpu-preference-test"
-PYTHON="$backend_python" bash tool/build_backend.sh
+TAL_PACK_CACHE_DIR="$project_root/build/tools/cmsis-packs" PYTHON="$backend_python" bash tool/build_backend.sh
 "$flutter" build linux "--$mode" --no-pub --target-platform "linux-$flutter_arch"
 dart="$(dirname "$(readlink -f "$(command -v "$flutter")")")/dart"
 "$dart" compile exe tool/update_helper.dart -o "build/linux/$flutter_arch/$mode/bundle/take_a_look_updater"

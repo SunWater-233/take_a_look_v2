@@ -50,6 +50,10 @@ if ($LASTEXITCODE -ne 0) {
 
 Copy-Item -LiteralPath (Join-Path $BackendRoot 'bundled_packs') `
     -Destination (Join-Path $DistRoot 'take_a_look_backend') -Recurse -Force
+# Repeated direct builds must not retain full packs from an earlier runtime.
+Get-ChildItem -LiteralPath (Join-Path $DistRoot 'take_a_look_backend\bundled_packs') -File -Filter '*.pack' |
+    Where-Object { -not (Test-Path -LiteralPath (Join-Path $BackendRoot "bundled_packs\$($_.Name)")) } |
+    Remove-Item -Force
 
 & (Join-Path $ProjectRoot 'windows\normalise_runtime_integrity.ps1') `
     -Executable (Join-Path $DistRoot 'take_a_look_backend\take_a_look_backend.exe')

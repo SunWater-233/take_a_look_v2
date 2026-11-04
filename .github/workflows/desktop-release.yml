@@ -86,7 +86,7 @@ jobs:
         if: matrix.target != 'linux'
         uses: actions/cache@v4
         with:
-          path: backend/bundled_packs
+          path: build/tools/cmsis-packs
           key: cmsis-packs-${{ hashFiles('tool/bundled_packs.json') }}
       - name: Install Flutter
         if: matrix.target != 'linux'

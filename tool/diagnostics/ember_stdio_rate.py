@@ -76,7 +76,7 @@ class Backend:
         self._id += 1
         request_id = self._id
         self.process.stdin.write((json.dumps(
-            {"v": 2, "id": request_id, "method": method, "params": params}) + "\n").encode())
+            {"v": 3, "id": request_id, "method": method, "params": params}) + "\n").encode())
         self.process.stdin.flush()
         deadline = time.perf_counter() + timeout
         while time.perf_counter() < deadline:
@@ -154,7 +154,7 @@ def main() -> int:
 
     backend = Backend(args.exe)
     try:
-        state = backend.call("loadSymbols", {"path": str(args.elf)})["state"]
+        state = backend.call("loadFirmware", {"path": str(args.elf)})["state"]
         symbol = pick(state["symbols"])
         selected = [symbol]
         for candidate in state["symbols"]:

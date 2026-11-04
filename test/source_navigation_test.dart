@@ -136,7 +136,8 @@ void main() {
       final fixture = await _fixture(tester);
       final controller = fixture.controller;
       controller.applySnapshot({
-        'symbolFile': 'legacy.axf',
+        'sourceProject': {'firmwarePath': 'legacy.axf'},
+        'firmware': {'status': 'ready'},
         'symbols': <Object?>[],
         'debug': {
           'sourceFiles': [fixture.main, fixture.motor],

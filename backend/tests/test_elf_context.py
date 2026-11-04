@@ -19,7 +19,7 @@ def test_symbol_transaction_shares_the_open_elf_and_dwarf_graph(tmp_path):
     ):
         service = BackendService(lambda *_: None, recording_directory=tmp_path / "records")
         try:
-            result = service.handle(RpcMethod.LOAD_SYMBOLS, {"path": str(path)})
+            result = service.handle(RpcMethod.LOAD_FIRMWARE, {"path": str(path)})
             assert len(result["state"]["symbols"]) == 1
             assert factory.call_count == 1
             assert elf.get_dwarf_info.call_count == 1

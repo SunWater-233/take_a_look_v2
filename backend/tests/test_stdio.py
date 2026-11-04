@@ -18,9 +18,9 @@ class StdioIntegrationTests(unittest.TestCase):
         output = io.BytesIO()
         server = StdioServer(io.StringIO(), output)
         try:
-            server._handle_line('{"v":2,"id":41,"method":"futureMethod"}')
-            server._handle_line('{"v":2,"id":42,"method":"getState","params":[]}')
-            server._handle_line('{"v":2,"id":43,"method":"getState"}')
+            server._handle_line('{"v":3,"id":41,"method":"futureMethod"}')
+            server._handle_line('{"v":3,"id":42,"method":"getState","params":[]}')
+            server._handle_line('{"v":3,"id":43,"method":"getState"}')
             server._output_worker.drain()
             replies = {item["id"]: item for line in output.getvalue().splitlines()
                        if "id" in (item := json.loads(line))}
@@ -67,7 +67,7 @@ class StdioIntegrationTests(unittest.TestCase):
                 {"key": item.key, "readMode": "manual"} for item in items]})
             service._connection_status = "connected"
             try:
-                server._handle_line(json.dumps({"v": 2, "id": 17, "method": "writeWatches",
+                server._handle_line(json.dumps({"v": 3, "id": 17, "method": "writeWatches",
                     "params": {"writes": [{"key": item.key, "value": str(i + 1)}
                                            for i, item in enumerate(items)]}}))
                 server._output_worker.drain()
@@ -107,7 +107,7 @@ stdio.StdioServer.run = run_with_logs
 stdio.main()
 """
         requests = "\n".join(
-            json.dumps({"v": 2, "id": index, "method": method, "params": {}})
+            json.dumps({"v": 3, "id": index, "method": method, "params": {}})
             for index, method in enumerate(("handshake", "shutdown"), start=1)
         ) + "\n"
         completed = subprocess.run(
@@ -139,7 +139,7 @@ stdio.main()
         self.assertIn("RuntimeError: SWD/JTAG communication failure", completed.stderr)
         messages = [json.loads(line) for line in completed.stdout.splitlines()]
         responses = {message.get("id"): message for message in messages if "id" in message}
-        self.assertEqual(responses[1]["result"]["protocolVersion"], 2)
+        self.assertEqual(responses[1]["result"]["protocolVersion"], 3)
         self.assertEqual(responses[2]["result"]["state"]["connectionStatus"], "disconnected")
 
     def test_process_handshake_and_shutdown(self) -> None:
@@ -148,8 +148,8 @@ stdio.main()
         environment["PYTHONPATH"] = str(backend_root)
         requests = "\n".join(
             [
-                json.dumps({"v": 2, "id": 1, "method": "handshake", "params": {}}),
-                json.dumps({"v": 2, "id": 2, "method": "shutdown", "params": {}}),
+                json.dumps({"v": 3, "id": 1, "method": "handshake", "params": {}}),
+                json.dumps({"v": 3, "id": 2, "method": "shutdown", "params": {}}),
                 "",
             ]
         )
@@ -169,7 +169,7 @@ stdio.main()
         self.assertTrue(completed.stdout.isascii())
         messages = [json.loads(line) for line in completed.stdout.splitlines()]
         responses = {message.get("id"): message for message in messages if "id" in message}
-        self.assertEqual(responses[1]["result"]["protocolVersion"], 2)
+        self.assertEqual(responses[1]["result"]["protocolVersion"], 3)
         self.assertEqual(responses[2]["result"]["state"]["connectionStatus"], "disconnected")
 
     def test_sample_events_are_binary_framed_after_a_json_schema(self) -> None:

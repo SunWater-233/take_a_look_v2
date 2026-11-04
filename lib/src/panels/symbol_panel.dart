@@ -11,6 +11,7 @@ import '../controller/controller.dart';
 import '../models/models.dart';
 import '../theme/theme.dart';
 import 'table_layout.dart';
+import 'firmware_notice.dart';
 
 import 'shared_controls.dart';
 import 'source_file_drag_data.dart';
@@ -452,6 +453,7 @@ class _SymbolPanelState extends State<SymbolPanel> {
         final rows = _visibleRows;
         return Column(
           children: [
+            FirmwareNotice(controller: widget.controller),
             Padding(
               padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
               child: Row(
@@ -467,12 +469,12 @@ class _SymbolPanelState extends State<SymbolPanel> {
                       ),
                       alignment: Alignment.centerLeft,
                       child: Text(
-                        widget.controller.symbolFile.isEmpty
+                        widget.controller.firmwarePath.isEmpty
                             ? '尚未读取 .elf / .axf'
-                            : widget.controller.symbolFile,
+                            : widget.controller.firmwarePath,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: widget.controller.symbolFile.isEmpty
+                        style: widget.controller.firmwarePath.isEmpty
                             ? talMuted
                             : talBody,
                       ),
@@ -482,7 +484,7 @@ class _SymbolPanelState extends State<SymbolPanel> {
                   TalButton(
                     onPressed: widget.controller.isSymbolLoading
                         ? null
-                        : widget.controller.chooseSymbolFile,
+                        : widget.controller.chooseFirmwareFile,
                     child: const Text('选择文件'),
                   ),
                   const SizedBox(width: 8),
@@ -490,10 +492,10 @@ class _SymbolPanelState extends State<SymbolPanel> {
                     width: 56,
                     child: TalButton(
                       onPressed:
-                          widget.controller.symbols.isEmpty ||
+                          widget.controller.firmwarePath.isEmpty ||
                               widget.controller.isSymbolLoading
                           ? null
-                          : widget.controller.refreshSymbols,
+                          : widget.controller.refreshFirmware,
                       child: const Text('刷新'),
                     ),
                   ),

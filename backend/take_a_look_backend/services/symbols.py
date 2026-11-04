@@ -96,8 +96,6 @@ def load_symbols_from_elf(path: Path, progress: SymbolLoadProgress | None = None
                 emit_variable_progress_if_needed()
 
     result = sorted(symbols.values(), key=lambda item: (item.source_file, item.name, item.address))
-    if not result:
-        raise ValueError("没有在符号表中找到可追踪的变量符号。")
     return result
 
 

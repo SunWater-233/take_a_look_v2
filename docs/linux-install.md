@@ -140,8 +140,8 @@ ARM/Cortex-M 目标使用 `arm-none-eabi-gdb` 或 `gdb-multiarch`，并在连接
 
 安装器先完成新包自检和临时目录复制，再替换程序；旧库会被清理，原有 `recordings/`
 及旧后端目录内的采样记录会被保留，用户配置目录中的布局不会被改动。
-源码工程的编译命令、解释器及固件路径保存在
-`${XDG_CONFIG_HOME:-$HOME/.config}/TakeALook/source-projects.json`，升级时同样保留。
+源码工程的编译命令、解释器及固件路径随 `.talproj` 工程保存。当前使用 v2 工程格式；
+旧版工程和旧的 `source-projects.json` 不再读取。
 同一版本重复运行安装器也可修复安装。升级过程中请勿运行程序或同时运行多个安装器。
 
 自定义安装位置可用 `./install.sh --prefix "$HOME/apps/tal"`；程序会放在该前缀的

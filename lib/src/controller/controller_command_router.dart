@@ -45,11 +45,11 @@ Future<JsonObject> executeControllerCommand(
       controller.clearSourceOutput();
     case ControllerCommand.toggleConnection:
       await controller.toggleConnection();
-    case ControllerCommand.loadSymbols:
+    case ControllerCommand.loadFirmware:
       if (arguments is String && arguments.isNotEmpty) {
-        controller.loadSymbolsFromPath(arguments);
+        await controller.loadFirmware(arguments);
       } else {
-        await controller.chooseSymbolFile();
+        await controller.chooseFirmwareFile();
       }
     case ControllerCommand.setSampleRate:
       controller.setSampleRate((arguments as num).toDouble());
@@ -112,7 +112,7 @@ Future<JsonObject> executeControllerCommand(
       controller.resetTarget(halt: arguments == true);
     case ControllerCommand.setSourceRoot:
       if (arguments is String) {
-        controller.setSourceRoot(arguments);
+        await controller.setSourceRoot(arguments);
       } else {
         await controller.chooseSourceRoot();
       }

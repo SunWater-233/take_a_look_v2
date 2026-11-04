@@ -270,7 +270,7 @@ def test_packaged_runtime_pairing_connect_and_forget(phone_factory, tmp_path, ar
     def send(method, **params):
         nonlocal sequence
         sequence += 1
-        process.stdin.write(json.dumps({"v": 2, "id": sequence, "method": method, "params": params}) + "\n")
+        process.stdin.write(json.dumps({"v": 3, "id": sequence, "method": method, "params": params}) + "\n")
         process.stdin.flush()
         return sequence
     def receive(request_id):

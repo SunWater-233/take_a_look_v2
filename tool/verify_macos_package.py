@@ -53,11 +53,11 @@ def verify_app(app: Path, architecture: str, version: str, mode: str) -> None:
         environment['TAL_RECORDINGS_DIR'] = str(Path(directory) / 'recordings')
         report = json.loads(command(backend, '--self-test', env=environment, cwd=directory))
         assert report['ok'] and report['checks']['rpc'] == 'ok', report
-        requests = '\n'.join(json.dumps({'v': 2, 'id': index, 'method': method, 'params': {}})
+        requests = '\n'.join(json.dumps({'v': 3, 'id': index, 'method': method, 'params': {}})
                              for index, method in enumerate(('handshake', 'getState', 'shutdown'), 1)) + '\n'
         responses = command(backend, input=requests, env=environment, cwd=directory)
         replies = {row['id']: row for line in responses.splitlines() if 'id' in (row := json.loads(line))}
-        assert replies[1]['result']['protocolVersion'] == 2, replies
+        assert replies[1]['result']['protocolVersion'] == 3, replies
         assert replies[2]['result']['state']['connectionStatus'] == 'disconnected', replies
         assert 'error' not in replies[3], replies
     print(f'Verified macOS {architecture} {mode}: signed app, version, native backend, relocation and offline RPC.', flush=True)

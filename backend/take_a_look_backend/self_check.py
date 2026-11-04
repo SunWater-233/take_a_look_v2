@@ -64,10 +64,11 @@ def run() -> int:
         import io
 
         from take_a_look_backend.stdio import StdioServer
+        from take_a_look_backend.protocol import PROTOCOL_VERSION
 
         output = io.BytesIO()
         requests = '\n'.join(
-            json.dumps({"v": 2, "id": index, "method": method, "params": {}})
+            json.dumps({"v": PROTOCOL_VERSION, "id": index, "method": method, "params": {}})
             for index, method in enumerate(("handshake", "listTargets", "shutdown"), 1)
         ) + '\n'
         StdioServer(io.StringIO(requests), output).run()
@@ -76,7 +77,7 @@ def run() -> int:
             for line in output.getvalue().splitlines()
             if "id" in (message := json.loads(line))
         }
-        if responses[1]["result"]["protocolVersion"] != 2:
+        if responses[1]["result"]["protocolVersion"] != PROTOCOL_VERSION:
             raise RuntimeError("Unexpected protocol version")
         if "memoryWriteBatch" not in responses[1]["result"]["capabilities"]:
             raise RuntimeError("Batch memory-write support is missing")

@@ -39,9 +39,9 @@ void main() {
       );
       await backend.start();
       expect(backend.isRunning, isTrue);
-      await controller.loadSymbolsFromPath('slow.elf');
+      await controller.loadFirmware('slow.elf');
       expect(controller.lastBackendError, isNull);
-      expect(controller.symbolFile, 'slow.elf');
+      expect(controller.firmwarePath, 'slow.elf');
       expect(controller.debugState.sourceFiles, ['main.c']);
       expect(progress.any((p) => p.fraction == 0.6 && p.isLoading), isTrue);
       expect(progress.last.status, SymbolLoadStatus.complete);
@@ -77,7 +77,7 @@ void main() {
           isTrue,
           reason: '${controller.lastBackendError}',
         );
-        await controller.loadSymbolsFromPath(entry.key);
+        await controller.loadFirmware(entry.key);
         expect(controller.isSymbolLoading, isFalse);
         expect(controller.symbolLoadProgress!.status, SymbolLoadStatus.failed);
         expect(controller.lastBackendError?['code'], entry.value);
@@ -115,7 +115,7 @@ void main() {
       });
       await backend.start();
       expect(backend.isRunning, isTrue);
-      await controller.loadSymbolsFromPath(realElf!);
+      await controller.loadFirmware(realElf!);
       expect(controller.lastBackendError, isNull);
       expect(controller.symbols, isNotEmpty);
       expect(controller.debugState.sourceFiles, isNotEmpty);

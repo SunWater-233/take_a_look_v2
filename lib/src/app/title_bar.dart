@@ -407,7 +407,7 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
         ),
       ),
       const _MenuDivider(),
-      _menuItem(label: '打开 ELF / AXF', onPressed: state?.chooseSymbolFile),
+      _menuItem(label: '打开 ELF / AXF', onPressed: state?.chooseFirmwareFile),
       _menuItem(
         label: '工程设置',
         onPressed: state == null

@@ -25,20 +25,21 @@ void main() {
       backendCommand: (method, arguments) async {
         commands.add((method, arguments));
       },
-      symbolFilePicker: () async => r'C:\firmware\motor.axf',
+      firmwareFilePicker: () async => r'C:\firmware\motor.axf',
       csvExportPathPicker: () async => r'C:\capture\samples.csv',
     );
     addTearDown(controller.dispose);
 
-    await controller.chooseSymbolFile();
+    await controller.chooseFirmwareFile();
     final loadCommand = commands.removeAt(0);
-    expect(loadCommand.$1, ControllerCommand.loadSymbols);
+    expect(loadCommand.$1, ControllerCommand.loadFirmware);
     expect((loadCommand.$2 as Map)['path'], r'C:\firmware\motor.axf');
     expect((loadCommand.$2 as Map)['loadId'], isA<String>());
 
     controller.applyBackendEvent(BackendEventType.state, {
       'connectionStatus': 'connected',
-      'symbolFile': r'C:\firmware\motor.axf',
+      'sourceProject': {'firmwarePath': r'C:\firmware\motor.axf'},
+      'firmware': {'status': 'ready'},
       'sampleRateHz': 200,
       'rttSampleRateHz': 1000,
       'samplingPaused': false,

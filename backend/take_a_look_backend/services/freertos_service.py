@@ -78,7 +78,7 @@ class FreeRtosServiceMixin:
             except Exception as error:
                 self._handle_connection_failure_locked(error)
                 snapshot = self._freertos.unavailable('readError', f'内核读取失败：{error}')
-        snapshot = {**snapshot, 'symbolFile': self._symbol_file, 'targetName': self._target_name}
+        snapshot = {**snapshot, 'firmwarePath': self._source_project['firmwarePath'], 'targetName': self._target_name}
         if snapshot.get('status') == 'ready':
             identities = {task['handle']: task.get('taskNumber') for task in snapshot.get('tasks', [])}
             removed = {key for key,(handle,number) in self._freertos_watch_identity.items()

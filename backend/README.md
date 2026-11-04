@@ -20,6 +20,14 @@ lease channels; the same up channel cannot have two readers. A released lease
 closes its remote subscription without stopping other channels, and the last
 release closes the underlying session. Leases cannot be reused after a reset.
 
+The desktop stdio contract is v3. `loadFirmware {path, loadId?}` and
+`setSourceProject {..., firmwarePath, loadId?}` use the same firmware transition.
+`sourceProject.firmwarePath` is the only firmware path and is always absolute in
+backend state. `firmware {status, revision, fingerprint}` carries runtime metadata;
+there is no `symbolFile` field or path fallback. Source settings are persisted only
+in v2 `.talproj` files, with no per-directory profile store or legacy migration.
+See [firmware context](../docs/firmware-context.md).
+
 It is a local stdio process, not a TCP server. It can connect as a client to
 EmberMobile (v2 QUIC with v1 JSON-lines compatibility) and GDB Server. The Flutter connection settings map
 to `setConfig.connectionKind` (`local`, `ember`, `emberGdb`, or `gdb`) and

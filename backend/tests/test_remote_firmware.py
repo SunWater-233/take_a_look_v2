@@ -120,7 +120,7 @@ def test_source_download_over_real_ember_quic_reloads_symbols_only_after_flash(p
         else:
             assert result['status'] == 'succeeded', result
             assert service._watches[new.key].color == '#123456'
-            assert service._symbol_file == str(path)
+            assert service._source_project['firmwarePath'] == str(path)
             assert state['resets'] == state['resumes'] == 1
         assert state['firmware']['received'] == Path(path).stat().st_size
         assert state['firmware']['sha256'] == hashlib.sha256(Path(path).read_bytes()).hexdigest()

@@ -42,7 +42,6 @@ extension TakeALookControllerProject on TakeALookController {
       'compactExpandedWatches': compactExpandedWatches.toList(),
       'compactWatchSummaryFraction': compactWatchSummaryFraction,
       'expandedSymbolTreeNodes': _expandedSymbolTreeNodes.toList(),
-      'sourceRoot': debugState.sourceRoot,
       'requestedBreakpoints': {
         for (final entry in debugState.requestedBreakpoints.entries)
           entry.key: entry.value.toList()..sort(),
@@ -62,10 +61,23 @@ extension TakeALookControllerProject on TakeALookController {
     if (data['symbols'] is! List ||
         data['watches'] is! List ||
         data['sourceProject'] is! Map ||
-        !ControllerSnapshotSchema.projectFields
-            .where((key) => key != 'freeRtosSettings')
-            .every(data.containsKey)) {
+        !ControllerSnapshotSchema.projectFields.every(data.containsKey)) {
       throw const FormatException('项目缺少变量或工程配置。');
+    }
+    final project = data['sourceProject'] as Map;
+    for (final key in const [
+      'sourceRoot',
+      'firmwarePath',
+      'buildCommand',
+      'shell',
+      'afterDownload',
+      'extraPath',
+      'outputEncoding',
+    ]) {
+      final value = project[key];
+      if (value is! String || value.contains('\u0000')) {
+        throw FormatException('项目工程配置无效：$key');
+      }
     }
     for (final key in const [
       'sampleRateHz',
@@ -83,8 +95,6 @@ extension TakeALookControllerProject on TakeALookController {
     final monitorRate = (data['monitorRateHz'] as num).toDouble();
     if (monitorRate < .5 ||
         monitorRate > 10 ||
-        data['sourceRoot'] is! String ||
-        data['symbolFile'] is! String ||
         !const {
           'local',
           'ember',
@@ -182,10 +192,6 @@ extension TakeALookControllerProject on TakeALookController {
     }
     final sender = projectBackendCommand ?? backendCommand;
     if (sender != null) {
-      final path = data['symbolFile'] as String? ?? '';
-      if (path.isNotEmpty && !await File(path).exists()) {
-        throw FormatException('项目符号文件不存在：$path');
-      }
       if (!preserveConnection && targetCatalogRequest != null) {
         await requestTargetCatalog('selectTarget', {
           'name': data['targetName'],
@@ -211,19 +217,16 @@ extension TakeALookControllerProject on TakeALookController {
       await saveSourceProject(
         Map<String, dynamic>.from(data['sourceProject'] as Map),
       );
-      if (path.isNotEmpty) {
-        await loadSymbolsFromPath(path);
-        if (state.symbolLoad?.status == SymbolLoadStatus.failed) {
-          throw const FormatException('项目符号文件加载失败。');
-        }
+      if (firmwarePath.isNotEmpty) {
         final loadedKeys = _symbols.map((s) => s.key).toSet();
         if ((data['watches'] as List).any(
           (w) => !loadedKeys.contains((w as Map)['key']),
         )) {
           throw const FormatException('固件符号已变化，无法恢复项目变量，请使用保存项目时的 ELF / AXF。');
         }
-        settings['symbols'] = [for (final symbol in _symbols) symbol.toJson()];
       }
+      settings['symbols'] = [for (final symbol in _symbols) symbol.toJson()];
+      settings['sourceProject'] = sourceProject.toJson();
       // Await the backend before applying the UI, so a delayed state echo cannot
       // replace the project's variables with the previous watch list.
       final visibleMonitorKeys = <String>{
@@ -281,8 +284,6 @@ extension TakeALookControllerProject on TakeALookController {
     _expandedSymbolTreeNodes
       ..clear()
       ..addAll((data['expandedSymbolTreeNodes'] as List? ?? []).cast<String>());
-    debugState.sourceRoot =
-        data['sourceRoot'] as String? ?? sourceProject.sourceRoot;
     debugState.requestedBreakpoints.clear();
     for (final entry in (data['requestedBreakpoints'] as Map? ?? {}).entries) {
       final lines = (entry.value as List).cast<int>().toSet();

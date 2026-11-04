@@ -36,7 +36,7 @@ for line in sys.stdin:
     history.append(request['method'])
     if request['method'] == 'handshake':
         time.sleep(0.1)
-    print(json.dumps({'v': 2, 'id': request['id'], 'result': {
+    print(json.dumps({'v': 3, 'id': request['id'], 'result': {
         'state': {}, 'history': history}}), flush=True)
     if request['method'] == 'shutdown':
         break
@@ -78,16 +78,16 @@ pending = None
 for line in sys.stdin:
     request = json.loads(line)
     if request['method'] == 'writeWatch':
-        print(json.dumps({'v': 2, 'id': request['id'], 'error': {
+        print(json.dumps({'v': 3, 'id': request['id'], 'error': {
             'code': 'write_failed', 'message': 'readback failed'}}), flush=True)
         continue
     if request['params'].get('defer'):
         pending = request
         continue
-    print(json.dumps({'v': 2, 'id': request['id'], 'result': {
+    print(json.dumps({'v': 3, 'id': request['id'], 'result': {
         'method': request['method'], 'params': request['params'], 'state': {}}}), flush=True)
     if pending is not None:
-        print(json.dumps({'v': 2, 'id': pending['id'], 'result': {
+        print(json.dumps({'v': 3, 'id': pending['id'], 'result': {
             'method': pending['method'], 'params': pending['params']}}), flush=True)
         pending = None
     if request['method'] == 'shutdown':
@@ -118,7 +118,7 @@ for line in sys.stdin:
         reply = {'error': {'code': 'write_failed', 'message': 'readback failed'}}
     else:
         reply = {'result': {'capabilities': ['memoryWriteBatch'], 'state': {}, 'history': history}}
-    print(json.dumps({'v': 2, 'id': request['id'], **reply}), flush=True)
+    print(json.dumps({'v': 3, 'id': request['id'], **reply}), flush=True)
     if method == 'shutdown':
         break
 ''',

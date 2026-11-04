@@ -258,7 +258,7 @@ class BackendServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             symbol_path = Path(directory) / "firmware.axf"
             symbol_path.write_bytes(b"not parsed by injected loader")
-            loaded = self.service.handle(RpcMethod.LOAD_SYMBOLS, {"path": str(symbol_path)})
+            loaded = self.service.handle(RpcMethod.LOAD_FIRMWARE, {"path": str(symbol_path)})
             key = self.symbols[0].key
             self.assertEqual(len(loaded["state"]["symbols"]), 2)  # type: ignore[index]
             self.assertEqual(loaded["state"]["symbols"][0]["section"], ".data")  # type: ignore[index]
@@ -297,7 +297,7 @@ class BackendServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             symbol_path = Path(directory) / "firmware.elf"
             symbol_path.touch()
-            self.service.handle(RpcMethod.LOAD_SYMBOLS, {"path": str(symbol_path)})
+            self.service.handle(RpcMethod.LOAD_FIRMWARE, {"path": str(symbol_path)})
             with self.assertRaisesRegex(ProtocolError, "unknown symbol"):
                 self.service.handle(RpcMethod.SET_WATCHES, {"watches": [{"key": "missing"}]})
             readonly = self.symbols[1].key
@@ -326,7 +326,7 @@ class BackendServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "firmware.elf"
             path.touch()
-            result = self.service.handle(RpcMethod.LOAD_SYMBOLS, {"path": str(path), "loadId": "load-1"})
+            result = self.service.handle(RpcMethod.LOAD_FIRMWARE, {"path": str(path), "loadId": "load-1"})
         progress = [payload for event, payload in self.events if event == EventName.SYMBOL_LOAD_PROGRESS]
         self.assertEqual(progress[0]["phase"], "check")
         self.assertEqual(progress[-1]["phase"], "ui")
@@ -340,7 +340,7 @@ class BackendServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "firmware.elf"
             path.touch()
-            self.service.handle(RpcMethod.LOAD_SYMBOLS, {"path": str(path)})
+            self.service.handle(RpcMethod.LOAD_FIRMWARE, {"path": str(path)})
             self.service.handle(RpcMethod.SET_WATCHES, {"watches": [{"key": self.symbols[0].key}]})
             before = self.service.state_snapshot()
 
@@ -349,7 +349,7 @@ class BackendServiceTests(unittest.TestCase):
 
             self.service._symbol_loader = fail
             with self.assertRaises(ProtocolError) as caught:
-                self.service.handle(RpcMethod.LOAD_SYMBOLS, {"path": str(path), "loadId": "bad"})
+                self.service.handle(RpcMethod.LOAD_FIRMWARE, {"path": str(path), "loadId": "bad"})
             self.assertEqual(caught.exception.code, "symbol_load_failed")
 
             def slow(_path, **_kwargs):
@@ -357,12 +357,12 @@ class BackendServiceTests(unittest.TestCase):
                 return []
 
             self.service._symbol_loader = slow
-            with patch("take_a_look_backend.service.SYMBOL_LOAD_TIMEOUT_SECONDS", 0.01):
+            with patch("take_a_look_backend.services.firmware.SYMBOL_LOAD_TIMEOUT_SECONDS", 0.01):
                 with self.assertRaises(ProtocolError) as caught:
-                    self.service.handle(RpcMethod.LOAD_SYMBOLS, {"path": str(path), "loadId": "slow"})
+                    self.service.handle(RpcMethod.LOAD_FIRMWARE, {"path": str(path), "loadId": "slow"})
             self.assertEqual(caught.exception.code, "symbol_load_timeout")
             after = self.service.state_snapshot()
-            for key in ("symbols", "watches", "symbolFile", "sourceProject", "debug"):
+            for key in ("symbols", "watches", "firmware", "sourceProject", "debug"):
                 self.assertEqual(after[key], before[key])
 
     def test_source_index_failure_remains_a_warning_and_load_completes(self) -> None:
@@ -373,7 +373,7 @@ class BackendServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "firmware.axf"
             path.touch()
-            result = self.service.handle(RpcMethod.LOAD_SYMBOLS, {"path": str(path)})
+            result = self.service.handle(RpcMethod.LOAD_FIRMWARE, {"path": str(path)})
         self.assertEqual(len(result["state"]["symbols"]), 2)
         self.assertEqual(result["state"]["debug"]["sourceFiles"], [])
         self.assertTrue(any(name == EventName.LOG and payload.get("level") == "warning" for name, payload in self.events))
@@ -394,7 +394,7 @@ class BackendServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             symbol_path = Path(directory) / "firmware.elf"
             symbol_path.touch()
-            loaded = self.service.handle(RpcMethod.LOAD_SYMBOLS, {"path": str(symbol_path)})
+            loaded = self.service.handle(RpcMethod.LOAD_FIRMWARE, {"path": str(symbol_path)})
             self.assertEqual(loaded["state"]["debug"]["sourceFiles"], ["C:/firmware/main.c"])  # type: ignore[index]
             self.assertEqual(
                 loaded["state"]["debug"]["executableLines"],  # type: ignore[index]
@@ -428,7 +428,7 @@ class BackendServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             symbol_path = Path(directory) / "firmware.elf"
             symbol_path.touch()
-            self.service.handle(RpcMethod.LOAD_SYMBOLS, {"path": str(symbol_path)})
+            self.service.handle(RpcMethod.LOAD_FIRMWARE, {"path": str(symbol_path)})
             self.service.handle(RpcMethod.CONNECT, {})
 
             added = self.service.handle(

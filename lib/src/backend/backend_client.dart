@@ -40,7 +40,7 @@ class BackendClient {
     this.processStarter,
   });
 
-  static const protocolVersion = 2;
+  static const protocolVersion = 3;
 
   BackendEventHandler? eventHandler;
   final Duration commandTimeout;
@@ -184,7 +184,7 @@ class BackendClient {
     } catch (error) {
       // These operations await completion and own error feedback in the controller.
       if (const {
-        ControllerCommand.loadSymbols,
+        ControllerCommand.loadFirmware,
         ControllerCommand.configureProject,
         ControllerCommand.setSourceProject,
         ControllerCommand.startSourceTask,
@@ -289,7 +289,10 @@ class BackendClient {
       // Listen to the response before yielding for stdin.flush(): a fast
       // protocol error or process exit can arrive while the pipe is flushing.
       final response = completer.future.timeout(
-        method == BackendMethod.loadSymbols
+        const {
+              BackendMethod.loadFirmware,
+              BackendMethod.setSourceProject,
+            }.contains(method)
             ? symbolLoadTimeout
             : const {
                 BackendMethod.listTargets,

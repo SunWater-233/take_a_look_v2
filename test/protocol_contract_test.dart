@@ -10,7 +10,7 @@ void main() {
     final manifest =
         jsonDecode(await File('backend/protocol_manifest.json').readAsString())
             as Map<String, dynamic>;
-    expect(manifest['version'], 2);
+    expect(manifest['version'], 3);
     expect((manifest['methods'] as List).toSet(), {
       for (final method in BackendMethod.values) method.wireName,
     });

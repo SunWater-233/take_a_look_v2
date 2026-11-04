@@ -35,7 +35,7 @@ class UiTestSession extends ChangeNotifier {
        ) {
     controller = TakeALookController(
       backendCommand: _command,
-      symbolFilePicker: () async => 'ui_test_fixture.axf',
+      firmwareFilePicker: () async => 'ui_test_fixture.axf',
       sourceRootPicker: pickSourceRootDirectory,
       csvImportContentsPicker: pickCsvImportContents,
       csvImportPathPicker: pickCsvImportPath,
@@ -116,7 +116,8 @@ void motor_control_tick(void)
       'watches': const [],
       'logs': const [],
       'selectedSymbols': const [],
-      'symbolFile': '',
+      'sourceProject': {'sourceRoot': '', 'firmwarePath': ''},
+      'firmware': {'status': 'empty'},
       'elapsedSeconds': 0,
       'samplingElapsedSeconds': 0,
       'debug': {
@@ -154,12 +155,16 @@ void motor_control_tick(void)
     notifyListeners();
   }
 
-  void _loadFixture({bool dense = false}) {
+  void _loadFixture({
+    bool dense = false,
+    String firmwarePath = 'ui_test_fixture.axf',
+  }) {
     controller.applySnapshot({
       'symbols': _symbols(
         dense: dense,
       ).map((symbol) => symbol.toJson()).toList(),
-      'symbolFile': 'ui_test_fixture.axf',
+      'sourceProject': {'firmwarePath': firmwarePath},
+      'firmware': {'status': 'ready'},
     });
     _debug(
       controller.connectionStatus == ConnectionStatus.connected
@@ -171,7 +176,7 @@ void motor_control_tick(void)
   Future<void> simulateLoad({bool fail = false}) async {
     if (_disposed || controller.isSymbolLoading) return;
     _failNextLoad = fail;
-    await controller.loadSymbolsFromPath('ui_test_fixture.axf');
+    await controller.loadFirmware('ui_test_fixture.axf');
   }
 
   void injectDisconnect() {
@@ -230,7 +235,7 @@ void motor_control_tick(void)
         controller.applySnapshot({'connectionStatus': 'connected'});
         _debug('running');
         controller.addLog('已连接模拟探针。');
-      case BackendMethod.loadSymbols:
+      case BackendMethod.loadFirmware:
         final fail = _failNextLoad;
         _failNextLoad = false;
         for (final phase in [
@@ -257,8 +262,22 @@ void motor_control_tick(void)
             );
           }
         }
-        _loadFixture(dense: scenario == UiTestScenario.dense);
+        _loadFixture(
+          dense: scenario == UiTestScenario.dense,
+          firmwarePath: call!.params['path'] as String,
+        );
         controller.addLog('模拟符号加载完成。');
+      case BackendMethod.setSourceProject:
+        controller.applySnapshot({'sourceProject': call!.params});
+        if (controller.firmwarePath.isNotEmpty) {
+          _loadFixture(firmwarePath: controller.firmwarePath);
+        } else {
+          controller.applySnapshot({
+            'firmware': {'status': 'empty'},
+            'symbols': [],
+            'watches': [],
+          });
+        }
       case BackendMethod.setConfig:
         controller.applySnapshot(call!.params);
       case BackendMethod.setSamplingPaused:

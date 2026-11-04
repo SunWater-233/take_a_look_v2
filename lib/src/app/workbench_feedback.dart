@@ -354,7 +354,7 @@ String _backendErrorTitle(Map<String, dynamic> error) =>
       'unsupported_symbol_file' ||
       'symbol_load_failed' ||
       'symbol_load_timeout' => '读取失败',
-      'timeout' when error['operation'] == 'loadSymbols' => '读取失败',
+      'timeout' when error['operation'] == 'loadFirmware' => '读取失败',
       'write_failed' || 'readonly_symbol' || 'unknown_watch' => '写入失败',
       'reset_failed' => '目标复位失败',
       'no_samples' => '导出失败',

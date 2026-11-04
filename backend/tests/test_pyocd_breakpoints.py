@@ -147,7 +147,7 @@ def test_running_breakpoint_rpc_programs_fpb_and_reports_stop(pyocd_backend, tmp
         ]),
     )
     try:
-        service.handle(RpcMethod.LOAD_SYMBOLS, {"path": str(elf)})
+        service.handle(RpcMethod.LOAD_FIRMWARE, {"path": str(elf)})
         service.handle(RpcMethod.CONNECT, {})
         result = service.handle(RpcMethod.SET_BREAKPOINTS, {"path": path, "lines": [12]})
         assert result["debug"]["breakpoints"][0]["verified"]

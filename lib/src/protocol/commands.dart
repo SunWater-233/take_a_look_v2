@@ -14,7 +14,7 @@ enum ControllerCommand {
   cancelSourceTask,
   clearSourceOutput,
   toggleConnection,
-  loadSymbols,
+  loadFirmware,
   setSampleRate,
   setMonitorRate,
   setDisplayRefreshMode,
@@ -110,7 +110,7 @@ enum BackendMethod {
   connect,
   toggleConnection,
   disconnect,
-  loadSymbols,
+  loadFirmware,
   setConfig,
   setWatches,
   setMonitorVisibility,
@@ -181,9 +181,9 @@ class BackendCommandMapper {
         return null;
       case ControllerCommand.toggleConnection:
         return const BackendCall(BackendMethod.toggleConnection);
-      case ControllerCommand.loadSymbols:
+      case ControllerCommand.loadFirmware:
         return BackendCall(
-          BackendMethod.loadSymbols,
+          BackendMethod.loadFirmware,
           arguments is Map
               ? Map<String, Object?>.from(arguments)
               : {'path': arguments},

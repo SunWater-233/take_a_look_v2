@@ -21,9 +21,7 @@ class _SourceBuildToolbar extends StatelessWidget {
         final connected =
             controller.connectionStatus == ConnectionStatus.connected;
         final configured = project.canBuild;
-        final firmwarePath = project.firmwarePath.trim().isNotEmpty
-            ? project.firmwarePath.trim()
-            : controller.symbolFile.trim();
+        final firmwarePath = controller.firmwarePath;
         final canDownload =
             supportsDownload && connected && firmwarePath.isNotEmpty;
         final iconsOnly = compact || constraints.maxWidth < 440;
@@ -150,25 +148,32 @@ class _SourceBuildToolbar extends StatelessWidget {
             ),
           ),
         );
-        return Container(
-          decoration: const BoxDecoration(
-            border: Border(bottom: BorderSide(color: TalColors.borderSoft)),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-          child: !iconsOnly && constraints.maxWidth < 620
-              ? Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    projectButton,
-                    Align(alignment: Alignment.centerRight, child: actions),
-                  ],
-                )
-              : Row(
-                  children: [
-                    Expanded(child: projectButton),
-                    actions,
-                  ],
-                ),
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            FirmwareNotice(controller: controller),
+            Container(
+              decoration: const BoxDecoration(
+                border: Border(bottom: BorderSide(color: TalColors.borderSoft)),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+              child: !iconsOnly && constraints.maxWidth < 620
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        projectButton,
+                        Align(alignment: Alignment.centerRight, child: actions),
+                      ],
+                    )
+                  : Row(
+                      children: [
+                        Expanded(child: projectButton),
+                        actions,
+                      ],
+                    ),
+            ),
+          ],
         );
       },
     ),
@@ -198,11 +203,7 @@ class _SourceProjectDialogState extends State<SourceProjectDialog> {
     final project = widget.controller.sourceProject;
     _root = TextEditingController(text: project.sourceRoot);
     _command = TextEditingController(text: project.buildCommand);
-    _firmware = TextEditingController(
-      text: project.firmwarePath.trim().isNotEmpty
-          ? project.firmwarePath
-          : widget.controller.symbolFile,
-    );
+    _firmware = TextEditingController(text: project.firmwarePath);
     _extraPath = TextEditingController(text: project.extraPath);
     _shell = project.shell;
     _after = project.afterDownload;
@@ -235,8 +236,10 @@ class _SourceProjectDialogState extends State<SourceProjectDialog> {
         'extraPath': _extraPath.text.trim(),
         'outputEncoding': _encoding,
       });
-      if (mounted) Navigator.of(context).pop();
-      await controller.loadSourceProjectSymbols();
+      if (mounted) {
+        final route = ModalRoute.of(context);
+        if (route != null) Navigator.of(context).removeRoute(route);
+      }
     } on Object catch (error) {
       if (mounted) {
         setState(() {
@@ -250,7 +253,7 @@ class _SourceProjectDialogState extends State<SourceProjectDialog> {
   Future<void> _pick(bool root) async {
     final picker = root
         ? widget.controller.sourceRootPicker ?? pickSourceRootDirectory
-        : widget.controller.symbolFilePicker ?? pickSymbolFile;
+        : widget.controller.firmwareFilePicker ?? pickFirmwareFile;
     final path = await picker();
     if (!mounted || path == null) return;
     setState(() => (root ? _root : _firmware).text = path);
@@ -427,7 +430,7 @@ class _SourceProjectDialogState extends State<SourceProjectDialog> {
                   ),
                   const SizedBox(height: 7),
                   const Text(
-                    'ELF / AXF；相对路径基于源码根目录，下载时必填。',
+                    'ELF / AXF；相对路径基于源码根目录，保存后统一为绝对路径。',
                     style: talMuted,
                     textAlign: TextAlign.left,
                   ),

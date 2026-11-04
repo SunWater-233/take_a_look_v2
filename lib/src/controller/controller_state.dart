@@ -29,6 +29,11 @@ class ControllerState {
   final SourceWorkspaceState sourceWorkspace = SourceWorkspaceState();
   final SourceProjectConfig sourceProject = SourceProjectConfig();
   final SourceTaskState sourceTask = SourceTaskState();
+  Map<String, dynamic> firmware = {
+    'status': 'empty',
+    'revision': 0,
+    'fingerprint': '',
+  };
   SymbolLoadProgress? symbolLoad;
 }
 
@@ -92,7 +97,6 @@ class DebugState {
   int? currentLine;
   int? programCounter;
   int stopRevision = 0;
-  String sourceRoot = '';
 }
 
 class ConnectionState {
@@ -123,7 +127,6 @@ class ConnectionState {
     'core': '0',
     'rttDelivery': 'reliable',
   };
-  String symbolFile = '';
   Map<String, dynamic>? lastError;
 }
 

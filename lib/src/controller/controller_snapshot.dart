@@ -125,7 +125,6 @@ extension TakeALookControllerSnapshot on TakeALookController {
     final hasConnectionState = ControllerSnapshotSchema.containsDomain(
       data,
       SnapshotDomain.connection,
-      except: {SnapshotField.symbolFile},
     );
     final hasSamplingState = ControllerSnapshotSchema.containsDomain(
       data,
@@ -134,7 +133,6 @@ extension TakeALookControllerSnapshot on TakeALookController {
     final hasSymbolState = ControllerSnapshotSchema.containsDomain(
       data,
       SnapshotDomain.symbols,
-      except: {SnapshotField.symbolFile},
       include: {SnapshotField.symbols},
     );
     final hasWatchState = ControllerSnapshotSchema.containsDomain(
@@ -220,7 +218,9 @@ extension TakeALookControllerSnapshot on TakeALookController {
             )
           : null;
     }
-    symbolFile = data['symbolFile'] as String? ?? symbolFile;
+    if (data['firmware'] case final Map firmware) {
+      state.firmware = Map<String, dynamic>.from(firmware);
+    }
     sampleRateHz = (data['sampleRateHz'] as num?)?.toDouble() ?? sampleRateHz;
     monitorRateHz =
         (data['monitorRateHz'] as num?)?.toDouble() ?? monitorRateHz;
@@ -446,7 +446,6 @@ extension TakeALookControllerSnapshot on TakeALookController {
     }
     if (data['sourceProject'] case final Map project) {
       sourceProject.applyJson(Map<String, dynamic>.from(project));
-      debugState.sourceRoot = sourceProject.sourceRoot;
     }
     if (data['sourceTask'] case final Map task) {
       sourceTask.applyJson(Map<String, dynamic>.from(task));

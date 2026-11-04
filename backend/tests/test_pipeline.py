@@ -133,10 +133,10 @@ def test_csv_export_does_not_block_following_control_requests():
             pass
     server._service = FakeService()
     try:
-        server._handle_line(json.dumps({"v": 2, "id": 1, "method": "exportCsv",
+        server._handle_line(json.dumps({"v": 3, "id": 1, "method": "exportCsv",
                                       "params": {"path": "fixture.csv"}}))
         assert entered.wait(1)
-        server._handle_line(json.dumps({"v": 2, "id": 2, "method": "getState", "params": {}}))
+        server._handle_line(json.dumps({"v": 3, "id": 2, "method": "getState", "params": {}}))
         server._output_worker.drain()
         responses = [json.loads(line) for line in output.getvalue().splitlines()]
         assert [r["id"] for r in responses] == [2]

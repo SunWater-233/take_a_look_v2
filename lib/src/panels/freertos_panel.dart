@@ -293,9 +293,10 @@ class _FreeRtosPanelState extends State<FreeRtosPanel> {
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 18),
-          if (data.status == 'symbolsRequired' || controller.symbolFile.isEmpty)
+          if (data.status == 'symbolsRequired' ||
+              !controller.hasFirmwareSymbols)
             TalButton(
-              onPressed: controller.chooseSymbolFile,
+              onPressed: controller.chooseFirmwareFile,
               child: const Text('加载 ELF / AXF'),
             ),
           if (data.status == 'targetRunning' &&
@@ -1194,7 +1195,7 @@ class _FreeRtosPanelState extends State<FreeRtosPanel> {
           const JsonEncoder.withIndent('  ').convert({
             'format': 'take-a-look-freertos',
             'formatVersion': 1,
-            'symbolFile': controller.symbolFile,
+            'firmwarePath': controller.firmwarePath,
             'connectionKind': controller.connectionKind,
             'offline': offline,
             ...data.data,

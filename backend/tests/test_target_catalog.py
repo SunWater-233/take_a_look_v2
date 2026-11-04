@@ -378,9 +378,9 @@ def test_denied_selection_returns_rpc_error_and_keeps_backend_responsive(tmp_pat
     try:
         with patch("tempfile.mkstemp", side_effect=AssertionError("unbounded retry")), \
                 patch.object(Path, "open", side_effect=PermissionError("directory is not writable")):
-            server._handle_line('{"v":2,"id":1,"method":"selectTarget","params":{"name":"auto"}}')
+            server._handle_line('{"v":3,"id":1,"method":"selectTarget","params":{"name":"auto"}}')
             server._catalog_worker.submit(lambda: None).result(timeout=2)
-        server._handle_line('{"v":2,"id":2,"method":"getState"}')
+        server._handle_line('{"v":3,"id":2,"method":"getState"}')
         server._output_worker.drain()
         replies = {message["id"]: message for line in output.getvalue().splitlines()
                    if "id" in (message := json.loads(line))}
@@ -526,9 +526,9 @@ def test_pack_worker_does_not_block_control_requests(tmp_path, monkeypatch):
         return {"targetCount": 1}
     try:
         with patch.object(server._service._targets, "inspect", side_effect=inspect):
-            server._handle_line(json.dumps({"v": 2, "id": 1, "method": "inspectTargetPack", "params": {"path": "test.pack"}}))
+            server._handle_line(json.dumps({"v": 3, "id": 1, "method": "inspectTargetPack", "params": {"path": "test.pack"}}))
             assert entered.wait(1)
-            server._handle_line('{"v":2,"id":2,"method":"getState"}')
+            server._handle_line('{"v":3,"id":2,"method":"getState"}')
             server._output_worker.drain()
             assert any(json.loads(line).get("id") == 2 for line in output.getvalue().splitlines())
             assert not any(json.loads(line).get("id") == 1 for line in output.getvalue().splitlines())

@@ -5,7 +5,7 @@ import time
 
 
 def send(message):
-    print(json.dumps({"v": 2, **message}), flush=True)
+    print(json.dumps({"v": 3, **message}), flush=True)
 
 
 for line in sys.stdin:
@@ -13,7 +13,7 @@ for line in sys.stdin:
     method = request["method"]
     if method == "handshake":
         send({"id": request["id"], "result": {"state": {"connectionStatus": "disconnected"}}})
-    elif method == "loadSymbols":
+    elif method == "loadFirmware":
         params = request["params"]
         if params["path"] == "broken.elf":
             print("{invalid JSON}", flush=True)
@@ -24,7 +24,7 @@ for line in sys.stdin:
             "loadId": params["loadId"], "phase": "debug", "current": 96, "total": 160,
         }})
         time.sleep(3.2)
-        state = {"symbolFile": params["path"], "symbols": [], "debug": {"sourceFiles": ["main.c"]}}
+        state = {"sourceProject": {"firmwarePath": params["path"]}, "firmware": {"status": "ready"}, "symbols": [], "debug": {"sourceFiles": ["main.c"]}}
         send({"event": "state", "params": state})
         send({"id": request["id"], "result": {"state": state}})
     elif method == "getState":

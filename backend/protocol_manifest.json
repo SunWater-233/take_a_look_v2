@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "methods": [
     "ember",
     "listTargets",
@@ -14,7 +14,7 @@
     "connect",
     "toggleConnection",
     "disconnect",
-    "loadSymbols",
+    "loadFirmware",
     "setConfig",
     "setWatches",
     "setMonitorVisibility",

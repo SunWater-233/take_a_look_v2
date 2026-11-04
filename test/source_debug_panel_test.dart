@@ -182,7 +182,8 @@ void main() {
     expect(find.text('选择要查看的源码'), findsOneWidget);
 
     controller.applySnapshot({
-      'symbolFile': 'firmware.axf',
+      'sourceProject': {'firmwarePath': 'firmware.axf'},
+      'firmware': {'status': 'ready'},
       'symbols': <Object?>[],
     });
     controller.setSourceRoot(sourceRoot.path);
@@ -209,7 +210,7 @@ void main() {
 
     expect(sourceView, findsOneWidget);
     expect(find.textContaining('mapped_source'), findsWidgets);
-    expect(controller.debugState.sourceRoot, sourceRoot.path);
+    expect(controller.sourceProject.sourceRoot, sourceRoot.path);
 
     await tester.tap(find.byKey(const ValueKey('source-tab-close-$debugPath')));
     controller.selectSymbols(const []);

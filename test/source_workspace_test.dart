@@ -60,10 +60,9 @@ void main() {
         final controller = fixture.controller;
         final expectedPath = useSourceRoot ? 'control.c' : fixture.control;
         if (useSourceRoot) {
-          controller.applyDebugState({
-            'executionState': 'running',
-            'sourceFiles': <String>[],
-            'sourceRoot': File(fixture.control).parent.path,
+          controller.applySnapshot({
+            'sourceProject': {'sourceRoot': File(fixture.control).parent.path},
+            'debug': {'executionState': 'running', 'sourceFiles': <String>[]},
           });
         }
         controller.openSourceFile(fixture.main);

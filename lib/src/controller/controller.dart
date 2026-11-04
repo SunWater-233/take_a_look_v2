@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -33,6 +32,7 @@ part 'controller_snapshot.dart';
 part 'controller_sync.dart';
 part 'controller_telemetry.dart';
 part 'controller_connection.dart';
+part 'controller_firmware.dart';
 part 'controller_plot.dart';
 part 'controller_analysis.dart';
 part 'controller_watch.dart';
@@ -61,7 +61,7 @@ class TakeALookController extends ChangeNotifier {
     this.remoteCommand,
     this.backendCommand,
     this.projectBackendCommand,
-    this.symbolFilePicker,
+    this.firmwareFilePicker,
     this.sourceRootPicker,
     this.csvExportPathPicker,
     this.csvImportContentsPicker,
@@ -88,7 +88,7 @@ class TakeALookController extends ChangeNotifier {
   final RemoteCommand? remoteCommand;
   final BackendCommand? backendCommand;
   final BackendCommand? projectBackendCommand;
-  final PathPicker? symbolFilePicker;
+  final PathPicker? firmwareFilePicker;
   final PathPicker? sourceRootPicker;
   final PathPicker? csvExportPathPicker;
   final TextFilePicker? csvImportContentsPicker;
@@ -113,7 +113,7 @@ class TakeALookController extends ChangeNotifier {
   final Set<String> _selectedSymbols = <String>{};
   final Set<String> _expandedSymbolTreeNodes = <String>{};
   int _symbolRevision = 0;
-  bool _pickingSymbolFile = false;
+  bool _pickingFirmwareFile = false;
   bool _restoringProject = false;
   bool get isProjectRestoring => _restoringProject;
   int _nextSymbolLoadId = 0;
@@ -181,8 +181,9 @@ class TakeALookController extends ChangeNotifier {
   bool get supportsTargetControl => state.connection.capabilities.targetControl;
   bool get supportsFirmwareDownload =>
       state.connection.capabilities.firmwareDownload;
-  String get symbolFile => state.connection.symbolFile;
-  set symbolFile(String value) => state.connection.symbolFile = value;
+  String get firmwarePath => sourceProject.firmwarePath;
+  bool get hasFirmwareSymbols =>
+      const {'ready', 'stale'}.contains(state.firmware['status']);
   Map<String, dynamic>? get lastBackendError => state.connection.lastError;
   set lastBackendError(Map<String, dynamic>? value) =>
       state.connection.lastError = value;

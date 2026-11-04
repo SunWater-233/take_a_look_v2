@@ -15,7 +15,6 @@ enum SnapshotDomain {
 }
 
 /// A field's wire name, revision ownership, and project inclusion live together.
-/// Wire names and the project format remain compatible with existing files.
 enum SnapshotField {
   freeRtos({SnapshotDomain.freeRtos}),
   freeRtosSettings({SnapshotDomain.freeRtos}, persistInProject: true),
@@ -33,10 +32,7 @@ enum SnapshotField {
   connectionCapabilities({SnapshotDomain.connection}),
   gatewayProtocolVersion({SnapshotDomain.connection}),
   remoteConfig({SnapshotDomain.connection}, persistInProject: true),
-  symbolFile({
-    SnapshotDomain.connection,
-    SnapshotDomain.symbols,
-  }, persistInProject: true),
+  firmware({SnapshotDomain.symbols, SnapshotDomain.debug}),
   symbolLoad({}),
   sampleRateHz({SnapshotDomain.sampling}, persistInProject: true),
   monitorRateHz({SnapshotDomain.sampling}, persistInProject: true),
@@ -75,7 +71,11 @@ enum SnapshotField {
   logs({SnapshotDomain.logs}),
   analysisSession({SnapshotDomain.analysis}, persistInProject: true),
   sourceWorkspace({SnapshotDomain.sourceWorkspace}, persistInProject: true),
-  sourceProject({SnapshotDomain.sourceTools}, persistInProject: true),
+  sourceProject({
+    SnapshotDomain.sourceTools,
+    SnapshotDomain.symbols,
+    SnapshotDomain.debug,
+  }, persistInProject: true),
   sourceTask({SnapshotDomain.sourceTools}),
   debug({SnapshotDomain.debug});
 

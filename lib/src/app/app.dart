@@ -85,7 +85,7 @@ class _TakeALookAppState extends State<TakeALookApp> with WindowListener {
           freeRtosRequest: client.freeRtosRequest,
           emberRequest: client.emberRequest,
           targetPackPicker: pickTargetPack,
-          symbolFilePicker: pickSymbolFile,
+          firmwareFilePicker: pickFirmwareFile,
           sourceRootPicker: pickSourceRootDirectory,
           csvExportPathPicker: pickCsvExportPath,
           csvImportContentsPicker: pickCsvImportContents,

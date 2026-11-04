@@ -84,7 +84,7 @@ class ControllerSnapshotCodec {
     SnapshotField.remoteConfig => Map<String, String>.from(
       source.state.connection.remoteConfig,
     ),
-    SnapshotField.symbolFile => source.state.connection.symbolFile,
+    SnapshotField.firmware => Map<String, dynamic>.of(source.state.firmware),
     SnapshotField.symbolLoad => source.state.symbolLoad!.toJson(),
     SnapshotField.sampleRateHz => source.state.acquisition.sampleRateHz,
     SnapshotField.monitorRateHz => source.state.acquisition.monitorRateHz,
@@ -168,7 +168,6 @@ class ControllerSnapshotCodec {
               for (final definition in source.state.debug.sourceDefinitions)
                 definition.toJson(),
             ],
-      'sourceRoot': source.state.debug.sourceRoot,
       'executableLines': {
         for (final entry in source.state.debug.executableLines.entries)
           entry.key: entry.value.toList()..sort(),

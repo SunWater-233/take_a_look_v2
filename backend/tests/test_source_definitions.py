@@ -106,11 +106,11 @@ def test_symbol_load_and_get_debug_info_publish_definitions_and_clear_old_sites(
         debug_info_loader=lambda *_args, **_kwargs: DebugInfoIndex(definitions=[definition]),
     )
     try:
-        loaded = service.handle(RpcMethod.LOAD_SYMBOLS, {"path": str(elf)})
+        loaded = service.handle(RpcMethod.LOAD_FIRMWARE, {"path": str(elf)})
         assert loaded["state"]["debug"]["sourceDefinitions"] == [definition.to_json()]
         assert service.handle(RpcMethod.GET_DEBUG_INFO, {})["debug"]["sourceDefinitions"] == [definition.to_json()]
         service._debug_info_loader = lambda *_args, **_kwargs: DebugInfoIndex()
-        reloaded = service.handle(RpcMethod.LOAD_SYMBOLS, {"path": str(elf)})
+        reloaded = service.handle(RpcMethod.LOAD_FIRMWARE, {"path": str(elf)})
         assert reloaded["state"]["debug"]["sourceDefinitions"] == []
     finally:
         service.close()

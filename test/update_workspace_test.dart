@@ -67,7 +67,6 @@ void main() {
       controller.addSelectedToWatch();
       controller.watchInputDrafts[demoSymbols.first.key] = '123.456';
       controller.sampleRateHz = 500;
-      controller.symbolFile = '';
       var saved = false;
       final saving = workspace
           .saveUpdateSession(session)
@@ -86,8 +85,15 @@ void main() {
       controller.dispose();
       final commands = <ControllerCommand>[];
       controller = TakeALookController(
-        backendCommand: (command, _) async {
+        backendCommand: (command, arguments) async {
           commands.add(command);
+          if (command == ControllerCommand.setSourceProject) {
+            controller.applySnapshot({
+              'sourceProject': arguments,
+              'firmware': {'status': 'ready'},
+              'symbols': [for (final symbol in demoSymbols) symbol.toJson()],
+            });
+          }
         },
       );
       sync = MainWindowSync(controller);

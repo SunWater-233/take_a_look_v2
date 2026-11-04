@@ -25,6 +25,7 @@ import '../theme/theme.dart';
 
 import 'shared_controls.dart';
 import 'panel_frame.dart';
+import 'firmware_notice.dart';
 import 'source_file_drag_data.dart';
 
 part 'source_build_tools.dart';
@@ -264,12 +265,12 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
   void _handleDebugChange() {
     if (!mounted) return;
     final sourceRootChanged =
-        _observedSourceRoot != controller.debugState.sourceRoot;
+        _observedSourceRoot != controller.sourceProject.sourceRoot;
     if (sourceRootChanged) {
       _sourcePeek = null;
       _references.cancel();
       _navigation.clear();
-      _observedSourceRoot = controller.debugState.sourceRoot;
+      _observedSourceRoot = controller.sourceProject.sourceRoot;
       _resolvedSourcePaths.clear();
       _sourceDocuments.clear();
       _sourceDocuments.clearIndex();
@@ -378,7 +379,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
   }) {
     return _sourceDocuments.read(
       path,
-      sourceRoot: controller.debugState.sourceRoot,
+      sourceRoot: controller.sourceProject.sourceRoot,
       localPath: localPath,
     );
   }
@@ -646,7 +647,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
 
   Future<List<SourceSearchFile>> _getSearchFiles() => _search.files(
     sourcePaths: [..._sourceFiles, ..._openPaths],
-    sourceRoot: controller.debugState.sourceRoot,
+    sourceRoot: controller.sourceProject.sourceRoot,
   );
 
   Future<SourceSearchText?> _readSearchDocument(SourceSearchFile file) async {
@@ -894,7 +895,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     if (includeName == null) return null;
     final sourceFile = await _sourceDocuments.resolve(
       sourcePath,
-      controller.debugState.sourceRoot,
+      controller.sourceProject.sourceRoot,
     );
     final candidates = <String>[];
     if (await File(sourceFile).exists()) {
@@ -903,7 +904,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
         '$parent${Platform.pathSeparator}${includeName.replaceAll('/', Platform.pathSeparator)}',
       );
     }
-    final root = controller.debugState.sourceRoot;
+    final root = controller.sourceProject.sourceRoot;
     if (root.isNotEmpty) {
       candidates.add(
         '$root${Platform.pathSeparator}${includeName.replaceAll('/', Platform.pathSeparator)}',
@@ -1430,10 +1431,10 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     ];
     final rootPicker = _DebugToolbarButton(
       key: const ValueKey('source-root-picker'),
-      tooltip: controller.debugState.sourceRoot.isEmpty
+      tooltip: controller.sourceProject.sourceRoot.isEmpty
           ? '设置工程源码根目录'
-          : '工程源码根目录：${controller.debugState.sourceRoot}',
-      icon: controller.debugState.sourceRoot.isEmpty
+          : '工程源码根目录：${controller.sourceProject.sourceRoot}',
+      icon: controller.sourceProject.sourceRoot.isEmpty
           ? Icons.folder_open_outlined
           : Icons.folder_special_outlined,
       onPressed: controller.sourceTask.running
@@ -1683,16 +1684,18 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
   }
 
   List<Widget> _buildSourceSetupActions() {
-    final symbolFile = controller.symbolFile;
-    final sourceRoot = controller.debugState.sourceRoot;
-    final hasSymbolFile = symbolFile.isNotEmpty;
+    final firmwarePath = controller.firmwarePath;
+    final sourceRoot = controller.sourceProject.sourceRoot;
+    final hasSymbolFile = controller.hasFirmwareSymbols;
     final hasSourceRoot = sourceRoot.isNotEmpty;
     return [
       Tooltip(
-        message: hasSymbolFile ? '$symbolFile\n点击更换符号文件' : '打开 ELF / AXF 符号文件',
+        message: hasSymbolFile
+            ? '$firmwarePath\n点击更换符号文件'
+            : '打开 ELF / AXF 符号文件',
         child: TalButton.icon(
           key: const ValueKey('source-symbol-file-button'),
-          onPressed: controller.chooseSymbolFile,
+          onPressed: controller.chooseFirmwareFile,
           style: hasSymbolFile ? talSuccessOutlinedButtonStyle : null,
           icon: Icon(
             hasSymbolFile

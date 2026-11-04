@@ -160,7 +160,7 @@ void main() {
       project.remove('freeRtosSettings');
       expect(
         () => TakeALookControllerProject.validateProjectSettings(project),
-        returnsNormally,
+        throwsFormatException,
       );
       expect(FreeRtosSnapshot().number('nonIdlePercent'), isNull);
     },

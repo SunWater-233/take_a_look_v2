@@ -35,26 +35,26 @@ with tempfile.TemporaryDirectory(prefix="tal package test ") as temporary:
     report = json.loads(command(launcher, "--backend", "--self-test", env=environment, cwd=root))
     assert report["ok"] and report["checks"]["rpc"] == "ok", report
     assert report["checks"]["bundled_target_prefixes"] == ["stm32f103", "stm32f407", "stm32h723"]
-    requests = '\n'.join(json.dumps({"v": 2, "id": index, "method": method, "params": {}})
+    requests = '\n'.join(json.dumps({"v": 3, "id": index, "method": method, "params": {}})
                          for index, method in enumerate(("handshake", "getState", "shutdown"), 1)) + '\n'
     responses = [json.loads(line) for line in command(
         launcher, "--backend", input=requests, env=environment, cwd=root).splitlines()]
     replies = {message["id"]: message for message in responses if "id" in message}
-    assert replies[1]["result"]["protocolVersion"] == 2
+    assert replies[1]["result"]["protocolVersion"] == 3
     assert replies[2]["result"]["state"]["connectionStatus"] == "disconnected"
     assert "error" not in replies[3]
 
     # A clean HOME has the shipped devices immediately, without importing or
     # downloading packs. Exercise exact pack selection through the real RPC.
     listing = command(launcher, "--backend", input=json.dumps(
-        {"v": 2, "id": 1, "method": "listTargets", "params": {}}) + '\n', env=environment, cwd=root)
+        {"v": 3, "id": 1, "method": "listTargets", "params": {}}) + '\n', env=environment, cwd=root)
     catalog = next(json.loads(line)["result"] for line in listing.splitlines() if json.loads(line).get("id") == 1)
     bundled_ids = {pack["id"] for pack in catalog["packs"] if pack.get("bundled")}
     assert len(bundled_ids) == 3
     for prefix in ("stm32f103", "stm32f407", "stm32h723"):
         chip = next(t for t in catalog["targets"] if t["packId"] in bundled_ids and t["name"].startswith(prefix))
         selected = command(launcher, "--backend", input=json.dumps(
-            {"v": 2, "id": 1, "method": "selectTarget", "params": {"name": chip["name"], "packId": chip["packId"]}})
+            {"v": 3, "id": 1, "method": "selectTarget", "params": {"name": chip["name"], "packId": chip["packId"]}})
             + '\n', env=environment, cwd=root)
         result = next(json.loads(line)["result"] for line in selected.splitlines() if json.loads(line).get("id") == 1)
         assert result["state"]["targetPackId"] == chip["packId"] and not result["state"]["targetPackMissing"]

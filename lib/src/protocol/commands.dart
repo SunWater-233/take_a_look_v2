@@ -5,6 +5,10 @@ typedef JsonObject = Map<String, Object?>;
 /// Detached windows still cross a platform-channel boundary as strings, but
 /// strings are converted to this closed set immediately at the boundary.
 enum ControllerCommand {
+  configureFreeRtos,
+  setFreeRtosViewVisible,
+  setFreeRtosSettings,
+  addFreeRtosWatch,
   setSourceProject,
   startSourceTask,
   cancelSourceTask,
@@ -87,6 +91,9 @@ enum ControllerCommand {
 
 /// Commands implemented by the Python hardware process.
 enum BackendMethod {
+  configureFreeRtos,
+  addFreeRtosWatch,
+  getFreeRtosStack,
   ember,
   listTargets,
   onlineTargetPacks,
@@ -140,6 +147,19 @@ class BackendCommandMapper {
     JsonObject backendState,
   ) {
     switch (command) {
+      case ControllerCommand.configureFreeRtos:
+        return BackendCall(
+          BackendMethod.configureFreeRtos,
+          Map<String, Object?>.from(arguments! as Map),
+        );
+      case ControllerCommand.addFreeRtosWatch:
+        return BackendCall(
+          BackendMethod.addFreeRtosWatch,
+          Map<String, Object?>.from(arguments! as Map),
+        );
+      case ControllerCommand.setFreeRtosViewVisible:
+      case ControllerCommand.setFreeRtosSettings:
+        return null;
       case ControllerCommand.configureProject:
         return BackendCall(
           BackendMethod.setConfig,

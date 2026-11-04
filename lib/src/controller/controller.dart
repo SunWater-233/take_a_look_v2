@@ -19,6 +19,7 @@ import '../models/demo_data.dart';
 import '../models/models.dart';
 import '../models/connection_capabilities.dart';
 import '../models/source_tools.dart';
+import '../models/freertos.dart';
 import '../protocol/commands.dart';
 import '../protocol/events.dart';
 import '../telemetry/telemetry_store.dart';
@@ -40,6 +41,7 @@ part 'controller_source_workspace.dart';
 part 'controller_source_tools.dart';
 part 'controller_targets.dart';
 part 'controller_project.dart';
+part 'controller_freertos.dart';
 
 typedef RemoteCommand =
     Future<void> Function(ControllerCommand command, Object? arguments);
@@ -65,6 +67,7 @@ class TakeALookController extends ChangeNotifier {
     this.csvImportContentsPicker,
     this.csvImportPathPicker,
     this.targetCatalogRequest,
+    this.freeRtosRequest,
     this.emberRequest,
     this.targetPackPicker,
     HistoryReader? historyReader,
@@ -91,6 +94,7 @@ class TakeALookController extends ChangeNotifier {
   final TextFilePicker? csvImportContentsPicker;
   final PathPicker? csvImportPathPicker;
   final TargetCatalogRequest? targetCatalogRequest;
+  final TargetCatalogRequest? freeRtosRequest;
   final TargetCatalogRequest? emberRequest;
   final PathPicker? targetPackPicker;
   final List<SymbolItem> _symbols = <SymbolItem>[];
@@ -139,6 +143,8 @@ class TakeALookController extends ChangeNotifier {
   bool _watchMonitorVisibilityKnown = false;
   bool _watchMonitorSyncPending = false;
   final Map<String, Set<String>?> _pendingRemoteMonitorScopes = {};
+  final Set<String> _freeRtosViews = {};
+  bool _freeRtosConfigPending = false;
   Set<String>? _lastMonitorEnabledKeys;
   ({String path, int line})? sourceLocationRequest;
   int _analysisDataRevision = 0;

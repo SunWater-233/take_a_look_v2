@@ -54,6 +54,9 @@ class SamplingServiceMixin:
                         next_memory_at = next_rtt_at = now
                         previous_periods = periods
                     elapsed = self._elapsed_locked(now)
+                    self._poll_freertos_locked(now, connected)
+                    if self._freertos_enabled:
+                        deadlines.append(self._next_freertos_at)
                     rtt_enabled = self._rtt_enabled
                     rtt_protocol = self._rtt_protocol
                     if self._pipeline.backpressure:

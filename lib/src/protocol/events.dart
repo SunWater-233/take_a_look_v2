@@ -1,4 +1,5 @@
 enum BackendEventType {
+  freeRtos,
   state,
   samples,
   watchValues,

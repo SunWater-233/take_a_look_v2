@@ -15,6 +15,24 @@ Future<JsonObject> executeControllerCommand(
   bool includeResultState = true,
 }) async {
   switch (command) {
+    case ControllerCommand.configureFreeRtos:
+      break;
+    case ControllerCommand.setFreeRtosViewVisible:
+      final values = Map<String, dynamic>.from(arguments! as Map);
+      controller.setFreeRtosViewVisible(
+        values['viewId'] as String,
+        values['visible'] == true,
+      );
+    case ControllerCommand.setFreeRtosSettings:
+      controller.setFreeRtosSettings(
+        Map<String, dynamic>.from(arguments! as Map),
+      );
+    case ControllerCommand.addFreeRtosWatch:
+      final values = arguments! as Map;
+      controller.addFreeRtosWatch(
+        values['handle'] as int,
+        values['field'] as String,
+      );
     case ControllerCommand.setSourceProject:
       await controller.saveSourceProject(
         Map<String, dynamic>.from(arguments! as Map),

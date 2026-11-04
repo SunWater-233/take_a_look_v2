@@ -1,0 +1,126 @@
+# FreeRTOS 工作区检查
+
+通过 **视图 → FreeRTOS** 打开面板。新工作区也在实时图表旁显示 FreeRTOS 标签。
+面板可以停靠或拖出为独立窗口；所有窗口共用主后端的内核快照。
+
+## 使用
+
+连接目标，加载与固件匹配、包含 DWARF 的 ELF / AXF，然后打开面板。
+默认 2 Hz 刷新；隐藏所有 FreeRTOS 面板后停止读取。
+选择任务，在检查器查看优先级、栈余量、通知、等待对象与持有者。
+点击任务或对象名称可以沿资源关系继续检查。
+
+**冻结显示**只固定本窗口的快照，不暂停目标，不影响其他窗口。
+**导出快照**保存当前显示的 JSON，包含采集时间、质量、能力说明和离线标记。
+页面、筛选、排序、刷新频率和拖动调整的列宽随 `.talproj` 保存。
+实时快照、冻结状态和依赖任务地址的临时内核监视变量不随工程恢复。
+
+## 数据能力
+
+| 页面 | 内容 | 条件 |
+| --- | --- | --- |
+| 任务 | 名称、句柄、状态、当前/基础优先级、运行计数、CPU 占比、通知数组 | TCB 和内核链表的 DWARF 类型、地址 |
+| 栈 | 栈基址、边界、保存 SP、历史最小剩余、余量提醒 | 边界来自 TCB 或辅助模块；水位来自 API 或填充扫描估算 |
+| 内核对象 | 队列、互斥锁、递归锁、二值/计数信号量、事件组、流/消息缓冲区 | 队列登记表或有类型的全局句柄 |
+| 内存 | 当前空闲、历史最小空闲、空闲块数量与大小、任务栈预算 | 分配器提供对应符号；缺失项显示“—” |
+| 定时器 | 活动状态、周期、重载模式、到期 Tick、回调地址 | 活动列表或有类型的全局句柄 |
+| 诊断 | 各项数据来源、可用性、配置提示 | 始终可打开 |
+
+对象列表表示已发现的对象，不能保证包含未登记的局部或私有对象。
+空闲块图比较已知空闲块大小，不补画未知的已分配区间。
+
+CPU 占比按相邻有效快照中任务运行计数差归一化，反映**已归属的运行时间**。
+当前任务未结算的片段会带来偏差，中断时间也可能归入被打断的任务。
+暂停、任务集合变化、复位和首次读取时先显示“—”，建立新窗口后再计算。
+不提供中断耗时、切换历史或调度时间线。
+
+栈条表示历史最小余量 / 分配大小。扫描值注明为估算，超过扫描上限时显示“≥”，
+不将下界用于低余量告警。没有填充证据时不把零当成有效水位；API 明确报告的零会正常提醒。
+默认提醒阈值为分配大小的 10%。
+
+**查看保存栈**需要暂停目标并获取有效快照，显示地址范围验证后的原始栈字。
+当前不进行 CPU 端口寄存器解码或完整调用栈展开。
+辅助模块登记了入口且 DWARF 能解析源码位置时，可以**定位入口**。
+
+## 固件配置
+
+基本读取不向固件注入代码，不调用目标函数。建议保留内核调试信息，按需要配置：
+
+```c
+#define configUSE_TRACE_FACILITY              1
+#define configGENERATE_RUN_TIME_STATS         1
+#define configRECORD_STACK_HIGH_ADDRESS       1
+#define INCLUDE_uxTaskGetStackHighWaterMark    1
+#define configQUEUE_REGISTRY_SIZE            16
+```
+
+运行统计还需要正确实现独立计时器。栈边界配置是否可用取决于内核版本和端口。
+缺少配置时保留其他可读取信息，在诊断页说明原因。
+队列、信号量和互斥锁可以通过稳定生命周期的名称登记：
+
+```c
+vQueueAddToRegistry(queueHandle, "qCanRx");
+vQueueAddToRegistry((QueueHandle_t)mutexHandle, "mutexLog");
+```
+
+## 可选辅助模块
+
+将 `firmware/freertos/tal_freertos.c` 加入固件，同目录加入头文件路径。
+模块提供版本、Tick 频率、API 栈水位，不依赖 RTT。从一个低优先级任务定期调用：
+
+```c
+#include "tal_freertos.h"
+
+void RtosMonitorTask(void *argument) {
+    (void)argument;
+    TalFreeRtos_Init(1000000); /* 实际运行统计计时器频率，未启用时填 0 */
+    for (;;) {
+        TalFreeRtos_Update();
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+```
+
+任务遍历与水位扫描有开销，建议从 1 Hz 开始测量。
+默认最多 32 个任务，`TAL_FREERTOS_MAX_TASKS` 可调整到 64；容量不足时不发布部分记录。
+已知入口和栈预算时，可在创建任务后登记：
+
+```c
+TaskHandle_t control;
+xTaskCreate(MotorControl, "MotorControl", 512, NULL, 5, &control);
+TalFreeRtos_RegisterTask(control, MotorControl, 512 * sizeof(StackType_t));
+```
+
+删除前使用 `TalFreeRtos_UnregisterTask(control)`。登记还记录任务编号，防止句柄复用后引用旧入口。
+Cortex-M7 等带缓存的平台需要把 `tal_freertos_info` 放入可一致访问的 RAM，或由固件维护缓存；
+`volatile` 不负责数据缓存一致性。
+
+## 质量与范围
+
+本地 USB 和支持运行中内存读取的 Ember 连接可读取运行中快照。
+其他连接按现有 `memorySampling` 能力决定是否要求暂停目标。
+检查器和变量采样共用探针锁，低频且有读取预算，不另开探针会话。
+
+任务链表校验长度、前后指针、容器、任务数量与当前任务。变化时保留上一份有效快照，标为过期。
+对象、定时器或堆不完整时，仅标记对应数据域不可用。
+运行中快照始终标注为近似；暂停在内核修改链表的中间位置也可能校验失败。
+
+当前覆盖单核 FreeRTOS 常用 V10 / V11 布局，按 DWARF 识别，不硬编码 TCB 偏移。
+识别到 SMP 时明确提示尚不支持。
+已对原版 V10.4.6、V11.1.0 与辅助模块执行 ARM 交叉编译与布局检查，
+并覆盖 DWARF 4 / 5 与不同 TCB 偏移；仍需目标板实测。
+
+## RTT 与回归
+
+`RttSessionManager` 统一管理 J-Link、pyOCD 内存 RTT 与 Ember RTT 的发现和生命周期。
+Normal / Plus 使用通道租约：一个上行通道只有一个读取者，释放一份租约不停止其他租约，
+最后一份释放才关闭底层会话。断开、复位和关闭后旧租约失效。当前未加入 SystemView。
+
+```powershell
+.\backend\.venv\Scripts\python.exe -m pytest -q backend
+flutter analyze
+flutter test
+```
+
+安装 `arm-none-eabi-gcc` 后，后端测试额外编译合成 ARM ELF，验证真实 DWARF 和链接地址。
+未安装时仅跳过交叉编译用例。界面截图位于 `build/freertos_ui/`；示例数据只进入 UI 测试版。

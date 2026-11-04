@@ -27,6 +27,10 @@ from take_a_look_backend.services.source_project import SourceProjects
 from take_a_look_backend.services.source_tasks import SourceTasks
 from take_a_look_backend.services.target_catalog import TargetCatalog
 from take_a_look_backend.services.online_packs import OnlinePacks
+from take_a_look_backend.services.freertos import FreeRtosInspector
+from take_a_look_backend.services.freertos_layout import FreeRtosLayout
+from take_a_look_backend.services.freertos_service import FreeRtosServiceMixin
+from take_a_look_backend.backends.rtt_session import RttSessionManager
 
 
 EventSink = Callable[[EventName, object], None]
@@ -35,7 +39,7 @@ DebugInfoLoader = Callable[..., DebugInfoIndex]
 SYMBOL_LOAD_TIMEOUT_SECONDS = 600
 
 
-class BackendService(SamplingServiceMixin):
+class BackendService(SamplingServiceMixin, FreeRtosServiceMixin):
     """Owns hardware state and exposes it through a small command surface.
 
     pyOCD access is serialized by ``_lock``. The sampler runs on one worker
@@ -61,8 +65,16 @@ class BackendService(SamplingServiceMixin):
         self._memory: TargetBackend = memory_backend or PyOcdMemoryBackend()
         self._local_memory = self._memory
         self._remote_backend_factory = remote_backend_factory
-        self._normal_rtt = normal_rtt_backend or JScopeRttBackend()
-        self._plus_rtt = plus_rtt_backend or JScopeRttPlusBackend()
+        self._rtt_sessions = RttSessionManager()
+        self._normal_rtt = normal_rtt_backend or JScopeRttBackend(self._rtt_sessions)
+        self._plus_rtt = plus_rtt_backend or JScopeRttPlusBackend(self._rtt_sessions)
+        self._freertos = FreeRtosInspector()
+        self._freertos_snapshot: dict = {}
+        self._freertos_enabled = False
+        self._freertos_watch_identity = {}
+        self._freertos_rate = 2.0
+        self._freertos_tick_hz: int | None = None
+        self._next_freertos_at = 0.0
         self._symbol_loader = symbol_loader
         self._debug_info_loader = debug_info_loader
         self._lock = threading.RLock()
@@ -133,6 +145,7 @@ class BackendService(SamplingServiceMixin):
                     self._recording.close()
                 finally:
                     self._stop_rtt_locked()
+                    self._rtt_sessions.close()
                     self._debug.remove_breakpoints(self._memory, connected=self._connection_status == "connected")
                     self._memory.disconnect()
                     self._connection_status = "disconnected"
@@ -148,6 +161,7 @@ class BackendService(SamplingServiceMixin):
             RpcMethod.SET_CONFIG, RpcMethod.SET_RTT, RpcMethod.CLEAR_SAMPLES,
             RpcMethod.SELECT_TARGET,
             RpcMethod.SET_MONITOR_VISIBILITY,
+            RpcMethod.ADD_FREERTOS_WATCH, RpcMethod.GET_FREERTOS_STACK,
         }
         if not priority:
             return self._handle(method, params)
@@ -286,11 +300,19 @@ class BackendService(SamplingServiceMixin):
                     "sourceBuild",
                     "firmwareDownload",
                     "targetCatalog",
+                    "freeRtos",
+                    "rttSessions",
                 ],
                 "state": self.state_snapshot(),
             }
         if method is RpcMethod.GET_STATE:
             return {"state": self.state_snapshot()}
+        if method is RpcMethod.CONFIGURE_FREERTOS:
+            return self._configure_freertos(params)
+        if method is RpcMethod.ADD_FREERTOS_WATCH:
+            return self._add_freertos_watch(params)
+        if method is RpcMethod.GET_FREERTOS_STACK:
+            return self._freertos_stack(params)
         if method is RpcMethod.CONNECT:
             return self._connect(params)
         if method is RpcMethod.TOGGLE_CONNECTION:
@@ -336,6 +358,7 @@ class BackendService(SamplingServiceMixin):
         with self._lock:
             return {
                 **self._runtime_state_locked(),
+                "freeRtos": self._freertos_snapshot,
                 "symbols": [self._symbol_json(symbol) for symbol in self._symbols.values()],
                 "watches": [self._watch_json(watch) for watch in self._watches.values()],
                 "sourceProject": self._source_projects.snapshot(),
@@ -381,6 +404,7 @@ class BackendService(SamplingServiceMixin):
                 return {"state": self._runtime_state_locked()}
             self._apply_config_locked(params)
             self._connection_status = "connecting"
+            self._invalidate_freertos_locked()
             self._latest_rtt_values.clear()
             self._monitor_schedule_revision += 1
             for watch in self._watches.values():
@@ -439,6 +463,7 @@ class BackendService(SamplingServiceMixin):
         with self._lock:
             self._flush_pending_samples_locked()
             self._stop_rtt_locked()
+            self._rtt_sessions.close()
             self._debug.remove_breakpoints(self._memory, connected=self._connection_status == "connected")
             self._memory.disconnect()
             self._connection_status = "disconnected"
@@ -481,6 +506,7 @@ class BackendService(SamplingServiceMixin):
             raise ProtocolError("file_not_found", "Symbol file does not exist.", str(path))
         if path.suffix.lower() not in {".elf", ".axf"}:
             raise ProtocolError("unsupported_symbol_file", "Symbol file must use .elf or .axf.", str(path))
+        freertos_layout = None
         with ExitStack() as resources:
             try:
                 options = {}
@@ -499,12 +525,24 @@ class BackendService(SamplingServiceMixin):
             except Exception as error:
                 debug_info = DebugInfoIndex()
                 self._emit(EventName.LOG, {"level": "warning", "message": f"无法读取源码行调试信息：{error}"})
+            context = options.get("context")
+            if context is not None and any(symbol.name in {'pxCurrentTCB', 'pxCurrentTCBs'} for symbol in symbols):
+                try:
+                    freertos_layout = FreeRtosLayout.from_context(context, lambda: report_progress("source"))
+                except ProtocolError:
+                    raise
+                except Exception as error:
+                    freertos_layout = FreeRtosLayout(problem=f"无法解析 FreeRTOS 类型：{error}")
         with self._lock:
             report_progress("ui")
             self._source_projects.sync_firmware_path(display_path or path)
             self._debug.remove_breakpoints(self._memory, connected=self._connection_status == "connected")
             self._symbols = {symbol.key: symbol for symbol in symbols}
             self._symbol_file = str(display_path or path)
+            self._freertos = FreeRtosInspector(freertos_layout)
+            self._freertos_watch_identity.clear()
+            self._freertos_snapshot = {}
+            self._next_freertos_at = 0.0
             self._debug.info = debug_info
             # Watches are only valid for symbols in the current file. RTT symbols
             # are recreated after a connection is established.
@@ -542,6 +580,7 @@ class BackendService(SamplingServiceMixin):
             with self._lock:
                 self._flush_pending_samples_locked()
                 self._stop_rtt_locked()
+                self._rtt_sessions.close()
                 self._memory.halt()
                 self._debug.remove_breakpoints(self._memory, connected=self._connection_status == "connected")
             task.log(f"下载文件：{original}")
@@ -656,6 +695,7 @@ class BackendService(SamplingServiceMixin):
         if not fatal:
             return False
         self._stop_rtt_locked()
+        self._rtt_sessions.close()
         self._memory.disconnect()
         self._connection_status = "disconnected"
         self._connection_started_at = None
@@ -699,7 +739,8 @@ class BackendService(SamplingServiceMixin):
         cleanup_errors = []
         for cleanup in (lambda: self._flush_pending_samples_locked(wait=False),
                         self._stop_memory_sampling_locked,
-                        self._normal_rtt.stop, self._plus_rtt.stop, disconnect):
+                        self._normal_rtt.stop, self._plus_rtt.stop,
+                        self._rtt_sessions.close, disconnect):
             try:
                 cleanup()
             except Exception as cleanup_error:
@@ -984,6 +1025,8 @@ class BackendService(SamplingServiceMixin):
             try:
                 self._stop_rtt_locked()
                 self._memory.reset(halt=halt)
+                self._rtt_sessions.close()
+                self._invalidate_freertos_locked()
                 self._refresh_debug_state_locked(force=True)
             except Exception as error:
                 raise ProtocolError("reset_failed", "Unable to reset target.", str(error)) from error

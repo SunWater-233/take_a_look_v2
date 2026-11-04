@@ -11,6 +11,7 @@ import '../models/models.dart';
 import '../protocol/commands.dart';
 import '../protocol/events.dart';
 import '../telemetry/raw_recording.dart';
+import 'freertos_fixture.dart';
 
 enum UiTestScenario {
   live('实时波形'),
@@ -57,6 +58,8 @@ class UiTestSession extends ChangeNotifier {
   int _generation = 0;
   double _sampleRemainder = 0;
   int _sourceLine = 10;
+  bool _freeRtosEnabled = false;
+  int _lastFreeRtosAt = 0;
 
   static const sourceText = '''#include <stdint.h>
 
@@ -195,6 +198,21 @@ void motor_control_tick(void)
       controller.stateSnapshot(),
     );
     switch (call?.method) {
+      case BackendMethod.configureFreeRtos:
+        _freeRtosEnabled = call!.params['enabled'] == true;
+        if (call.params['enabled'] == true &&
+            controller.connectionStatus == ConnectionStatus.connected) {
+          controller.applyBackendEvent(
+            BackendEventType.freeRtos,
+            freeRtosFixture(
+              halted:
+                  controller.debugState.executionState ==
+                  DebugExecutionState.halted,
+            ),
+          );
+        }
+      case BackendMethod.addFreeRtosWatch:
+        controller.addLog('UI 测试：已请求加入只读 FreeRTOS 字段。');
       case BackendMethod.toggleConnection:
         if (controller.connectionStatus == ConnectionStatus.connecting) return;
         if (controller.connectionStatus == ConnectionStatus.connected) {
@@ -387,6 +405,17 @@ void motor_control_tick(void)
       return;
     }
     final now = DateTime.now().millisecondsSinceEpoch;
+    if (_freeRtosEnabled && now - _lastFreeRtosAt >= 500) {
+      _lastFreeRtosAt = now;
+      controller.applyBackendEvent(
+        BackendEventType.freeRtos,
+        freeRtosFixture(
+          halted:
+              controller.debugState.executionState ==
+              DebugExecutionState.halted,
+        ),
+      );
+    }
     final monitored = <Map<String, Object>>[];
     for (final (index, watch) in controller.watches.indexed) {
       if (watch.readMode != WatchReadMode.monitor ||

@@ -15,6 +15,7 @@ enum WorkspacePanelId {
   log,
   buildOutput,
   registers,
+  freeRtos,
 }
 
 const workspaceOutputPanels = <WorkspacePanelId>[
@@ -91,6 +92,7 @@ extension WorkspacePanelInfo on WorkspacePanelId {
     WorkspacePanelId.log => '事件日志',
     WorkspacePanelId.buildOutput => '编译 / 下载',
     WorkspacePanelId.registers => '寄存器',
+    WorkspacePanelId.freeRtos => 'FreeRTOS',
   };
 
   IconData get icon => switch (this) {
@@ -106,6 +108,7 @@ extension WorkspacePanelInfo on WorkspacePanelId {
     WorkspacePanelId.log => Icons.terminal,
     WorkspacePanelId.buildOutput => Icons.build_outlined,
     WorkspacePanelId.registers => Icons.memory_outlined,
+    WorkspacePanelId.freeRtos => Icons.account_tree_outlined,
   };
 
   Size get preferredWindowSize => switch (this) {
@@ -121,6 +124,7 @@ extension WorkspacePanelInfo on WorkspacePanelId {
     WorkspacePanelId.log => const Size(900, 340),
     WorkspacePanelId.buildOutput => const Size(900, 340),
     WorkspacePanelId.registers => const Size(640, 400),
+    WorkspacePanelId.freeRtos => const Size(1180, 800),
   };
 }
 

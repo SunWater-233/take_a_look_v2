@@ -60,6 +60,10 @@ class ControllerSnapshotCodec {
     required bool packedSamples,
     required bool? includeAnalysisData,
   }) => switch (field) {
+    SnapshotField.freeRtos => source.state.freeRtos.data,
+    SnapshotField.freeRtosSettings => Map<String, dynamic>.from(
+      source.state.freeRtosSettings,
+    ),
     SnapshotField.connectionStatus => source.state.connection.status.name,
     SnapshotField.probeType => source.state.connection.probeType,
     SnapshotField.targetName => source.state.connection.targetName,

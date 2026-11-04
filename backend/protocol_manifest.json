@@ -32,7 +32,10 @@
     "shutdown",
     "setSourceProject",
     "startSourceTask",
-    "cancelSourceTask"
+    "cancelSourceTask",
+    "configureFreeRtos",
+    "addFreeRtosWatch",
+    "getFreeRtosStack"
   ],
   "events": [
     "state",
@@ -45,6 +48,7 @@
     "perf",
     "debug",
     "symbolLoadProgress",
-    "sourceTask"
+    "sourceTask",
+    "freeRtos"
   ]
 }

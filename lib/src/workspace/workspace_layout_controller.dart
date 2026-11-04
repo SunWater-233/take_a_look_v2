@@ -294,6 +294,7 @@ class WorkspaceLayoutController {
                     WorkspacePanelId.plot,
                     WorkspacePanelId.sourceDebug,
                     WorkspacePanelId.analysis,
+                    WorkspacePanelId.freeRtos,
                   ],
                   activePanel: WorkspacePanelId.plot,
                   rect: const Rect.fromLTWH(0, 0, .72, 1),

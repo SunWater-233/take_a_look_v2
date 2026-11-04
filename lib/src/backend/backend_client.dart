@@ -66,6 +66,10 @@ class BackendClient {
   bool _closed = false;
 
   bool get isRunning => _process != null;
+  Future<JsonObject> freeRtosRequest(String operation, JsonObject arguments) {
+    if (operation != 'stack') throw ArgumentError.value(operation, 'operation');
+    return request(BackendMethod.getFreeRtosStack, arguments);
+  }
 
   Future<JsonObject> emberRequest(String operation, JsonObject arguments) =>
       request(BackendMethod.ember, {...arguments, 'operation': operation});

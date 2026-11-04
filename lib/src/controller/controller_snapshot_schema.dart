@@ -1,5 +1,6 @@
 /// State domains that revise the main/detached-window snapshot contract.
 enum SnapshotDomain {
+  freeRtos,
   connection,
   sampling,
   targetCatalog,
@@ -16,6 +17,8 @@ enum SnapshotDomain {
 /// A field's wire name, revision ownership, and project inclusion live together.
 /// Wire names and the project format remain compatible with existing files.
 enum SnapshotField {
+  freeRtos({SnapshotDomain.freeRtos}),
+  freeRtosSettings({SnapshotDomain.freeRtos}, persistInProject: true),
   connectionStatus({SnapshotDomain.connection}),
   probeType({SnapshotDomain.connection}, persistInProject: true),
   targetName({SnapshotDomain.connection}, persistInProject: true),

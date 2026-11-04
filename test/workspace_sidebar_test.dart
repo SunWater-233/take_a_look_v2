@@ -828,7 +828,7 @@ void main() {
             .expand((frame) => frame.chrome!.tabs)
             .toSet()
             .length,
-        5,
+        6,
       );
       expect(tester.takeException(), isNull);
     },

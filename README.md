@@ -12,6 +12,7 @@
 | 硬件访问 | pyOCD 探针发现、连接、合并内存读取、按类型写入并回读校验 |
 | 实时采样 | 1 Hz – 10 kHz；RTT-Normal（兼容 J-Scope）与 RTT-Plus |
 | 源码调试 | C/C++ 语法高亮、行断点、暂停/继续/单步、当前 PC、寄存器 |
+| FreeRTOS | 任务、CPU 统计、栈余量、对象关系、堆与软件定时器；冻结显示与快照导出 |
 | 数据记录 | 原始数据追加落盘、按时间回看、暂停/继续、流式导出 CSV |
 | 多窗口 | 面板可拖出为独立窗口，与主窗口共享采集和状态 |
 | 远程连接 | EmberMobile v2（QUIC）、EmberMobile + GDB、远程 GDB |
@@ -116,6 +117,7 @@ Windows、Linux、macOS Intel / Apple Silicon 分别在原生 runner 构建，�
 | 文档 | 内容 |
 | --- | --- |
 | [应用更新](docs/app-updates.md) | 更新检查、发行资产与恢复 |
+| [FreeRTOS 检查](docs/freertos.md) | 面板使用、固件配置、可选辅助模块与读取范围 |
 | [桌面构建](docs/build.md) | 完整构建参数 |
 | [Windows 安装](docs/windows-install.md) | MSI 构建与安装 |
 | [Linux 安装](docs/linux-install.md) | 依赖、USB 权限、WSL 构建 |

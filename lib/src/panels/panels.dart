@@ -17,6 +17,7 @@ import 'watch_panel.dart';
 import 'plot_log_panels.dart';
 import 'analysis_chart_panel.dart';
 import 'source_debug_panel.dart';
+import 'freertos_panel.dart';
 
 export '../theme/theme.dart' show TalDropdown;
 export 'panel_frame.dart';
@@ -102,6 +103,11 @@ Widget buildWorkspacePanelBody(
       onShowSource: onShowSource,
     ),
     WorkspacePanelId.registers => RegistersPanel(controller: controller),
+    WorkspacePanelId.freeRtos => FreeRtosPanel(
+      controller: controller,
+      visible: visible,
+      onShowSource: onShowSource,
+    ),
   };
 }
 

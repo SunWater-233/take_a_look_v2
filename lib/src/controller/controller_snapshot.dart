@@ -112,6 +112,13 @@ extension TakeALookControllerSnapshot on TakeALookController {
   }
 
   void _applySnapshot(JsonObject data) {
+    if (data['freeRtos'] case final Map snapshot) {
+      state.freeRtos = FreeRtosSnapshot(snapshot);
+    }
+    if (data['freeRtosSettings'] case final Map settings) {
+      state.freeRtosSettings.addAll(Map<String, dynamic>.from(settings));
+      if (!_isDetachedRemote) _scheduleFreeRtosConfig();
+    }
     final previousSymbolRevision = _symbolRevision;
     final hadDeletedWatches = _watchRegistry.canUndo;
     _touchSnapshotFields(data.keys);
@@ -466,6 +473,8 @@ extension TakeALookControllerSnapshot on TakeALookController {
         hadDeletedWatches && previousSymbolRevision != _symbolRevision;
     if (deletedWatchesInvalidated && !_isDetachedRemote) _syncWatchesBackend();
     _emitState([
+      if (data.containsKey('freeRtos') || data.containsKey('freeRtosSettings'))
+        signals.freeRtos,
       if (hasConnectionState) signals.connection,
       if (hasTargetCatalog) signals.targetCatalog,
       if (hasSamplingState) signals.sampling,

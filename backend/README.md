@@ -4,6 +4,22 @@ This package is the local hardware service used by the Flutter desktop app. It
 reads JSON-RPC 2.0-inspired messages from standard input and writes responses
 and unsolicited events as one JSON object per line on standard output.
 
+`configureFreeRtos {enabled, rateHz: 1..5, tickHz?: integer|null}` controls
+visibility-driven kernel inspection on the existing sampler, under the shared
+probe lock. `freeRtos` events and the full-state field carry immutable snapshots,
+quality, timestamps and per-domain diagnostics. Offsets come from the loaded ELF's
+DWARF. No target halt, write, or inferior function call is performed by inspection.
+`addFreeRtosWatch {handle, field}` registers an inspector-approved scalar as a
+read-only temporary watch; reset, reconnect and task identity changes invalidate
+it. `getFreeRtosStack {handle}` requires a validated halted snapshot and returns
+bounded raw saved-stack words. See [FreeRTOS](../docs/freertos.md) for firmware
+configuration and supported scope.
+
+`RttSessionManager` owns discovery and transport lifetime. Normal/Plus decoders
+lease channels; the same up channel cannot have two readers. A released lease
+closes its remote subscription without stopping other channels, and the last
+release closes the underlying session. Leases cannot be reused after a reset.
+
 It is a local stdio process, not a TCP server. It can connect as a client to
 EmberMobile (v2 QUIC with v1 JSON-lines compatibility) and GDB Server. The Flutter connection settings map
 to `setConfig.connectionKind` (`local`, `ember`, `emberGdb`, or `gdb`) and

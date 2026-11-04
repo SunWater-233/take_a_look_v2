@@ -14,6 +14,9 @@ SAMPLE_FRAME_MARKER = 0
 
 
 class RpcMethod(StrEnum):
+    CONFIGURE_FREERTOS = "configureFreeRtos"
+    ADD_FREERTOS_WATCH = "addFreeRtosWatch"
+    GET_FREERTOS_STACK = "getFreeRtosStack"
     EMBER = "ember"
     HANDSHAKE = "handshake"
     GET_STATE = "getState"
@@ -49,6 +52,7 @@ class RpcMethod(StrEnum):
 
 
 class EventName(StrEnum):
+    FREERTOS = "freeRtos"
     STATE = "state"
     SAMPLES = "samples"
     WATCH_VALUES = "watchValues"

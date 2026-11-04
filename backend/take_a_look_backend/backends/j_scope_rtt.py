@@ -127,7 +127,9 @@ class JScopeRttBackend:
     NATIVE_START_DRAIN_S = 0.25
     NATIVE_READ_MAX_BYTES = 1024 * 1024
 
-    def __init__(self) -> None:
+    def __init__(self, session_manager=None) -> None:
+        from .rtt_session import RttSessionManager
+        self._sessions = session_manager or RttSessionManager()
         self.control_block: Any | None = None
         self.up_channel: Any | None = None
         self.channel_index = -1
@@ -136,7 +138,6 @@ class JScopeRttBackend:
         self.symbols: tuple[SymbolInfo, ...] = ()
         self.nominal_rate_hz = 1000.0
         self.transport_name = "pyOCD 内存 RTT"
-        self._native_jlink: Any | None = None
         self._first_target_timestamp_us: int | None = None
         self._last_target_timestamp_us: int | None = None
         self._timestamp_wraps = 0
@@ -147,60 +148,32 @@ class JScopeRttBackend:
     def is_started(self) -> bool:
         return self.up_channel is not None and self.decoder is not None
 
-    def start(
-        self,
-        target: Any,
-        control_block_address: int | None = None,
-        probe: Any | None = None,
-    ) -> tuple[SymbolInfo, ...]:
+    def start(self, target: Any, control_block_address: int | None = None,
+              probe: Any | None = None) -> tuple[SymbolInfo, ...]:
         self.stop()
-        open_remote = getattr(target, "open_rtt", None)
-        if callable(open_remote):
-            control_block = open_remote(control_block_address)
-            try:
-                for channel in control_block.up_channels:
-                    try:
-                        data_format = parse_j_scope_channel_name(channel.name or "")
-                    except ValueError:
-                        continue
-                    self.transport_name = control_block.transport_name
-                    return self._activate_channel(control_block, channel, channel.number, data_format)
-                raise RuntimeError("手机 RTT 没有 JScope_<FORMAT> 上行通道。")
-            except Exception:
-                control_block.close()
-                raise
-        native_jlink = _find_native_jlink(probe)
-        if native_jlink is not None:
-            return self._start_native_jlink(native_jlink, target, control_block_address)
-
-        from pyocd.debug.rtt import RTTControlBlock
-
-        if control_block_address is None:
-            control_block = RTTControlBlock.from_target(target)
-        else:
-            control_block = RTTControlBlock.from_target(target, address=control_block_address)
-        control_block.start()
-        for channel_index, channel in enumerate(control_block.up_channels):
-            channel_name = channel.name or ""
-            try:
-                data_format = parse_j_scope_channel_name(channel_name)
-            except ValueError:
-                continue
-            self.transport_name = "pyOCD 内存 RTT"
-            return self._activate_channel(control_block, channel, channel_index, data_format)
-        raise RuntimeError("已找到 RTT 控制块，但没有名为 JScope_<FORMAT> 的 Up Channel。")
+        lease = self._sessions.open(target, control_block_address, probe)
+        try:
+            for channel in lease.up_channels:
+                try:
+                    data_format = parse_j_scope_channel_name(channel.name or "")
+                except ValueError:
+                    continue
+                channel.claim()
+                self.transport_name = lease.transport_name
+                symbols = self._activate_channel(lease, channel, channel.number, data_format)
+                if lease.native:
+                    self._discard_native_startup_backlog(channel)
+                return symbols
+            raise RuntimeError("已找到 RTT 控制块，但没有名为 JScope_<FORMAT> 的 Up Channel。")
+        except BaseException:
+            lease.close()
+            self.stop()
+            raise
 
     def stop(self) -> None:
         close_remote = getattr(self.control_block, "close", None)
         if callable(close_remote):
             close_remote()
-        native_jlink = self._native_jlink
-        self._native_jlink = None
-        if native_jlink is not None:
-            try:
-                native_jlink.rtt_stop()
-            except Exception:
-                pass
         self.control_block = None
         self.up_channel = None
         self.channel_index = -1
@@ -209,52 +182,6 @@ class JScopeRttBackend:
         self.symbols = ()
         self.transport_name = "pyOCD 内存 RTT"
         self.reset_timing()
-
-    def _start_native_jlink(
-        self,
-        native_jlink: Any,
-        target: Any,
-        control_block_address: int | None,
-    ) -> tuple[SymbolInfo, ...]:
-        _connect_native_jlink_target(native_jlink, target)
-        native_jlink.rtt_start(control_block_address)
-        self._native_jlink = native_jlink
-        deadline = time.perf_counter() + self.NATIVE_START_TIMEOUT_S
-        last_error: Exception | None = None
-        while True:
-            try:
-                channel_count = int(native_jlink.rtt_get_num_up_buffers())
-                if channel_count > 0:
-                    break
-            except Exception as exc:
-                last_error = exc
-            if time.perf_counter() >= deadline:
-                self.stop()
-                detail = f"：{last_error}" if last_error is not None else ""
-                raise RuntimeError(f"J-Link 原生 RTT 尚未找到控制块{detail}") from last_error
-            time.sleep(self.NATIVE_START_POLL_S)
-
-        for channel_index in range(channel_count):
-            descriptor = native_jlink.rtt_get_buf_descriptor(channel_index, True)
-            channel_name = str(getattr(descriptor, "name", "") or "")
-            try:
-                data_format = parse_j_scope_channel_name(channel_name)
-            except ValueError:
-                continue
-            channel = _NativeJLinkUpChannel(
-                native_jlink,
-                channel_index,
-                channel_name,
-                int(getattr(descriptor, "SizeOfBuffer", 0)),
-                self.NATIVE_READ_MAX_BYTES,
-            )
-            self.transport_name = "J-Link 原生 RTT"
-            symbols = self._activate_channel(native_jlink, channel, channel_index, data_format)
-            self._discard_native_startup_backlog(channel)
-            return symbols
-
-        self.stop()
-        raise RuntimeError("J-Link 原生 RTT 已连接，但没有名为 JScope_<FORMAT> 的 Up Channel。")
 
     def _activate_channel(
         self,
@@ -353,25 +280,6 @@ def _symbols_for_format(channel_index: int, data_format: JScopeFormat) -> tuple[
             )
         )
     return tuple(symbols)
-
-
-class _NativeJLinkUpChannel:
-    def __init__(
-        self,
-        link: Any,
-        channel_index: int,
-        name: str,
-        size: int,
-        max_read_bytes: int,
-    ) -> None:
-        self._link = link
-        self._channel_index = channel_index
-        self.name = name
-        self.size = size
-        self._max_read_bytes = max(max_read_bytes, size, 1)
-
-    def read(self) -> bytes:
-        return bytes(self._link.rtt_read(self._channel_index, self._max_read_bytes))
 
 
 def _find_native_jlink(probe: Any | None, *, require_down: bool = False) -> Any | None:

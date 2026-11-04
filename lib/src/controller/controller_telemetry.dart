@@ -59,6 +59,11 @@ extension TakeALookControllerTelemetry on TakeALookController {
 
   void applyBackendEvent(BackendEventType event, Object? params) {
     switch (event) {
+      case BackendEventType.freeRtos:
+        if (params is Map) {
+          state.freeRtos = FreeRtosSnapshot(params);
+          _emitState([signals.freeRtos]);
+        }
       case BackendEventType.state:
         final state = _asMap(params);
         if (state != null) {

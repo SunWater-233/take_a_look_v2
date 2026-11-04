@@ -7,6 +7,17 @@ extension TakeALookControllerProject on TakeALookController {
       includeSamples: false,
       includeAnalysisData: true,
     );
+    // Kernel handles have a target lifetime and are never restored as raw watches.
+    final transientKeys = {
+      for (final w in _watches)
+        if (w.symbol.section == '.rodata.freertos') w.symbol.key,
+    };
+    (data['watches'] as List).removeWhere(
+      (raw) => transientKeys.contains((raw as Map)['key']),
+    );
+    (data['symbols'] as List).removeWhere(
+      (raw) => (raw as Map)['section'] == '.rodata.freertos',
+    );
     // A project stores variable configuration and input drafts. Recorded values
     // belong to recordings and must never be replayed as target writes.
     for (final raw in data['watches'] as List) {
@@ -51,7 +62,9 @@ extension TakeALookControllerProject on TakeALookController {
     if (data['symbols'] is! List ||
         data['watches'] is! List ||
         data['sourceProject'] is! Map ||
-        !ControllerSnapshotSchema.projectFields.every(data.containsKey)) {
+        !ControllerSnapshotSchema.projectFields
+            .where((key) => key != 'freeRtosSettings')
+            .every(data.containsKey)) {
       throw const FormatException('项目缺少变量或工程配置。');
     }
     for (final key in const [
@@ -95,6 +108,11 @@ extension TakeALookControllerProject on TakeALookController {
     }
     final probe = TakeALookController(backendCommand: (_, _) async {});
     try {
+      if (data['freeRtosSettings'] case final Map settings) {
+        probe.setFreeRtosSettings(Map<String, dynamic>.from(settings));
+      } else if (data.containsKey('freeRtosSettings')) {
+        throw const FormatException('FreeRTOS 面板设置无效。');
+      }
       probe.applySnapshot({
         for (final key in ControllerSnapshotSchema.projectFields)
           if (data.containsKey(key)) key: data[key],

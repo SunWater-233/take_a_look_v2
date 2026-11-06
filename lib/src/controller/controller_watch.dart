@@ -108,32 +108,15 @@ extension TakeALookControllerWatches on TakeALookController {
         .toList();
     if (selected.isNotEmpty) _watchRegistry.clearRedos();
     for (final symbol in selected) {
-      // Re-adding a retained variable is equivalent to undoing its removal.
-      final retained = _watchRegistry.takeDeleted(symbol.key);
-      final previouslyRemoved = _removedWatchKeys.remove(symbol.key);
-      if (retained != null) {
-        _restoreDeletedWatch(retained, index: _watches.length);
-        continue;
-      }
       final isAggregateMember = selectedRoots.any(
         (root) =>
             aggregateRootKeys.contains(root.key) &&
             (symbol.key == root.key || _isDescendantSymbol(symbol, root)),
       );
-      _watches.add(
-        WatchItem(
-            symbol: symbol,
-            color: seriesColors[_watches.length % seriesColors.length],
-          )
-          ..historyStartSeconds = previouslyRemoved ? elapsedSeconds + 1e-9 : 0
-          ..readMode = isAggregateMember ? WatchReadMode.monitor : mode,
+      _insertWatchSymbol(
+        symbol,
+        mode: isAggregateMember ? WatchReadMode.monitor : mode,
       );
-      final previous = state.plot.visibilityBeforeIsolation;
-      if (previous != null) {
-        final added = _watches.last;
-        previous.putIfAbsent(added.symbol.key, () => added.plotted);
-        added.plotted = false;
-      }
     }
     _selectedSymbols.clear();
     compactExpandedWatches.addAll(aggregateRootKeys);
@@ -141,6 +124,72 @@ extension TakeALookControllerWatches on TakeALookController {
     _syncWatchesBackend();
     _appendLog('已加入 ${selected.length} 个变量到变量监视列表。');
     _emitState([signals.symbols, signals.watches, signals.plot, signals.logs]);
+  }
+
+  void _insertWatchSymbol(
+    SymbolItem symbol, {
+    required WatchReadMode mode,
+    int? index,
+  }) {
+    // Re-adding a retained variable is equivalent to undoing its removal.
+    final retained = _watchRegistry.takeDeleted(symbol.key);
+    final previouslyRemoved = _removedWatchKeys.remove(symbol.key);
+    if (retained != null) {
+      _restoreDeletedWatch(retained, index: index ?? _watches.length);
+      return;
+    }
+    final watch =
+        WatchItem(
+            symbol: symbol,
+            color: seriesColors[_watches.length % seriesColors.length],
+          )
+          ..historyStartSeconds = previouslyRemoved ? elapsedSeconds + 1e-9 : 0
+          ..readMode = mode;
+    _watches.insert(index ?? _watches.length, watch);
+    final previous = state.plot.visibilityBeforeIsolation;
+    if (previous != null) {
+      previous.putIfAbsent(symbol.key, () => watch.plotted);
+      watch.plotted = false;
+    }
+  }
+
+  Iterable<SymbolItem> _watchMemberSymbols(String key) {
+    final root = _watchByKey(key)?.symbol;
+    if (root == null) return const [];
+    return _symbols.where((symbol) => _isDescendantSymbol(symbol, root));
+  }
+
+  bool isAggregateWatch(String key) => _watchMemberSymbols(key).isNotEmpty;
+
+  bool canRestoreWatchMembers(String key) {
+    final existing = _watches.map((watch) => watch.symbol.key).toSet();
+    return _watchMemberSymbols(
+      key,
+    ).any((symbol) => !existing.contains(symbol.key));
+  }
+
+  void restoreWatchMembers(String key) {
+    if (_isDetachedRemote &&
+        _dispatchRemote(ControllerCommand.restoreWatchMembers, key)) {
+      return;
+    }
+    if (!canRestoreWatchMembers(key)) return;
+    _watchRegistry.clearRedos();
+    var index = _watches.indexWhere((watch) => watch.symbol.key == key) + 1;
+    for (final symbol in _watchMemberSymbols(key)) {
+      final existingIndex = _watches.indexWhere(
+        (watch) => watch.symbol.key == symbol.key,
+      );
+      if (existingIndex >= 0) {
+        index = existingIndex + 1;
+      } else {
+        _insertWatchSymbol(symbol, mode: WatchReadMode.monitor, index: index++);
+      }
+    }
+    _configurePlotRetention();
+    _syncWatchesBackend();
+    _emitState([signals.watches, signals.plot]);
+    signals.telemetrySync.emit();
   }
 
   void removeWatch(String key) {
@@ -155,6 +204,16 @@ extension TakeALookControllerWatches on TakeALookController {
           removedKeys.toList(),
         )) {
       return;
+    }
+    final roots = _watches
+        .where((watch) => removedKeys.contains(watch.symbol.key))
+        .map((watch) => watch.symbol)
+        .toList();
+    for (final watch in _watches) {
+      if (removedKeys.contains(watch.symbol.key)) continue;
+      if (roots.any((root) => _isDescendantSymbol(watch.symbol, root))) {
+        removedKeys.add(watch.symbol.key);
+      }
     }
     if (!_watchRegistry.remove(
       removedKeys,

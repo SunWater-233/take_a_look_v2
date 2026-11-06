@@ -343,6 +343,24 @@ void main() {
       expect(speed.plotted, isTrue);
       expect(find.byType(Checkbox), findsNothing);
 
+      await tester.ensureVisible(find.text('current'));
+      await rightClick(tester, find.text('current'));
+      expect(find.text('恢复成员'), findsNothing);
+      await tester.tap(find.text('移除该变量'));
+      await tester.pumpAndSettle();
+      expect(find.text('current'), findsNothing);
+      await tester.ensureVisible(find.text('motor'));
+      await rightClick(tester, find.text('motor'));
+      expect(find.text('恢复成员'), findsOneWidget);
+      await tester.tap(find.text('恢复成员'));
+      await tester.pumpAndSettle();
+      expect(find.text('current'), findsOneWidget);
+      expect(controller.watches.map((w) => w.symbol.key), [
+        'motor',
+        'motor.speed',
+        'motor.current',
+      ]);
+
       controller.dispose();
       await tester.pumpWidget(const SizedBox.shrink());
     },

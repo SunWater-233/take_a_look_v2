@@ -564,10 +564,94 @@ void main() {
         c.watches.map((w) => w.symbol.key),
         isNot(contains(anyOf('motor.speed', 'motor.current', 'motor.pid'))),
       );
-      expect(c.watches.map((w) => w.symbol.key), contains('motor.current.q'));
+      expect(
+        c.watches.map((w) => w.symbol.key),
+        isNot(
+          contains(
+            anyOf(
+              'motor.current.d',
+              'motor.current.q',
+              'motor.pid.kp',
+              'motor.pid.ki',
+            ),
+          ),
+        ),
+      );
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );
+
+  testWidgets('array deletion and restore members work from the branch menu', (
+    tester,
+  ) async {
+    final c = structureFixture();
+    addTearDown(c.dispose);
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final originalKeys = c.watches.map((w) => w.symbol.key).toList();
+    await mount(tester, c);
+
+    Future<void> menu(String key) async {
+      await tester.tap(
+        find.byKey(ValueKey('compact-watch-$key')),
+        buttons: kSecondaryMouseButton,
+      );
+      await tester.pumpAndSettle();
+    }
+
+    void expectRestoreEnabled(bool enabled) {
+      final item = tester.widget<PopupMenuItem<String>>(
+        find.ancestor(
+          of: find.text('恢复成员'),
+          matching: find.byType(PopupMenuItem<String>),
+        ),
+      );
+      expect(item.enabled, enabled);
+    }
+
+    await menu('motor');
+    expectRestoreEnabled(false);
+    await tester.tapAt(const Offset(2, 2));
+    await tester.pumpAndSettle();
+    await menu('motor.samples');
+    await tester.tap(find.text('删除变量'));
+    await tester.pumpAndSettle();
+    expect(
+      c.watches.any((w) => w.symbol.name.startsWith('motor.samples')),
+      isFalse,
+    );
+    expect(find.text('[0]'), findsNothing);
+    expect(
+      find.byKey(const ValueKey('compact-watch-motor.samples')),
+      findsNothing,
+    );
+
+    await menu('motor');
+    expectRestoreEnabled(true);
+    await tester.tap(find.text('恢复成员'));
+    await tester.pumpAndSettle();
+    expect(c.watches.map((w) => w.symbol.key), originalKeys);
+    expect(
+      find.byKey(const ValueKey('compact-watch-motor.samples')),
+      findsOneWidget,
+    );
+    expect(c.canUndoWatchDeletion, isFalse);
+
+    await menu('motor.speed');
+    expect(find.text('恢复成员'), findsNothing);
+    await tester.tapAt(const Offset(2, 2));
+    await tester.pumpAndSettle();
+
+    // Restoration remains available even when every member has been removed.
+    c.removeWatches(c.watches.skip(1).map((w) => w.symbol.key));
+    await tester.pump();
+    await menu('motor');
+    expectRestoreEnabled(true);
+    await tester.tap(find.text('恢复成员'));
+    await tester.pumpAndSettle();
+    expect(c.watches.map((w) => w.symbol.key), originalKeys);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
   testWidgets(
     'isolating a branch plots its captured members without filtering rows',

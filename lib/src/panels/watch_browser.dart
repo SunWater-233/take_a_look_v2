@@ -387,6 +387,14 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
           ),
         ),
         const PopupMenuDivider(),
+        if (controller.isAggregateWatch(watch.symbol.key))
+          _watchPopupItem(
+            touchOptimized: TalUiTheme.of(context).touchOptimized,
+            value: 'restoreMembers',
+            icon: Icons.restore,
+            label: '恢复成员',
+            enabled: controller.canRestoreWatchMembers(watch.symbol.key),
+          ),
         _watchPopupItem(
           touchOptimized: TalUiTheme.of(context).touchOptimized,
           value: 'delete',
@@ -425,6 +433,8 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
         controller.isolateWatchPlots(plotKeys);
       case 'delete':
         controller.removeWatches(keys);
+      case 'restoreMembers':
+        controller.restoreWatchMembers(watch.symbol.key);
       case 'undo':
         controller.undoWatchDeletion();
       case 'redo':

@@ -444,6 +444,14 @@ class _WatchPanelState extends State<WatchPanel> {
       position: _menuPosition(request.globalPosition),
       touchOptimized: request.touchOptimized,
       items: [
+        if (controller.isAggregateWatch(clickedKey))
+          _watchPopupItem(
+            value: 'restoreMembers',
+            icon: Icons.restore,
+            label: '恢复成员',
+            enabled: controller.canRestoreWatchMembers(clickedKey),
+            touchOptimized: request.touchOptimized,
+          ),
         _watchPopupItem(
           value: 'remove',
           icon: Icons.close,
@@ -509,6 +517,8 @@ class _WatchPanelState extends State<WatchPanel> {
       case 'remove':
         _selectedWatchKeys.removeAll(keys);
         controller.removeWatches(keys);
+      case 'restoreMembers':
+        controller.restoreWatchMembers(clickedKey);
       case 'undo':
         controller.undoWatchDeletion();
       case 'redo':

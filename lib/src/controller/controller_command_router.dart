@@ -164,6 +164,8 @@ Future<JsonObject> executeControllerCommand(
       controller.removeWatch(arguments as String);
     case ControllerCommand.removeWatches:
       controller.removeWatches((arguments as List).cast<String>());
+    case ControllerCommand.restoreWatchMembers:
+      controller.restoreWatchMembers(arguments as String);
     case ControllerCommand.undoWatchDeletion:
       controller.undoWatchDeletion();
     case ControllerCommand.redoWatchDeletion:

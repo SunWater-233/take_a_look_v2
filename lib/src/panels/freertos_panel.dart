@@ -139,7 +139,8 @@ class _FreeRtosPanelState extends State<FreeRtosPanel> {
     },
   );
 
-  Widget _toolbar(FreeRtosSnapshot data) => Padding(
+  Widget _toolbar(FreeRtosSnapshot data) => Container(
+    color: WorkbenchColors.surface,
     padding: const EdgeInsets.fromLTRB(12, 10, 12, 9),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,

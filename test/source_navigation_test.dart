@@ -241,7 +241,10 @@ void main() {
     await _clickToken(tester, 3, 11);
     await _clickToken(tester, 3, 2, secondary: true);
     await tester.pumpAndSettle();
-    expect(find.text('跳转到定义  gain    F12'), findsOneWidget);
+    expect(find.text('跳转到定义    F12'), findsOneWidget);
+    for (final element in find.byType(PopupMenuItem<String>).evaluate()) {
+      expect(tester.getSize(find.byWidget(element.widget)).height, 32);
+    }
     await tester.tap(find.byKey(const ValueKey('source-menu-definition')));
     await _waitForPeek(tester);
     expect(find.text('gain 的定义 (2)'), findsOneWidget);

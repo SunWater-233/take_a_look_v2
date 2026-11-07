@@ -63,13 +63,13 @@ class _WatchMemberDetails extends StatelessWidget {
           const SizedBox(height: 3),
           Text(
             '${watch.symbol.type}  ${watch.symbol.addressLabel}${watch.symbol.writable ? '' : '  只读'}',
-            style: workbenchMuted.copyWith(fontSize: 11),
+            style: talMuted.copyWith(fontSize: 11),
           ),
           if (aggregate) ...[
             const SizedBox(height: 12),
-            Text('${node.children.length} 个直接成员', style: workbenchMuted),
+            Text('${node.children.length} 个直接成员', style: talMuted),
             const SizedBox(height: 4),
-            const Text('展开后刷新可见成员。', style: workbenchMuted),
+            const Text('展开后刷新可见成员。', style: talMuted),
           ] else ...[
             const SizedBox(height: 6),
             AnimatedBuilder(

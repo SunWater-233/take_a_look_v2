@@ -978,30 +978,33 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     final includePath = await _resolveIncludedSource(sourcePath, line.rawText);
     if (!context.mounted || generation != _loadGeneration) return;
 
+    final itemHeight = TalUiTheme.of(context).menuItemHeight;
     final items = <PopupMenuEntry<String>>[];
     if (hit != null) {
       items.add(
         PopupMenuItem<String>(
           key: const ValueKey('source-menu-definition'),
           value: 'definition',
-          child: Text('跳转到定义  ${hit.token}    F12'),
+          height: itemHeight,
+          child: const Text('跳转到定义    F12'),
         ),
       );
       items.addAll([
         PopupMenuItem<String>(
           key: const ValueKey('source-menu-peek-definition'),
           value: 'peek-definition',
-          child: Text('预览定义  ${hit.token}    Alt+F12'),
+          height: itemHeight,
+          child: const Text('预览定义    Alt+F12'),
         ),
         PopupMenuItem<String>(
           key: const ValueKey('source-menu-references'),
           value: 'references',
-          child: Text('查看引用  ${hit.token}    Shift+F12'),
+          height: itemHeight,
+          child: const Text('查看引用    Shift+F12'),
         ),
       ]);
     }
     for (final symbol in symbols) {
-      final symbolLabel = symbol.name == token ? token : symbol.name;
       final suffix = symbols.length > 1 ? '  ${symbol.addressLabel}' : '';
       final watched = controller.watches.any(
         (watch) => watch.symbol.key == symbol.key,
@@ -1011,10 +1014,11 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
           key: ValueKey('source-menu-watch-${symbol.key}'),
           value: 'watch:${symbol.key}',
           enabled: !watched,
+          height: itemHeight,
           child: Text(
             watched
-                ? '${widget.externalOutput ? '已在变量监视中' : '已在实时调试中'}  $symbolLabel$suffix'
-                : '${widget.externalOutput ? '加入变量监视' : '加入实时调试'}  $symbolLabel$suffix',
+                ? '${widget.externalOutput ? '已在变量监视中' : '已在实时调试中'}$suffix'
+                : '${widget.externalOutput ? '加入变量监视' : '加入实时调试'}$suffix',
           ),
         ),
       );
@@ -1024,6 +1028,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
         PopupMenuItem<String>(
           key: ValueKey('source-menu-include-$includePath'),
           value: 'include:$includePath',
+          height: itemHeight,
           child: Text('打开头文件  ${_basename(includePath)}'),
         ),
       );
@@ -1031,6 +1036,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
       items.add(
         PopupMenuItem<String>(
           enabled: false,
+          height: itemHeight,
           child: Text('无法定位头文件  ${_basename(includeName)}'),
         ),
       );

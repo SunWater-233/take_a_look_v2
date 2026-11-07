@@ -139,6 +139,9 @@ class TakeALookController extends ChangeNotifier {
   set compactWatchSelection(String? value) => _watchRegistry.selection = value;
   Set<String> get compactExpandedWatches => _watchRegistry.expanded;
   double? compactWatchSummaryFraction;
+  double? compactWatchPinnedFraction;
+  // Each browser section has its own display order, independent of acquisition.
+  final Map<String, List<String>> compactWatchSectionOrders = {};
   String watchSearchQuery = '';
   final Map<String, Set<String>> _watchMonitorScopes = {};
   bool _watchMonitorVisibilityKnown = false;

@@ -1133,8 +1133,8 @@ void main() {
       buttons: kSecondaryMouseButton,
     );
     await tester.pumpAndSettle();
-    expect(find.text('加入实时调试  message'), findsOneWidget);
-    await tester.tap(find.text('加入实时调试  message'));
+    expect(find.text('加入实时调试'), findsOneWidget);
+    await tester.tap(find.text('加入实时调试'));
     await tester.pumpAndSettle();
     expect(controller.watches.single.symbol.key, 'message-key');
 

@@ -41,6 +41,11 @@ extension TakeALookControllerProject on TakeALookController {
       'compactWatchSelection': compactWatchSelection,
       'compactExpandedWatches': compactExpandedWatches.toList(),
       'compactWatchSummaryFraction': compactWatchSummaryFraction,
+      'compactWatchPinnedFraction': compactWatchPinnedFraction,
+      'compactWatchSectionOrders': {
+        for (final entry in compactWatchSectionOrders.entries)
+          entry.key: List<String>.of(entry.value),
+      },
       'expandedSymbolTreeNodes': _expandedSymbolTreeNodes.toList(),
       'requestedBreakpoints': {
         for (final entry in debugState.requestedBreakpoints.entries)
@@ -50,13 +55,32 @@ extension TakeALookControllerProject on TakeALookController {
   }
 
   static void validateProjectSettings(Map<String, dynamic> data) {
-    final summaryFraction = data['compactWatchSummaryFraction'];
-    if (summaryFraction != null &&
-        (summaryFraction is! num ||
-            !summaryFraction.isFinite ||
-            summaryFraction <= 0 ||
-            summaryFraction >= 1)) {
-      throw const FormatException('项目变量监视分区比例无效。');
+    for (final key in [
+      'compactWatchSummaryFraction',
+      'compactWatchPinnedFraction',
+    ]) {
+      final fraction = data[key];
+      if (fraction != null &&
+          (fraction is! num ||
+              !fraction.isFinite ||
+              fraction <= 0 ||
+              fraction >= 1)) {
+        throw const FormatException('项目变量监视分区比例无效。');
+      }
+    }
+    final orders = data['compactWatchSectionOrders'];
+    if (orders != null) {
+      if (orders is! Map ||
+          orders.entries.any(
+            (entry) =>
+                !const ['pinned', 'capture', 'members'].contains(entry.key) ||
+                entry.value is! List ||
+                (entry.value as List).any((key) => key is! String) ||
+                (entry.value as List).toSet().length !=
+                    (entry.value as List).length,
+          )) {
+        throw const FormatException('项目变量监视排序无效。');
+      }
     }
     if (data['symbols'] is! List ||
         data['watches'] is! List ||
@@ -278,6 +302,15 @@ extension TakeALookControllerProject on TakeALookController {
     compactWatchSelection = data['compactWatchSelection'] as String?;
     compactWatchSummaryFraction = (data['compactWatchSummaryFraction'] as num?)
         ?.toDouble();
+    compactWatchPinnedFraction = (data['compactWatchPinnedFraction'] as num?)
+        ?.toDouble();
+    compactWatchSectionOrders
+      ..clear()
+      ..addAll({
+        for (final entry
+            in (data['compactWatchSectionOrders'] as Map? ?? {}).entries)
+          entry.key as String: (entry.value as List).cast<String>().toList(),
+      });
     compactExpandedWatches
       ..clear()
       ..addAll((data['compactExpandedWatches'] as List? ?? []).cast<String>());

@@ -155,15 +155,17 @@ class WorkbenchToolbar extends StatelessWidget {
                       ),
                       label: Text(controller.samplingPaused ? '继续采集' : '暂停采集'),
                     ),
+                    const SizedBox(width: 8),
+                    TalButton(
+                      key: const ValueKey('workbench-clear-samples'),
+                      onPressed: controller.clearSamples,
+                      child: const Text('清空采样'),
+                    ),
                     const SizedBox(width: 10),
                     TalButton(
                       onPressed: () =>
                           showWorkbenchSamplingSettings(context, controller),
-                      child: Text(
-                        controller.rttEnabled
-                            ? 'RTT ${controller.rttProtocol == 'plus' ? 'Plus' : 'Normal'}'
-                            : 'RTT 关闭',
-                      ),
+                      child: const Text('RTT设置'),
                     ),
                     const SizedBox(width: 18),
                     const Spacer(),

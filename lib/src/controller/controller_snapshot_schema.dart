@@ -39,6 +39,8 @@ enum SnapshotField {
   rttSampleRateHz({SnapshotDomain.sampling}, persistInProject: true),
   displayRefreshMode({SnapshotDomain.plot}, persistInProject: true),
   samplingElapsedSeconds({}, alwaysRevised: true),
+  samplingClockRunning({SnapshotDomain.sampling}),
+  samplingEpoch({SnapshotDomain.sampling}),
   elapsedSeconds({}, alwaysRevised: true),
   samplingPaused({SnapshotDomain.sampling}, persistInProject: true),
   rawRecording({SnapshotDomain.sampling}),

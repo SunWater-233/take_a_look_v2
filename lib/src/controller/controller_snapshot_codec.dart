@@ -13,6 +13,7 @@ class ControllerSnapshotView {
     required this.logs,
     required this.uiScale,
     required this.samplingElapsedSeconds,
+    required this.samplingClockRunning,
     required this.plotWindowEndSeconds,
     required this.canUndoWatchDeletion,
     required this.canRedoWatchDeletion,
@@ -25,6 +26,7 @@ class ControllerSnapshotView {
   final Iterable<LogEntry> logs;
   final double uiScale;
   final double samplingElapsedSeconds;
+  final bool samplingClockRunning;
   final double plotWindowEndSeconds;
   final bool canUndoWatchDeletion;
   final bool canRedoWatchDeletion;
@@ -92,6 +94,8 @@ class ControllerSnapshotCodec {
     SnapshotField.displayRefreshMode =>
       source.state.acquisition.displayRefreshMode,
     SnapshotField.samplingElapsedSeconds => source.samplingElapsedSeconds,
+    SnapshotField.samplingClockRunning => source.samplingClockRunning,
+    SnapshotField.samplingEpoch => source.state.acquisition.samplingEpoch,
     SnapshotField.elapsedSeconds => source.state.acquisition.elapsedSeconds,
     SnapshotField.samplingPaused => source.state.acquisition.samplingPaused,
     SnapshotField.rawRecording => source.state.acquisition.rawRecording,

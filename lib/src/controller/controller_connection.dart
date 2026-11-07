@@ -45,10 +45,8 @@ extension TakeALookControllerConnection on TakeALookController {
           .toDouble(),
   };
 
-  double get samplingElapsedSeconds =>
-      _samplingElapsedBaseSeconds +
-      _samplingElapsedStopwatch.elapsedMicroseconds /
-          Duration.microsecondsPerSecond;
+  double get samplingElapsedSeconds => _samplingClock.elapsedSeconds;
+  int get samplingEpoch => state.acquisition.samplingEpoch;
 
   String get elapsedLabel {
     final totalCentiseconds = (samplingElapsedSeconds * 100).round();

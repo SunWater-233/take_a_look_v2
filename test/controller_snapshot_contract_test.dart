@@ -24,6 +24,7 @@ void main() {
         logs: const [],
         uiScale: 1.25,
         samplingElapsedSeconds: 7,
+        samplingClockRunning: false,
         plotWindowEndSeconds: 9,
         canUndoWatchDeletion: false,
         canRedoWatchDeletion: false,

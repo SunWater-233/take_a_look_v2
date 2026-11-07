@@ -4,7 +4,7 @@ import re
 import struct
 import time
 from dataclasses import dataclass
-from numbers import Real
+from .sample_timebase import SampleTimebase
 from typing import Any, Literal, cast
 
 from take_a_look_backend.models import SymbolInfo
@@ -136,13 +136,8 @@ class JScopeRttBackend:
         self.data_format: JScopeFormat | None = None
         self.decoder: JScopeStreamDecoder | None = None
         self.symbols: tuple[SymbolInfo, ...] = ()
-        self.nominal_rate_hz = 1000.0
+        self._timebase = SampleTimebase()
         self.transport_name = "pyOCD 内存 RTT"
-        self._first_target_timestamp_us: int | None = None
-        self._last_target_timestamp_us: int | None = None
-        self._timestamp_wraps = 0
-        self._host_time_origin_s: float | None = None
-        self._next_untimed_elapsed_s: float | None = None
 
     @property
     def is_started(self) -> bool:
@@ -209,18 +204,17 @@ class JScopeRttBackend:
             time.sleep(self.NATIVE_START_POLL_S)
         self.reset_timing()
 
+    @property
+    def nominal_rate_hz(self) -> float:
+        return self._timebase.nominal_rate_hz
+
     def set_nominal_rate_hz(self, rate_hz: float) -> None:
-        if isinstance(rate_hz, Real) and not isinstance(rate_hz, bool):
-            self.nominal_rate_hz = max(1.0, float(rate_hz))
+        self._timebase.set_rate(rate_hz)
 
     def reset_timing(self) -> None:
         if self.decoder is not None:
             self.decoder.clear()
-        self._first_target_timestamp_us = None
-        self._last_target_timestamp_us = None
-        self._timestamp_wraps = 0
-        self._host_time_origin_s = None
-        self._next_untimed_elapsed_s = None
+        self._timebase.reset()
 
     def read_frames(self, host_elapsed_s: float) -> list[tuple[float, dict[str, object]]]:
         if self.up_channel is None or self.decoder is None:
@@ -243,24 +237,7 @@ class JScopeRttBackend:
             self.decoder.clear()
 
     def _elapsed_for_packet(self, packet: JScopePacket, host_elapsed_s: float) -> float:
-        if packet.timestamp_us is not None:
-            timestamp_us = packet.timestamp_us
-            if self._last_target_timestamp_us is not None and timestamp_us < self._last_target_timestamp_us:
-                if self._last_target_timestamp_us - timestamp_us > 0x80000000:
-                    self._timestamp_wraps += 1
-            self._last_target_timestamp_us = timestamp_us
-            unwrapped = timestamp_us + self._timestamp_wraps * 0x100000000
-            if self._first_target_timestamp_us is None:
-                self._first_target_timestamp_us = unwrapped
-                self._host_time_origin_s = host_elapsed_s
-            assert self._host_time_origin_s is not None
-            return self._host_time_origin_s + (unwrapped - self._first_target_timestamp_us) / 1_000_000.0
-
-        if self._next_untimed_elapsed_s is None:
-            self._next_untimed_elapsed_s = host_elapsed_s
-        elapsed_s = self._next_untimed_elapsed_s
-        self._next_untimed_elapsed_s += 1.0 / max(1.0, self.nominal_rate_hz)
-        return elapsed_s
+        return self._timebase.elapsed(packet.timestamp_us, host_elapsed_s)
 
 
 def _symbols_for_format(channel_index: int, data_format: JScopeFormat) -> tuple[SymbolInfo, ...]:

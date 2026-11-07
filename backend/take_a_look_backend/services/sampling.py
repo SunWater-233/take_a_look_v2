@@ -47,13 +47,15 @@ class SamplingServiceMixin:
                         monitor_revision = self._monitor_schedule_revision
                         next_monitor_at = now
                     active = connected and not self._sampling_paused and self._debug.execution_state != "halted"
+                    if self._reconcile_acquisition_clock_locked():
+                        self._emit(EventName.STATE, self._sampling_clock_state())
                     memory_period = 1.0 / self._sample_rate_hz
                     rtt_period = max(1.0 / self._rtt_sample_rate_hz, 0.002)
                     periods = (memory_period, rtt_period)
                     if previous_periods != periods:
                         next_memory_at = next_rtt_at = now
                         previous_periods = periods
-                    elapsed = self._elapsed_locked(now)
+                    elapsed = self._acquisition_clock.elapsed()
                     self._poll_freertos_locked(now, connected)
                     if self._freertos_enabled:
                         deadlines.append(self._next_freertos_at)
@@ -117,8 +119,9 @@ class SamplingServiceMixin:
                         self._stop_memory_sampling_locked()
                     if isinstance(error, EmberError) and error.code == "client_overflow":
                         self._sampling_paused = True
+                        self._reconcile_acquisition_clock_locked()
                         self._emit(EventName.ERROR, {"code": error.code, "message": str(error)})
-                        self._emit(EventName.STATE, {"samplingPaused": True})
+                        self._emit(EventName.STATE, {"samplingPaused": True, **self._sampling_clock_state()})
                 if not disconnected:
                     self._emit(EventName.LOG, {"level": "error", "message": f"采样失败：{message}"})
                 next_memory_at = time.perf_counter() + 0.25
@@ -211,6 +214,7 @@ class SamplingServiceMixin:
             if now < self._next_rtt_retry_at:
                 return []
             try:
+                self._configure_rtt_timebases_locked()
                 if self._rtt_protocol == "normal":
                     symbols = self._normal_rtt.start(
                         target,
@@ -260,18 +264,21 @@ class SamplingServiceMixin:
         return frames
 
     def _queue_samples_locked(self, frames: list[tuple[float, dict[str, object]]]) -> None:
-        self._pipeline.queue(frames, self._watches)
+        latest = self._pipeline.queue(frames, self._watches)
+        if latest is not None:
+            self._last_sample_seconds = max(self._last_sample_seconds, latest)
 
     def _flush_pending_samples_locked(self, *, wait: bool = True, block: bool | None = None) -> bool:
         return self._pipeline.flush(wait=wait, block=block)
 
     def _recording_failed(self, error) -> None:
         self._sampling_paused = True
+        self._acquisition_clock.set_running(False)
         self._wake.set()
         self._emit(EventName.ERROR, {"code": "raw_recording_failed",
                    "message": "原始记录写入失败，已暂停采样。", "details": str(error)})
         self._emit(EventName.STATE, {"samplingPaused": True,
-                   "rawRecording": self._recording.status()})
+                   "rawRecording": self._recording.status(), **self._sampling_clock_state()})
 
     def _publish_perf(self, now: float) -> None:
         with self._lock:
@@ -312,7 +319,33 @@ class SamplingServiceMixin:
         self._next_rtt_retry_at = 0.0
         self._latest_rtt_values.clear()
 
-    def _elapsed_locked(self, now: float | None = None) -> float:
-        if self._connection_started_at is None:
-            return 0.0
-        return max(0.0, (now if now is not None else time.perf_counter()) - self._connection_started_at)
+    def _sampling_clock_state(self) -> dict[str, object]:
+        elapsed, running = self._acquisition_clock.snapshot()
+        return {"samplingElapsedSeconds": elapsed, "samplingClockRunning": running}
+
+    def _acquisition_should_run(self) -> bool:
+        return (self._connection_status == "connected" and not self._sampling_paused
+                and not self._firmware_busy and self._debug.execution_state != "halted")
+
+    def _reconcile_acquisition_clock_locked(self) -> bool:
+        running = self._acquisition_should_run()
+        if running and not self._acquisition_clock.running:
+            # Monitoring continues during a pause. Discard its remaining bytes
+            # and map the next captured packet onto the resumed session time.
+            self._reset_capture_timing_locked()
+        return self._acquisition_clock.set_running(running)
+
+    def _reset_capture_timing_locked(self) -> None:
+        for backend in (self._normal_rtt, self._plus_rtt):
+            discard = getattr(backend, "discard_available", None)
+            if backend.is_started and discard is not None:
+                discard()
+            reset = getattr(backend, "reset_timing", None)
+            if reset is not None:
+                reset()
+
+    def _configure_rtt_timebases_locked(self) -> None:
+        for backend in (self._normal_rtt, self._plus_rtt):
+            configure = getattr(backend, "set_nominal_rate_hz", None)
+            if configure is not None:
+                configure(self._rtt_sample_rate_hz)

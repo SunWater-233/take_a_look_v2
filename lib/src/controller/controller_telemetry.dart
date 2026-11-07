@@ -2,6 +2,7 @@ part of 'controller.dart';
 
 extension TakeALookControllerTelemetry on TakeALookController {
   void applyTelemetrySnapshot(Map<String, dynamic> data) {
+    _applySamplingClockSnapshot(data);
     elapsedSeconds =
         (data['elapsedSeconds'] as num?)?.toDouble() ?? elapsedSeconds;
     final watchesByKey = {
@@ -26,6 +27,7 @@ extension TakeALookControllerTelemetry on TakeALookController {
   }
 
   void applyTelemetryDelta(Map<String, dynamic> data) {
+    _applySamplingClockSnapshot(data);
     elapsedSeconds =
         (data['elapsedSeconds'] as num?)?.toDouble() ?? elapsedSeconds;
     final watchesByKey = {
@@ -197,14 +199,20 @@ extension TakeALookControllerTelemetry on TakeALookController {
   }
 
   void applyBackendSamplesCleared() {
+    _clearSampleHistory();
+    _emitState([signals.sampling, signals.telemetry, signals.plot]);
+    signals.telemetrySync.emit();
+  }
+
+  void _clearSampleHistory({bool advanceEpoch = true}) {
+    if (advanceEpoch) state.acquisition.samplingEpoch++;
     plotHistory.clear();
     state.acquisition.rawRecording = {};
     elapsedSeconds = 0;
+    _resetSamplingElapsedClock();
     telemetryStore.clear(_allRetainedWatches);
     _frozenPlotSamples.clear();
     if (plottingPaused || !followLatest) _frozenPlotEndSeconds = 0;
-    _emitState([signals.sampling, signals.telemetry, signals.plot]);
-    signals.telemetrySync.emit();
   }
 }
 

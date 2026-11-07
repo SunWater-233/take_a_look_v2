@@ -30,6 +30,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
         logs: _logs,
         uiScale: uiScale,
         samplingElapsedSeconds: samplingElapsedSeconds,
+        samplingClockRunning: _samplingClock.running,
         plotWindowEndSeconds: plotWindowEndSeconds,
         canUndoWatchDeletion: canUndoWatchDeletion,
         canRedoWatchDeletion: canRedoWatchDeletion,
@@ -46,6 +47,9 @@ extension TakeALookControllerSnapshot on TakeALookController {
   Map<String, dynamic> telemetrySnapshot() {
     return {
       'elapsedSeconds': elapsedSeconds,
+      'samplingElapsedSeconds': samplingElapsedSeconds,
+      'samplingClockRunning': _samplingClock.running,
+      'samplingEpoch': samplingEpoch,
       'watches': [
         for (final watch in _watches)
           {
@@ -72,6 +76,9 @@ extension TakeALookControllerSnapshot on TakeALookController {
   }) {
     return {
       'elapsedSeconds': elapsedSeconds,
+      'samplingElapsedSeconds': samplingElapsedSeconds,
+      'samplingClockRunning': _samplingClock.running,
+      'samplingEpoch': samplingEpoch,
       'watches': [
         for (final watch in _watches)
           _watchTelemetryDelta(
@@ -112,6 +119,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
   }
 
   void _applySnapshot(JsonObject data) {
+    _applySamplingEpoch(data);
     if (data['freeRtos'] case final Map snapshot) {
       state.freeRtos = FreeRtosSnapshot(snapshot);
     }
@@ -298,17 +306,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
     if (data.containsKey('plotInvertY')) {
       plotInvertY = data['plotInvertY'] == true;
     }
-    if (data.containsKey('samplingElapsedSeconds')) {
-      _samplingElapsedBaseSeconds =
-          (data['samplingElapsedSeconds'] as num?)?.toDouble() ??
-          _samplingElapsedBaseSeconds;
-      _samplingElapsedStopwatch.reset();
-    }
-    if (data.containsKey('connectionStatus') ||
-        data.containsKey('samplingPaused') ||
-        data.containsKey('samplingElapsedSeconds')) {
-      _reconcileSamplingClock();
-    }
+    _applySamplingClockSnapshot(data);
     final nextUiScale = (data['uiScale'] as num?)?.toDouble() ?? uiScale;
     if ((nextUiScale - uiScale).abs() >= 0.001) {
       _uiScale.value = nextUiScale.clamp(0.5, 2).toDouble();

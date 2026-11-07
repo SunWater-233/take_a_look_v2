@@ -4,6 +4,24 @@ This package is the local hardware service used by the Flutter desktop app. It
 reads JSON-RPC 2.0-inspired messages from standard input and writes responses
 and unsolicited events as one JSON object per line on standard output.
 
+Acquisition time is owned by `AcquisitionClock`, using the host monotonic clock.
+`samplingElapsedSeconds` counts active capture time; `samplingClockRunning`
+controls UI interpolation. Explicit pause, target halt and firmware download
+freeze this clock; resume continues its accumulated time. Connect and clear
+reset it to zero, with a paused session staying at zero until capture resumes.
+Reading state never starts a clock, drains a stream or resets a decoder.
+`elapsedSeconds` is the latest accepted sample position, separate from elapsed
+capture time, so status updates cannot move a plot ahead of its samples.
+
+RTT Normal and Plus share `SampleTimebase`: target microseconds retain their
+relative spacing and uint32 wrap handling; untimed packets use the configured
+`rttSampleRateHz`. Resume and clear discard monitoring backlog and re-anchor
+the next captured RTT packet. Remote memory subscriptions are stopped on pause
+and clear, so their producer clock is mapped anew when capture resumes.
+The desktop synchronizes display clock anchors and a `samplingEpoch` history
+generation to detached windows. Cursor equality across a clear does not imply
+that a recipient already owns the new session's samples.
+
 `configureFreeRtos {enabled, rateHz: 1..5, tickHz?: integer|null}` controls
 visibility-driven kernel inspection on the existing sampler, under the shared
 probe lock. `freeRtos` events and the full-state field carry immutable snapshots,

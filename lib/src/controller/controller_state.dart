@@ -137,6 +137,8 @@ class AcquisitionState {
   double rttSampleRateHz = 1000;
   String displayRefreshMode = 'standard';
   double elapsedSeconds = 0;
+  bool? samplingClockRunning;
+  int samplingEpoch = 0;
   bool samplingPaused = false;
   bool rttEnabled = false;
   String rttProtocol = 'normal';

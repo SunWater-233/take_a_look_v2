@@ -16,6 +16,7 @@ from take_a_look_backend.backends.ember_pairing import PairingManager
 from take_a_look_backend.models import SymbolInfo, WatchedVariable, json_value
 from take_a_look_backend.protocol import EventName, PROTOCOL_VERSION, ProtocolError, RpcMethod
 from take_a_look_backend.services.sampling import SamplingServiceMixin
+from take_a_look_backend.services.acquisition_clock import AcquisitionClock
 from take_a_look_backend.services.sample_pipeline import SamplePipeline
 from take_a_look_backend.services.recording import RawRecording, export_recording_csv
 from take_a_look_backend.services.debug_info import DebugInfoIndex, load_debug_info_from_elf
@@ -56,6 +57,7 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
         recording_directory: Path | None = None,
         target_directory: Path | None = None,
         bundled_target_directory: Path | None = None,
+        monotonic_clock: Callable[[], float] | None = None,
     ) -> None:
         self._emit_event = event_sink
         self._memory: TargetBackend = memory_backend or PyOcdMemoryBackend()
@@ -105,7 +107,8 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
         self._rtt_control_block_address: int | None = None
         self._firmware = {"status": "empty", "revision": 0, "fingerprint": ""}
         self._firmware_lock = threading.RLock()
-        self._connection_started_at: float | None = None
+        self._acquisition_clock = AcquisitionClock(monotonic_clock or time.perf_counter)
+        self._last_sample_seconds = 0.0
         self._symbols: dict[str, SymbolInfo] = {}
         self._watches: dict[str, WatchedVariable] = {}
         self._capture_source = None
@@ -379,7 +382,8 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
             "rttProtocol": self._rtt_protocol,
             "rttControlBlockAddress": self._rtt_control_block_address,
             "firmware": dict(self._firmware),
-            "elapsedSeconds": self._elapsed_locked(),
+            "elapsedSeconds": self._last_sample_seconds,
+            **self._sampling_clock_state(),
             "sampleCount": self._recording.sample_count,
             "rawRecording": self._recording.status(),
             "debug": self._debug.snapshot(),
@@ -440,8 +444,8 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
             raise ProtocolError("connect_failed", "Unable to connect to the debug probe.", str(error)) from error
         with self._lock:
             self._connection_status = "connected"
-            self._connection_started_at = time.perf_counter()
             self._sampling_paused = True
+            self._acquisition_clock.reset()
             self._debug.execution_state = initial_execution_state
             self._debug.apply_breakpoints(self._memory, connected=self._connection_status == "connected")
             state = self._runtime_state_locked()
@@ -460,7 +464,7 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
             self._debug.remove_breakpoints(self._memory, connected=self._connection_status == "connected")
             self._memory.disconnect()
             self._connection_status = "disconnected"
-            self._connection_started_at = None
+            self._acquisition_clock.reset()
             self._sampling_paused = False
             self._debug.execution_state = "unavailable"
             self._debug.stopped_location = None
@@ -541,7 +545,7 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
         self._rtt_sessions.close()
         self._memory.disconnect()
         self._connection_status = "disconnected"
-        self._connection_started_at = None
+        self._acquisition_clock.reset()
         self._debug.execution_state = "unavailable"
         self._debug.stopped_location = None
         self._debug.registers = {}
@@ -568,7 +572,7 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
             return False
 
         self._connection_status = "disconnected"
-        self._connection_started_at = None
+        self._acquisition_clock.reset()
         self._sampling_paused = True
         self._rtt_enabled = False
         self._debug.execution_state = "unavailable"
@@ -598,6 +602,8 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
     def _refresh_debug_state_locked(self, *, force: bool) -> None:
         if not self._debug.refresh(self._memory, force=force):
             return
+        if self._reconcile_acquisition_clock_locked():
+            self._emit(EventName.STATE, self._sampling_clock_state())
         if self._debug.execution_state == "halted" and not backend_capabilities(self._memory).memory_sampling:
             symbols = [watch.symbol for watch in self._watches.values()
                        if not watch.symbol.is_rtt and watch.mode != "manual"
@@ -627,6 +633,7 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
             self._connect({})
         finally:
             self._sampling_paused = paused
+            self._reconcile_acquisition_clock_locked()
             self._emit(EventName.STATE, self._runtime_state_locked())
 
     def _set_watches(self, params: Mapping[str, object]) -> dict[str, object]:
@@ -814,11 +821,13 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
                 self._emit(EventName.STATE, {"samplingPaused": True})
                 raise ProtocolError("raw_recording_failed", "请解决记录写入错误后清空采样，开启新记录。")
             self._sampling_paused = paused
+            self._reconcile_acquisition_clock_locked()
             if paused:
                 self._stop_memory_sampling_locked()
             state = {
                 "samplingPaused": self._sampling_paused,
-                "elapsedSeconds": self._elapsed_locked(),
+                "elapsedSeconds": self._last_sample_seconds,
+                **self._sampling_clock_state(),
             }
         self._emit(EventName.LOG, {"level": "info", "message": "采集已暂停，低频监视继续。" if paused else "采集已继续。"})
         self._emit(EventName.STATE, state)
@@ -839,6 +848,7 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
             self._rtt_protocol = str(protocol)
             if "rateHz" in params:
                 self._rtt_sample_rate_hz = _positive_number(params["rateHz"], "rateHz")
+                self._configure_rtt_timebases_locked()
             if "controlBlockAddress" in params:
                 self._rtt_control_block_address = _optional_address(params["controlBlockAddress"])
             self._stop_rtt_locked()
@@ -852,8 +862,11 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
             self._stop_memory_sampling_locked()
             self._flush_pending_samples_locked()
             self._pipeline.rotate()
-            self._connection_started_at = time.perf_counter() if self._connection_status == "connected" else None
-            state = {"elapsedSeconds": 0.0, "sampleCount": 0, "rawRecording": self._recording.status()}
+            self._last_sample_seconds = 0.0
+            self._reset_capture_timing_locked()
+            self._acquisition_clock.reset(running=self._acquisition_should_run())
+            state = {"elapsedSeconds": 0.0, "sampleCount": 0, "rawRecording": self._recording.status(),
+                     **self._sampling_clock_state()}
         self._emit(EventName.SAMPLES_CLEARED, {})
         self._emit(EventName.STATE, state)
         return {"state": state}
@@ -941,6 +954,7 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
                     watch.next_monitor_at = 0.0
         if "rttSampleRateHz" in params:
             self._rtt_sample_rate_hz = _positive_number(params["rttSampleRateHz"], "rttSampleRateHz")
+            self._configure_rtt_timebases_locked()
 
     @staticmethod
     def _symbol_json(symbol: SymbolInfo) -> dict[str, object]:

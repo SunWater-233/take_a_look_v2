@@ -179,7 +179,9 @@ class FirmwareServiceMixin:
             self._firmware_busy = True
             was_paused, was_rtt = self._sampling_paused, self._rtt_enabled
             self._sampling_paused, self._rtt_enabled = True, False
-        self._emit(EventName.STATE, {"samplingPaused": True, "rttEnabled": False})
+            self._reconcile_acquisition_clock_locked()
+        self._emit(EventName.STATE, {"samplingPaused": True, "rttEnabled": False,
+                                    **self._sampling_clock_state()})
         try:
             with self._lock:
                 self._flush_pending_samples_locked()
@@ -227,6 +229,7 @@ class FirmwareServiceMixin:
                     self._debug.stopped_location, self._debug.registers = None, {}
                     self._debug.mark_breakpoints_pending()
                 self._firmware_busy = False
+                self._reconcile_acquisition_clock_locked()
                 state = self.state_snapshot()
             self._emit(EventName.STATE, state)
             self._wake.set()

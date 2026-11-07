@@ -565,6 +565,9 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
         }
 
         return InkWell(
+          // Selection owns the row highlight. Descendant editor focus must not
+          // add independent ink that can linger after editing and deselection.
+          focusColor: Colors.transparent,
           onTap: activate,
           onSecondaryTapUp: watch == null
               ? null

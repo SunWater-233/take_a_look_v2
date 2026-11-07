@@ -3,17 +3,7 @@ part of 'controller.dart';
 extension TakeALookControllerWatches on TakeALookController {
   void clearSamples() {
     if (_dispatchCommand(ControllerCommand.clearSamples)) return;
-    plotHistory.clear();
-    state.acquisition.rawRecording = {};
-    elapsedSeconds = 0;
-    _resetSamplingElapsedClock();
-    for (final watch in _allRetainedWatches) {
-      watch.samples.clear();
-      watch.totalSampleCount = 0;
-      watch.historyStartSeconds = 0;
-    }
-    _frozenPlotSamples.clear();
-    if (plottingPaused || !followLatest) _frozenPlotEndSeconds = 0;
+    _clearSampleHistory();
     _appendLog('当前采样缓存已清空。');
     _emitState([
       signals.sampling,

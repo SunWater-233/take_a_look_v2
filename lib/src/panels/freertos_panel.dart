@@ -348,12 +348,14 @@ class _FreeRtosPanelState extends State<FreeRtosPanel> {
           child: Row(
             children: [
               Flexible(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 310),
+                child: SizedBox(
+                  width: 310,
+                  height: TalUiTheme.of(context).controlHeight,
                   child: TextField(
                     controller: _search,
+                    style: workbenchBody,
                     decoration: const InputDecoration(
-                      prefixIcon: Icon(Icons.search, size: 16),
+                      prefixIcon: Icon(Icons.search, size: 17),
                       hintText: '查找任务或句柄',
                       isDense: true,
                     ),

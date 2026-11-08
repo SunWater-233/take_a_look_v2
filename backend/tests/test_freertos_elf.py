@@ -12,7 +12,8 @@ from take_a_look_backend.services.freertos import FreeRtosInspector
 
 @pytest.mark.parametrize('alter_layout',[False,True])
 @pytest.mark.parametrize('dwarf_version',[4,5])
-def test_arm_elf_drives_all_offsets_and_typed_global_handles(tmp_path,alter_layout,dwarf_version):
+@pytest.mark.parametrize('legacy_container',[False,True])
+def test_arm_elf_drives_all_offsets_and_typed_global_handles(tmp_path,alter_layout,dwarf_version,legacy_container):
     compiler=shutil.which('arm-none-eabi-gcc')
     if compiler is None:
         pytest.skip('ARM cross compiler not installed')
@@ -22,6 +23,7 @@ def test_arm_elf_drives_all_offsets_and_typed_global_handles(tmp_path,alter_layo
              '-fno-eliminate-unused-debug-types','-Wl,--entry=_start','-Wl,-Ttext=0x08000000',
              '-Wl,-Tdata=0x20000000',str(source),'-o',str(elf_path)]
     if alter_layout:command.insert(1,'-DALTER_LAYOUT=1')
+    if legacy_container:command.insert(1,'-DLEGACY_LIST_CONTAINER=1')
     subprocess.run(command,check=True,capture_output=True,timeout=30)
     with ElfLoadContext(elf_path) as context:
         layout=FreeRtosLayout.from_context(context)
@@ -48,3 +50,9 @@ def test_arm_elf_drives_all_offsets_and_typed_global_handles(tmp_path,alter_layo
     assert snapshot['timers'][0]['name']=='Heartbeat'
     assert snapshot['timers'][0]['periodMs']==1000
     assert snapshot['timers'][0]['autoReload'] is True
+    live_inspector = FreeRtosInspector(layout)
+    for _ in range(2):
+        live = live_inspector.inspect(read, halted=False, tick_hz=1000)
+        assert live['status'] == 'ready', live
+        assert live['quality'] == 'runningApproximate'
+        assert [task['name'] for task in live['tasks']] == ['Control', 'Telemetry']

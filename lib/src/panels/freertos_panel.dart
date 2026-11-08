@@ -330,9 +330,7 @@ class _FreeRtosPanelState extends State<FreeRtosPanel> {
     }
     if (sort == 'stack') {
       rows.sort(
-        (a, b) => (a.number('minFreeStackBytes') ?? double.infinity).compareTo(
-          b.number('minFreeStackBytes') ?? double.infinity,
-        ),
+        (a, b) => (b.peakStackBytes ?? -1).compareTo(a.peakStackBytes ?? -1),
       );
     }
     var selected = data.task(settings['selectedTask'] as int?);
@@ -365,7 +363,7 @@ class _FreeRtosPanelState extends State<FreeRtosPanel> {
               ),
               const SizedBox(width: 12),
               const Flexible(
-                child: Text('栈单位 B / CPU 按快照窗口统计', style: workbenchMuted),
+                child: Text('栈显示历史峰值 / CPU 按快照窗口统计', style: workbenchMuted),
               ),
             ],
           ),
@@ -390,8 +388,8 @@ class _FreeRtosPanelState extends State<FreeRtosPanel> {
                     ),
                     _Col(
                       'stack',
-                      '最小剩余栈${sort == 'stack' ? ' ↑' : ''}',
-                      compact ? 110 : 145,
+                      '峰值栈占用${sort == 'stack' ? ' ↓' : ''}',
+                      compact ? 145 : 165,
                       right: true,
                       onSort: () =>
                           _set({'sort': sort == 'stack' ? '' : 'stack'}),
@@ -420,10 +418,13 @@ class _FreeRtosPanelState extends State<FreeRtosPanel> {
                       row.number('cpuPercent')?.toDouble(),
                       TalColors.info,
                     ),
-                    _meter(
-                      '${row.flag('stackWatermarkAtLeast') ? '≥ ' : ''}${_bytesValue(row.number('minFreeStackBytes'))}',
-                      _stackRatio(row),
-                      _stackLow(row) ? TalColors.warning : TalColors.success,
+                    Tooltip(
+                      message: _stackUsageTooltip(row),
+                      child: _meter(
+                        _stackPeakPercent(row),
+                        row.peakStackPercent,
+                        _stackLow(row) ? TalColors.warning : TalColors.success,
+                      ),
                     ),
                   ],
                 );
@@ -466,8 +467,19 @@ class _FreeRtosPanelState extends State<FreeRtosPanel> {
           ('CPU 占用', Text(_percent(task.number('cpuPercent')), style: talMono)),
           ('运行计数', Text(task.text('runtimeCounter'), style: talMono)),
         ]),
-        _heading('栈余量'),
+        _heading('栈占用'),
         _properties([
+          (
+            '峰值占用',
+            Text(
+              _stackPeakBytes(task),
+              style: talMono.copyWith(
+                color: _stackLow(task) ? TalColors.warning : null,
+              ),
+            ),
+          ),
+          ('峰值占比', Text(_stackPeakPercent(task), style: talMono)),
+          ('分配大小', Text(_bytes(task.number('stackBytes')), style: talMono)),
           (
             '历史最小剩余',
             Text(
@@ -477,7 +489,6 @@ class _FreeRtosPanelState extends State<FreeRtosPanel> {
               ),
             ),
           ),
-          ('分配大小', Text(_bytes(task.number('stackBytes')), style: talMono)),
           (
             '栈起始地址',
             Text(freeRtosAddress(task.number('stackBase')), style: talMono),
@@ -488,12 +499,16 @@ class _FreeRtosPanelState extends State<FreeRtosPanel> {
           ),
         ]),
         const SizedBox(height: 8),
+        const Text('峰值表示任务创建以来用到过的最大栈空间。', style: workbenchMuted),
+        const SizedBox(height: 4),
         Text(
           task.text('stackWatermarkSource') == 'kernelApi'
               ? '来源：FreeRTOS API 水位'
               : '填充扫描估算；缺少边界或填充证据时显示“—”。',
           style: workbenchMuted,
         ),
+        if (task.flag('stackWatermarkAtLeast'))
+          const Text('扫描未覆盖完整空闲区，峰值占用显示上限（≤）。', style: workbenchMuted),
         if (_stackLow(task))
           _message(
             '历史最小栈余量低于 ${settings['stackWarningPercent']}% 提醒阈值。',
@@ -804,8 +819,10 @@ class _FreeRtosPanelState extends State<FreeRtosPanel> {
                     child: _link(task.name, () => _selectTask(task.handle)),
                   ),
                   Text(
-                    '分配 ${_bytes(task.number('stackBytes'))}',
-                    style: talMono,
+                    '峰值占用 ${_stackPeakCapacity(task)}（${_stackPeakPercent(task)}）',
+                    style: talMono.copyWith(
+                      color: _stackLow(task) ? TalColors.warning : null,
+                    ),
                   ),
                   Text(
                     '最小剩余 ${task.flag('stackWatermarkAtLeast') ? '≥ ' : ''}${_bytes(task.number('minFreeStackBytes'))}',
@@ -818,7 +835,10 @@ class _FreeRtosPanelState extends State<FreeRtosPanel> {
             ),
           ),
         const Divider(),
-        const Text('水位表示创建以来的历史最小剩余。任务栈可能由该堆分配，两项不能相加。', style: workbenchMuted),
+        const Text(
+          '峰值占用 = 分配大小 − 历史最小剩余。任务栈可能由该堆分配，两项不能相加。',
+          style: workbenchMuted,
+        ),
       ],
     ),
   );
@@ -1115,6 +1135,8 @@ class _FreeRtosPanelState extends State<FreeRtosPanel> {
         style: talMono.copyWith(
           color: color == TalColors.warning ? color : null,
         ),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
       ),
       const SizedBox(height: 4),
       SizedBox(
@@ -1167,6 +1189,35 @@ class _FreeRtosPanelState extends State<FreeRtosPanel> {
       !task.flag('stackWatermarkAtLeast') &&
       _stackRatio(task) != null &&
       _stackRatio(task)! < (settings['stackWarningPercent'] as num? ?? 10);
+  String _stackPeakBytes(FreeRtosRecord task) => task.peakStackBytes == null
+      ? '—'
+      : '${task.flag('stackWatermarkAtLeast') ? '≤ ' : ''}${_bytes(task.peakStackBytes)}';
+  String _stackPeakPercent(FreeRtosRecord task) => task.peakStackPercent == null
+      ? '—'
+      : '${task.flag('stackWatermarkAtLeast') ? '≤ ' : ''}${_percent(task.peakStackPercent)}';
+  String _stackPeakCapacity(FreeRtosRecord task) {
+    final total = task.number('stackBytes');
+    if (task.peakStackBytes == null) {
+      return total != null && total.isFinite && total > 0
+          ? '— / ${_bytes(total)}'
+          : '—';
+    }
+    return '${task.flag('stackWatermarkAtLeast') ? '≤ ' : ''}${_bytesValue(task.peakStackBytes)} / ${_bytes(total)}';
+  }
+
+  String _stackUsageTooltip(FreeRtosRecord task) {
+    final free = task.number('minFreeStackBytes');
+    if (task.peakStackBytes == null) {
+      return '缺少有效的栈总容量或历史水位，无法计算峰值占用。'
+          '\n分配大小：${_bytes(task.number('stackBytes'))}'
+          '\n历史最小剩余：${task.flag('stackWatermarkAtLeast') ? '≥ ' : ''}${_bytes(free)}';
+    }
+    return '峰值栈占用：${_stackPeakCapacity(task)}（${_stackPeakPercent(task)}）'
+        '\n栈总容量减去历史最小剩余，表示任务创建以来的最大占用。'
+        '${task.text('stackWatermarkSource') == 'patternEstimate' ? '\n根据栈填充水位估算。' : ''}'
+        '${task.flag('stackWatermarkAtLeast') ? '\n扫描未覆盖完整空闲区，显示占用上限（≤）。' : ''}';
+  }
+
   String _objectValue(FreeRtosRecord object) =>
       object.text('kind') == 'eventGroup'
       ? freeRtosAddress(object.number('bits'))

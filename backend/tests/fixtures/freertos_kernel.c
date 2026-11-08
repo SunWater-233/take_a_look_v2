@@ -6,7 +6,12 @@ typedef struct tskTaskControlBlock *TaskHandle_t;
 typedef struct xLIST_ITEM {
   U32 xItemValue;
   struct xLIST_ITEM *pxNext, *pxPrevious;
-  void *pvOwner, *pxContainer;
+  void *pvOwner;
+#ifdef LEGACY_LIST_CONTAINER
+  void *pvContainer;
+#else
+  void *pxContainer;
+#endif
 } ListItem_t;
 typedef struct {U32 xItemValue; ListItem_t *pxNext, *pxPrevious;} MiniListItem_t;
 typedef struct xLIST {U32 uxNumberOfItems; ListItem_t *pxIndex; MiniListItem_t xListEnd;} List_t;
@@ -79,7 +84,7 @@ static TCB_t telemetryTask={
   .pcTaskName="Telemetry",.ulRunTimeCounter=456,.uxTCBNumber=2
 };
 TCB_t *pxCurrentTCB=&controlTask;
-U32 uxCurrentNumberOfTasks=2,xTickCount=1000;
+U32 uxCurrentNumberOfTasks=2,xTickCount=1000,uxTaskNumber=2;
 static Queue_t logMutexBody={.pcHead=0,.u.xSemaphore={&controlTask,0},
   .xTasksWaitingToSend=EMPTY(logMutexBody.xTasksWaitingToSend),
   .xTasksWaitingToReceive=ONE(logMutexBody.xTasksWaitingToReceive,telemetryTask.xEventListItem),

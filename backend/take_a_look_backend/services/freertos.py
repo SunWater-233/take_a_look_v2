@@ -1,11 +1,13 @@
 """Read-only FreeRTOS inspection. No target function calls, halt, or writes.
 
-Layouts are obtained from the exact firmware. Every linked list is bounded and
-validated twice; invalid snapshots never replace a previously validated one.
+Layouts are obtained from the exact firmware. Halted lists are validated twice;
+running samples validate task identities without requiring a frozen scheduler.
+Invalid snapshots never replace a previously validated one.
 """
 from __future__ import annotations
 
 import time
+from collections import deque
 from dataclasses import dataclass
 from typing import Callable
 
@@ -14,6 +16,14 @@ from .freertos_layout import CType, FreeRtosLayout
 
 class SnapshotInvalid(RuntimeError):
     pass
+
+
+class SnapshotChanging(SnapshotInvalid):
+    """A live record kept changing across bounded rereads."""
+
+
+def _address_text(value):
+    return f"0x{value:X}" if isinstance(value, int) else "缺失"
 
 
 @dataclass
@@ -64,10 +74,12 @@ class FreeRtosInspector:
         self.previous: tuple | None = None
         self.last: dict | None = None
         self._stack_cache: dict[int, tuple] = {}
+        self._task_registry: tuple | None = None
 
     def invalidate(self, *, clear: bool = False) -> None:
         self.previous = None
         self._stack_cache.clear()
+        self._task_registry = None
         if clear:
             self.last = None
 
@@ -88,13 +100,19 @@ class FreeRtosInspector:
         self._checks: list[tuple[int, bytes]] = []
         self._diagnostics: list[dict] = []
         self._list_cache: dict[int, list[tuple[int, int]]] = {}
+        self._running_retries = 0
         try:
             result = self._inspect(halted, tick_hz)
             for address, old in self._checks:
                 if memory.block(address, len(old)) != old:
                     raise SnapshotInvalid("读取期间任务或对象链表发生变化，请等待下一次刷新。")
+        except SnapshotChanging as error:
+            # No new counters were committed. The next valid frame can still
+            # calculate CPU deltas across this skipped sample's wider window.
+            return self.unavailable("inconsistent", str(error))
         except (SnapshotInvalid, KeyError, ValueError, OverflowError) as error:
             self.previous = None
+            self._task_registry = None
             return self.unavailable("inconsistent", str(error))
         self.sequence += 1
         result.update(sequence=self.sequence, capturedAtMs=time.time_ns() // 1_000_000,
@@ -117,9 +135,22 @@ class FreeRtosInspector:
             raise SnapshotInvalid(f"内核字段 {path} 布局无效。")
         return int.from_bytes(data[offset:offset + member.size], self.layout.byteorder)
 
-    def _list(self, address: int) -> list[tuple[int, int]]:
+    def _list_container(self, data: bytes, typ: CType, member: str = "", default=None):
+        # Older FreeRTOS kernels used pvContainer for this same link.
+        prefix = f"{member}." if member else ""
+        for name in ("pxContainer", "pvContainer"):
+            value = self._field(data, typ, prefix + name)
+            if value is not None:
+                return value
+        return default
+
+    def _list(self, address: int, name: str = "内核链表") -> list[tuple[int, int]]:
         if address in self._list_cache:
             return self._list_cache[address]
+
+        def invalid(message):
+            return SnapshotInvalid(f"{name} @ 0x{address:X}：{message}")
+
         typ = self.layout.type("List_t", "xLIST")
         item_type = self.layout.type("ListItem_t", "xLIST_ITEM")
         if typ is None or item_type is None:
@@ -128,25 +159,32 @@ class FreeRtosInspector:
         count = self._field(raw, typ, "uxNumberOfItems")
         end = typ.member("xListEnd")
         if count is None or count > self.MAX_TASKS or end is None:
-            raise SnapshotInvalid("内核链表长度无效。")
+            raise invalid("内核链表长度无效。")
         sentinel = address + end[0]
         pointer = self._field(raw, typ, "xListEnd.pxNext")
+        tail = self._field(raw, typ, "xListEnd.pxPrevious")
+        if count == 0 and pointer == 0 and tail == 0:
+            raise invalid("内核链表未初始化，或 ELF / AXF 与目标固件不匹配。")
         previous = sentinel
         result, visited = [], set()
         for _ in range(count):
             if not pointer or pointer == sentinel or pointer in visited:
-                raise SnapshotInvalid("内核链表提前结束或形成环。")
+                raise invalid("内核链表提前结束或形成环。")
             visited.add(pointer)
             item = self._m.block(pointer, item_type.size)
             if (self._field(item, item_type, "pxPrevious") != previous
-                    or self._field(item, item_type, "pxContainer") != address):
-                raise SnapshotInvalid("内核链表正在更新或已损坏。")
+                    or self._list_container(item, item_type) != address):
+                raise invalid("内核链表正在更新或已损坏。")
             owner = self._field(item, item_type, "pvOwner")
             result.append((owner, self._field(item, item_type, "xItemValue", 0)))
             self._checks.append((pointer, item))
             previous, pointer = pointer, self._field(item, item_type, "pxNext")
-        if pointer != sentinel or self._field(raw, typ, "xListEnd.pxPrevious") != previous:
-            raise SnapshotInvalid("内核链表尾指针不一致。")
+        if pointer != sentinel or tail != previous:
+            observed_end = f"0x{pointer:X}" if pointer is not None else "缺失"
+            observed_tail = f"0x{tail:X}" if tail is not None else "缺失"
+            raise invalid(f"内核链表尾指针不一致（节点数 {count}，结束指针 {observed_end}，"
+                          f"应为 0x{sentinel:X}；尾指针 {observed_tail}，应为 0x{previous:X}）。"
+                          "请等待下一次刷新；若暂停目标后仍持续出现，请核对 ELF / AXF 与目标固件。")
         # pxIndex is the scheduler's rotating cursor, not a structural link.
         for path in ('uxNumberOfItems', 'xListEnd.pxNext', 'xListEnd.pxPrevious'):
             offset, member = typ.member(path)
@@ -154,12 +192,135 @@ class FreeRtosInspector:
         self._list_cache[address] = result
         return result
 
+    def _task_lists(self):
+        for name, state in (("pxReadyTasksLists", "ready"), ("xDelayedTaskList1", "blocked"),
+                            ("xDelayedTaskList2", "blocked"), ("xSuspendedTaskList", "suspended"),
+                            ("xTasksWaitingTermination", "deleted")):
+            var = self.layout.variables.get(name)
+            if var is None:
+                continue
+            entries = var.type.count if var.type.kind == "array" else 1
+            stride = var.type.target.size if var.type.kind == "array" else var.type.size
+            if entries > 128 or not stride or stride > 4096:
+                raise SnapshotInvalid("任务列表数组布局无效。")
+            yield var, entries, stride, state
+
+    def _read_running_record(self, address: int, typ: CType,
+                             validate: Callable[[bytes], str | None], label: str) -> bytes:
+        """Reread a torn live record using the original snapshot's read budget."""
+        problems = []
+        for attempt in range(3):
+            if attempt:
+                self._running_retries += 1
+            raw = self._m.block(address, typ.size)
+            problem = validate(raw)
+            if problem is None:
+                return raw
+            problems.append(problem)
+        if len(set(problems)) == 1:
+            raise SnapshotInvalid(f"{label}：连续 3 次读到相同的无效任务字段（{problems[-1]}）。"
+                                  "该样本未发布，请核对固件符号与目标内核状态。")
+        raise SnapshotChanging(f"{label}：采样期间状态变化，保留上一份有效快照，等待自动重试。")
+
+    def _running_task_states(self, current: int, count: int, generation: int | None):
+        """Discover live TCBs, then reuse handles only within one task lifetime epoch.
+
+        A task may move between lists while USB reads are in flight. Its owner,
+        TCB number and membership container remain usable independently of other
+        tasks' sampling instants. Never infer an atomic scheduler snapshot here.
+        """
+        typ = self.layout.type("TCB_t", "tskTaskControlBlock")
+        list_type = self.layout.type("List_t", "xLIST")
+        item_type = self.layout.type("ListItem_t", "xLIST_ITEM")
+        state_item = typ.member("xStateListItem")
+        end = list_type.member("xListEnd") if list_type else None
+        if state_item is None or end is None or item_type is None:
+            raise SnapshotInvalid("缺少 FreeRTOS 任务链表类型。")
+        groups = list(self._task_lists())
+        containers = {var.address + index * stride: state
+                      for var, entries, stride, state in groups for index in range(entries)}
+        sentinels = {address + end[0] for address in containers}
+        registry = self._task_registry
+        cached = generation is not None and registry is not None and registry[:2] == (count, generation)
+        handles = set(registry[2]) if cached else {current} if current else set()
+        if not cached:
+            # Batch the priority array; reading every empty priority separately
+            # needlessly stretches discovery across many scheduler ticks.
+            for _ in range(3):
+                pending = deque()
+                for var, entries, stride, _state in groups:
+                    per_block = max(1, 4096 // stride)
+                    for first in range(0, entries, per_block):
+                        length = min(per_block, entries - first)
+                        data = self._m.block(var.address + first * stride, length * stride)
+                        for index in range(length):
+                            address = var.address + (first + index) * stride
+                            raw = data[index * stride:(index + 1) * stride]
+                            size = self._field(raw, list_type, "uxNumberOfItems")
+                            head = self._field(raw, list_type, "xListEnd.pxNext")
+                            tail = self._field(raw, list_type, "xListEnd.pxPrevious")
+                            if size is None or size > self.MAX_TASKS:
+                                raise SnapshotInvalid(f"{var.name} @ 0x{address:X}：内核链表长度无效。")
+                            if head == 0 or tail == 0:
+                                raise SnapshotInvalid(f"{var.name} @ 0x{address:X}：内核链表未初始化，或 ELF / AXF 与目标固件不匹配。")
+                            pending.extend((head, tail))
+                visited = set()
+                while pending:
+                    node = pending.popleft()
+                    if node in sentinels or node in visited:
+                        continue
+                    if len(visited) >= self.MAX_TASKS:
+                        raise SnapshotInvalid("运行中任务链表超过读取上限。")
+                    visited.add(node)
+                    def validate_item(raw):
+                        owner = self._field(raw, item_type, "pvOwner")
+                        container = self._list_container(raw, item_type)
+                        if not owner or owner + state_item[0] != node or container not in containers:
+                            return f"owner={_address_text(owner)}, container={_address_text(container)}"
+                        return None
+
+                    item = self._read_running_record(node, item_type, validate_item, f"任务链表节点 0x{node:X}")
+                    owner = self._field(item, item_type, "pvOwner")
+                    handles.add(owner)
+                    pending.extend((self._field(item, item_type, "pxNext"),
+                                    self._field(item, item_type, "pxPrevious")))
+                if len(handles) == count:
+                    break
+                if len(handles) > count:
+                    raise SnapshotInvalid("任务数量与链表内容不一致，可能正在创建或删除任务。")
+            if len(handles) != count:
+                raise SnapshotInvalid("任务在采样期间迁移，尚未发现完整任务集合，请等待下一次刷新。")
+        legal_links = {handle + state_item[0] for handle in handles} | sentinels
+        states = {}
+        self._task_raw = {}
+        for handle in sorted(handles):
+            def validate_task(raw):
+                owner = self._field(raw, typ, "xStateListItem.pvOwner")
+                container = self._list_container(raw, typ, "xStateListItem")
+                links = [self._field(raw, typ, f"xStateListItem.{name}") for name in ("pxNext", "pxPrevious")]
+                if (owner != handle or container not in containers
+                        or any(link not in legal_links or link == handle + state_item[0]
+                               or (link in sentinels and link != container + end[0]) for link in links)):
+                    return (f"owner={_address_text(owner)}, container={_address_text(container)}, "
+                            f"next={_address_text(links[0])}, previous={_address_text(links[1])}")
+                number = self._field(raw, typ, "uxTCBNumber")
+                if cached and number != registry[2][handle]:
+                    return f"任务编号={number}，期望={registry[2][handle]}"
+                return None
+
+            raw = self._read_running_record(handle, typ, validate_task, f"任务 0x{handle:X}")
+            container = self._list_container(raw, typ, "xStateListItem")
+            self._task_raw[handle] = raw
+            states[handle] = containers[container]
+        return states
+
     def _inspect(self, halted: bool, tick_hz: int | None) -> dict:
         typ = self.layout.type("TCB_t", "tskTaskControlBlock")
         if typ.size <= 0 or typ.size > 4096:
             raise SnapshotInvalid("TCB 布局大小无效。")
         current = self._var("pxCurrentTCB")
         count = self._var("uxCurrentNumberOfTasks")
+        generation = self._var("uxTaskNumber")
         tick = self._var("xTickCount")
         idle = self._var('xIdleTaskHandle')
         idle_array = self.layout.variables.get('xIdleTaskHandles')
@@ -171,32 +332,29 @@ class FreeRtosInspector:
             raise SnapshotInvalid("缺少 pxCurrentTCB / uxCurrentNumberOfTasks 符号。")
         if count > self.MAX_TASKS:
             raise SnapshotInvalid("任务数量超出支持范围。")
-        tcb_var = self.layout.variables["pxCurrentTCB"]
-        current_raw = self._m.block(tcb_var.address, tcb_var.type.size)
-        if int.from_bytes(current_raw, self.layout.byteorder) != current:
-            raise SnapshotInvalid('读取期间当前任务发生变化。')
-        self._checks.append((tcb_var.address, current_raw))
+        if halted:
+            tcb_var = self.layout.variables["pxCurrentTCB"]
+            current_raw = self._m.block(tcb_var.address, tcb_var.type.size)
+            if int.from_bytes(current_raw, self.layout.byteorder) != current:
+                raise SnapshotInvalid('读取期间当前任务发生变化。')
+            self._checks.append((tcb_var.address, current_raw))
         count_var = self.layout.variables['uxCurrentNumberOfTasks']
         self._checks.append((count_var.address, int(count).to_bytes(count_var.type.size, self.layout.byteorder)))
         task_states: dict[int, str] = {}
-        for name, state in (("pxReadyTasksLists", "ready"), ("xDelayedTaskList1", "blocked"),
-                            ("xDelayedTaskList2", "blocked"), ("xSuspendedTaskList", "suspended"),
-                            ("xTasksWaitingTermination", "deleted")):
-            var = self.layout.variables.get(name)
-            if var is None:
-                continue
-            entries = var.type.count if var.type.kind == "array" else 1
-            stride = var.type.target.size if var.type.kind == "array" else var.type.size
-            if entries > 128 or not stride:
-                raise SnapshotInvalid("任务列表数组布局无效。")
-            for index in range(entries):
-                for owner, _ in self._list(var.address + index * stride):
-                    if owner in task_states:
-                        raise SnapshotInvalid("任务同时出现在多个状态列表中。")
-                    task_states[owner] = state
+        self._task_raw = {}
+        if halted:
+            for var, entries, stride, state in self._task_lists():
+                for index in range(entries):
+                    list_name = f"{var.name}[{index}]" if var.type.kind == "array" else var.name
+                    for owner, _ in self._list(var.address + index * stride, list_name):
+                        if owner in task_states:
+                            raise SnapshotInvalid("任务同时出现在多个状态列表中。")
+                        task_states[owner] = state
+        else:
+            task_states = self._running_task_states(current, count, generation)
         pending = self.layout.variables.get('xPendingReadyList')
-        if pending is not None:
-            for owner, _ in self._list(pending.address):
+        if pending is not None and halted:
+            for owner, _ in self._list(pending.address, 'xPendingReadyList'):
                 if owner not in task_states:
                     raise SnapshotInvalid('待就绪列表包含未知任务。')
                 task_states[owner] = 'ready'
@@ -206,7 +364,7 @@ class FreeRtosInspector:
             raise SnapshotInvalid("当前任务不在任务列表中。")
         tasks = []
         for handle, state in task_states.items():
-            raw = self._m.block(handle, typ.size)
+            raw = self._task_raw[handle] if handle in self._task_raw else self._m.block(handle, typ.size)
             name_field = typ.member("pcTaskName")
             if name_field is None:
                 raise SnapshotInvalid("TCB 缺少任务名字段。")
@@ -220,7 +378,9 @@ class FreeRtosInspector:
             total = end - stack + word if end and stack and end >= stack and word else None
             if total is not None and total > 16 * 1024 * 1024:
                 raise SnapshotInvalid("任务栈边界无效。")
-            event_container = self._field(raw, typ, "xEventListItem.pxContainer", 0)
+            event_container = self._list_container(raw, typ, "xEventListItem", 0)
+            if pending is not None and event_container == pending.address:
+                state = "ready"
             # Indefinite event waits live on the suspended list in FreeRTOS.
             if state == "suspended" and event_container:
                 state = "blocked"
@@ -259,6 +419,9 @@ class FreeRtosInspector:
             if self._m.block(address, len(old)) != old:
                 raise SnapshotInvalid('任务在读取期间发生变化，请等待下一次刷新。')
         self._checks.clear()
+        if generation is not None and self._var("uxTaskNumber") != generation:
+            raise SnapshotInvalid("读取期间任务被创建或删除，请等待下一次刷新。")
+        self._task_registry = (count, generation, {task['handle']: task['taskNumber'] for task in tasks})
         metadata = self._optional('metadata', '固件辅助快照', lambda: self._metadata(tasks), {})
         tick_hz = metadata.get("tickHz") or tick_hz
         objects = self._optional('objects', '内核对象', lambda: self._objects(tasks), None)
@@ -271,7 +434,11 @@ class FreeRtosInspector:
         self._cpu(tasks, tick, tick_hz, metadata, halted)
         for task in tasks:
             task.pop("_eventContainer", None)
-        self._diag("tasks", "任务与状态", "available", "ELF / DWARF 布局；任务链表已校验。")
+        self._diag("tasks", "任务与状态", "available", "ELF / DWARF 布局；任务链表已校验。" if halted else
+                   "任务身份、数量与状态容器已校验；运行中状态取自各任务各自的采样时刻。")
+        if not halted and self._running_retries:
+            self._diag("sampling", "运行中采样", "available",
+                       f"采样遇到任务字段变化，已在读取预算内自动重读 {self._running_retries} 次并通过校验。")
         self._diag("stack", "任务栈", "available" if any(t['minFreeStackBytes'] is not None for t in tasks) else "unavailable",
                    "A5 填充扫描为估算；固件辅助快照可提供 API 水位。缺少边界时不计算占比。")
         self._diag("context", "保存上下文", "available" if halted else "targetRunning",

@@ -12,6 +12,28 @@ class FreeRtosRecord {
   bool flag(String key) => data[key] == true;
   int get handle => integer('handle') ?? 0;
   String get name => text('name');
+
+  /// Historical peak inferred from the watermark; an upper bound when the
+  /// free-stack scan stopped before reaching the used region.
+  num? get peakStackBytes {
+    final size = number('stackBytes'), free = number('minFreeStackBytes');
+    if (size == null ||
+        free == null ||
+        !size.isFinite ||
+        !free.isFinite ||
+        size <= 0 ||
+        free < 0 ||
+        free > size) {
+      return null;
+    }
+    return size - free;
+  }
+
+  double? get peakStackPercent {
+    final used = peakStackBytes;
+    return used == null ? null : used / number('stackBytes')! * 100;
+  }
+
   List<FreeRtosRecord> records(String key) => [
     for (final value in data[key] as List? ?? const [])
       if (value is Map) FreeRtosRecord(value),

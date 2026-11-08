@@ -44,10 +44,11 @@ class KernelImage:
         def var(name, offset, typ):
             self.layout.variables[name]=CVariable(name,self.BASE+offset,typ,'tasks.c')
         var('pxCurrentTCB',0,ptr); var('uxCurrentNumberOfTasks',4,u32); var('xTickCount',8,u32)
+        var('uxTaskNumber',12,u32)
         var('pxReadyTasksLists',0x100,array(lists,8)); var('xSuspendedTaskList',0x200,lists)
         var('xDelayedTaskList1',0x240,lists);var('xDelayedTaskList2',0x280,lists)
         var('xTasksWaitingTermination',0x2c0,lists);var('xQueueRegistry',0x300,array(registry,1))
-        self.u32(self.BASE,self.A);self.u32(self.BASE+4,3);self.u32(self.BASE+8,1000)
+        self.u32(self.BASE,self.A);self.u32(self.BASE+4,3);self.u32(self.BASE+8,1000);self.u32(self.BASE+12,3)
         for i in range(8):self.linked_list(self.BASE+0x100+i*20,[])
         for offset in (0x200,0x240,0x280,0x2c0):self.linked_list(self.BASE+offset,[])
         self.linked_list(self.BASE+0x100+5*20,[(self.A+4,self.A)])
@@ -108,6 +109,45 @@ def test_tasks_indefinite_wait_mutex_owner_stack_and_cpu():
     assert second['quality']=='runningApproximate'
 
 
+@pytest.mark.parametrize('container_name', ['pxContainer', 'pvContainer'])
+def test_list_container_names_preserve_wait_states_and_mutex_relationships(container_name):
+    image = KernelImage()
+    item = image.layout.types['ListItem_t']
+    item.fields[container_name] = item.fields.pop('pxContainer')
+    snapshot = FreeRtosInspector(image.layout).inspect(image.read, halted=True)
+    assert snapshot['status'] == 'ready', snapshot
+    task = next(task for task in snapshot['tasks'] if task['handle'] == image.B)
+    assert task['state'] == 'blocked'
+    assert task['waitingObject'] == image.QUEUE
+    assert snapshot['objects'][0]['waiters'] == [image.B]
+
+
+def test_uninitialized_list_reports_symbol_address_and_firmware_match_hint():
+    image = KernelImage()
+    image.put(image.BASE + 0x100, bytes(20))
+    snapshot = FreeRtosInspector(image.layout).inspect(image.read, halted=True)
+    assert snapshot['status'] == 'inconsistent'
+    assert snapshot['tasks'] == []
+    assert 'pxReadyTasksLists[0]' in snapshot['message']
+    assert '0x20000100' in snapshot['message']
+    assert '未初始化' in snapshot['message']
+    assert 'ELF / AXF' in snapshot['message']
+
+
+def test_invalid_list_tail_reports_observed_links_and_preserves_last_snapshot():
+    image = KernelImage()
+    inspector = FreeRtosInspector(image.layout)
+    first = inspector.inspect(image.read, halted=True)
+    image.u32(image.BASE + 0x110, image.BASE + 0x10c)
+    snapshot = inspector.inspect(image.read, halted=True)
+    assert snapshot['status'] == 'inconsistent'
+    assert snapshot['stale'] is True
+    assert snapshot['sequence'] == first['sequence']
+    assert 'pxReadyTasksLists[0]' in snapshot['message']
+    assert '0x20000108' in snapshot['message']
+    assert '0x2000010C' in snapshot['message']
+
+
 def test_corrupt_list_preserves_last_good_snapshot_and_does_not_follow_mmio():
     image=KernelImage();inspector=FreeRtosInspector(image.layout)
     first=inspector.inspect(image.read,halted=True)
@@ -132,9 +172,238 @@ def test_mutation_during_read_rejects_the_whole_snapshot():
             reads+=1
             if reads>=2:image.u32(image.A+12,0)
         return image.read(address,size)
-    result=inspector.inspect(read,halted=False)
+    result=inspector.inspect(read,halted=True)
     assert result['status']=='inconsistent'
     assert not result['stale']
+
+
+def test_running_snapshot_allows_current_task_to_change_on_every_read():
+    image = KernelImage()
+    reads = 0
+    def read(address, size):
+        nonlocal reads
+        reads += 1
+        image.u32(image.BASE, image.A if reads % 2 else image.OWNER)
+        return image.read(address, size)
+    snapshot = FreeRtosInspector(image.layout).inspect(read, halted=False)
+    assert snapshot['status'] == 'ready', snapshot
+    assert snapshot['quality'] == 'runningApproximate'
+    assert len(snapshot['tasks']) == 3
+
+
+def test_running_snapshots_keep_refreshing_with_scheduling_on_every_transport_read():
+    image = KernelImage()
+    inspector = FreeRtosInspector(image.layout)
+    reads = 0
+    def read(address, size):
+        nonlocal reads
+        reads += 1
+        ready = image.BASE + 0x100 + 3 * 20
+        delayed = image.BASE + 0x240
+        image.linked_list(ready, [(image.OWNER + 4, image.OWNER)] if reads % 2 else [])
+        image.linked_list(delayed, [] if reads % 2 else [(image.OWNER + 4, image.OWNER)])
+        image.u32(image.BASE, image.OWNER if reads % 2 else image.A)
+        image.u32(image.BASE + 8, 1000 + reads)
+        return image.read(address, size)
+    for sequence in range(1, 21):
+        snapshot = inspector.inspect(read, halted=False)
+        assert snapshot['status'] == 'ready', snapshot
+        assert snapshot['sequence'] == sequence
+        assert snapshot['quality'] == 'runningApproximate'
+        assert len(snapshot['tasks']) == 3
+
+
+def test_running_without_lifetime_symbol_rediscovers_tasks_each_sample():
+    image = KernelImage()
+    del image.layout.variables['uxTaskNumber']
+    inspector = FreeRtosInspector(image.layout)
+    for _ in range(2):
+        snapshot = inspector.inspect(image.read, halted=False)
+        assert snapshot['status'] == 'ready', snapshot
+        assert len(snapshot['tasks']) == 3
+
+
+def test_running_discovery_retries_when_task_moves_behind_the_reader():
+    image = KernelImage()
+    image.u32(image.BASE + 0x304, 0)
+    moved = False
+    def read(address, size):
+        nonlocal moved
+        if address == image.BASE + 0x240 and not moved:
+            moved = True
+            image.linked_list(image.BASE + 0x240, [])
+            image.linked_list(image.BASE + 0x100 + 3 * 20, [(image.OWNER + 4, image.OWNER)])
+        return image.read(address, size)
+    snapshot = FreeRtosInspector(image.layout).inspect(read, halted=False)
+    assert snapshot['status'] == 'ready', snapshot
+    assert {task['handle'] for task in snapshot['tasks']} == {image.A, image.B, image.OWNER}
+    assert next(task for task in snapshot['tasks'] if task['handle'] == image.OWNER)['state'] == 'ready'
+
+
+def test_running_registry_reads_current_tcb_state_after_migration():
+    image = KernelImage()
+    image.u32(image.BASE + 0x304, 0)
+    inspector = FreeRtosInspector(image.layout)
+    assert inspector.inspect(image.read, halted=True)['status'] == 'ready'
+    image.linked_list(image.BASE + 0x200, [])
+    image.linked_list(image.BASE + 0x100 + 3 * 20, [(image.B + 4, image.B)])
+    image.u32(image.B + 40, 0)
+    snapshot = inspector.inspect(image.read, halted=False)
+    assert snapshot['status'] == 'ready', snapshot
+    assert next(task for task in snapshot['tasks'] if task['handle'] == image.B)['state'] == 'ready'
+
+
+@pytest.mark.parametrize('offset,value', [(20, 0), (12, 0), (20, KernelImage.BASE + 0x100 + 3 * 20)])
+@pytest.mark.parametrize('bad_reads', [1, 2])
+def test_running_retries_a_tcb_sample_taken_during_a_list_splice(offset, value, bad_reads):
+    image = KernelImage()
+    inspector = FreeRtosInspector(image.layout)
+    assert inspector.inspect(image.read, halted=False)['status'] == 'ready'
+    task_reads = 0
+    def read(address, size):
+        nonlocal task_reads
+        data = image.read(address, size)
+        if address == image.A:
+            task_reads += 1
+            if task_reads <= bad_reads:
+                data = bytearray(data)
+                struct.pack_into('<I', data, offset, value)
+        return data
+    snapshot = inspector.inspect(read, halted=False)
+    assert snapshot['status'] == 'ready', snapshot
+    assert snapshot['stale'] is False
+    assert task_reads == bad_reads + 1
+    assert len(snapshot['tasks']) == 3
+    assert any(item['key'] == 'sampling' for item in snapshot['diagnostics'])
+
+
+def test_running_retries_a_discovery_node_with_a_temporarily_cleared_container():
+    image = KernelImage()
+    task_reads = 0
+    def read(address, size):
+        nonlocal task_reads
+        data = image.read(address, size)
+        if address == image.A + 4:
+            task_reads += 1
+            if task_reads == 1:
+                data = bytearray(data)
+                struct.pack_into('<I', data, 16, 0)
+        return data
+    snapshot = FreeRtosInspector(image.layout).inspect(read, halted=False)
+    assert snapshot['status'] == 'ready', snapshot
+    assert task_reads == 2
+
+
+def test_running_changing_samples_preserve_last_snapshot_and_cpu_window():
+    image = KernelImage()
+    inspector = FreeRtosInspector(image.layout)
+    first = inspector.inspect(image.read, halted=False)
+    task_reads = 0
+    def read(address, size):
+        nonlocal task_reads
+        data = image.read(address, size)
+        if address == image.A:
+            data = bytearray(data)
+            task_reads += 1
+            struct.pack_into('<I', data, 20, image.BASE + 0x40 + 4 * task_reads)
+        return data
+    changing = inspector.inspect(read, halted=False)
+    assert changing['stale'] is True
+    assert changing['sequence'] == first['sequence']
+    assert task_reads == 3
+    assert '状态变化' in changing['message']
+    for handle in (image.A, image.B, image.OWNER):
+        image.u32(handle + 76, 200)
+    recovered = inspector.inspect(image.read, halted=False)
+    assert recovered['status'] == 'ready', recovered
+    assert all(abs(task['cpuPercent'] - 100 / 3) < .001 for task in recovered['tasks'])
+
+
+def test_running_persistently_invalid_links_report_the_task_and_observed_values():
+    image = KernelImage()
+    inspector = FreeRtosInspector(image.layout)
+    inspector.inspect(image.read, halted=False)
+    image.u32(image.A + 20, 0)
+    snapshot = inspector.inspect(image.read, halted=False)
+    assert snapshot['status'] == 'inconsistent'
+    assert snapshot['stale'] is True
+    assert f'0x{image.A:X}' in snapshot['message']
+    assert 'container=0x0' in snapshot['message']
+    assert '连续 3 次' in snapshot['message']
+
+
+def test_running_rereads_stop_at_the_original_snapshot_deadline(monkeypatch):
+    image = KernelImage()
+    inspector = FreeRtosInspector(image.layout)
+    assert inspector.inspect(image.read, halted=False)['status'] == 'ready'
+    now = [100.0]
+    monkeypatch.setattr('take_a_look_backend.services.freertos.time.monotonic', lambda: now[0])
+    task_reads = 0
+    def read(address, size):
+        nonlocal task_reads
+        data = image.read(address, size)
+        if address == image.A:
+            task_reads += 1
+            data = bytearray(data)
+            struct.pack_into('<I', data, 20, 0)
+            now[0] += .2
+        return data
+    snapshot = inspector.inspect(read, halted=False)
+    assert snapshot['status'] == 'inconsistent'
+    assert task_reads == 1
+    assert '预算' in snapshot['message']
+
+
+def test_running_registry_rejects_lifetime_change_even_when_task_count_is_unchanged():
+    image = KernelImage()
+    inspector = FreeRtosInspector(image.layout)
+    first = inspector.inspect(image.read, halted=True)
+    def read(address, size):
+        if address == image.A:
+            image.u32(image.BASE + 12, 4)
+        return image.read(address, size)
+    snapshot = inspector.inspect(read, halted=False)
+    assert snapshot['status'] == 'inconsistent'
+    assert snapshot['stale'] is True
+    assert snapshot['sequence'] == first['sequence']
+
+
+def test_running_cached_task_handle_reuse_is_rejected_when_identity_does_not_match():
+    image = KernelImage()
+    inspector = FreeRtosInspector(image.layout)
+    first = inspector.inspect(image.read, halted=True)
+    image.u32(image.A + 80, 999)
+    snapshot = inspector.inspect(image.read, halted=False)
+    assert snapshot['status'] == 'inconsistent'
+    assert snapshot['sequence'] == first['sequence']
+
+
+@pytest.mark.parametrize('offset,value', [(8, 0x40000000), (12, 0), (16, 0x40000000), (20, 0x40000000)])
+def test_running_registry_rejects_invalid_tcb_links_without_following_them(offset, value):
+    image = KernelImage()
+    inspector = FreeRtosInspector(image.layout)
+    first = inspector.inspect(image.read, halted=True)
+    image.u32(image.A + offset, value)
+    addresses = []
+    def read(address, size):
+        addresses.append(address)
+        return image.read(address, size)
+    snapshot = inspector.inspect(read, halted=False)
+    assert snapshot['status'] == 'inconsistent'
+    assert snapshot['sequence'] == first['sequence']
+    assert 0x40000000 not in addresses
+
+
+def test_running_cold_start_rejects_out_of_range_links_before_reading_mmio():
+    image = KernelImage()
+    image.u32(image.A + 8, 0x40000000)
+    addresses = []
+    def read(address, size):
+        addresses.append(address)
+        return image.read(address, size)
+    snapshot = FreeRtosInspector(image.layout).inspect(read, halted=False)
+    assert snapshot['status'] == 'inconsistent'
+    assert 0x40000000 not in addresses
 
 
 def test_missing_runtime_counter_and_stack_end_are_unknown_not_zero():
@@ -155,6 +424,7 @@ def test_counter_wrap_reset_and_task_lifetime_do_not_generate_spikes():
     wrapped=inspector.inspect(image.read,halted=False)
     assert all(abs(t['cpuPercent']-100/3)<.001 for t in wrapped['tasks'])
     image.u32(image.B+80,999)  # allocator reused a handle for another task
+    image.u32(image.BASE+12,4)
     replaced=inspector.inspect(image.read,halted=False)
     assert all(t['cpuPercent'] is None for t in replaced['tasks'])
     inspector.invalidate(clear=True)

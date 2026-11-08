@@ -1,4 +1,6 @@
 from pathlib import Path
+import threading
+import time
 from unittest.mock import patch
 
 import pytest
@@ -6,7 +8,7 @@ import pytest
 from take_a_look_backend.protocol import EventName, ProtocolError, RpcMethod
 from take_a_look_backend.models import SymbolInfo, WatchedVariable
 from take_a_look_backend.service import BackendService
-from take_a_look_backend.services.debug_info import DebugInfoIndex
+from take_a_look_backend.services.debug_info import DebugInfoIndex, SourceLocation
 from test_service import _FakeMemory, _FakeRtt
 from test_source_tasks import wait_for, python_command
 
@@ -110,7 +112,7 @@ def test_same_path_rebuild_refreshes_identity_and_rebinds_watch_addresses(tmp_pa
     assert next(iter(service._watches.values())).symbol.address == 0x20000009
 
 
-def test_build_marks_symbols_stale_without_changing_target_addresses(tmp_path, backend):
+def test_build_refreshes_symbols_and_waits_for_download(tmp_path, backend):
     service, _, _ = backend
     firmware = tmp_path / 'motor.elf'
     firmware.write_bytes(b'A')
@@ -122,10 +124,13 @@ def test_build_marks_symbols_stale_without_changing_target_addresses(tmp_path, b
     wait_for(lambda: not service._source_tasks.running)
     assert service._source_tasks.snapshot()['status'] == 'succeeded'
     after = service.state_snapshot()
-    assert after['firmware']['status'] == 'stale'
-    assert after['symbols'] == before['symbols']
+    assert after['firmware']['status'] == 'ready'
+    assert after['firmware']['requiresDownload']
+    assert after['symbols'] != before['symbols']
+    assert after['samplingPaused']
     refreshed = service.handle(RpcMethod.LOAD_FIRMWARE, {'path': str(firmware)})['state']
     assert refreshed['firmware']['status'] == 'ready'
+    assert not refreshed['firmware']['requiresDownload']  # Explicit reload acknowledges an external download.
     assert refreshed['firmware']['fingerprint'] != before['firmware']['fingerprint']
 
 
@@ -156,3 +161,172 @@ def test_file_changes_during_parse_never_publish_mixed_metadata(tmp_path, backen
     assert error.value.code == 'firmware_changed'
     assert service.state_snapshot()['firmware'] == before['firmware']
     assert service.state_snapshot()['sourceProject'] == before['sourceProject']
+
+
+def test_external_rebuild_refreshes_watches_and_defers_breakpoints_until_download(tmp_path, backend):
+    service, events, downloads = backend
+    firmware = tmp_path / 'external.axf'
+    firmware.write_bytes(b'A')
+    service._debug_info_loader = lambda path, **_: DebugInfoIndex([
+        SourceLocation('main.c', 10, 0x08000100 + len(path.read_bytes()))])
+    service.handle(RpcMethod.SET_SOURCE_PROJECT, {
+        'sourceRoot': str(tmp_path), 'firmwarePath': str(firmware)})
+    service.handle(RpcMethod.CONNECT, {})
+    symbol = next(iter(service._symbols.values()))
+    service._watches = {symbol.key: WatchedVariable(symbol, '#123456', True, True)}
+    service.handle(RpcMethod.SET_BREAKPOINTS, {'path': 'main.c', 'lines': [10]})
+    assert service._memory.breakpoints == {0x08000101}
+    service.handle(RpcMethod.SET_SAMPLING_PAUSED, {'paused': False})
+    before = service.state_snapshot()['firmware']['revision']
+
+    # Represents an external IDE replacing the linker output atomically.
+    replacement = tmp_path / 'new.axf'
+    replacement.write_bytes(b'new build')
+    replacement.replace(firmware)
+    wait_for(lambda: service.state_snapshot()['firmware']['revision'] > before)
+    state = service.state_snapshot()
+    assert state['firmware']['requiresDownload']
+    assert state['samplingPaused'] and not state['rttEnabled']
+    watch = next(iter(service._watches.values()))
+    assert watch.symbol.address == 0x20000009
+    assert watch.color == '#123456' and watch.plot_enabled and watch.sampling_enabled
+    assert watch.symbol.key not in service._memory.values
+    assert service._memory.breakpoints == set()
+    assert state['debug']['breakpoints'][0]['verified'] is False
+    assert state['debug']['stoppedLocation'] is None
+    assert downloads == []  # Detection never writes firmware automatically.
+    assert len([p for e, p in events if e == EventName.LOG and '已自动刷新' in p['message']]) == 1
+
+    for method, params in [
+        (RpcMethod.SET_SAMPLING_PAUSED, {'paused': False}),
+        (RpcMethod.DEBUG_CONTROL, {'action': 'step'}),
+        (RpcMethod.READ_WATCH, {'key': watch.symbol.key}),
+        (RpcMethod.WRITE_WATCH, {'key': watch.symbol.key, 'value': '1'}),
+        (RpcMethod.WRITE_WATCHES, {'writes': [{'key': watch.symbol.key, 'value': '1'}]}),
+        (RpcMethod.SET_RTT, {'enabled': True}),
+    ]:
+        with pytest.raises(ProtocolError) as error:
+            service.handle(method, params)
+        assert error.value.code == 'firmware_download_required'
+
+    # Reconnecting also must not install new addresses on the old program.
+    service.handle(RpcMethod.DISCONNECT, {})
+    service.handle(RpcMethod.CONNECT, {})
+    assert service._memory.breakpoints == set()
+    service.handle(RpcMethod.SET_BREAKPOINTS, {'path': 'main.c', 'lines': [10]})
+    assert service._memory.breakpoints == set()
+    service.handle(RpcMethod.START_SOURCE_TASK, {'kind': 'download'})
+    wait_for(lambda: not service._source_tasks.running)
+    assert service._source_tasks.snapshot()['status'] == 'succeeded'
+    assert downloads == [b'new build']
+    assert not service.state_snapshot()['firmware']['requiresDownload']
+    assert service._memory.breakpoints == {0x08000109}
+
+
+def test_failed_auto_parse_preserves_last_generation_and_retries_without_popups(tmp_path, backend):
+    service, events, _ = backend
+    firmware = tmp_path / 'motor.axf'
+    firmware.write_bytes(b'A')
+    service.handle(RpcMethod.LOAD_FIRMWARE, {'path': str(firmware)})
+    before = service.state_snapshot()
+    firmware.write_bytes(b'partial link')
+    with patch.object(service, '_symbol_loader', side_effect=ProtocolError('symbol_load_failed', 'invalid ELF')):
+        assert not service._refresh_changed_firmware(firmware)
+        assert not service._refresh_changed_firmware(firmware)
+    after = service.state_snapshot()
+    for key in ('firmware', 'symbols', 'watches', 'debug'):
+        assert after[key] == before[key]
+    assert not [p for e, p in events if e == EventName.ERROR]
+    assert len([p for e, p in events if e == EventName.LOG and '将重试' in p['message']]) == 1
+    firmware.write_bytes(b'valid new build')
+    assert service._refresh_changed_firmware(firmware)
+    assert service.state_snapshot()['firmware']['requiresDownload']
+
+
+def test_identical_rebuild_does_not_refresh_or_require_download(tmp_path, backend):
+    service, _, _ = backend
+    firmware = tmp_path / 'motor.axf'
+    firmware.write_bytes(b'A')
+    service.handle(RpcMethod.LOAD_FIRMWARE, {'path': str(firmware)})
+    before = service.state_snapshot()['firmware']
+    firmware.write_bytes(b'A')
+    service._firmware_built()
+    assert service._refresh_changed_firmware(firmware)
+    assert service.state_snapshot()['firmware'] == before
+
+
+def test_first_build_loads_previously_missing_output(tmp_path, backend):
+    service, _, _ = backend
+    state = service.handle(RpcMethod.SET_SOURCE_PROJECT, {
+        'sourceRoot': str(tmp_path), 'firmwarePath': 'first.axf',
+        'buildCommand': python_command('from pathlib import Path; Path("first.axf").write_bytes(b"first build")'),
+    })['state']
+    assert state['firmware']['status'] == 'missing'
+    service.handle(RpcMethod.START_SOURCE_TASK, {'kind': 'build'})
+    wait_for(lambda: not service._source_tasks.running)
+    assert service._source_tasks.snapshot()['status'] == 'succeeded'
+    state = service.state_snapshot()
+    assert state['firmware']['status'] == 'ready'
+    assert state['firmware']['requiresDownload']
+    assert len(state['symbols']) == 1
+
+
+def test_settings_preserve_pending_download_and_explicit_reopen_acknowledges_external_download(tmp_path, backend):
+    service, _, _ = backend
+    firmware = tmp_path / 'motor.axf'
+    firmware.write_bytes(b'A')
+    service.handle(RpcMethod.LOAD_FIRMWARE, {'path': str(firmware)})
+    firmware.write_bytes(b'new build')
+    assert service._refresh_changed_firmware(firmware)
+    service.handle(RpcMethod.SET_SOURCE_PROJECT, {'firmwarePath': str(firmware), 'afterDownload': 'run'})
+    assert service.state_snapshot()['firmware']['requiresDownload']
+    service.handle(RpcMethod.LOAD_FIRMWARE, {'path': str(firmware)})
+    assert not service.state_snapshot()['firmware']['requiresDownload']
+
+
+def test_build_and_download_commits_only_the_downloaded_generation(tmp_path, backend):
+    service, events, downloads = backend
+    firmware = tmp_path / 'motor.axf'
+    firmware.write_bytes(b'A')
+    before = service.handle(RpcMethod.SET_SOURCE_PROJECT, {
+        'sourceRoot': str(tmp_path), 'firmwarePath': 'motor.axf',
+        'buildCommand': python_command('from pathlib import Path; Path("motor.axf").write_bytes(b"new build")'),
+    })['state']['firmware']['revision']
+    service.handle(RpcMethod.CONNECT, {})
+    service.handle(RpcMethod.START_SOURCE_TASK, {'kind': 'buildAndDownload'})
+    wait_for(lambda: not service._source_tasks.running)
+    assert service._source_tasks.snapshot()['status'] == 'succeeded'
+    assert downloads == [b'new build']
+    assert service.state_snapshot()['firmware']['revision'] == before + 1
+    assert not service.state_snapshot()['firmware']['requiresDownload']
+    assert service._refresh_changed_firmware(firmware)
+    assert not [p for e, p in events if e == EventName.STATE and p.get('firmware', {}).get('requiresDownload')]
+
+
+def test_background_parse_keeps_state_requests_responsive(tmp_path, backend):
+    service, _, _ = backend
+    firmware = tmp_path / 'motor.axf'
+    firmware.write_bytes(b'A')
+    service.handle(RpcMethod.LOAD_FIRMWARE, {'path': str(firmware)})
+    before = service.state_snapshot()['firmware']
+    firmware.write_bytes(b'new build')
+    entered, release = threading.Event(), threading.Event()
+    loader = service._symbol_loader
+    def blocked(path, **options):
+        entered.set()
+        assert release.wait(5)
+        return loader(path, **options)
+    with patch.object(service, '_symbol_loader', blocked):
+        worker = threading.Thread(target=lambda: service._refresh_changed_firmware(firmware))
+        worker.start()
+        try:
+            assert entered.wait(2)
+            started = time.monotonic()
+            state = service.handle(RpcMethod.GET_STATE, {})['state']
+            assert time.monotonic() - started < .5
+            assert state['firmware'] == before
+        finally:
+            release.set()
+            worker.join(5)
+    assert not worker.is_alive()
+    assert service.state_snapshot()['firmware']['requiresDownload']

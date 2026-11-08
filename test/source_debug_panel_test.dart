@@ -12,6 +12,86 @@ import 'package:take_a_look_v2/src/theme/theme.dart';
 
 void main() {
   testWidgets(
+    'firmware refresh reloads cached source text and executable lines',
+    (tester) async {
+      late Directory directory;
+      late File source;
+      await tester.runAsync(() async {
+        directory = await Directory.systemTemp.createTemp(
+          'tal_source_rebuild_',
+        );
+        source = File('${directory.path}/main.c');
+        await source.writeAsString('int before_rebuild = 1;\n');
+      });
+      addTearDown(() => directory.delete(recursive: true));
+      final controller = TakeALookController(backendCommand: (_, _) async {});
+      controller.applySnapshot({
+        'firmware': {'status': 'ready', 'revision': 1},
+        'sourceProject': {'firmwarePath': '${directory.path}/motor.axf'},
+        'debug': {
+          'sourceFiles': [source.path],
+          'executableLines': {
+            source.path: [1],
+          },
+        },
+      });
+      controller.openSourceFile(source.path);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: buildWorkspacePanel(WorkspacePanelId.sourceDebug, controller),
+          ),
+        ),
+      );
+      bool containsSource(String value) => tester
+          .widgetList<Text>(find.byType(Text))
+          .any((text) => text.textSpan?.toPlainText().contains(value) ?? false);
+      Future<void> waitForSource(String value) async {
+        for (
+          var attempt = 0;
+          attempt < 30 && !containsSource(value);
+          attempt++
+        ) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 20)),
+          );
+          await tester.pump();
+        }
+        expect(containsSource(value), isTrue);
+      }
+
+      await waitForSource('before_rebuild');
+      await tester.runAsync(
+        () => source.writeAsString('// new build\nint after_rebuild = 2;\n'),
+      );
+      controller.applySnapshot({
+        'firmware': {
+          'status': 'ready',
+          'revision': 2,
+          'requiresDownload': true,
+        },
+        'debug': {
+          'sourceFiles': [source.path],
+          'executableLines': {
+            source.path: [2],
+          },
+          'stoppedLocation': null,
+        },
+      });
+      await tester.pump();
+      await waitForSource('after_rebuild');
+      expect(containsSource('before_rebuild'), isFalse);
+      expect(controller.sourceWorkspace.selectedPath, source.path);
+      final executable = tester.widget<Container>(
+        find.byKey(const ValueKey('executable-line-2')),
+      );
+      expect(executable.color, TalColors.surfaceAlt);
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+    },
+  );
+
+  testWidgets(
     'source debugger highlights C code and toggles gutter breakpoints',
     (tester) async {
       final sourcePath =

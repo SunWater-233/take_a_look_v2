@@ -53,6 +53,8 @@ class FreeRtosServiceMixin:
         self._next_freertos_at = now + 1 / self._freertos_rate
         if self._firmware_busy:
             snapshot = self._freertos.unavailable('busy', '固件下载中，暂不读取内核；保留最后一份快照。')
+        elif self._firmware.get('requiresDownload'):
+            snapshot = self._freertos.unavailable('firmwareChanged', '固件已变化，请重新下载后读取内核。')
         elif not connected:
             snapshot = self._freertos.unavailable('disconnected', '连接已断开；保留最后一份快照。')
         elif not backend_capabilities(self._memory).memory_sampling and self._debug.execution_state != 'halted':

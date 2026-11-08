@@ -707,6 +707,7 @@ class _DetachedPanelWindowState extends State<DetachedPanelWindow> {
     return _nativeDropTarget(
       WorkbenchFeedback(
         controller: widget.controller,
+        showFirmwareChanges: false,
         child: WorkspaceKeyboardShortcuts(
           onKeyEvent: (event) {
             if (WorkspaceShortcut.resetUiScale.matches(event)) {

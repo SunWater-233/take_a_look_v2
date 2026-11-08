@@ -25,6 +25,7 @@ from take_a_look_backend.services.debug_session import DebugSession
 from take_a_look_backend.services.symbols import load_symbols_from_elf
 from take_a_look_backend.services.source_project import default_config, project_snapshot
 from take_a_look_backend.services.firmware import FirmwareServiceMixin
+from take_a_look_backend.services.firmware_watch import FirmwareWatcher
 from take_a_look_backend.services.source_tasks import SourceTasks
 from take_a_look_backend.services.target_catalog import TargetCatalog
 from take_a_look_backend.services.online_packs import OnlinePacks
@@ -133,7 +134,13 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
         self._firmware_busy = False
         self._source_project = default_config()
         self._source_tasks = SourceTasks(lambda payload: self._emit(EventName.SOURCE_TASK, payload), self._download_firmware, self._firmware_built)
+        self._firmware_watch_error = None
+        self._firmware_watcher = FirmwareWatcher(
+            lambda: self._source_project["firmwarePath"], self._refresh_changed_firmware)
+        self._firmware_watch_thread = threading.Thread(
+            target=self._firmware_watcher.run, args=(self._shutdown,), name="tal-firmware-watch", daemon=True)
         self._sampler.start()
+        self._firmware_watch_thread.start()
 
     def close(self) -> None:
         if self._closed:
@@ -145,6 +152,7 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
         self._shutdown.set()
         self._wake.set()
         self._sampler.join(timeout=2.0)
+        self._firmware_watch_thread.join(timeout=2.0)
         try:
             with self._connection_lock, self._lock:
                 try:
@@ -267,13 +275,15 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
             return self._set_source_project(params)
         if method is RpcMethod.START_SOURCE_TASK:
             kind = _required_string(params, "kind")
-            config = dict(self._source_project)
+            if self._source_tasks.running:
+                raise ProtocolError("source_task_busy", "已有编译或下载任务正在执行。")
             if kind != "build":
                 if not capabilities_for_connection(self._connection_kind).firmware_download:
                     raise ProtocolError("download_unsupported", "当前连接不支持固件下载，请使用本地 pyOCD 或 EmberMobile 连接。")
                 if self._connection_status != "connected":
                     raise ProtocolError("not_connected", "请先连接调试目标。")
-            return {"sourceTask": self._source_tasks.start(kind, config)}
+            with self._firmware_lock:
+                return {"sourceTask": self._source_tasks.start(kind, dict(self._source_project))}
         if self._source_tasks.running:
             if method is RpcMethod.LOAD_FIRMWARE or (self._source_tasks.reserves_probe and method in {
                 RpcMethod.CONNECT, RpcMethod.DISCONNECT, RpcMethod.TOGGLE_CONNECTION, RpcMethod.SET_CONFIG,
@@ -451,7 +461,10 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
             self._sampling_paused = True
             self._acquisition_clock.reset()
             self._debug.execution_state = initial_execution_state
-            self._debug.apply_breakpoints(self._memory, connected=self._connection_status == "connected")
+            self._debug.apply_breakpoints(self._memory, connected=not self._firmware.get("requiresDownload"))
+            if self._firmware.get("requiresDownload"):
+                self._debug.execution_state = "unknown"
+                self._debug.mark_breakpoints_pending(message="固件已变化，请重新下载后应用断点。")
             state = self._runtime_state_locked()
         label = {"local": "pyOCD 调试探针", "ember": "EmberMobile 私有协议",
                  "emberGdb": "EmberMobile + GDB", "gdb": "远程 GDB"}[self._connection_kind]
@@ -527,7 +540,9 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
             raise ProtocolError("invalid_request", "lines must contain positive integers.")
         with self._lock:
             self._debug.set_breakpoints(path, raw_lines, self._memory,
-                                        connected=self._connection_status == "connected")
+                                        connected=self._connection_status == "connected" and not self._firmware.get("requiresDownload"))
+            if self._firmware.get("requiresDownload"):
+                self._debug.mark_breakpoints_pending(message="固件已变化，请重新下载后应用断点。")
             payload = self._debug.snapshot()
         self._emit(EventName.DEBUG, payload)
         return {"debug": payload}
@@ -539,6 +554,8 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
         with self._lock:
             if self._connection_status != "connected":
                 raise ProtocolError("not_connected", "Connect a debug probe before controlling the target.")
+            if action != "halt":
+                self._require_current_firmware_locked()
             try:
                 if action == "halt":
                     self._memory.halt()
@@ -608,6 +625,8 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
         return True
 
     def _refresh_debug_state_locked(self, *, force: bool) -> None:
+        if self._firmware.get("requiresDownload"):
+            return
         if not self._debug.refresh(self._memory, force=force):
             return
         if self._reconcile_acquisition_clock_locked():
@@ -729,6 +748,7 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
         key = _required_string(params, "key")
         value_text = _required_string(params, "value")
         with self._lock:
+            self._require_current_firmware_locked()
             watch = self._watches.get(key)
             if watch is None:
                 raise ProtocolError("unknown_watch", "Watch does not exist.", key)
@@ -753,6 +773,7 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
         if not isinstance(raw, list) or not 1 <= len(raw) <= 64:
             raise ProtocolError("invalid_request", "writes must contain 1..64 entries.")
         with self._lock:
+            self._require_current_firmware_locked()
             if self._connection_status != "connected":
                 raise ProtocolError("not_connected", "Connect a debug probe before writing variables.")
             if not backend_capabilities(self._memory).memory_write:
@@ -798,6 +819,7 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
     def _read_watch(self, params: Mapping[str, object]) -> dict[str, object]:
         key = _required_string(params, "key")
         with self._lock:
+            self._require_current_firmware_locked()
             watch = self._watches.get(key)
             if watch is None:
                 raise ProtocolError("unknown_watch", "Watch does not exist.", key)
@@ -825,6 +847,8 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
         if not isinstance(paused, bool):
             raise ProtocolError("invalid_request", "paused must be a boolean.")
         with self._lock:
+            if not paused:
+                self._require_current_firmware_locked()
             if not paused and self._recording.failure is not None:
                 self._emit(EventName.STATE, {"samplingPaused": True})
                 raise ProtocolError("raw_recording_failed", "请解决记录写入错误后清空采样，开启新记录。")
@@ -850,6 +874,8 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
         if protocol not in {"normal", "plus"}:
             raise ProtocolError("invalid_request", "RTT protocol must be normal or plus.")
         with self._lock:
+            if enabled:
+                self._require_current_firmware_locked()
             if enabled and self._connection_kind == "gdb":
                 raise ProtocolError("unsupported_operation", "独立 GDB 连接不提供 RTT，请使用 EmberMobile + GDB。")
             self._rtt_enabled = enabled

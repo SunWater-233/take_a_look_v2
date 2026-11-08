@@ -112,14 +112,14 @@ class DebugSession:
         self.resolved_breakpoints = []
 
 
-    def mark_breakpoints_pending(self) -> None:
+    def mark_breakpoints_pending(self, *, message="连接调试探针后设置断点。") -> None:
         self.resolved_breakpoints = [
             {
                 "path": path,
                 "requestedLine": line,
                 "actualLine": line,
                 "verified": False,
-                "message": "连接调试探针后设置断点。",
+                "message": message,
             }
             for path, lines in self.requested_breakpoints.items()
             for line in sorted(lines)

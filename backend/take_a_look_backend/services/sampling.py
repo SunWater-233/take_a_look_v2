@@ -31,7 +31,8 @@ class SamplingServiceMixin:
             precise = False
             try:
                 with self._lock:
-                    connected = self._connection_status == "connected" and not self._firmware_busy
+                    connected = (self._connection_status == "connected" and not self._firmware_busy
+                                 and not self._firmware.get("requiresDownload"))
                     if connected and now >= self._next_debug_poll_at:
                         self._poll_debug_state_locked()
                         # The phone services every probe request on one worker, so a
@@ -325,7 +326,8 @@ class SamplingServiceMixin:
 
     def _acquisition_should_run(self) -> bool:
         return (self._connection_status == "connected" and not self._sampling_paused
-                and not self._firmware_busy and self._debug.execution_state != "halted")
+                and not self._firmware_busy and not self._firmware.get("requiresDownload")
+                and self._debug.execution_state != "halted")
 
     def _reconcile_acquisition_clock_locked(self) -> bool:
         running = self._acquisition_should_run()

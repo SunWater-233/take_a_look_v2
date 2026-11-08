@@ -103,6 +103,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
   Map<String, String> get _resolvedSourcePaths =>
       _sourceDocuments.resolvedPaths;
   String _observedSourceRoot = '';
+  int _observedFirmwareRevision = -1;
   String? _observedCurrentSource;
   int? _observedCurrentLine;
   int _observedStopRevision = -1;
@@ -191,6 +192,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     _observedCurrentSource = null;
     _observedCurrentLine = null;
     _observedStopRevision = -1;
+    _observedFirmwareRevision = -1;
     _restoreSourceWorkspace();
     _handleDebugChange();
   }
@@ -266,7 +268,11 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     if (!mounted) return;
     final sourceRootChanged =
         _observedSourceRoot != controller.sourceProject.sourceRoot;
-    if (sourceRootChanged) {
+    final firmwareRevision =
+        (controller.state.firmware['revision'] as num?)?.toInt() ?? 0;
+    final firmwareChanged = firmwareRevision != _observedFirmwareRevision;
+    _observedFirmwareRevision = firmwareRevision;
+    if (sourceRootChanged || firmwareChanged) {
       _sourcePeek = null;
       _references.cancel();
       _navigation.clear();
@@ -296,13 +302,13 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
             _matchingPath(nextPath, files) == null)) {
       nextPath = _openPaths.firstOrNull;
     }
-    if (nextPath != _selectedPath || sourceRootChanged) {
+    if (nextPath != _selectedPath || sourceRootChanged || firmwareChanged) {
       unawaited(_loadSource(nextPath));
     } else {
       setState(() {});
       _scrollToCurrentLine();
     }
-    if ((sourceRootChanged || sourceFilesChanged) &&
+    if ((sourceRootChanged || sourceFilesChanged || firmwareChanged) &&
         _searchVisible &&
         _searchController.text.isNotEmpty) {
       _queueSearch(_searchController.text, immediate: true);

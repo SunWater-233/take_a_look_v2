@@ -1,12 +1,20 @@
 part of 'controller.dart';
 
 extension TakeALookControllerFirmware on TakeALookController {
-  String? get firmwareNotice => switch (state.firmware['status']) {
-    'missing' => '固件文件尚未生成，请编译或选择文件。',
-    'unloaded' => '编译已完成，请下载或刷新符号。',
-    'stale' => '固件已重新编译，当前保留编译前的符号，请下载或刷新。',
-    _ => null,
-  };
+  bool get firmwareRequiresDownload =>
+      state.firmware['requiresDownload'] == true;
+
+  bool get sourceDebugConfigured =>
+      hasFirmwareSymbols && sourceProject.sourceRoot.trim().isNotEmpty;
+
+  String? get firmwareNotice => firmwareRequiresDownload
+      ? '固件已变化，符号已自动刷新；请重新下载后继续采样或源码调试。'
+      : switch (state.firmware['status']) {
+          'missing' => '固件文件尚未生成，请编译或选择文件。',
+          'unloaded' => '编译已完成，请下载或刷新符号。',
+          'stale' => '固件已重新编译，当前保留编译前的符号，请下载或刷新。',
+          _ => null,
+        };
 
   void loadDemoSymbols() {
     if (_dispatchRemote(ControllerCommand.loadFirmware)) return;

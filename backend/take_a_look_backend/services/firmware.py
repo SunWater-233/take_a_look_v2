@@ -46,6 +46,8 @@ class FirmwareServiceMixin:
 
     def _set_source_project(self, values, *, require_file=False):
         with self._firmware_lock:
+            if self._source_tasks.running:
+                raise ProtocolError("source_task_busy", "编译或下载任务执行中，请等待任务完成。")
             config = normalize_config(self._source_project, dict(values))
             if "firmwarePath" not in values:
                 with self._lock:
@@ -60,12 +62,24 @@ class FirmwareServiceMixin:
             if require_file and image is None:
                 raise ProtocolError("file_not_found", "固件文件不存在。", text)
             with self._lock:
-                self._commit_firmware(config, image)
+                # Explicitly reopening unchanged symbols also acknowledges a
+                # download performed in an external IDE/programmer.
+                requires_download = bool(image and text == self._source_project["firmwarePath"]
+                    and ((self._firmware.get("requiresDownload") and not require_file)
+                         or (self._firmware["fingerprint"] and image.fingerprint != self._firmware["fingerprint"])))
+                self._commit_firmware(config, image, requires_download=requires_download)
                 state = self.state_snapshot()
             self._emit(EventName.STATE, state)
             return {"state": state}
 
-    def _commit_firmware(self, config, image):
+    def _commit_firmware(self, config, image, *, requires_download=False):
+        if requires_download:
+            # Monitoring also reads addresses, so pausing capture alone is insufficient.
+            self._flush_pending_samples_locked()
+            self._stop_memory_sampling_locked()
+            self._stop_rtt_locked()
+            self._latest_rtt_values.clear()
+            self._sampling_paused, self._rtt_enabled = True, False
         self._debug.remove_breakpoints(self._memory, connected=self._connection_status == "connected")
         symbols = image.symbols if image else []
         self._source_project = dict(config)
@@ -74,6 +88,7 @@ class FirmwareServiceMixin:
             "status": "ready" if image else "missing" if config["firmwarePath"] else "empty",
             "revision": self._firmware["revision"] + 1,
             "fingerprint": image.fingerprint if image else "",
+            "requiresDownload": requires_download,
         }
         self._freertos = FreeRtosInspector(image.freertos_layout if image else None)
         self._freertos_watch_identity.clear()
@@ -82,19 +97,58 @@ class FirmwareServiceMixin:
         self._debug.info = image.debug_info if image else DebugInfoIndex()
         self._debug.stopped_location, self._debug.registers = None, {}
         self._watches = self._rebind_watches(self._watches, symbols)
-        self._debug.apply_breakpoints(self._memory, connected=self._connection_status == "connected")
+        if requires_download:
+            self._debug.execution_state = "unknown"
+            self._debug.mark_breakpoints_pending(message="固件已变化，请重新下载后应用断点。")
+        else:
+            self._debug.apply_breakpoints(self._memory, connected=self._connection_status == "connected")
+        self._reconcile_acquisition_clock_locked()
 
     def _firmware_built(self):
-        # A build changes disk, not the running target. Explicit reload/download
-        # installs a new symbol generation; never silently swap target addresses.
-        with self._lock:
-            path = self._source_project["firmwarePath"]
-            if path:
-                self._firmware = {**self._firmware, "status": "stale" if self._firmware["fingerprint"] else "unloaded"}
+        # The compiler has exited; build-only jobs need not wait for the poller.
+        path = self._source_project["firmwarePath"]
+        if path:
+            self._refresh_changed_firmware(Path(path), after_build=True)
+
+    def _refresh_changed_firmware(self, path: Path, *, after_build=False) -> bool:
+        # Parsing stays off the sampler/RPC thread and never holds the probe lock.
+        # Serialize against explicit loads and downloads; a busy job is retried.
+        if not self._firmware_lock.acquire(blocking=False):
+            return False
+        try:
+            if self._closed or str(path) != self._source_project["firmwarePath"]:
+                return False
+            if self._source_tasks.running and not after_build:
+                return False
+            fingerprint = file_fingerprint(path)
+            if fingerprint == self._firmware["fingerprint"]:
+                return True
+            image = self._parse_firmware(path)
+            with self._lock:
+                if self._closed:
+                    return False
+                self._commit_firmware(self._source_project, image, requires_download=True)
                 state = self.state_snapshot()
-            else:
-                return
-        self._emit(EventName.STATE, state)
+            self._firmware_watch_error = None
+            self._emit(EventName.LOG, {"level": "info", "message": f"检测到固件变化，已自动刷新符号与源码索引：{path}"})
+            self._emit(EventName.STATE, state)
+            self._wake.set()
+            return True
+        except Exception as error:
+            # Linkers can leave an incomplete/unreadable file between writes.
+            # Keep the previous generation and retry, without repeated popups.
+            message = getattr(error, "message", str(error))
+            signature = (str(path), message)
+            if signature != self._firmware_watch_error:
+                self._firmware_watch_error = signature
+                self._emit(EventName.LOG, {"level": "warning", "message": f"自动刷新符号暂未完成，将重试：{message}"})
+            return False
+        finally:
+            self._firmware_lock.release()
+
+    def _require_current_firmware_locked(self):
+        if self._firmware.get("requiresDownload"):
+            raise ProtocolError("firmware_download_required", "固件已变化，符号已刷新，请重新下载固件后再采样或调试。")
 
     def _parse_firmware(self, path: Path, load_id=None) -> FirmwareImage:
         path_text = str(path)
@@ -172,6 +226,10 @@ class FirmwareServiceMixin:
         return result
 
     def _download_firmware(self, staged: Path, original: Path, config: dict[str, object], task: SourceTasks) -> None:
+        with self._firmware_lock:
+            self._download_firmware_locked(staged, original, config, task)
+
+    def _download_firmware_locked(self, staged: Path, original: Path, config: dict[str, object], task: SourceTasks) -> None:
         # Parse exactly the staged bytes before touching the target.
         image = self._parse_firmware(staged)
         successful = False

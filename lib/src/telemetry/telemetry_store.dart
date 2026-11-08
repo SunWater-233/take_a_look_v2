@@ -66,9 +66,16 @@ class TelemetryStore {
       for (final entry in rawValues.entries) {
         final watch = watchesByKey[entry.key];
         if (watch == null || elapsed < watch.historyStartSeconds) continue;
-        final value = numericValue(entry.value, fallback: watch.value);
+        if (entry.value is! num && entry.value is! bool) {
+          if (freshKeys.contains(watch.symbol.key)) {
+            watch.applyValue(entry.value);
+            watch.updatedAtMs = stamp ?? receivedAtMs;
+          }
+          continue;
+        }
+        final value = numericValue(entry.value);
         if (freshKeys.contains(watch.symbol.key)) {
-          watch.value = value;
+          watch.applyValue(entry.value);
           watch.updatedAtMs = stamp ?? receivedAtMs;
         }
         if (payload['captureOnly'] == true || watch.samplingEnabled) {
@@ -116,7 +123,7 @@ class TelemetryStore {
           (batch.updatedAtMs == null ||
               watch.updatedAtMs == null ||
               batch.updatedAtMs! > watch.updatedAtMs!)) {
-        watch.value = latest;
+        watch.applyValue(latest);
         watch.updatedAtMs =
             batch.updatedAtMs ?? DateTime.now().millisecondsSinceEpoch;
       }

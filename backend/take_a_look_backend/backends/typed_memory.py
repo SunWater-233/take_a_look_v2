@@ -62,6 +62,8 @@ class TypedMemoryBackend:
         raise ProtocolError("download_unsupported", "当前连接不支持固件下载。")
 
     def read_symbol(self, symbol: SymbolInfo) -> object:
+        if symbol.diagnostic:
+            return symbol.diagnostic
         size = _access_size(symbol)
         data = self._read_block(symbol.address, size)
         _check_read_size(data, size)
@@ -77,9 +79,9 @@ class TypedMemoryBackend:
             }
             return {}
 
-        plan = self._read_plan_for(symbols)
-        # Seeding once preserves caller order without rebuilding a second dict.
-        values_by_key = dict.fromkeys(self._read_keys)
+        readable = tuple(symbol for symbol in symbols if not symbol.diagnostic)
+        plan = self._read_plan_for(readable)
+        values_by_key = {symbol.key: symbol.diagnostic or None for symbol in symbols}
         byte_count = 0
         for block, data in zip(plan, self._read_blocks(plan), strict=True):
             _check_read_size(data, block.size)
@@ -210,7 +212,7 @@ class _ReadBlock:
         overlap = False
         for part in self.slices:
             codec, conversion = _value_codec(part.symbol, part.size)
-            if part.offset < cursor:
+            if part.offset < cursor or part.symbol.byte_order != "little":
                 overlap = True
             formats.append(f"{max(0, part.offset - cursor)}x" + codec.format[1:])
             cursor = part.offset + part.size
@@ -309,6 +311,15 @@ def _unsigned_value(data: bytes) -> int:
 
 @lru_cache(maxsize=2048)
 def _value_codec(symbol: SymbolInfo, size: int):
+    if symbol.encoding:
+        prefix = "<" if symbol.byte_order == "little" else ">"
+        if symbol.encoding == "float" and size in (2, 4, 8):
+            return struct.Struct(prefix + {2: "e", 4: "f", 8: "d"}[size]), None
+        if symbol.encoding in {"signed", "unsigned", "bool"} and size in (1, 2, 4, 8):
+            code = {1: "b", 2: "h", 4: "i", 8: "q"}[size]
+            return (struct.Struct(prefix + (code if symbol.encoding == "signed" else code.upper())),
+                    bool if symbol.encoding == "bool" else None)
+        return struct.Struct(f"{prefix}{size}s"), _hex_value
     type_name = _normalized_type(symbol)
     if _is_float_type(type_name, size):
         return struct.Struct("<f"), None
@@ -331,11 +342,34 @@ def _check_read_size(data: bytes, expected: int) -> None:
 
 
 def encode_symbol_value(symbol: SymbolInfo, value_text: str) -> bytes:
+    if symbol.diagnostic:
+        raise ValueError(symbol.diagnostic)
     type_name = _normalized_type(symbol)
     size = _access_size(symbol)
     text = value_text.strip()
     if not text:
         raise ValueError("写入值不能为空。")
+
+    if symbol.encoding:
+        codec, _ = _value_codec(symbol, size)
+        if symbol.encoding == "float" and size in (2, 4, 8):
+            return codec.pack(_finite_float(text))
+        if symbol.encoding == "bool" and size in (1, 2, 4, 8):
+            return codec.pack(_parse_bool(text))
+        if symbol.encoding in {"signed", "unsigned"} and size in (1, 2, 4, 8):
+            value = _parse_int(text)
+            signed = symbol.encoding == "signed"
+            minimum = -(1 << (size * 8 - 1)) if signed else 0
+            maximum = (1 << (size * 8 - int(signed))) - 1
+            if not minimum <= value <= maximum:
+                raise ValueError(f"写入值超出 {size} 字节变量范围：{value}")
+            return codec.pack(value)
+        if symbol.encoding != "bytes":
+            raise ValueError(f"不支持 {symbol.kind} 的数值写入。")
+        parsed = _parse_byte_sequence(text)
+        if len(parsed) != size:
+            raise ValueError(f"{symbol.name} 需要 {size} 字节，当前提供 {len(parsed)} 字节。")
+        return parsed
 
     if _is_float_type(type_name, size):
         return struct.pack("<f", _finite_float(text))

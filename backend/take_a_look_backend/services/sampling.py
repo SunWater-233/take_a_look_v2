@@ -164,7 +164,7 @@ class SamplingServiceMixin:
                            or self._debug.execution_state == "halted")
         plus = self._rtt_enabled and self._rtt_protocol == "plus"
         for watch in self._watches.values():
-            if watch.mode != "monitor" or not watch.monitor_enabled:
+            if watch.mode != "monitor" or not watch.monitor_enabled or watch.symbol.diagnostic:
                 continue
             period = 1.0 / (watch.monitor_rate_hz or self._monitor_rate_hz)
             if watch.next_monitor_at <= now:
@@ -191,7 +191,7 @@ class SamplingServiceMixin:
             self._capture_source = self._watches
             self._capture_source_count = len(self._watches)
             self._capture_symbols = tuple(watch.symbol for watch in self._watches.values()
-                                          if not watch.symbol.is_rtt and watch.captures)
+                                          if not watch.symbol.is_rtt and not watch.symbol.diagnostic and watch.captures)
         return self._capture_symbols
 
     def _read_memory_locked(self, rtt_enabled: bool, rtt_protocol: str) -> dict[str, object]:

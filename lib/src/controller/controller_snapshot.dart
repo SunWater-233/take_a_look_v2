@@ -54,7 +54,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
         for (final watch in _watches)
           {
             'key': watch.symbol.key,
-            'value': watch.value,
+            'value': watch.wireValue,
             'updatedAtMs': watch.updatedAtMs,
             'sampleCursor': watch.totalSampleCount,
             'samples': [
@@ -103,7 +103,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
     final skip = sampleStart - retainedStart;
     return {
       'key': watch.symbol.key,
-      'value': watch.value,
+      'value': watch.wireValue,
       'sampleStart': sampleStart,
       'updatedAtMs': watch.updatedAtMs,
       'sampleCursor': watch.totalSampleCount,
@@ -365,9 +365,9 @@ extension TakeALookControllerSnapshot on TakeALookController {
                     sampling: item['sampling'] != false,
                   )
                   ..monitorRateHz = (item['monitorRateHz'] as num?)?.toDouble()
-                  ..updatedAtMs =
-                      (item['updatedAtMs'] as num?)?.toInt() ??
-                      previousWatches[symbol.key]?.updatedAtMs
+                  ..updatedAtMs = item.containsKey('updatedAtMs')
+                      ? (item['updatedAtMs'] as num?)?.toInt()
+                      : previousWatches[symbol.key]?.updatedAtMs
                   ..plotted = item['plotted'] == true
                   ..pinned =
                       item['pinned'] as bool? ??
@@ -377,6 +377,11 @@ extension TakeALookControllerSnapshot on TakeALookController {
                     item['value'],
                     fallback: previousWatches[symbol.key]?.value ?? 0,
                   );
+            if (item.containsKey('value')) {
+              watch.applyValue(item['value']);
+            } else {
+              watch.valueIssue = previousWatches[symbol.key]?.valueIssue;
+            }
             telemetryStore.configureWatch(watch);
             _appendWireSamples(watch.samples, samples);
             watch.totalSampleCount = samples == null

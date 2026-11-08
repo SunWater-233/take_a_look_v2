@@ -141,7 +141,7 @@ class ControllerSnapshotCodec {
           'updatedAtMs': watch.updatedAtMs,
           'plotted': watch.plotted,
           'pinned': watch.pinned,
-          'value': watch.value,
+          'value': watch.wireValue,
           'sampleCursor': watch.totalSampleCount,
           'historyStartSeconds': watch.historyStartSeconds,
           if (includeSamples)

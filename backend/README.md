@@ -77,6 +77,20 @@ codecs, register access and write/readback verification. The remote adapter does
 not inherit pyOCD connection, target-registry or flash-programming behavior;
 those remain in the local adapter. Adapter calls retain the service's existing
 serialization and ownership rules.
+
+ELF / AXF variable matching uses the ELF name (including DWARF linkage names)
+and resolved address together. Name-only fallback is limited to unambiguous
+global declarations without a location expression. Typedef display names are
+preserved; scalar codecs use DWARF base-type encoding and target byte order.
+Constant address/member expressions share a stack evaluator. Register, frame,
+location-list, dereference and split-piece locations are not treated as static
+memory addresses. Missing/conflicting types carry a `diagnostic`, disable writes
+and memory sampling, and display a failure state instead of a numeric zero.
+Composite objects are expanded into typed members; undecodable strings are
+never copied into numeric plot history. Compiler regression tests cover GCC
+DWARF 4/5 and Arm Compiler DWARF 4 at O0/O2/Os; set `TAL_ARMCLANG` to the
+`armclang` executable to enable the optional Arm Compiler cases.
+
 Local pyOCD sessions guard error recovery against re-entry: if clearing a
 transfer fault also fails, the original transfer error is returned after probe
 locks are released. Failed AP/DP SELECT writes also release the lock acquired

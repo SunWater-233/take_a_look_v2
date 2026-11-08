@@ -976,6 +976,8 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
             "section": symbol.section,
             "writable": symbol.is_writable,
             "dataSource": symbol.data_source,
+            **({"encoding": symbol.encoding} if symbol.encoding else {}),
+            **({"diagnostic": symbol.diagnostic} if symbol.diagnostic else {}),
         }
 
     @staticmethod

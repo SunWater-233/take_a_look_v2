@@ -59,6 +59,8 @@ class SymbolItem {
     this.backendKey,
     this.writable = true,
     this.dataSource = 'memory',
+    this.encoding = '',
+    this.diagnostic = '',
   });
 
   final String source;
@@ -70,6 +72,8 @@ class SymbolItem {
   final String? backendKey;
   final bool writable;
   final String dataSource;
+  final String encoding;
+  final String diagnostic;
 
   factory SymbolItem.fromJson(Map<String, dynamic> json) {
     return SymbolItem(
@@ -82,6 +86,8 @@ class SymbolItem {
       backendKey: json['key'] as String?,
       writable: json['writable'] != false,
       dataSource: json['dataSource'] as String? ?? 'memory',
+      encoding: json['encoding'] as String? ?? '',
+      diagnostic: json['diagnostic'] as String? ?? '',
     );
   }
 
@@ -95,6 +101,8 @@ class SymbolItem {
     'key': key,
     'writable': writable,
     'dataSource': dataSource,
+    if (encoding.isNotEmpty) 'encoding': encoding,
+    if (diagnostic.isNotEmpty) 'diagnostic': diagnostic,
   };
 
   String get key => backendKey ?? '${address.toRadixString(16)}:$name';
@@ -146,14 +154,38 @@ class WatchItem {
   bool plotted = false;
   bool pinned = false;
   double value = 0;
+  String? valueIssue;
+
+  Object get wireValue => valueIssue ?? value;
+
+  bool applyValue(Object? raw) {
+    if (raw is num || raw is bool) {
+      value = raw is num ? raw.toDouble() : (raw == true ? 1 : 0);
+      valueIssue = null;
+      return true;
+    }
+    valueIssue = raw == null || raw == '' ? null : raw.toString();
+    return false;
+  }
+
+  String? get valueDiagnostic {
+    if (symbol.diagnostic.isNotEmpty) return symbol.diagnostic;
+    if (symbol.encoding == 'unsupported') return '暂不支持该类型的数值解码';
+    if (symbol.encoding == 'bytes') return '该变量为复合类型，请展开成员查看数值';
+    if (valueIssue != null) return '无法解码为数值：$valueIssue';
+    return null;
+  }
 
   bool get isFloatingPoint =>
-      symbol.type.contains('float') || symbol.type.contains('double');
+      symbol.encoding == 'float' ||
+      (symbol.encoding.isEmpty &&
+          (symbol.type.contains('float') || symbol.type.contains('double')));
 
   /// Decimal digits sufficient to round-trip the target's IEEE floating type.
   int get valuePrecision => symbol.size == 8 ? 17 : 9;
 
   String get editValueLabel {
+    if (valueDiagnostic != null) return '';
     if (!isFloatingPoint) return valueLabel;
     final typedValue = symbol.size == 4
         ? Float32List.fromList([value]).single
@@ -162,7 +194,13 @@ class WatchItem {
   }
 
   String get valueLabel {
-    if (symbol.type == 'bool') {
+    if (symbol.diagnostic.isNotEmpty) return '解析失败';
+    if (symbol.encoding == 'unsupported') return '类型不支持';
+    if (symbol.encoding == 'bytes') return '非标量';
+    if (valueIssue != null) return '无法解码';
+    if (!value.isFinite) return value.toString();
+    if (symbol.encoding == 'bool' ||
+        const {'bool', '_Bool'}.contains(symbol.type)) {
       return value >= 0.5 ? 'true' : 'false';
     }
     if (isFloatingPoint) {

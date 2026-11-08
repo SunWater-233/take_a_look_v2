@@ -7,6 +7,7 @@ from math import prod
 from pathlib import Path
 
 from take_a_look_backend.models import SymbolInfo
+from take_a_look_backend.services.dwarf_support import inherited_attribute, static_expression
 from take_a_look_backend.services.elf_context import ElfLoadContext
 
 
@@ -30,6 +31,9 @@ class DwarfVariableInfo:
     byte_size: int = 0
     is_pointer: bool = False
     members: tuple[DwarfMemberInfo, ...] = ()
+    name: str = ""
+    encoding: str = ""
+    diagnostic: str = ""
 
 
 @dataclass(frozen=True)
@@ -39,6 +43,7 @@ class DwarfMemberInfo:
     data_type: str
     byte_size: int
     is_pointer: bool = False
+    encoding: str = ""
 
 
 def load_symbols_from_elf(path: Path, progress: SymbolLoadProgress | None = None,
@@ -52,7 +57,7 @@ def load_symbols_from_elf(path: Path, progress: SymbolLoadProgress | None = None
         _emit_progress(progress, "scan", 0, 0)
         candidates = symbol_candidates_from_elf(elf)
         resolved_candidates = [
-            (candidate, debug_by_addr.get(candidate.address) or debug_by_name.get(candidate.name) or DwarfVariableInfo())
+            (candidate, _match_variable(candidate, debug_by_name, debug_by_addr))
             for candidate in candidates
         ]
         total = sum(1 + len(debug_info.members) for _candidate, debug_info in resolved_candidates)
@@ -79,18 +84,26 @@ def load_symbols_from_elf(path: Path, progress: SymbolLoadProgress | None = None
                 section=candidate.section,
                 source_file=source_file,
                 pointer=debug_info.is_pointer,
+                encoding=debug_info.encoding,
+                byte_order="little" if elf.little_endian else "big",
+                diagnostic=debug_info.diagnostic or _type_diagnostic(debug_info.encoding, symbol_size),
             )
             current += 1
             emit_variable_progress_if_needed()
             for member in debug_info.members:
-                symbols[(member.name, candidate.address + member.address_offset)] = SymbolInfo(
-                    name=member.name,
+                member_name = (candidate.name + member.name[len(debug_info.name):]
+                               if debug_info.name else member.name)
+                symbols[(member_name, candidate.address + member.address_offset)] = SymbolInfo(
+                    name=member_name,
                     address=candidate.address + member.address_offset,
                     size=member.byte_size,
                     kind=member.data_type,
                     section=candidate.section,
                     source_file=source_file,
                     pointer=member.is_pointer,
+                    encoding=member.encoding,
+                    byte_order="little" if elf.little_endian else "big",
+                    diagnostic=_type_diagnostic(member.encoding, member.byte_size),
                 )
                 current += 1
                 emit_variable_progress_if_needed()
@@ -149,14 +162,15 @@ def variable_debug_info_from_dwarf(
     elf_file,
     progress: SymbolLoadProgress | None = None,
     *, context: ElfLoadContext | None = None,
-) -> tuple[dict[str, DwarfVariableInfo], dict[int, DwarfVariableInfo]]:
+) -> tuple[dict[str, DwarfVariableInfo], dict[tuple[str, int], DwarfVariableInfo]]:
     if not elf_file.has_dwarf_info():
         return {}, {}
 
     from elftools.dwarf.dwarf_expr import DWARFExprParser
 
     by_name: dict[str, DwarfVariableInfo] = {}
-    by_addr: dict[int, DwarfVariableInfo] = {}
+    by_addr: dict[tuple[str, int], DwarfVariableInfo] = {}
+    named_records: dict[str, list[tuple[DwarfVariableInfo, bool]]] = {}
     try:
         dwarf_info = context.dwarf_info if context is not None else elf_file.get_dwarf_info()
     except Exception:
@@ -180,7 +194,8 @@ def variable_debug_info_from_dwarf(
         for die in compile_unit.iter_DIEs():
             if die.tag != "DW_TAG_variable":
                 continue
-            name = _decode_dwarf_value(die.attributes.get("DW_AT_name", None))
+            name_attribute = inherited_attribute(die, "DW_AT_name")
+            name = _decode_dwarf_value(name_attribute[0]) if name_attribute else ""
             if not name:
                 continue
 
@@ -191,26 +206,108 @@ def variable_debug_info_from_dwarf(
             metadata = type_cache.get(type_key)
             if metadata is None:
                 data_type, byte_size = _type_info_for_die(die)
-                metadata = (data_type, byte_size, _is_pointer_type_die(type_die),
+                metadata = (data_type, byte_size, _is_pointer_type_die(type_die), _type_encoding(type_die),
                             tuple(_expand_type_members(type_die, "@", 0, expr_parser, set())))
                 type_cache[type_key] = metadata
-            data_type, byte_size, pointer, members = metadata
+            data_type, byte_size, pointer, encoding, members = metadata
             info = DwarfVariableInfo(
                 source_file=source_file or "未知来源", data_type=data_type,
                 byte_size=byte_size, is_pointer=pointer,
+                name=name, encoding=encoding,
                 members=tuple(DwarfMemberInfo(
                     name=name + member.name[1:], address_offset=member.address_offset,
                     data_type=member.data_type, byte_size=member.byte_size,
-                    is_pointer=member.is_pointer) for member in members),
+                    is_pointer=member.is_pointer, encoding=member.encoding) for member in members),
             )
-            by_name.setdefault(name, info)
-
-            address = _address_from_location(die.attributes.get("DW_AT_location", None), expr_parser)
-            if address is not None:
-                by_addr[address] = info
+            location = inherited_attribute(die, "DW_AT_location")
+            attribute = location[0] if location else None
+            address = _address_from_location(attribute, expr_parser)
+            aliases = {name}
+            scope = _variable_scope(die)
+            if scope:
+                aliases.update({".".join([*scope, name]), "::".join([*scope, name])})
+            for key in ("DW_AT_linkage_name", "DW_AT_MIPS_linkage_name"):
+                linkage = inherited_attribute(die, key)
+                if linkage:
+                    aliases.add(_decode_dwarf_value(linkage[0]))
+            for alias in aliases:
+                if address is not None:
+                    key = (alias, address)
+                    by_addr[key] = _merge_debug_info(by_addr.get(key), info)
+                if _is_global_variable(die):
+                    fallback_allowed = attribute is None and inherited_attribute(die, "DW_AT_const_value") is None
+                    named_records.setdefault(alias, []).append((info, fallback_allowed))
         _emit_progress(progress, "debug", unit_index, total_units)
 
+    for name, records in named_records.items():
+        if all(allowed for _, allowed in records):
+            for info, _ in records:
+                by_name[name] = _merge_debug_info(by_name.get(name), info)
+        else:
+            by_name[name] = DwarfVariableInfo(diagnostic="无法将符号与固定内存位置的调试信息唯一匹配。", encoding="unsupported")
     return by_name, by_addr
+
+
+def _merge_debug_info(previous, info):
+    if previous is None or not previous.data_type and not previous.diagnostic:
+        return info
+    if not info.data_type:
+        return previous
+    fields = ("data_type", "byte_size", "is_pointer", "encoding", "members")
+    if any(getattr(previous, field) != getattr(info, field) for field in fields):
+        return DwarfVariableInfo(diagnostic="变量存在相互冲突的调试类型信息。", encoding="unsupported")
+    return previous
+
+
+def _match_variable(candidate, by_name, by_addr):
+    info = by_addr.get((candidate.name, candidate.address))
+    if info is None:
+        # GCC names function-local statics as name.N in the ELF symbol table.
+        base, separator, suffix = candidate.name.rpartition(".")
+        if separator and suffix.isdigit():
+            info = by_addr.get((base, candidate.address))
+    info = info or by_name.get(candidate.name) or DwarfVariableInfo(
+        diagnostic="未找到可匹配的变量类型信息。", encoding="unsupported")
+    if candidate.size and info.byte_size and candidate.size != info.byte_size:
+        return DwarfVariableInfo(diagnostic="ELF 符号大小与 DWARF 类型大小不一致。", encoding="unsupported")
+    return info
+
+
+def _is_global_variable(die):
+    seen = set()
+    current = die
+    while current is not None and id(current) not in seen and len(seen) < 64:
+        seen.add(id(current))
+        if current.tag == "DW_TAG_compile_unit":
+            return True
+        if current.tag in {"DW_TAG_subprogram", "DW_TAG_lexical_block", "DW_TAG_inlined_subroutine"}:
+            return False
+        current = current.get_parent()
+    return False
+
+
+def _variable_scope(die):
+    names = []
+    seen = set()
+    current = die.get_parent()
+    while current is not None and id(current) not in seen and len(seen) < 64:
+        seen.add(id(current))
+        if current.tag == "DW_TAG_compile_unit":
+            break
+        if current.tag in {"DW_TAG_subprogram", "DW_TAG_namespace", "DW_TAG_class_type", "DW_TAG_structure_type"}:
+            attribute = inherited_attribute(current, "DW_AT_name")
+            if attribute:
+                names.append(_decode_dwarf_value(attribute[0]))
+        current = current.get_parent()
+    return list(reversed(names))
+
+
+def _type_diagnostic(encoding: str, size: int) -> str:
+    widths = {"float": {2, 4, 8}, "signed": {1, 2, 4, 8},
+              "unsigned": {1, 2, 4, 8}, "bool": {1, 2, 4, 8}}
+    if encoding == "unsupported" or encoding in widths and size not in widths[encoding]:
+        return "暂不支持该类型或字节宽度的数值解码。"
+    return ""
 
 
 
@@ -224,41 +321,32 @@ def symbol_hierarchy(symbol: SymbolInfo) -> list[str]:
 
 
 def _source_file_for_die(die, line_program, compile_dir: str) -> str:
-    decl_file = die.attributes.get("DW_AT_decl_file", None)
-    if decl_file is None or line_program is None:
+    declaration = inherited_attribute(die, "DW_AT_decl_file")
+    if declaration is None:
         return compile_dir or "未知来源"
-
-    file_entries = line_program.header.get("file_entry", [])
-    index = int(decl_file.value) - 1
-    if index < 0 or index >= len(file_entries):
+    attribute, owner = declaration
+    if owner is not die and owner.cu is not die.cu:
+        line_program = owner.cu.dwarfinfo.line_program_for_CU(owner.cu)
+        compile_dir = _decode_dwarf_value(owner.cu.get_top_DIE().attributes.get("DW_AT_comp_dir"))
+    if line_program is None:
         return compile_dir or "未知来源"
-
-    entry = file_entries[index]
-    file_name = _decode_dwarf_value(entry.name)
-    directory = compile_dir
-    dir_index = getattr(entry, "dir_index", 0)
-    include_dirs = line_program.header.get("include_directory", [])
-    if dir_index:
-        directory_index = int(dir_index) - 1
-        if 0 <= directory_index < len(include_dirs):
-            directory = _decode_dwarf_value(include_dirs[directory_index])
-
-    return _join_source_path(directory, file_name)
+    # Keep the established source-path spelling for project/watch rebinding.
+    # DWARF 5 indexes both file and directory tables from zero.
+    version = line_program.header.get("version", 4)
+    index = int(attribute.value) - (0 if version >= 5 else 1)
+    files = line_program.header.get("file_entry", [])
+    if not 0 <= index < len(files):
+        return compile_dir or "未知来源"
+    entry = files[index]
+    directory_index = int(getattr(entry, "dir_index", 0)) - (0 if version >= 5 else 1)
+    directories = line_program.header.get("include_directory", [])
+    directory = (_decode_dwarf_value(directories[directory_index])
+                 if 0 <= directory_index < len(directories) else compile_dir)
+    return _join_source_path(directory, _decode_dwarf_value(entry.name))
 
 
 def _address_from_location(attribute, expr_parser) -> int | None:
-    if attribute is None or not isinstance(attribute.value, (bytes, bytearray, list, tuple)):
-        return None
-
-    try:
-        operations = expr_parser.parse_expr(attribute.value)
-    except Exception:
-        return None
-
-    for operation in operations:
-        if operation.op_name == "DW_OP_addr" and operation.args:
-            return int(operation.args[0])
-    return None
+    return static_expression(attribute, expr_parser)
 
 
 def _expand_type_members(type_die, base_name: str, base_offset: int, expr_parser, seen: set[int]) -> list[DwarfMemberInfo]:
@@ -308,6 +396,7 @@ def _expand_record_members(type_die, base_name: str, base_offset: int, expr_pars
                     data_type=data_type,
                     byte_size=byte_size,
                     is_pointer=_is_pointer_type_die(member_type),
+                    encoding=_type_encoding(member_type),
                 )
             )
 
@@ -375,6 +464,7 @@ def _append_array_members(
                 data_type=item_type,
                 byte_size=stride,
                 is_pointer=_is_pointer_type_die(leaf_type),
+                encoding="bytes" if remaining_dimensions else _type_encoding(leaf_type),
             )
         )
 
@@ -458,45 +548,19 @@ def _member_offset_for_die(die, expr_parser) -> int | None:
     value = attribute.value
     if isinstance(value, int):
         return int(value)
-    if not isinstance(value, (bytes, bytearray, list, tuple)):
-        return None
-
-    try:
-        operations = expr_parser.parse_expr(value)
-    except Exception:
-        return None
-
-    offset = 0
-    for operation in operations:
-        if operation.op_name.startswith("DW_OP_lit"):
-            try:
-                offset += int(operation.op_name.removeprefix("DW_OP_lit"))
-            except ValueError:
-                return None
-            continue
-        if operation.op_name in {
-            "DW_OP_const1u",
-            "DW_OP_const1s",
-            "DW_OP_const2u",
-            "DW_OP_const2s",
-            "DW_OP_const4u",
-            "DW_OP_const4s",
-            "DW_OP_const8u",
-            "DW_OP_const8s",
-            "DW_OP_constu",
-            "DW_OP_consts",
-            "DW_OP_plus_uconst",
-        } and operation.args:
-            offset += int(operation.args[0])
-            continue
-        return None
-    return offset
+    return static_expression(attribute, expr_parser, member=True)
 
 
 def _type_die_for_die(die):
     try:
         return die.get_DIE_from_attribute("DW_AT_type")
     except Exception:
+        inherited = inherited_attribute(die, "DW_AT_type")
+        if inherited is not None:
+            try:
+                return inherited[1].get_DIE_from_attribute("DW_AT_type")
+            except (KeyError, ValueError):
+                pass
         return None
 
 
@@ -507,6 +571,7 @@ def _resolve_type_die(type_die, seen: set[int]):
         "DW_TAG_const_type",
         "DW_TAG_volatile_type",
         "DW_TAG_restrict_type",
+        "DW_TAG_atomic_type",
     }:
         offset = int(getattr(current, "offset", 0))
         if offset in seen:
@@ -519,6 +584,29 @@ def _resolve_type_die(type_die, seen: set[int]):
 def _is_pointer_type_die(type_die) -> bool:
     resolved = _resolve_type_die(type_die, set())
     return resolved is not None and resolved.tag == "DW_TAG_pointer_type"
+
+
+def _type_encoding(type_die, seen=None) -> str:
+    resolved = _resolve_type_die(type_die, set())
+    if resolved is None:
+        return "unsupported"
+    seen = set() if seen is None else seen
+    if id(resolved) in seen:
+        return "unsupported"
+    seen.add(id(resolved))
+    if resolved.tag == "DW_TAG_pointer_type":
+        return "unsigned"
+    if resolved.tag in {"DW_TAG_structure_type", "DW_TAG_union_type", "DW_TAG_class_type", "DW_TAG_array_type"}:
+        return "bytes"
+    if resolved.tag == "DW_TAG_enumeration_type":
+        target = _type_die_for_die(resolved)
+        if target is not None:
+            return _type_encoding(target, seen)
+    if resolved.tag in {"DW_TAG_base_type", "DW_TAG_enumeration_type"}:
+        encoding = _int_attribute_value(resolved.attributes.get("DW_AT_encoding"))
+        return {1: "unsigned", 2: "bool", 4: "float", 5: "signed", 6: "signed",
+                7: "unsigned", 8: "unsigned"}.get(encoding, "unsupported")
+    return "unsupported"
 
 
 def _is_unsupported_bitfield(die) -> bool:
@@ -558,20 +646,24 @@ def _describe_type_die(type_die, seen: set[int]) -> tuple[str, int]:
         if name:
             return name, size or _nested_type_size(type_die, seen)
         return _nested_type(type_die, seen)
-    if tag in {"DW_TAG_const_type", "DW_TAG_volatile_type", "DW_TAG_restrict_type"}:
+    if tag in {"DW_TAG_const_type", "DW_TAG_volatile_type", "DW_TAG_restrict_type", "DW_TAG_atomic_type"}:
         nested_name, nested_size = _nested_type(type_die, seen)
         qualifier = {
             "DW_TAG_const_type": "const",
             "DW_TAG_volatile_type": "volatile",
             "DW_TAG_restrict_type": "restrict",
+            "DW_TAG_atomic_type": "_Atomic",
         }[tag]
         return f"{qualifier} {nested_name}".strip(), size or nested_size
     if tag == "DW_TAG_pointer_type":
         nested_name, _nested_size = _nested_type(type_die, seen)
-        return f"{nested_name or 'void'}*", size
+        return f"{nested_name or 'void'}*", size or int(type_die.cu["address_size"])
     if tag == "DW_TAG_array_type":
         nested_name, nested_size = _nested_type(type_die, seen)
-        return f"{nested_name or 'unknown'}[]", size or nested_size
+        counts = [_subrange_count(child) for child in type_die.iter_children()
+                  if child.tag == "DW_TAG_subrange_type"]
+        count = prod(counts) if counts and all(value is not None for value in counts) else 0
+        return f"{nested_name or 'unknown'}[]", size or nested_size * count
     if tag in {"DW_TAG_structure_type", "DW_TAG_union_type", "DW_TAG_enumeration_type", "DW_TAG_class_type"}:
         prefix = {
             "DW_TAG_structure_type": "struct",

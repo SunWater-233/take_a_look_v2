@@ -4,6 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from .dwarf_support import static_expression
+
 
 @dataclass
 class CType:
@@ -61,7 +63,9 @@ class FreeRtosLayout:
         named: dict[str, Any] = {}
         variables = []
         dwarf = context.dwarf_info
+        from elftools.dwarf.dwarf_expr import DWARFExprParser
         for cu in dwarf.iter_CUs():
+            parser = DWARFExprParser(cu.structs)
             if check:
                 check()
             source = _name(cu.get_top_DIE())
@@ -73,10 +77,9 @@ class FreeRtosLayout:
                         named[name] = die
                 if die.tag == "DW_TAG_variable" and name:
                     location = die.attributes.get("DW_AT_location")
-                    if location and isinstance(location.value, (list, bytes)):
-                        data = bytes(location.value)
-                        if len(data) == result.pointer_size + 1 and data[0] == 3:  # DW_OP_addr
-                            variables.append((die, int.from_bytes(data[1:], result.byteorder), source))
+                    address = static_expression(location, parser)
+                    if address is not None:
+                        variables.append((die, address, source))
 
         def build(die, depth=0) -> CType:
             if die is None or depth > 64:
@@ -118,6 +121,9 @@ class FreeRtosLayout:
                         continue
                     offset = _attr(child, "DW_AT_data_member_location", 0)
                     if not isinstance(offset, int):
+                        offset = static_expression(child.attributes.get("DW_AT_data_member_location"),
+                                                   DWARFExprParser(child.cu.structs), member=True)
+                    if offset is None:
                         continue
                     node.fields[_name(child)] = (offset, build(_target(child), depth + 1))
             return node

@@ -33,6 +33,7 @@ def test_cached_type_members_keep_each_variable_name():
     for name in (b"first", b"second"):
         die = Mock(tag="DW_TAG_variable")
         die.attributes = {"DW_AT_name": Mock(value=name)}
+        die.get_parent.return_value = Mock(tag="DW_TAG_compile_unit")
         variables.append(die)
     unit = Mock(cu_offset=0)
     unit.get_top_DIE.return_value = Mock(attributes={})

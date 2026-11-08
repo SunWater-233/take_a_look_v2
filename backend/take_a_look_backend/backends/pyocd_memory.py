@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import io
-import errno
 import threading
 import struct
 import zipfile
@@ -11,7 +9,10 @@ from time import perf_counter
 from typing import Any
 
 from take_a_look_backend.protocol import ProtocolError
-from take_a_look_backend.backends.pyocd_compat import guard_dap_error_recovery
+from take_a_look_backend.backends.pyocd_compat import (
+    close_pyocd_session, guard_dap_error_recovery, normalise_pack_svd,
+)
+from take_a_look_backend.backends.probe_presence import ProbePresence, ProbePresenceMonitor
 from take_a_look_backend.backends.local_firmware import batched_flash_pages, flash_sector_plan, read_firmware_chunks, sector_matches
 from take_a_look_backend.backends.target_backend import capabilities_for_connection
 # Re-export the existing codec entry points for external callers.
@@ -41,7 +42,7 @@ class PyOcdMemoryBackend(TypedMemoryBackend):
         self.session: Any | None = None
         self._owns_target_registry = False
         self._pack_archive: zipfile.ZipFile | None = None
-        self._next_probe_check_at = 0.0
+        self._presence = ProbePresenceMonitor()
         self.last_flash_stats: dict[str, int | float] | None = None
 
     @property
@@ -50,7 +51,7 @@ class PyOcdMemoryBackend(TypedMemoryBackend):
 
     @property
     def probe(self) -> Any | None:
-        return self.session.probe if self.session is not None else None
+        return getattr(self.session, "probe", None)
 
     def connect(self, config: PyOcdConnectionConfig) -> None:
         if self.is_connected:
@@ -93,31 +94,31 @@ class PyOcdMemoryBackend(TypedMemoryBackend):
         try:
             self._prepare_target(config)
             session = Session(probe, auto_open=False, options=options)
+            self.session = session
             # Guard before open: discovery can encounter the same failed
             # recovery as running-target memory sampling.
             guard_dap_error_recovery(session.target)
             if config.pack_path is not None:
-                _normalise_pack_svd(session.target)
+                normalise_pack_svd(session.target)
             session.open()
             if native_jlink:
                 # pylink.connect() selects automatic speed during core connect.
                 # Restore the explicit clock before sampling or flashing.
                 probe.set_clock(config.frequency_hz)
             timings["session_open_s"] = perf_counter() - open_started
-        except Exception:
+        except Exception as error:
             timings["session_open_s"] = perf_counter() - open_started
             timings["total_s"] = perf_counter() - total_started
             self.last_connect_timings = timings
             try:
-                if session is not None:
-                    session.close()
-            finally:
-                self._release_target_registry()
+                self.disconnect()
+            except Exception as cleanup_error:
+                error.add_note(f"连接失败后的清理异常：{cleanup_error}")
             raise
 
         self.session = session
         self.target = session.target
-        self._next_probe_check_at = 0.0
+        self._presence.reset()
         timings["total_s"] = perf_counter() - total_started
         self.last_connect_timings = timings
 
@@ -132,58 +133,22 @@ class PyOcdMemoryBackend(TypedMemoryBackend):
         session = self.session
         self.session = None
         self.target = None
-        self._next_probe_check_at = 0.0
+        self._presence.reset()
         self._clear_read_plans()
         try:
             if session is not None:
-                if probe_lost:
-                    # Session.close() normally removes breakpoints and resumes
-                    # the MCU. A lost transport only needs its host handle closed.
-                    session._closed = True
-                    session.probe.close()
-                else:
-                    session.close()
+                close_pyocd_session(session, probe_lost=probe_lost)
         finally:
             self._release_target_registry()
 
     def check_connection(self, *, error: Exception | None = None, force: bool = False) -> None:
         """Check probe presence, independently of target/SWD accessibility."""
         from pyocd.core.exceptions import ProbeDisconnected
-        from pyocd.probe.cmsis_dap_probe import CMSISDAPProbe
-        from pyocd.probe.debug_probe import DebugProbe
-        from pyocd.probe.jlink_probe import JLinkProbe
 
         if not self.is_connected:
             return
-        if error is not None and _probe_disconnect_error(error):
-            raise ProbeDisconnected(str(error)) from error
-        now = perf_counter()
-        if not force and now < self._next_probe_check_at:
-            return
-        self._next_probe_check_at = now + 1.0
-        try:
-            probe = self.probe
-            if isinstance(probe, JLinkProbe):
-                connected = getattr(probe._link, "connected", None)
-                if not callable(connected):
-                    return
-                # target_connected() is false in pyOCD's low-level CoreSight
-                # mode even when the emulator USB connection is healthy.
-                present = bool(connected())
-            elif isinstance(probe, CMSISDAPProbe):
-                present = _cmsis_dap_probe_present(probe)
-            elif isinstance(probe, DebugProbe):
-                present = type(probe).get_probe_with_id(probe.unique_id) is not None
-            else:
-                return
-        except Exception as check_error:
-            if _probe_disconnect_error(check_error):
-                raise ProbeDisconnected("本地调试探针连接已中断。") from check_error
-            # An enumeration/driver query failure is inconclusive. Do not
-            # turn a target fault or an unsupported presence check into a loss.
-            return
-        if present is False:
-            raise ProbeDisconnected("本地调试探针已拔出或连接已中断。")
+        if self._presence.check(self.probe, error=error, force=force) is ProbePresence.MISSING:
+            raise ProbeDisconnected("本地调试探针已拔出或连接已中断。") from (error or self._presence.last_error)
 
     def _prepare_target(self, config: PyOcdConnectionConfig) -> None:
         from pyocd.target import TARGET, normalise_target_type_name
@@ -410,60 +375,6 @@ def _matches_probe_filter(probe: Any, probe_filter: str) -> bool:
         probe_class = PROBE_CLASSES.get(plugin_name)
         return probe_class is not None and isinstance(probe, probe_class)
     return normalized in probe.description.casefold()
-
-
-def _cmsis_dap_probe_present(probe: Any) -> bool | None:
-    device = getattr(getattr(probe._link, "_interface", None), "dev", None)
-    if device is None:
-        # HID and other non-PyUSB transports retain their driver's enumeration.
-        return type(probe).get_probe_with_id(probe.unique_id) is not None
-
-    # pyOCD's CMSIS-DAP discovery reads configuration/string descriptors through
-    # a second handle. WinUSB denies that access while our interface is open,
-    # and discovery silently omits the healthy probe. Device descriptors and
-    # bus/address enumeration require no interface opens or target/SWD traffic.
-    bus, address = device.bus, device.address
-    backend = getattr(getattr(device, "_ctx", None), "backend", None)
-    if bus is None or address is None or backend is None:
-        return None
-    import usb.core
-
-    try:
-        return any((candidate.bus, candidate.address) == (bus, address)
-                   for candidate in usb.core.find(find_all=True, backend=backend,
-                                                  idVendor=device.idVendor, idProduct=device.idProduct))
-    except OSError:
-        # A failed system scan (possibly of another USB device) proves nothing
-        # about this active handle. Actual I/O loss is checked separately.
-        return None
-
-
-def _probe_disconnect_error(error: Exception) -> bool:
-    from pyocd.core.exceptions import ProbeDisconnected
-
-    seen = set()
-    while error is not None and id(error) not in seen:
-        seen.add(id(error))
-        if isinstance(error, (ProbeDisconnected, ConnectionError)):
-            return True
-        if isinstance(error, OSError) and (
-                error.errno in {errno.ENODEV, errno.ENXIO}
-                or getattr(error, "winerror", None) in {6, 1167}):
-            return True
-        error = error.__cause__ or error.__context__
-    return False
-
-
-def _normalise_pack_svd(target: Any) -> None:
-    """Repair whitespace before a pack SVD's XML declaration in memory only."""
-    location = getattr(target, "_svd_location", None)
-    if location is None or not isinstance(location.filename, io.BytesIO):
-        return
-    data = location.filename.getvalue()
-    bom = b"\xef\xbb\xbf" if data.startswith(b"\xef\xbb\xbf") else b""
-    stripped = data[len(bom):].lstrip(b" \t\r\n")
-    if stripped.startswith(b"<?xml") and bom + stripped != data:
-        location.filename = io.BytesIO(bom + stripped)
 
 
 def _firmware_segments(path: str, target: Any) -> list[tuple[int, bytes]]:

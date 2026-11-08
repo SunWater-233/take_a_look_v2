@@ -92,8 +92,10 @@ rather than product-name text, so OEM names such as SAM-ICE remain selectable
 as J-Link. Automatic selection and serial-number filtering retain their existing
 behavior.
 Local sessions check probe presence once per second even when capture is paused
-or no variables are watched. J-Link uses its emulator connection status; other
-pyOCD probes are matched by their active unique ID. A read/RTT/status failure
+or no variables are watched. J-Link uses its emulator connection status;
+PyUSB-backed ST-Link and CMSIS-DAP probes use their active USB bus/address
+without reopening an exclusively held WinUSB interface. Other pyOCD transports
+are matched by their active unique ID. A read/RTT/status failure
 forces an immediate check, and explicit transport-disconnect errors retain
 their meaning through exception wrapping. A target memory fault or inconclusive
 presence query alone does not disconnect. Confirmed loss pauses sampling, stops
@@ -101,6 +103,20 @@ RTT, closes the host probe handle without target resume/breakpoint accesses,
 preserves recordings and watches, and emits disconnected state plus one
 `probe_disconnected` notification. Cleanup errors do not prevent this transition;
 reinsertion requires an explicit connection request.
+`backends/probe_presence.py` owns throttled `present`/`missing`/`unknown`
+checks and transport-error classification, separately from initial discovery.
+`backends/pyocd_compat.py` contains the pinned driver's private USB/J-Link
+access, SVD repair and session-close handling. A changed ST-Link driver layout
+is an unknown result, never a reason to reopen its exclusive USB interface.
+The service routes failed connections, explicit disconnect, transport loss and
+shutdown through one cleanup path under the existing probe lock. Each cleanup
+step runs even if an earlier one fails; recording/watch data and requested
+breakpoints are preserved. Loss pauses capture, while explicit disconnect and
+shutdown may remove target breakpoints and normally close the session. Failed
+pyOCD opens release the target registry and retain their original error even
+when closing the partial session also fails.
+Shutdown shares the connection-control lock with opens/reconnects, so it waits
+for an in-progress open before releasing resources and rejects later connects.
 `services/debug_session.py` owns debug information, requested/resolved
 breakpoints, step-over handling, registers and stopped locations. It has no
 worker, service reference or lock; the service keeps target operations under

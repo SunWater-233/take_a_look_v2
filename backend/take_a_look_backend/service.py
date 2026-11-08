@@ -4,6 +4,7 @@ import math
 import threading
 import time
 from collections.abc import Callable, Mapping
+from enum import Enum
 from pathlib import Path
 
 from take_a_look_backend.backends.j_scope_rtt import JScopeRttBackend
@@ -35,6 +36,13 @@ from take_a_look_backend.backends.rtt_session import RttSessionManager
 EventSink = Callable[[EventName, object], None]
 SymbolLoader = Callable[..., list[SymbolInfo]]
 DebugInfoLoader = Callable[..., DebugInfoIndex]
+
+
+class _DisconnectReason(Enum):
+    USER = "user"
+    LOST = "lost"
+    CONNECT_FAILED = "connect_failed"
+    SHUTDOWN = "shutdown"
 
 
 class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareServiceMixin):
@@ -138,20 +146,19 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
         self._wake.set()
         self._sampler.join(timeout=2.0)
         try:
-            with self._lock:
+            with self._connection_lock, self._lock:
                 try:
-                    self._flush_pending_samples_locked()
+                    errors = self._cleanup_connection_locked(_DisconnectReason.SHUTDOWN)
+                    if errors:
+                        self._emit(EventName.LOG, {"level": "warning", "message": f"关闭连接时清理异常：{'；'.join(errors)}"})
                     self._pipeline.drain()
-                    self._recording.close()
                 finally:
-                    self._stop_rtt_locked()
-                    self._rtt_sessions.close()
-                    self._debug.remove_breakpoints(self._memory, connected=self._connection_status == "connected")
-                    self._memory.disconnect()
-                    self._connection_status = "disconnected"
+                    self._recording.close()
         finally:
-            self._pipeline.close()
-            self._targets.close()
+            try:
+                self._pipeline.close()
+            finally:
+                self._targets.close()
 
     def handle(self, method: RpcMethod, params: Mapping[str, object]) -> dict[str, object]:
         priority = method in {
@@ -397,6 +404,8 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
 
     def _connect(self, params: Mapping[str, object]) -> dict[str, object]:
         with self._lock:
+            if self._closed:
+                raise ProtocolError("service_closed", "Backend service is closed.")
             if self._connection_status == "connected":
                 return {"state": self._runtime_state_locked()}
             self._apply_config_locked(params)
@@ -427,15 +436,10 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
                 self._debug.execution_state = initial_execution_state
                 self._refresh_debug_state_locked(force=True)
         except Exception as error:
-            try:
-                self._memory.disconnect()
-            except Exception:
-                pass
             with self._lock:
-                self._connection_status = "disconnected"
-                self._debug.execution_state = "unavailable"
-                self._debug.stopped_location = None
-                self._debug.registers = {}
+                cleanup_errors = self._cleanup_connection_locked(_DisconnectReason.CONNECT_FAILED)
+                for cleanup_error in cleanup_errors:
+                    error.add_note(cleanup_error)
                 failed_state = self._runtime_state_locked()
             self._emit(EventName.LOG, {"level": "error", "message": f"连接调试探针失败：{error}"})
             self._emit(EventName.STATE, failed_state)
@@ -458,22 +462,53 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
 
     def _disconnect(self) -> dict[str, object]:
         with self._lock:
-            self._flush_pending_samples_locked()
-            self._stop_rtt_locked()
-            self._rtt_sessions.close()
-            self._debug.remove_breakpoints(self._memory, connected=self._connection_status == "connected")
-            self._memory.disconnect()
-            self._connection_status = "disconnected"
-            self._acquisition_clock.reset()
-            self._sampling_paused = False
-            self._debug.execution_state = "unavailable"
-            self._debug.stopped_location = None
-            self._debug.registers = {}
-            self._debug.mark_breakpoints_pending()
+            cleanup_errors = self._cleanup_connection_locked(_DisconnectReason.USER)
             state = self._runtime_state_locked()
+        if cleanup_errors:
+            self._emit(EventName.LOG, {"level": "warning", "message": f"断开连接时清理异常：{'；'.join(cleanup_errors)}"})
         self._emit(EventName.LOG, {"level": "info", "message": "已断开调试探针。"})
         self._emit(EventName.STATE, state)
         return {"state": state}
+
+    def _cleanup_connection_locked(self, reason: _DisconnectReason) -> list[str]:
+        """Finalize state and attempt every cleanup under the shared probe lock."""
+        connected = self._connection_status == "connected"
+        lost = reason is _DisconnectReason.LOST
+        self._connection_status = "disconnected"
+        self._acquisition_clock.reset()
+        if lost:
+            self._sampling_paused = True
+            self._rtt_enabled = False
+        elif reason is _DisconnectReason.USER:
+            self._sampling_paused = False
+        self._debug.execution_state = "unavailable"
+        self._debug.stopped_location = None
+        self._debug.registers = {}
+        self._last_rtt_error = ""
+        self._next_rtt_retry_at = 0.0
+        self._latest_rtt_values.clear()
+
+        disconnect = self._memory.disconnect
+        if lost and self._connection_kind == "local":
+            disconnect = getattr(self._memory, "disconnect_lost_probe", disconnect)
+        cleanups = [
+            ("采样缓冲", lambda: self._flush_pending_samples_locked(wait=not lost)),
+            ("内存采集", self._stop_memory_sampling_locked),
+            ("RTT Normal", self._normal_rtt.stop),
+            ("RTT Plus", self._plus_rtt.stop),
+            ("RTT 会话", self._rtt_sessions.close),
+        ]
+        if connected and reason in {_DisconnectReason.USER, _DisconnectReason.SHUTDOWN}:
+            cleanups.append(("断点", lambda: self._debug.remove_breakpoints(self._memory, connected=True)))
+        cleanups.append(("目标连接", disconnect))
+        errors = []
+        for name, cleanup in cleanups:
+            try:
+                cleanup()
+            except Exception as error:
+                errors.append(f"{name}：{error}")
+        self._debug.mark_breakpoints_pending()
+        return errors
 
     def _get_debug_info(self) -> dict[str, object]:
         with self._lock:
@@ -541,16 +576,9 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
             isinstance(error, EmberError) and error.code in {"unauthorized", "stale_session", "stale_memory", "not_attached"})
         if not fatal:
             return False
-        self._stop_rtt_locked()
-        self._rtt_sessions.close()
-        self._memory.disconnect()
-        self._connection_status = "disconnected"
-        self._acquisition_clock.reset()
-        self._debug.execution_state = "unavailable"
-        self._debug.stopped_location = None
-        self._debug.registers = {}
-        self._debug.mark_breakpoints_pending()
-        self._emit(EventName.LOG, {"level": "error", "message": f"远程连接已中断：{error}"})
+        cleanup_errors = self._cleanup_connection_locked(_DisconnectReason.LOST)
+        details = f"；清理异常：{'；'.join(cleanup_errors)}" if cleanup_errors else ""
+        self._emit(EventName.LOG, {"level": "error", "message": f"远程连接已中断：{error}{details}"})
         self._emit(EventName.STATE, self._runtime_state_locked())
         return True
 
@@ -571,27 +599,7 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
         else:
             return False
 
-        self._connection_status = "disconnected"
-        self._acquisition_clock.reset()
-        self._sampling_paused = True
-        self._rtt_enabled = False
-        self._debug.execution_state = "unavailable"
-        self._debug.stopped_location = None
-        self._debug.registers = {}
-        self._debug.mark_breakpoints_pending()
-        self._last_rtt_error = ""
-        self._next_rtt_retry_at = 0.0
-        self._latest_rtt_values.clear()
-        disconnect = getattr(self._memory, "disconnect_lost_probe", self._memory.disconnect)
-        cleanup_errors = []
-        for cleanup in (lambda: self._flush_pending_samples_locked(wait=False),
-                        self._stop_memory_sampling_locked,
-                        self._normal_rtt.stop, self._plus_rtt.stop,
-                        self._rtt_sessions.close, disconnect):
-            try:
-                cleanup()
-            except Exception as cleanup_error:
-                cleanup_errors.append(str(cleanup_error))
+        cleanup_errors = self._cleanup_connection_locked(_DisconnectReason.LOST)
         message = "本地调试探针连接已中断，已停止采样；请重新连接探针。"
         self._emit(EventName.STATE, self._runtime_state_locked())
         # ERROR already creates the frontend log entry and connection feedback.

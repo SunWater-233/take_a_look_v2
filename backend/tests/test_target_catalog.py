@@ -265,12 +265,12 @@ def test_pack_svd_declaration_is_normalised_before_session_open(tmp_path, prefix
 
 def test_svd_without_declaration_is_preserved():
     from pyocd.debug.svd.loader import SVDFile
-    from take_a_look_backend.backends.pyocd_memory import _normalise_pack_svd
+    from take_a_look_backend.backends.pyocd_compat import normalise_pack_svd
 
     data = io.BytesIO(b' \n<!-- comment --><device><name>TestChip</name>'
                       b'<addressUnitBits>8</addressUnitBits><width>32</width><peripherals/></device>')
     target = SimpleNamespace(_svd_location=SVDFile(data))
-    _normalise_pack_svd(target)
+    normalise_pack_svd(target)
     assert target._svd_location.filename is data
     target._svd_location.load()
     assert target._svd_location.device.name == 'TestChip'

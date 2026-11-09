@@ -44,6 +44,17 @@ PowerShell 执行策略阻止脚本时，也可以使用 CMD 入口。
 - .NET SDK 8 或更新版本，用于下载并运行 WiX。
 - 首次下载 Flutter/Python/NuGet 依赖时需要网络。
 
+使用 uv 创建后端虚拟环境后，还需要安装项目依赖。建议同时安装 `dev`，准备好打包工具和测试环境。
+在项目根目录运行：
+
+```powershell
+uv venv --python 3.12 backend/.venv  # 仅在尚未创建环境时执行
+uv pip install --python .\backend\.venv\Scripts\python.exe -e "./backend[dev]"
+```
+
+已有环境在 `pyproject.toml` 更新后也需要重新执行安装命令。
+构建脚本会在准备芯片包前检查解释器和 PyInstaller。
+
 脚本将 WiX Toolset **5.0.2** 和同版本 UI 扩展固定在 `build/tools/wix-5.0.2/`，
 不会向全局安装 WiX 或修改系统 PATH。这个固定版本用于保持安装器配置和生成行为一致；
 升级工具时需要同步更新脚本中的工具版本、扩展路径并重新验证安装器。

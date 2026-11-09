@@ -25,6 +25,18 @@ if ([IO.Path]::GetFullPath($PythonExecutable).StartsWith($ManagedVirtualEnv, [St
     & (Join-Path $ProjectRoot 'windows\normalise_runtime_integrity.ps1') -Executable $PythonExecutable
 }
 
+& $PythonExecutable -c "import sys; print('Backend Python:', sys.version.split()[0]); sys.exit(0 if sys.version_info >= (3, 11) else 1)"
+if ($LASTEXITCODE -ne 0) {
+    throw "Backend Python could not run or is older than 3.11: $PythonExecutable. Recreate backend/.venv with a working Python 3.11+ interpreter, then install backend[dev]."
+}
+
+# Creating a venv does not install the project's build dependencies. Check the
+# build tool before downloading/preparing packs or starting the packaging work.
+& $PythonExecutable -m PyInstaller --version
+if ($LASTEXITCODE -ne 0) {
+    throw "PyInstaller is unavailable in $PythonExecutable. Install the backend development dependencies: uv pip install --python `"$PythonExecutable`" -e `"$BackendRoot[dev]`" (or use this interpreter's -m pip install -e `"$BackendRoot[dev]`" if pip is installed)."
+}
+
 & $PythonExecutable (Join-Path $ProjectRoot 'tool\prepare_bundled_packs.py')
 if ($LASTEXITCODE -ne 0) { throw 'Preparing bundled chip packs failed.' }
 

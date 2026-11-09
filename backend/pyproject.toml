@@ -11,11 +11,11 @@ dependencies = [
     "psutil>=5,<8",
     "pyocd==0.46.0",
     "zeroconf>=0.148,<1",
+    "pyinstaller>=6.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pyinstaller>=6.0",
     "pytest>=8.0",
 ]
 

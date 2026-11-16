@@ -332,6 +332,9 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
   }) async {
     _select(watch.symbol.key, preserveSelection: true, section: section);
     final keys = _selectedKeys.toList();
+    final hexWatches = controller.watchesForHexDisplay(keys);
+    final allHex =
+        hexWatches.isNotEmpty && hexWatches.every((w) => w.displayHex);
     final plotKeys = <String>{};
     void collect(WatchTreeNode node) {
       if (_selectedKeys.contains(node.watch.symbol.key)) {
@@ -386,6 +389,13 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
             (w) => plotKeys.contains(w.symbol.key) && w.samplingEnabled,
           ),
         ),
+        _watchPopupItem(
+          touchOptimized: TalUiTheme.of(context).touchOptimized,
+          value: 'radix',
+          icon: Icons.numbers,
+          label: allHex ? '十进制显示' : '十六进制显示',
+          enabled: hexWatches.isNotEmpty,
+        ),
         const PopupMenuDivider(),
         _watchPopupItem(
           touchOptimized: TalUiTheme.of(context).touchOptimized,
@@ -423,6 +433,8 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
         }
       case 'isolate':
         controller.isolateWatchPlots(plotKeys);
+      case 'radix':
+        controller.setWatchesHexDisplay(keys, !allHex);
       case 'delete':
         controller.removeWatches(keys);
       case 'undo':

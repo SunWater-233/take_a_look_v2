@@ -133,6 +133,7 @@ class ControllerSnapshotCodec {
           'updatedAtMs': watch.updatedAtMs,
           'plotted': watch.plotted,
           'pinned': watch.pinned,
+          'displayHex': watch.displayHex,
           'value': watch.value,
           'sampleCursor': watch.totalSampleCount,
           'historyStartSeconds': watch.historyStartSeconds,

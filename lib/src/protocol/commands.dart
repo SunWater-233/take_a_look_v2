@@ -60,6 +60,8 @@ enum ControllerCommand {
   setWatchReadMode,
   setWatchMonitorRate,
   setWatchPinned,
+  setWatchHexDisplay,
+  setWatchesHexDisplay,
   setWatchMonitorScope,
   readWatch,
   toggleWatchPlot,
@@ -280,6 +282,8 @@ class BackendCommandMapper {
       case ControllerCommand.setWatchReadMode:
       case ControllerCommand.setWatchMonitorRate:
       case ControllerCommand.setWatchPinned:
+      case ControllerCommand.setWatchHexDisplay:
+      case ControllerCommand.setWatchesHexDisplay:
       case ControllerCommand.setWatchMonitorScope:
       case ControllerCommand.toggleWatchPlot:
       case ControllerCommand.setWatchColor:

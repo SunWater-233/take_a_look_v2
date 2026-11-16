@@ -368,6 +368,10 @@ extension TakeALookControllerSnapshot on TakeALookController {
                       item['pinned'] as bool? ??
                       previousWatches[symbol.key]?.pinned ??
                       false
+                  ..displayHex =
+                      item['displayHex'] as bool? ??
+                      previousWatches[symbol.key]?.displayHex ??
+                      false
                   ..value = _numericValue(
                     item['value'],
                     fallback: previousWatches[symbol.key]?.value ?? 0,

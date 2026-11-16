@@ -823,7 +823,7 @@ class _WatchRowState extends State<_WatchRow> {
     editor = TextEditingController(
       text:
           widget.controller.watchInputDrafts[widget.watch.symbol.key] ??
-          widget.watch.valueLabel,
+          widget.watch.editValueLabel,
     );
   }
 

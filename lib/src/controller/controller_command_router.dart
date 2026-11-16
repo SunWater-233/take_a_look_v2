@@ -194,6 +194,18 @@ Future<JsonObject> executeControllerCommand(
         values['key'] as String,
         values['value'] as bool,
       );
+    case ControllerCommand.setWatchHexDisplay:
+      final values = Map<String, Object?>.from(arguments! as Map);
+      controller.setWatchHexDisplay(
+        values['key'] as String,
+        values['value'] as bool,
+      );
+    case ControllerCommand.setWatchesHexDisplay:
+      final values = Map<String, Object?>.from(arguments! as Map);
+      controller.setWatchesHexDisplay(
+        (values['keys'] as List).cast<String>(),
+        values['value'] as bool,
+      );
     case ControllerCommand.setWatchMonitorScope:
       final values = Map<String, Object?>.from(arguments! as Map);
       controller.setWatchMonitorScope(

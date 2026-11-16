@@ -192,7 +192,8 @@ def test_successful_build_stages_exact_firmware_for_download(tmp_path):
 
 
 @pytest.mark.parametrize('fails', [False, True])
-def test_flash_reserves_probe_keeps_rpc_responsive_and_rebinds_symbols(tmp_path, fails):
+@pytest.mark.parametrize('engine', ['pyocd', 'jlink'])
+def test_flash_reserves_probe_keeps_rpc_responsive_and_rebinds_symbols(tmp_path, fails, engine):
     entered, release = threading.Event(), threading.Event()
     memory = _FakeMemory()
     def program(path, progress):
@@ -203,6 +204,9 @@ def test_flash_reserves_probe_keeps_rpc_responsive_and_rebinds_symbols(tmp_path,
             raise RuntimeError('probe unplugged')
         memory.last_flash_stats = {'data_bytes': 139216, 'skipped_sectors': 2, 'skipped_bytes': 139216,
                                    'compare_s': .12, 'program_s': 0, 'verify_s': 0, 'total_s': .2}
+        if engine == 'jlink':
+            memory.last_flash_stats = {'engine': 'jlink', 'device': 'STM32H723VG', 'data_bytes': 139216,
+                                       'program_s': .1, 'verify_s': .1, 'total_s': .2}
         progress(1)
     memory.program_firmware = program
     old = SymbolInfo('speed', 0x20000000, 4, 'float', '.data', 'motor.c')
@@ -238,7 +242,10 @@ def test_flash_reserves_probe_keeps_rpc_responsive_and_rebinds_symbols(tmp_path,
             assert service._watches[new.key].color == '#123456'
             assert service._symbol_file == str(firmware)
             assert memory.reset_calls == [True]
-            assert any('跳过 2 个相同扇区' in line['text']
+            message = 'J-Link 官方 Flash（STM32H723VG）' if engine == 'jlink' else '跳过 2 个相同扇区'
+            assert any(message in line['text']
+                       for line in service._source_tasks.snapshot()['lines'])
+            assert any('符号与断点：解析新固件' in line['text']
                        for line in service._source_tasks.snapshot()['lines'])
     finally:
         release.set()

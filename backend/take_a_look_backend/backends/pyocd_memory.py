@@ -12,7 +12,7 @@ from typing import Any
 
 from take_a_look_backend.protocol import ProtocolError
 from take_a_look_backend.backends.pyocd_compat import guard_dap_error_recovery
-from take_a_look_backend.backends.local_firmware import flash_sector_plan, read_firmware_chunks, sector_matches
+from take_a_look_backend.backends.local_firmware import firmware_segments as _firmware_segments
 from take_a_look_backend.backends.target_backend import capabilities_for_connection
 # Re-export the existing codec entry points for external callers.
 from take_a_look_backend.backends.typed_memory import (
@@ -31,6 +31,7 @@ class PyOcdConnectionConfig:
     probe_filter: str | None = None
     connect_mode: str = "attach"
     pack_path: str | None = None
+    part_number: str | None = None
 
 
 class PyOcdMemoryBackend(TypedMemoryBackend):
@@ -42,7 +43,8 @@ class PyOcdMemoryBackend(TypedMemoryBackend):
         self._owns_target_registry = False
         self._pack_archive: zipfile.ZipFile | None = None
         self._next_probe_check_at = 0.0
-        self.last_flash_stats: dict[str, int | float] | None = None
+        self.last_flash_stats: dict[str, int | float | str] | None = None
+        self._config: PyOcdConnectionConfig | None = None
 
     @property
     def is_connected(self) -> bool:
@@ -50,7 +52,7 @@ class PyOcdMemoryBackend(TypedMemoryBackend):
 
     @property
     def probe(self) -> Any | None:
-        return self.session.probe if self.session is not None else None
+        return getattr(self.session, "probe", None)
 
     def connect(self, config: PyOcdConnectionConfig) -> None:
         if self.is_connected:
@@ -116,6 +118,7 @@ class PyOcdMemoryBackend(TypedMemoryBackend):
             raise
 
         self.session = session
+        self._config = config
         self.target = session.target
         self._next_probe_check_at = 0.0
         timings["total_s"] = perf_counter() - total_started
@@ -131,6 +134,7 @@ class PyOcdMemoryBackend(TypedMemoryBackend):
     def _close_session(self, *, probe_lost: bool) -> None:
         session = self.session
         self.session = None
+        self._config = None
         self.target = None
         self._next_probe_check_at = 0.0
         self._clear_read_plans()
@@ -229,88 +233,25 @@ class PyOcdMemoryBackend(TypedMemoryBackend):
             _TARGET_REGISTRY_LOCK.release()
 
     def program_firmware(self, path: str, progress) -> None:
-        from pyocd.flash.loader import MemoryLoader
+        from pyocd.probe.jlink_probe import JLinkProbe
+        from .jlink_flash import program_jlink
+        from .pyocd_flash import program_pyocd
 
         self.last_flash_stats = None
-        started = perf_counter()
         target = self._require_target()
-        segments = _firmware_segments(path, target)
-        total = sum(len(data) for _, data in segments)
-        # FileProgrammer catches invalid ELF segment addresses and only logs a
-        # warning. Queue validated segments directly so no data can be skipped.
-        last_progress = 0.0
-        programming_start = 0.0
-        def write_progress(value: float) -> None:
-            nonlocal last_progress
-            # pyOCD starts its progress range again between erase and program.
-            last_progress = max(last_progress, min(0.8, max(0.0,
-                                programming_start + value * (0.8 - programming_start))))
-            progress(last_progress)
-        loader = MemoryLoader(self.session, progress=write_progress,
-                              chip_erase="sector", trust_crc=False)
-        for address, data in segments:
-            loader.add_data(address, data)
-        sectors = flash_sector_plan(target, segments)
+        native = isinstance(self.probe, JLinkProbe)
         try:
-            # Pack algorithms may change Flash latency without resetting the
-            # application's clocks (GD32E50x sets zero wait states). Start from
-            # reset clocks before any smart-flash reads, erase, or programming.
-            target.reset_and_halt()
-            compare_started = perf_counter()
-            compared_bytes = skipped_bytes = skipped_sectors = 0
-            changed = []
-            def compared(size: int) -> None:
-                nonlocal compared_bytes
-                compared_bytes += size
-                progress(0.15 * compared_bytes / total)
-            if sectors is not None:
-                for sector in sectors:
-                    if sector_matches(target, sector, compared):
-                        skipped_bytes += sum(len(data) for _, data in sector.chunks)
-                        skipped_sectors += 1
-                    else:
-                        # Keep ALL image chunks in a changed sector, including
-                        # matching pages that its erase will destroy.
-                        changed.extend(sector.chunks)
-                programming_start = last_progress = 0.15
-                progress(last_progress)
-                loader = MemoryLoader(self.session, progress=write_progress,
-                                      chip_erase="sector", trust_crc=False, smart_flash=False)
-                for address, data in changed:
-                    loader.add_data(address, data)
-            compare_s = perf_counter() - compare_started
-            program_started = perf_counter()
-            wrote = sectors is None or bool(changed)
-            if wrote:
-                loader.commit()
-            program_s = perf_counter() - program_started
-            target.halt()
-            target.flush()
-            progress(0.8)
-            verify_started = perf_counter()
-            verified = 0
-            # An entirely unchanged image was already read and compared byte
-            # for byte, with no flash algorithm run. Any write requires a fresh
-            # read of the whole image, including the skipped sectors and RAM.
-            for address, expected, actual in read_firmware_chunks(target, segments) if wrote else ():
-                if actual != expected:
-                    mismatch = next((i for i, (a, b) in enumerate(zip(actual, expected)) if a != b),
-                                    min(len(actual), len(expected)))
-                    expected_byte = f"0x{expected[mismatch]:02X}" if mismatch < len(expected) else "数据结束"
-                    actual_byte = f"0x{actual[mismatch]:02X}" if mismatch < len(actual) else "未读到数据"
-                    raise ProtocolError("firmware_verify_failed", "固件写后校验失败，未确认下载成功。",
-                                        f"地址 0x{address + mismatch:08X}，"
-                                        f"期望 {expected_byte}，实际 {actual_byte}")
-                verified += len(expected)
-                progress(0.8 + 0.2 * verified / total)
-            self.last_flash_stats = {
-                "data_bytes": total, "compared_bytes": compared_bytes,
-                "skipped_bytes": skipped_bytes, "skipped_sectors": skipped_sectors,
-                "compare_s": compare_s, "program_s": program_s,
-                "verify_s": perf_counter() - verify_started, "total_s": perf_counter() - started,
-            }
-            if not wrote:
-                progress(1.0)
+            segments = _firmware_segments(path, target, require_flash_algorithm=not native)
+            if native:
+                config = self._config
+                self.last_flash_stats = program_jlink(
+                    self.session, segments, progress,
+                    part_number=config.part_number if config else None,
+                    target_name=config.target if config else None,
+                    frequency_hz=config.frequency_hz if config else 1_000_000,
+                )
+            else:
+                self.last_flash_stats = program_pyocd(self.session, segments, progress)
         finally:
             self._clear_read_plans()
 
@@ -460,46 +401,3 @@ def _normalise_pack_svd(target: Any) -> None:
     stripped = data[len(bom):].lstrip(b" \t\r\n")
     if stripped.startswith(b"<?xml") and bom + stripped != data:
         location.filename = io.BytesIO(bom + stripped)
-
-
-def _firmware_segments(path: str, target: Any) -> list[tuple[int, bytes]]:
-    """Validate every load address before allowing any erase or write."""
-    from elftools.elf.elffile import ELFFile
-
-    segments = []
-    flash_bytes = 0
-    memory_map = target.memory_map
-    core_name = target.selected_core.node_name
-    with open(path, "rb") as stream:
-        elf = ELFFile(stream)
-        if elf.header.e_machine != "EM_ARM":
-            raise ProtocolError("invalid_firmware", "请选择适用于 ARM 目标的 ELF / AXF 固件。")
-        for segment in elf.iter_segments():
-            if segment.header.p_type != "PT_LOAD" or not segment.header.p_filesz:
-                continue
-            address = int(segment.header.p_paddr)
-            data = segment.data()
-            if len(data) != segment.header.p_filesz or address + len(data) > 0x100000000:
-                raise ProtocolError("invalid_firmware", "固件段不完整或地址超出范围。")
-            cursor = address
-            while cursor < address + len(data):
-                region = memory_map.get_region_for_address(cursor, core_name)
-                if region is None:
-                    raise ProtocolError("firmware_address_invalid", "固件地址不在所选芯片的内存范围内，请检查芯片型号。",
-                                        f"地址 0x{cursor:08X}")
-                size = min(address + len(data), region.end + 1) - cursor
-                if region.is_flash:
-                    if region.flash is None:
-                        raise ProtocolError("flash_algorithm_missing", "所选芯片缺少可用的 Flash 烧录算法，请选择正确芯片或导入芯片包。",
-                                            f"地址 0x{cursor:08X}")
-                    flash_bytes += size
-                elif not (region.is_ram and region.is_writable):
-                    raise ProtocolError("firmware_address_invalid", "固件段必须位于 Flash 或可写 RAM 中。",
-                                        f"地址 0x{cursor:08X}")
-                cursor += size
-            segments.append((address, data))
-    if not segments:
-        raise ProtocolError("firmware_empty", "固件中没有可下载的数据段。")
-    if not flash_bytes:
-        raise ProtocolError("flash_algorithm_missing", "固件未匹配到 Flash 区域；通用 Cortex-M 不支持固件烧录，请选择具体芯片型号。")
-    return segments

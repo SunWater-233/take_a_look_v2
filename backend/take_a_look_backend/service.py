@@ -98,6 +98,8 @@ class BackendService(SamplingServiceMixin):
         self._symbol_file = ""
         self._connection_started_at: float | None = None
         self._symbols: dict[str, SymbolInfo] = {}
+        self._symbol_cache: tuple[bytes, list[SymbolInfo], DebugInfoIndex] | None = None
+        self.last_symbol_load_timings: dict[str, float | bool] = {}
         self._watches: dict[str, WatchedVariable] = {}
         self._capture_source = None
         self._capture_source_count = -1
@@ -396,6 +398,7 @@ class BackendService(SamplingServiceMixin):
                 unique_id=self._serial_number.strip() or None,
                 probe_filter=_probe_filter(self._probe_type),
                 pack_path=self._targets.connection_pack() if self._connection_kind == "local" else None,
+                part_number=str(self._targets.selected.get("partNumber", "")),
             )
             self._memory.connect(config)
             initial_execution_state = self._memory.debug_state()
@@ -454,6 +457,8 @@ class BackendService(SamplingServiceMixin):
         return {"state": state}
 
     def _load_symbols(self, params: Mapping[str, object], *, display_path: Path | None = None) -> dict[str, object]:
+        started = time.perf_counter()
+        self.last_symbol_load_timings = {}
         path_text = _required_string(params, "path")
         load_id = params.get("loadId")
         deadline = time.perf_counter() + SYMBOL_LOAD_TIMEOUT_SECONDS
@@ -482,48 +487,79 @@ class BackendService(SamplingServiceMixin):
         if path.suffix.lower() not in {".elf", ".axf"}:
             raise ProtocolError("unsupported_symbol_file", "Symbol file must use .elf or .axf.", str(path))
         with ExitStack() as resources:
+            context = None
+            cached = None
             try:
                 options = {}
                 if self._symbol_loader is load_symbols_from_elf and self._debug_info_loader is load_debug_info_from_elf:
-                    options["context"] = resources.enter_context(ElfLoadContext(path))
-                symbols = self._symbol_loader(path, progress=report_progress, **options)
+                    context = resources.enter_context(ElfLoadContext(path))
+                    options["context"] = context
+                    if self._symbol_cache is not None and self._symbol_cache[0] == context.fingerprint:
+                        cached = self._symbol_cache
+                symbols = cached[1] if cached is not None else self._symbol_loader(path, progress=report_progress, **options)
             except ProtocolError:
                 raise
             except Exception as error:
                 raise ProtocolError("symbol_load_failed", "Unable to parse the symbol file.", str(error)) from error
+            symbols_s = time.perf_counter() - started
+            source_started = time.perf_counter()
+            source_complete = False
             try:
                 report_progress("source")
-                debug_info = self._debug_info_loader(path, progress=report_progress, **options)
+                debug_info = cached[2] if cached is not None else self._debug_info_loader(path, progress=report_progress, **options)
+                source_complete = True
             except ProtocolError:
                 raise
             except Exception as error:
                 debug_info = DebugInfoIndex()
                 self._emit(EventName.LOG, {"level": "warning", "message": f"无法读取源码行调试信息：{error}"})
+            source_s = time.perf_counter() - source_started
         with self._lock:
             report_progress("ui")
             self._source_projects.sync_firmware_path(display_path or path)
+            breakpoints_started = time.perf_counter()
             self._debug.remove_breakpoints(self._memory, connected=self._connection_status == "connected")
+            breakpoints_s = time.perf_counter() - breakpoints_started
             self._symbols = {symbol.key: symbol for symbol in symbols}
             self._symbol_file = str(display_path or path)
             self._debug.info = debug_info
             # Watches are only valid for symbols in the current file. RTT symbols
             # are recreated after a connection is established.
+            watches_started = time.perf_counter()
             self._watches = self._rebind_watches(self._watches, symbols)
+            watches_s = time.perf_counter() - watches_started
+            breakpoints_started = time.perf_counter()
             self._debug.apply_breakpoints(self._memory, connected=self._connection_status == "connected")
+            breakpoints_s += time.perf_counter() - breakpoints_started
+            if context is not None and source_complete:
+                # Keep one parsed image only; failed/partial parses never enter
+                # the cache. Rebuilt files are identified by their bytes.
+                self._symbol_cache = (context.fingerprint, symbols, debug_info)
+        publish_started = time.perf_counter()
         self._emit(EventName.LOG, {"level": "info", "message": f"已读取符号文件：{path.name}，变量 {len(symbols)} 个。"})
         state = self.state_snapshot()
         self._emit(EventName.STATE, state)
+        self.last_symbol_load_timings = {
+            "symbols_s": symbols_s, "source_s": source_s, "watches_s": watches_s,
+            "breakpoints_s": breakpoints_s, "publish_s": time.perf_counter() - publish_started,
+            "cache_hit": cached is not None, "total_s": time.perf_counter() - started,
+        }
         return {"state": state, "symbolFile": str(path)}
 
     @staticmethod
     def _rebind_watches(previous: dict[str, WatchedVariable], symbols: list[SymbolInfo]) -> dict[str, WatchedVariable]:
         # Addresses change after a rebuild. Match by source/name only when unambiguous.
+        if not previous:
+            return {}
+        by_source_name: dict[tuple[str, str], SymbolInfo | None] = {}
+        for symbol in symbols:
+            if not symbol.is_rtt:
+                key = (symbol.source_file, symbol.name)
+                by_source_name[key] = None if key in by_source_name else symbol
         result = {}
         for watch in previous.values():
-            candidates = [symbol for symbol in symbols if not symbol.is_rtt and
-                          symbol.name == watch.symbol.name and symbol.source_file == watch.symbol.source_file]
-            if len(candidates) == 1:
-                symbol = candidates[0]
+            symbol = by_source_name.get((watch.symbol.source_file, watch.symbol.name))
+            if symbol is not None:
                 result[symbol.key] = WatchedVariable(
                     symbol, watch.color, watch.plot_enabled, watch.sampling_enabled,
                     read_mode=watch.mode, monitor_rate_hz=watch.monitor_rate_hz,
@@ -556,16 +592,26 @@ class BackendService(SamplingServiceMixin):
             # service lock throughout flash; getState and shutdown stay responsive.
             self._memory.program_firmware(str(staged), progress)
             if stats := getattr(self._memory, "last_flash_stats", None):
-                task.log(f"本地固件：{stats['data_bytes'] / 1024:.1f} KiB；"
-                         f"跳过 {stats['skipped_sectors']} 个相同扇区（{stats['skipped_bytes'] / 1024:.1f} KiB）；"
-                         f"比较 {stats['compare_s']:.2f} 秒，擦写 {stats['program_s']:.2f} 秒，"
-                         f"写后校验 {stats['verify_s']:.2f} 秒，总计 {stats['total_s']:.2f} 秒。")
+                if stats.get("engine") == "jlink":
+                    task.log(f"J-Link 官方 Flash（{stats['device']}）：{stats['data_bytes'] / 1024:.1f} KiB；"
+                             f"原生下载 {stats['program_s']:.2f} 秒，"
+                             f"写后校验 {stats['verify_s']:.2f} 秒，总计 {stats['total_s']:.2f} 秒。")
+                else:
+                    task.log(f"本地固件：{stats['data_bytes'] / 1024:.1f} KiB；"
+                             f"跳过 {stats['skipped_sectors']} 个相同扇区（{stats['skipped_bytes'] / 1024:.1f} KiB）；"
+                             f"比较 {stats['compare_s']:.2f} 秒，擦写 {stats['program_s']:.2f} 秒，"
+                             f"写后校验 {stats['verify_s']:.2f} 秒，总计 {stats['total_s']:.2f} 秒。")
             if timings := getattr(self._memory, "last_flash_timings", None):
                 task.log(f"固件传输：{timings['upload_bytes'] / 1024:.1f} KiB，"
                          f"{timings['upload_s']:.2f} 秒；手机比较、擦写与校验：{timings['flash_s']:.2f} 秒。")
             self._memory.reset(halt=True)
             task.phase("symbols", "正在加载新符号与断点…")
             self._load_symbols({"path": str(staged)}, display_path=original)
+            timings = self.last_symbol_load_timings
+            task.log(f"符号与断点：{'复用相同固件解析结果' if timings['cache_hit'] else '解析新固件'}；"
+                     f"变量 {timings['symbols_s']:.2f} 秒，源码索引 {timings['source_s']:.2f} 秒，"
+                     f"监视重绑定 {timings['watches_s']:.2f} 秒，断点 {timings['breakpoints_s']:.2f} 秒，"
+                     f"状态发布 {timings['publish_s']:.2f} 秒，总计 {timings['total_s']:.2f} 秒。")
             with self._lock:
                 self._symbol_file = str(original)
                 self._clear_samples()

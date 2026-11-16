@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -69,6 +70,103 @@ void main() {
       }
       expect(sample('bool', 1, 1).editValueLabel, 'true');
       expect(sample('int32_t', 4, -123456).editValueLabel, '-123456');
+    },
+  );
+
+  test('hex display uses target width and preserves decimal edit values', () {
+    for (final (type, size, value, hex) in [
+      ('uint8_t', 1, 255.0, '0xFF'),
+      ('uint16_t', 2, 17.0, '0x0011'),
+      ('int16_t', 2, -1.0, '0xFFFF'),
+      ('int32_t', 4, -2.0, '0xFFFFFFFE'),
+      ('void *', 4, 0x240005CC.toDouble(), '0x240005CC'),
+      ('int64_t', 8, -1.0, '0xFFFFFFFFFFFFFFFF'),
+    ]) {
+      final watch = sample(type, size, value)..displayHex = true;
+      expect(watch.valueLabel, hex);
+      expect(watch.editValueLabel, value.round().toString());
+      watch.displayHex = false;
+      expect(watch.valueLabel, value.round().toString());
+    }
+    expect(sample('float', 4, 1.5).supportsHexDisplay, isFalse);
+  });
+
+  testWidgets(
+    'hex menu toggles rows, pinned values and persisted preferences',
+    (tester) async {
+      final c = TakeALookController(backendCommand: (_, _) async {});
+      addTearDown(c.dispose);
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      c.applySnapshot({
+        'symbols': [
+          {
+            'key': 'counter',
+            'source': 'test.c',
+            'name': 'counter',
+            'address': 0x20000000,
+            'type': 'uint16_t',
+            'size': 2,
+          },
+        ],
+      });
+      c.selectSymbols(['counter']);
+      c.addSelectedToWatch(mode: WatchReadMode.monitor);
+      c.applyTelemetrySnapshot({
+        'watches': [
+          {'key': 'counter', 'value': 17, 'updatedAtMs': 1},
+        ],
+      });
+      c.setWatchPinned('counter', true);
+      await browser.mount(tester, c, width: 640);
+
+      Future<void> menu() async {
+        final row = find.byKey(const ValueKey('compact-watch-counter'));
+        await showWatchWidget(tester, row);
+        await tester.tap(row, buttons: kSecondaryMouseButton);
+        await tester.pumpAndSettle();
+      }
+
+      void expectValues(String value) {
+        for (final key in [
+          'compact-watch-value-counter',
+          'pinned-watch-value-counter',
+          'watch-detail-value-counter',
+        ]) {
+          expect(tester.widget<Text>(find.byKey(ValueKey(key))).data, value);
+        }
+      }
+
+      await menu();
+      expect(find.text('十六进制显示'), findsOneWidget);
+      expect(find.text('十进制显示'), findsNothing);
+      await tester.tap(find.text('十六进制显示'));
+      await tester.pumpAndSettle();
+      expectValues('0x0011');
+      expect(c.watches.single.value, 17);
+      expect(c.watches.single.editValueLabel, '17');
+
+      final echo = c.stateSnapshot();
+      for (final watch in echo['watches'] as List) {
+        (watch as Map).remove('displayHex');
+      }
+      c.applySnapshot(echo);
+      expect(c.watches.single.displayHex, isTrue);
+      final restored = TakeALookController(backendCommand: (_, _) async {});
+      addTearDown(restored.dispose);
+      await restored.restoreProjectSettings(c.projectSettings());
+      expect(restored.watches.single.displayHex, isTrue);
+      final remote = TakeALookController(backendCommand: (_, _) async {});
+      addTearDown(remote.dispose);
+      remote.applySnapshot(c.stateSnapshot());
+      expect(remote.watches.single.valueLabel, '0x0011');
+
+      await menu();
+      expect(find.text('十进制显示'), findsOneWidget);
+      expect(find.text('十六进制显示'), findsNothing);
+      await tester.tap(find.text('十进制显示'));
+      await tester.pumpAndSettle();
+      expectValues('17');
+      await tester.pumpWidget(const SizedBox.shrink());
     },
   );
 

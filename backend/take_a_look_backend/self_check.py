@@ -12,7 +12,7 @@ def run() -> int:
     checks: dict[str, object] = {"python": platform.python_version()}
     errors: list[str] = []
     modules = [
-        "elftools.elf.elffile", "cmsis_pack_manager", "pylink",
+        "elftools.elf.elffile", "cmsis_pack_manager", "pylink", "intelhex",
         "pygdbmi.gdbmiparser", "aioquic.asyncio.client",
         "aioquic._crypto", "aioquic._buffer",
         "take_a_look_backend.backends.remote_backend",
@@ -20,6 +20,8 @@ def run() -> int:
         "take_a_look_backend.backends.ember_pairing", "zeroconf",
         "take_a_look_backend.backends.remote_firmware",
         "take_a_look_backend.backends.gdb_rsp",
+        "take_a_look_backend.backends.jlink_flash",
+        "take_a_look_backend.backends.pyocd_flash",
     ]
     # Linux CMSIS-DAP v1 uses PyUSB; hidapi is a Windows/macOS dependency.
     if sys.platform in ("win32", "darwin"):

@@ -17,6 +17,7 @@ import 'controller_snapshot_schema.dart';
 export 'controller_snapshot_codec.dart';
 import '../models/demo_data.dart';
 import '../models/models.dart';
+import '../models/watch_tree.dart';
 import '../models/connection_capabilities.dart';
 import '../models/source_tools.dart';
 import '../protocol/commands.dart';

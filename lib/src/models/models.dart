@@ -145,16 +145,20 @@ class WatchItem {
       readMode = value ? WatchReadMode.capture : WatchReadMode.monitor;
   bool plotted = false;
   bool pinned = false;
+  bool displayHex = false;
   double value = 0;
 
   bool get isFloatingPoint =>
       symbol.type.contains('float') || symbol.type.contains('double');
 
+  bool get supportsHexDisplay =>
+      !isFloatingPoint && const [1, 2, 4, 8].contains(symbol.size);
+
   /// Decimal digits sufficient to round-trip the target's IEEE floating type.
   int get valuePrecision => symbol.size == 8 ? 17 : 9;
 
   String get editValueLabel {
-    if (!isFloatingPoint) return valueLabel;
+    if (!isFloatingPoint) return _decimalValueLabel;
     final typedValue = symbol.size == 4
         ? Float32List.fromList([value]).single
         : value;
@@ -162,6 +166,18 @@ class WatchItem {
   }
 
   String get valueLabel {
+    if (displayHex && supportsHexDisplay && value.isFinite) {
+      final digits = BigInt.from(value)
+          .toUnsigned(symbol.size * 8)
+          .toRadixString(16)
+          .padLeft(symbol.size * 2, '0')
+          .toUpperCase();
+      return '0x$digits';
+    }
+    return _decimalValueLabel;
+  }
+
+  String get _decimalValueLabel {
     if (symbol.type == 'bool') {
       return value >= 0.5 ? 'true' : 'false';
     }

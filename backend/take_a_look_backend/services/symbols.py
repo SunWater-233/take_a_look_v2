@@ -48,9 +48,10 @@ def load_symbols_from_elf(path: Path, progress: SymbolLoadProgress | None = None
     with (nullcontext(context) if context is not None else ElfLoadContext(path)) as loaded:
         elf = loaded.elf
         _emit_progress(progress, "debug", 0, 0)
-        debug_by_name, debug_by_addr = variable_debug_info_from_dwarf(elf, progress=progress, context=loaded)
-        _emit_progress(progress, "scan", 0, 0)
         candidates = symbol_candidates_from_elf(elf)
+        debug_by_name, debug_by_addr = variable_debug_info_from_dwarf(
+            elf, progress=progress, context=loaded, candidates=candidates)
+        _emit_progress(progress, "scan", 0, 0)
         resolved_candidates = [
             (candidate, debug_by_addr.get(candidate.address) or debug_by_name.get(candidate.name) or DwarfVariableInfo())
             for candidate in candidates
@@ -151,6 +152,7 @@ def variable_debug_info_from_dwarf(
     elf_file,
     progress: SymbolLoadProgress | None = None,
     *, context: ElfLoadContext | None = None,
+    candidates: list[SymbolCandidate] | None = None,
 ) -> tuple[dict[str, DwarfVariableInfo], dict[int, DwarfVariableInfo]]:
     if not elf_file.has_dwarf_info():
         return {}, {}
@@ -159,6 +161,8 @@ def variable_debug_info_from_dwarf(
 
     by_name: dict[str, DwarfVariableInfo] = {}
     by_addr: dict[int, DwarfVariableInfo] = {}
+    candidate_names = {item.name for item in candidates} if candidates is not None else None
+    candidate_addresses = {item.address for item in candidates} if candidates is not None else None
     try:
         dwarf_info = context.dwarf_info if context is not None else elf_file.get_dwarf_info()
     except Exception:
@@ -186,6 +190,12 @@ def variable_debug_info_from_dwarf(
             if not name:
                 continue
 
+            address = _address_from_location(die.attributes.get("DW_AT_location", None), expr_parser)
+            if (candidate_names is not None and name not in candidate_names
+                    and address not in candidate_addresses):
+                # Stack locals and unused declarations never produce watched
+                # symbols. Retain address matches for mangled C++ symbols.
+                continue
             source_file = _source_file_for_die(die, line_program, compile_dir)
             type_die = _type_die_for_die(die)
             type_key = (getattr(compile_unit, "cu_offset", id(compile_unit)),
@@ -207,7 +217,6 @@ def variable_debug_info_from_dwarf(
             )
             by_name.setdefault(name, info)
 
-            address = _address_from_location(die.attributes.get("DW_AT_location", None), expr_parser)
             if address is not None:
                 by_addr[address] = info
         _emit_progress(progress, "debug", unit_index, total_units)
@@ -340,12 +349,11 @@ def _expand_array_members(type_die, base_name: str, base_offset: int, expr_parse
         members,
         base_name,
         base_offset,
-        leaf_type,
         leaf_name,
         dimensions,
         strides,
-        expr_parser,
-        seen,
+        _is_pointer_type_die(leaf_type),
+        _expand_type_members(leaf_type, "@", 0, expr_parser, seen),
     )
     return members
 
@@ -354,12 +362,11 @@ def _append_array_members(
     members: list[DwarfMemberInfo],
     base_name: str,
     base_offset: int,
-    leaf_type,
     leaf_name: str,
     dimensions: list[int],
     strides: list[int],
-    expr_parser,
-    seen: set[int],
+    leaf_is_pointer: bool,
+    leaf_members: list[DwarfMemberInfo],
 ) -> None:
     count = dimensions[0]
     stride = strides[0]
@@ -376,7 +383,7 @@ def _append_array_members(
                 address_offset=item_offset,
                 data_type=item_type,
                 byte_size=stride,
-                is_pointer=_is_pointer_type_die(leaf_type),
+                is_pointer=leaf_is_pointer,
             )
         )
 
@@ -385,16 +392,20 @@ def _append_array_members(
                 members,
                 item_name,
                 item_offset,
-                leaf_type,
                 leaf_name,
                 remaining_dimensions,
                 remaining_strides,
-                expr_parser,
-                seen,
+                leaf_is_pointer,
+                leaf_members,
             )
             continue
 
-        members.extend(_expand_type_members(leaf_type, item_name, item_offset, expr_parser, seen))
+        members.extend(DwarfMemberInfo(
+            name=item_name + member.name[1:],
+            address_offset=item_offset + member.address_offset,
+            data_type=member.data_type, byte_size=member.byte_size,
+            is_pointer=member.is_pointer,
+        ) for member in leaf_members)
 
 
 def _array_leaf_and_dimensions(type_die, seen: set[int]) -> tuple[object | None, list[int]]:

@@ -355,6 +355,47 @@ extension TakeALookControllerWatches on TakeALookController {
     _emitState([signals.watches]);
   }
 
+  List<WatchItem> watchesForHexDisplay(Iterable<String> keys) {
+    final selectedKeys = keys.toSet();
+    final result = <WatchItem>[];
+    void collect(WatchTreeNode node, {bool selected = false}) {
+      selected = selected || selectedKeys.contains(node.watch.symbol.key);
+      if (node.children.isEmpty) {
+        if (selected && node.watch.supportsHexDisplay) result.add(node.watch);
+      } else {
+        for (final child in node.children) {
+          collect(child, selected: selected);
+        }
+      }
+    }
+
+    for (final root in buildWatchTree(_watches)) {
+      collect(root);
+    }
+    return result;
+  }
+
+  void setWatchHexDisplay(String key, bool value) =>
+      setWatchesHexDisplay([key], value);
+
+  void setWatchesHexDisplay(Iterable<String> keys, bool value) {
+    final selectedKeys = keys.toSet();
+    if (_isDetachedRemote &&
+        _dispatchRemote(ControllerCommand.setWatchesHexDisplay, {
+          'keys': selectedKeys.toList(),
+          'value': value,
+        })) {
+      return;
+    }
+    var changed = false;
+    for (final watch in watchesForHexDisplay(selectedKeys)) {
+      if (watch.displayHex == value) continue;
+      watch.displayHex = value;
+      changed = true;
+    }
+    if (changed) _emitState([signals.watches]);
+  }
+
   double monitorRateFor(WatchItem watch) =>
       watch.monitorRateHz ?? monitorRateHz;
 

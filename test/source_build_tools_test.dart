@@ -29,12 +29,13 @@ void main() {
     expect(tester.widget<TalButton>(download).onPressed, isNull);
 
     controller.applyBackendEvent(BackendEventType.state, {
-      'symbolFile': '${Directory.current.path}/motor.elf',
+      'sourceProject': {'firmwarePath': '${Directory.current.path}/motor.elf'},
+      'firmware': {'status': 'ready'},
       'symbols': [_projectSymbol],
     });
     await tester.pump();
     expect(controller.sourceProject.sourceRoot, isEmpty);
-    expect(controller.sourceProject.firmwarePath, isEmpty);
+    expect(controller.sourceProject.firmwarePath, endsWith('motor.elf'));
     expect(tester.widget<TalButton>(download).onPressed, isNotNull);
     expect(
       tester
@@ -272,42 +273,30 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('saving a picked firmware loads symbols into both panels', (
+  testWidgets('saving settings atomically loads firmware for both panels', (
     tester,
   ) async {
-    final directory = Directory.systemTemp.createTempSync(
-      'tal-project-symbols-',
-    );
-    addTearDown(() => directory.deleteSync(recursive: true));
-    final firmware = File('${directory.path}/motor.axf')
-      ..writeAsStringSync('fixture');
-    final loaded = Completer<void>();
-    final requests = <String>[];
+    final requests = <ControllerCommand>[];
+    final finished = Completer<void>();
     late final TakeALookController controller;
     controller = TakeALookController(
-      symbolFilePicker: () async => firmware.path,
+      firmwareFilePicker: () async => 'C:/firmware/motor.axf',
       backendCommand: (command, arguments) async {
-        if (command == ControllerCommand.setSourceProject) {
-          controller.applyBackendEvent(BackendEventType.state, {
-            'sourceProject': arguments,
-          });
-        } else if (command == ControllerCommand.loadSymbols) {
-          final path = (arguments! as Map)['path'] as String;
-          requests.add(path);
-          await loaded.future;
-          controller.applyBackendEvent(BackendEventType.state, {
-            'symbolFile': path,
-            'symbols': [_projectSymbol],
-            'debug': {
-              'sourceRoot': directory.path,
-              'sourceFiles': ['${directory.path}/motor.c'],
-            },
-          });
-        }
+        requests.add(command);
+        expect(command, ControllerCommand.setSourceProject);
+        await finished.future;
+        controller.applySnapshot({
+          'sourceProject': arguments,
+          'firmware': {'status': 'ready'},
+          'symbols': [_projectSymbol],
+          'debug': {
+            'sourceFiles': ['motor.c'],
+          },
+        });
       },
     );
     addTearDown(controller.dispose);
-    controller.sourceProject.sourceRoot = directory.path;
+    controller.sourceProject.sourceRoot = Directory.current.path;
     tester.view.physicalSize = const Size(1100, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -318,110 +307,43 @@ void main() {
     await tester.tap(find.byTooltip('浏览固件文件'));
     await tester.pumpAndSettle();
     expect(requests, isEmpty);
-
     await tester.tap(find.byKey(const ValueKey('source-project-save')));
-    for (var attempt = 0; attempt < 20 && requests.isEmpty; attempt++) {
-      await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 20)),
-      );
-      await tester.pump();
-    }
-    expect(requests, hasLength(1));
-    await tester.pump(const Duration(milliseconds: 350));
-    expect(File(requests.single).absolute.uri, firmware.absolute.uri);
+    await tester.pump();
+    expect(requests, [ControllerCommand.setSourceProject]);
     expect(controller.isSymbolLoading, isTrue);
-    expect(find.byKey(const ValueKey('source-project-save')), findsNothing);
-    expect(find.text('正在加载 ELF'), findsOneWidget);
-    expect(find.text('打开符号文件'), findsOneWidget);
-    expect(find.text('符号文件已打开'), findsNothing);
-
-    await tester.runAsync(() async {
-      loaded.complete();
-      await Future<void>.delayed(Duration.zero);
-    });
+    expect(controller.firmwarePath, isEmpty);
+    finished.complete();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));
     await tester.pumpAndSettle();
-    expect(controller.isSymbolLoading, isFalse);
-    expect(find.text('正在加载 ELF'), findsNothing);
+    expect(controller.firmwarePath, 'C:/firmware/motor.axf');
     expect(controller.symbols.single.name, 'counter');
-    expect(controller.debugState.sourceFiles, ['${directory.path}/motor.c']);
+    expect(controller.debugState.sourceFiles, ['motor.c']);
     expect(find.text('符号文件已打开'), findsOneWidget);
-    expect(find.text('尚未读取 .elf / .axf'), findsNothing);
-    expect(find.text(requests.single), findsOneWidget);
+    expect(find.text('C:/firmware/motor.axf'), findsOneWidget);
+    expect(find.byKey(const ValueKey('source-project-save')), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  test(
-    'project symbols resolve relative paths and skip loaded or missing files',
-    () async {
-      final directory = Directory.systemTemp.createTempSync(
-        'tal-project-relative-',
-      );
-      addTearDown(() => directory.deleteSync(recursive: true));
-      final firmware = File('${directory.path}/build/motor.axf');
-      firmware.parent.createSync();
-      firmware.writeAsStringSync('fixture');
-      final requests = <String>[];
-      late final TakeALookController controller;
-      controller = TakeALookController(
-        backendCommand: (command, arguments) async {
-          expect(command, ControllerCommand.loadSymbols);
-          final path = (arguments! as Map)['path'] as String;
-          requests.add(path);
-          controller.applyBackendEvent(BackendEventType.state, {
-            'symbolFile': path,
-          });
-        },
-      );
-      addTearDown(controller.dispose);
-      controller.sourceProject.applyJson({
-        'sourceRoot': directory.path,
-        'firmwarePath': 'build/../build/motor.axf',
-      });
-      await controller.loadSourceProjectSymbols();
-      expect(File(requests.single).absolute.uri, firmware.absolute.uri);
-
-      controller.sourceProject.firmwarePath = firmware.absolute.path;
-      await controller.loadSourceProjectSymbols();
-      controller.sourceProject.firmwarePath = 'build/not-built-yet.axf';
-      await controller.loadSourceProjectSymbols();
-      controller.sourceProject.firmwarePath = '';
-      await controller.loadSourceProjectSymbols();
-      expect(requests, hasLength(1));
-      expect(controller.symbolFile, requests.single);
-    },
-  );
-
-  test(
-    'failed project symbol loading preserves the previously loaded file',
-    () async {
-      final directory = Directory.systemTemp.createTempSync(
-        'tal-project-invalid-',
-      );
-      addTearDown(() => directory.deleteSync(recursive: true));
-      final firmware = File('${directory.path}/invalid.axf')
-        ..writeAsStringSync('fixture');
-      final controller = TakeALookController(
-        backendCommand: (_, _) async =>
-            throw const BackendException('symbol_load_failed', '无法解析符号文件'),
-      );
-      addTearDown(controller.dispose);
-      controller.applySnapshot({
-        'symbolFile': '${directory.path}/previous.axf',
-        'symbols': [_projectSymbol],
-        'sourceProject': {
-          'sourceRoot': directory.path,
-          'firmwarePath': firmware.path,
-        },
-      });
-      await controller.loadSourceProjectSymbols();
-      expect(controller.symbolFile, '${directory.path}/previous.axf');
-      expect(controller.symbols.single.name, 'counter');
-      expect(controller.lastBackendError?['code'], 'symbol_load_failed');
-      expect(controller.isSymbolLoading, isFalse);
-    },
-  );
+  test('failed settings retain the previous firmware and symbols', () async {
+    final controller = TakeALookController(
+      backendCommand: (_, _) async =>
+          throw const BackendException('symbol_load_failed', '无效固件'),
+    );
+    addTearDown(controller.dispose);
+    controller.applySnapshot({
+      'sourceProject': {'firmwarePath': 'C:/firmware/previous.axf'},
+      'firmware': {'status': 'ready'},
+      'symbols': [_projectSymbol],
+    });
+    await expectLater(
+      controller.saveSourceProject({'firmwarePath': 'C:/firmware/invalid.axf'}),
+      throwsA(isA<BackendException>()),
+    );
+    expect(controller.firmwarePath, 'C:/firmware/previous.axf');
+    expect(controller.symbols.single.name, 'counter');
+    expect(controller.isSymbolLoading, isFalse);
+  });
 
   for (final failSave in [false, true]) {
     testWidgets(
@@ -435,7 +357,7 @@ void main() {
           ..writeAsStringSync('fixture');
         final commands = <ControllerCommand>[];
         final controller = TakeALookController(
-          symbolFilePicker: () async => firmware.path,
+          firmwareFilePicker: () async => firmware.path,
           backendCommand: (command, _) async {
             commands.add(command);
             if (command == ControllerCommand.setSourceProject) {
@@ -460,8 +382,8 @@ void main() {
               : find.text('取消'),
         );
         await tester.pumpAndSettle();
-        expect(commands, isNot(contains(ControllerCommand.loadSymbols)));
-        expect(controller.symbolFile, isEmpty);
+        expect(commands, isNot(contains(ControllerCommand.loadFirmware)));
+        expect(controller.firmwarePath, isEmpty);
         expect(controller.isSymbolLoading, isFalse);
         if (failSave) {
           expect(commands, [ControllerCommand.setSourceProject]);

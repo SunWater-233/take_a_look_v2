@@ -29,6 +29,9 @@ class SymbolInfo:
     pointer: bool = False
     data_source: str = "memory"
     source_id: str = ""
+    encoding: str = ""
+    byte_order: str = "little"
+    diagnostic: str = ""
 
     @cached_property
     def key(self) -> str:
@@ -47,7 +50,7 @@ class SymbolInfo:
 
     @property
     def is_writable(self) -> bool:
-        return not self.is_rtt and not self.section.startswith(".rodata")
+        return not self.is_rtt and not self.diagnostic and not self.section.startswith(".rodata")
 
 
 @dataclass

@@ -2,6 +2,7 @@ import '../models/models.dart';
 import '../models/connection_capabilities.dart';
 import '../analysis/analysis.dart';
 import '../models/source_tools.dart';
+import '../models/freertos.dart';
 
 /// Aggregate state owned by the application controller.
 ///
@@ -9,6 +10,17 @@ import '../models/source_tools.dart';
 /// connection, acquisition and presentation state from becoming one bag of
 /// unrelated mutable fields again.
 class ControllerState {
+  FreeRtosSnapshot freeRtos = FreeRtosSnapshot();
+  Map<String, dynamic> freeRtosSettings = {
+    'page': 'tasks',
+    'search': '',
+    'sort': '',
+    'objectFilter': 'all',
+    'rateHz': 2,
+    'tickHz': null,
+    'stackWarningPercent': 10,
+    'columns': <String, double>{},
+  };
   final ConnectionState connection = ConnectionState();
   final AcquisitionState acquisition = AcquisitionState();
   final PlotState plot = PlotState();
@@ -17,6 +29,11 @@ class ControllerState {
   final SourceWorkspaceState sourceWorkspace = SourceWorkspaceState();
   final SourceProjectConfig sourceProject = SourceProjectConfig();
   final SourceTaskState sourceTask = SourceTaskState();
+  Map<String, dynamic> firmware = {
+    'status': 'empty',
+    'revision': 0,
+    'fingerprint': '',
+  };
   SymbolLoadProgress? symbolLoad;
 }
 
@@ -80,7 +97,6 @@ class DebugState {
   int? currentLine;
   int? programCounter;
   int stopRevision = 0;
-  String sourceRoot = '';
 }
 
 class ConnectionState {
@@ -111,7 +127,6 @@ class ConnectionState {
     'core': '0',
     'rttDelivery': 'reliable',
   };
-  String symbolFile = '';
   Map<String, dynamic>? lastError;
 }
 
@@ -122,6 +137,8 @@ class AcquisitionState {
   double rttSampleRateHz = 1000;
   String displayRefreshMode = 'standard';
   double elapsedSeconds = 0;
+  bool? samplingClockRunning;
+  int samplingEpoch = 0;
   bool samplingPaused = false;
   bool rttEnabled = false;
   String rttProtocol = 'normal';

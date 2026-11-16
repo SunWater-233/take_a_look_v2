@@ -4,6 +4,51 @@ This package is the local hardware service used by the Flutter desktop app. It
 reads JSON-RPC 2.0-inspired messages from standard input and writes responses
 and unsolicited events as one JSON object per line on standard output.
 
+Acquisition time is owned by `AcquisitionClock`, using the host monotonic clock.
+`samplingElapsedSeconds` counts active capture time; `samplingClockRunning`
+controls UI interpolation. Explicit pause, target halt and firmware download
+freeze this clock; resume continues its accumulated time. Connect and clear
+reset it to zero, with a paused session staying at zero until capture resumes.
+Reading state never starts a clock, drains a stream or resets a decoder.
+`elapsedSeconds` is the latest accepted sample position, separate from elapsed
+capture time, so status updates cannot move a plot ahead of its samples.
+
+RTT Normal and Plus share `SampleTimebase`: target microseconds retain their
+relative spacing and uint32 wrap handling; untimed packets use the configured
+`rttSampleRateHz`. Resume and clear discard monitoring backlog and re-anchor
+the next captured RTT packet. Remote memory subscriptions are stopped on pause
+and clear, so their producer clock is mapped anew when capture resumes.
+The desktop synchronizes display clock anchors and a `samplingEpoch` history
+generation to detached windows. Cursor equality across a clear does not imply
+that a recipient already owns the new session's samples.
+
+`configureFreeRtos {enabled, rateHz: 1..5, tickHz?: integer|null}` controls
+visibility-driven kernel inspection on the existing sampler, under the shared
+probe lock. `freeRtos` events and the full-state field carry immutable snapshots,
+quality, timestamps and per-domain diagnostics. Offsets come from the loaded ELF's
+DWARF. No target halt, write, or inferior function call is performed by inspection.
+`addFreeRtosWatch {handle, field}` registers an inspector-approved scalar as a
+read-only temporary watch; reset, reconnect and task identity changes invalidate
+it. `getFreeRtosStack {handle}` requires a validated halted snapshot and returns
+bounded raw saved-stack words. See [FreeRTOS](../docs/freertos.md) for firmware
+configuration and supported scope.
+
+`RttSessionManager` owns discovery and transport lifetime. Normal/Plus decoders
+lease channels; the same up channel cannot have two readers. A released lease
+closes its remote subscription without stopping other channels, and the last
+release closes the underlying session. Leases cannot be reused after a reset.
+
+The desktop stdio contract is v3. `loadFirmware {path, loadId?}` and
+`setSourceProject {..., firmwarePath, loadId?}` use the same firmware transition.
+`sourceProject.firmwarePath` is the only firmware path and is always absolute in
+backend state. `firmware {status, revision, fingerprint, requiresDownload}` carries runtime metadata;
+there is no `symbolFile` field or path fallback. Source settings are persisted only
+in v2 `.talproj` files, with no per-directory profile store or legacy migration.
+The selected ELF/AXF is monitored for stable content changes, including external
+builds. Changed output refreshes symbols and debug indexes automatically, pauses
+address-based acquisition and defers breakpoints until firmware is downloaded.
+See [firmware context](../docs/firmware-context.md).
+
 It is a local stdio process, not a TCP server. It can connect as a client to
 EmberMobile (v2 QUIC with v1 JSON-lines compatibility) and GDB Server. The Flutter connection settings map
 to `setConfig.connectionKind` (`local`, `ember`, `emberGdb`, or `gdb`) and
@@ -35,6 +80,20 @@ codecs, register access and write/readback verification. The remote adapter does
 not inherit pyOCD connection, target-registry or flash-programming behavior;
 those remain in the local adapter. Adapter calls retain the service's existing
 serialization and ownership rules.
+
+ELF / AXF variable matching uses the ELF name (including DWARF linkage names)
+and resolved address together. Name-only fallback is limited to unambiguous
+global declarations without a location expression. Typedef display names are
+preserved; scalar codecs use DWARF base-type encoding and target byte order.
+Constant address/member expressions share a stack evaluator. Register, frame,
+location-list, dereference and split-piece locations are not treated as static
+memory addresses. Missing/conflicting types carry a `diagnostic`, disable writes
+and memory sampling, and display a failure state instead of a numeric zero.
+Composite objects are expanded into typed members; undecodable strings are
+never copied into numeric plot history. Compiler regression tests cover GCC
+DWARF 4/5 and Arm Compiler DWARF 4 at O0/O2/Os; set `TAL_ARMCLANG` to the
+`armclang` executable to enable the optional Arm Compiler cases.
+
 Local pyOCD sessions guard error recovery against re-entry: if clearing a
 transfer fault also fails, the original transfer error is returned after probe
 locks are released. Failed AP/DP SELECT writes also release the lock acquired
@@ -50,8 +109,10 @@ rather than product-name text, so OEM names such as SAM-ICE remain selectable
 as J-Link. Automatic selection and serial-number filtering retain their existing
 behavior.
 Local sessions check probe presence once per second even when capture is paused
-or no variables are watched. J-Link uses its emulator connection status; other
-pyOCD probes are matched by their active unique ID. A read/RTT/status failure
+or no variables are watched. J-Link uses its emulator connection status;
+PyUSB-backed ST-Link and CMSIS-DAP probes use their active USB bus/address
+without reopening an exclusively held WinUSB interface. Other pyOCD transports
+are matched by their active unique ID. A read/RTT/status failure
 forces an immediate check, and explicit transport-disconnect errors retain
 their meaning through exception wrapping. A target memory fault or inconclusive
 presence query alone does not disconnect. Confirmed loss pauses sampling, stops
@@ -59,6 +120,20 @@ RTT, closes the host probe handle without target resume/breakpoint accesses,
 preserves recordings and watches, and emits disconnected state plus one
 `probe_disconnected` notification. Cleanup errors do not prevent this transition;
 reinsertion requires an explicit connection request.
+`backends/probe_presence.py` owns throttled `present`/`missing`/`unknown`
+checks and transport-error classification, separately from initial discovery.
+`backends/pyocd_compat.py` contains the pinned driver's private USB/J-Link
+access, SVD repair and session-close handling. A changed ST-Link driver layout
+is an unknown result, never a reason to reopen its exclusive USB interface.
+The service routes failed connections, explicit disconnect, transport loss and
+shutdown through one cleanup path under the existing probe lock. Each cleanup
+step runs even if an earlier one fails; recording/watch data and requested
+breakpoints are preserved. Loss pauses capture, while explicit disconnect and
+shutdown may remove target breakpoints and normally close the session. Failed
+pyOCD opens release the target registry and retain their original error even
+when closing the partial session also fails.
+Shutdown shares the connection-control lock with opens/reconnects, so it waits
+for an in-progress open before releasing resources and rejects later connects.
 `services/debug_session.py` owns debug information, requested/resolved
 breakpoints, step-over handling, registers and stopped locations. It has no
 worker, service reference or lock; the service keeps target operations under

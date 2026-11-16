@@ -57,7 +57,6 @@ with zipfile.ZipFile(sys.argv[1], 'w') as archive:
             'PYTHONUTF8': '1',
             'TAL_PACKS_DIR': '${directory.path}/library',
             'TAL_RECORDINGS_DIR': '${directory.path}/recordings',
-            'TAL_SOURCE_SETTINGS': '${directory.path}/source.json',
           },
         ),
       );

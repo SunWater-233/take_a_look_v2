@@ -25,6 +25,7 @@ import '../theme/theme.dart';
 
 import 'shared_controls.dart';
 import 'panel_frame.dart';
+import 'firmware_notice.dart';
 import 'source_file_drag_data.dart';
 
 part 'source_build_tools.dart';
@@ -102,6 +103,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
   Map<String, String> get _resolvedSourcePaths =>
       _sourceDocuments.resolvedPaths;
   String _observedSourceRoot = '';
+  int _observedFirmwareRevision = -1;
   String? _observedCurrentSource;
   int? _observedCurrentLine;
   int _observedStopRevision = -1;
@@ -190,6 +192,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     _observedCurrentSource = null;
     _observedCurrentLine = null;
     _observedStopRevision = -1;
+    _observedFirmwareRevision = -1;
     _restoreSourceWorkspace();
     _handleDebugChange();
   }
@@ -264,12 +267,16 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
   void _handleDebugChange() {
     if (!mounted) return;
     final sourceRootChanged =
-        _observedSourceRoot != controller.debugState.sourceRoot;
-    if (sourceRootChanged) {
+        _observedSourceRoot != controller.sourceProject.sourceRoot;
+    final firmwareRevision =
+        (controller.state.firmware['revision'] as num?)?.toInt() ?? 0;
+    final firmwareChanged = firmwareRevision != _observedFirmwareRevision;
+    _observedFirmwareRevision = firmwareRevision;
+    if (sourceRootChanged || firmwareChanged) {
       _sourcePeek = null;
       _references.cancel();
       _navigation.clear();
-      _observedSourceRoot = controller.debugState.sourceRoot;
+      _observedSourceRoot = controller.sourceProject.sourceRoot;
       _resolvedSourcePaths.clear();
       _sourceDocuments.clear();
       _sourceDocuments.clearIndex();
@@ -295,13 +302,13 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
             _matchingPath(nextPath, files) == null)) {
       nextPath = _openPaths.firstOrNull;
     }
-    if (nextPath != _selectedPath || sourceRootChanged) {
+    if (nextPath != _selectedPath || sourceRootChanged || firmwareChanged) {
       unawaited(_loadSource(nextPath));
     } else {
       setState(() {});
       _scrollToCurrentLine();
     }
-    if ((sourceRootChanged || sourceFilesChanged) &&
+    if ((sourceRootChanged || sourceFilesChanged || firmwareChanged) &&
         _searchVisible &&
         _searchController.text.isNotEmpty) {
       _queueSearch(_searchController.text, immediate: true);
@@ -378,7 +385,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
   }) {
     return _sourceDocuments.read(
       path,
-      sourceRoot: controller.debugState.sourceRoot,
+      sourceRoot: controller.sourceProject.sourceRoot,
       localPath: localPath,
     );
   }
@@ -646,7 +653,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
 
   Future<List<SourceSearchFile>> _getSearchFiles() => _search.files(
     sourcePaths: [..._sourceFiles, ..._openPaths],
-    sourceRoot: controller.debugState.sourceRoot,
+    sourceRoot: controller.sourceProject.sourceRoot,
   );
 
   Future<SourceSearchText?> _readSearchDocument(SourceSearchFile file) async {
@@ -894,7 +901,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     if (includeName == null) return null;
     final sourceFile = await _sourceDocuments.resolve(
       sourcePath,
-      controller.debugState.sourceRoot,
+      controller.sourceProject.sourceRoot,
     );
     final candidates = <String>[];
     if (await File(sourceFile).exists()) {
@@ -903,7 +910,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
         '$parent${Platform.pathSeparator}${includeName.replaceAll('/', Platform.pathSeparator)}',
       );
     }
-    final root = controller.debugState.sourceRoot;
+    final root = controller.sourceProject.sourceRoot;
     if (root.isNotEmpty) {
       candidates.add(
         '$root${Platform.pathSeparator}${includeName.replaceAll('/', Platform.pathSeparator)}',
@@ -977,30 +984,33 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     final includePath = await _resolveIncludedSource(sourcePath, line.rawText);
     if (!context.mounted || generation != _loadGeneration) return;
 
+    final itemHeight = TalUiTheme.of(context).menuItemHeight;
     final items = <PopupMenuEntry<String>>[];
     if (hit != null) {
       items.add(
         PopupMenuItem<String>(
           key: const ValueKey('source-menu-definition'),
           value: 'definition',
-          child: Text('跳转到定义  ${hit.token}    F12'),
+          height: itemHeight,
+          child: const Text('跳转到定义    F12'),
         ),
       );
       items.addAll([
         PopupMenuItem<String>(
           key: const ValueKey('source-menu-peek-definition'),
           value: 'peek-definition',
-          child: Text('预览定义  ${hit.token}    Alt+F12'),
+          height: itemHeight,
+          child: const Text('预览定义    Alt+F12'),
         ),
         PopupMenuItem<String>(
           key: const ValueKey('source-menu-references'),
           value: 'references',
-          child: Text('查看引用  ${hit.token}    Shift+F12'),
+          height: itemHeight,
+          child: const Text('查看引用    Shift+F12'),
         ),
       ]);
     }
     for (final symbol in symbols) {
-      final symbolLabel = symbol.name == token ? token : symbol.name;
       final suffix = symbols.length > 1 ? '  ${symbol.addressLabel}' : '';
       final watched = controller.watches.any(
         (watch) => watch.symbol.key == symbol.key,
@@ -1010,10 +1020,11 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
           key: ValueKey('source-menu-watch-${symbol.key}'),
           value: 'watch:${symbol.key}',
           enabled: !watched,
+          height: itemHeight,
           child: Text(
             watched
-                ? '${widget.externalOutput ? '已在变量监视中' : '已在实时调试中'}  $symbolLabel$suffix'
-                : '${widget.externalOutput ? '加入变量监视' : '加入实时调试'}  $symbolLabel$suffix',
+                ? '${widget.externalOutput ? '已在变量监视中' : '已在实时调试中'}$suffix'
+                : '${widget.externalOutput ? '加入变量监视' : '加入实时调试'}$suffix',
           ),
         ),
       );
@@ -1023,6 +1034,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
         PopupMenuItem<String>(
           key: ValueKey('source-menu-include-$includePath'),
           value: 'include:$includePath',
+          height: itemHeight,
           child: Text('打开头文件  ${_basename(includePath)}'),
         ),
       );
@@ -1030,6 +1042,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
       items.add(
         PopupMenuItem<String>(
           enabled: false,
+          height: itemHeight,
           child: Text('无法定位头文件  ${_basename(includeName)}'),
         ),
       );
@@ -1430,10 +1443,10 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     ];
     final rootPicker = _DebugToolbarButton(
       key: const ValueKey('source-root-picker'),
-      tooltip: controller.debugState.sourceRoot.isEmpty
+      tooltip: controller.sourceProject.sourceRoot.isEmpty
           ? '设置工程源码根目录'
-          : '工程源码根目录：${controller.debugState.sourceRoot}',
-      icon: controller.debugState.sourceRoot.isEmpty
+          : '工程源码根目录：${controller.sourceProject.sourceRoot}',
+      icon: controller.sourceProject.sourceRoot.isEmpty
           ? Icons.folder_open_outlined
           : Icons.folder_special_outlined,
       onPressed: controller.sourceTask.running
@@ -1683,16 +1696,18 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
   }
 
   List<Widget> _buildSourceSetupActions() {
-    final symbolFile = controller.symbolFile;
-    final sourceRoot = controller.debugState.sourceRoot;
-    final hasSymbolFile = symbolFile.isNotEmpty;
+    final firmwarePath = controller.firmwarePath;
+    final sourceRoot = controller.sourceProject.sourceRoot;
+    final hasSymbolFile = controller.hasFirmwareSymbols;
     final hasSourceRoot = sourceRoot.isNotEmpty;
     return [
       Tooltip(
-        message: hasSymbolFile ? '$symbolFile\n点击更换符号文件' : '打开 ELF / AXF 符号文件',
+        message: hasSymbolFile
+            ? '$firmwarePath\n点击更换符号文件'
+            : '打开 ELF / AXF 符号文件',
         child: TalButton.icon(
           key: const ValueKey('source-symbol-file-button'),
-          onPressed: controller.chooseSymbolFile,
+          onPressed: controller.chooseFirmwareFile,
           style: hasSymbolFile ? talSuccessOutlinedButtonStyle : null,
           icon: Icon(
             hasSymbolFile

@@ -64,7 +64,7 @@ extension _SourcePeekActions on _SourceDebugPanelState {
     unawaited(
       _references.search(
         selection.token,
-        sourceRoot: controller.debugState.sourceRoot,
+        sourceRoot: controller.sourceProject.sourceRoot,
         currentPath: selection.path,
         getFiles: _getSearchFiles,
         publish: (results) {
@@ -134,7 +134,7 @@ extension _SourcePeekActions on _SourceDebugPanelState {
               unreadableFiles: session.unreadableFiles,
               documents: _sourceDocuments,
               highlighter: _highlighter,
-              sourceRoot: controller.debugState.sourceRoot,
+              sourceRoot: controller.sourceProject.sourceRoot,
               onClose: _closeSourcePeek,
               onOpen: (location) =>
                   unawaited(_navigateToCodeLocation(location)),

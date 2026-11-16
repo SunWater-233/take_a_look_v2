@@ -8,39 +8,23 @@ extension TakeALookControllerSourceTools on TakeALookController {
     if (_isDetachedRemote) {
       await remoteCommand!(ControllerCommand.setSourceProject, values);
     } else if (backendCommand != null) {
-      await backendCommand!(ControllerCommand.setSourceProject, values);
+      if (isSymbolLoading) {
+        throw const BackendException('firmware_busy', '请等待当前固件加载完成。');
+      }
+      if (!values.containsKey('firmwarePath')) {
+        await backendCommand!(ControllerCommand.setSourceProject, values);
+        return;
+      }
+      await _runFirmwareCommand(
+        ControllerCommand.setSourceProject,
+        values,
+        values['firmwarePath'] as String? ?? firmwarePath,
+        propagateFailure: true,
+      );
     } else {
       sourceProject.applyJson(values);
-      debugState.sourceRoot = sourceProject.sourceRoot;
       _emitState([signals.sourceTools, signals.debug]);
     }
-  }
-
-  Future<void> loadSourceProjectSymbols() async {
-    if (_disposed || kIsWeb) return;
-    var path = sourceProject.firmwarePath.trim();
-    if (path.isEmpty) return;
-    if (path.startsWith('~/') || path.startsWith(r'~\')) {
-      final homeDirectory =
-          Platform.environment[Platform.isWindows ? 'USERPROFILE' : 'HOME'];
-      if (homeDirectory != null) path = '$homeDirectory${path.substring(1)}';
-    }
-    final file = File.fromUri(
-      Directory(
-        sourceProject.sourceRoot,
-      ).absolute.uri.resolveUri(File(path).uri).normalizePath(),
-    );
-    String pathKey(String value) {
-      final normalized = File(value).absolute.uri.normalizePath().toFilePath();
-      return Platform.isWindows ? normalized.toLowerCase() : normalized;
-    }
-
-    if (symbolFile.isNotEmpty && pathKey(symbolFile) == pathKey(file.path)) {
-      return;
-    }
-    // A build output may not exist yet; keep that configuration usable.
-    if (!await file.exists() || _disposed) return;
-    await loadSymbolsFromPath(file.path);
   }
 
   Future<void> startSourceTask(String kind) async {

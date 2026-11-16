@@ -25,18 +25,18 @@ void main() {
           calls++;
           return operation.future;
         },
-        symbolFilePicker: () async {
+        firmwareFilePicker: () async {
           picks++;
           return null;
         },
       );
       addTearDown(controller.dispose);
-      await controller.chooseSymbolFile();
+      await controller.chooseFirmwareFile();
       expect(controller.symbolLoadProgress, isNull);
       expect(calls, 0);
-      final loading = controller.loadSymbolsFromPath('motor.elf');
-      await controller.loadSymbolsFromPath('second.axf');
-      await controller.chooseSymbolFile();
+      final loading = controller.loadFirmware('motor.elf');
+      await controller.loadFirmware('second.axf');
+      await controller.chooseFirmwareFile();
       expect(calls, 1);
       expect(picks, 1);
       final id = controller.symbolLoadProgress!.loadId;
@@ -78,10 +78,11 @@ void main() {
       addTearDown(source.dispose);
       addTearDown(replica.dispose);
       replica.applySnapshot({
-        'symbolFile': 'previous.elf',
+        'sourceProject': {'firmwarePath': 'previous.elf'},
+        'firmware': {'status': 'ready'},
         'symbols': [_symbol],
       });
-      final loading = source.loadSymbolsFromPath('next.elf');
+      final loading = source.loadFirmware('next.elf');
       final first = source.symbolLoadProgress!.toJson();
       replica.applySnapshot({'symbolLoad': first});
       expect(replica.symbols.single.name, 'counter');
@@ -105,12 +106,13 @@ void main() {
       );
       addTearDown(controller.dispose);
       controller.applySnapshot({
-        'symbolFile': 'previous.elf',
+        'sourceProject': {'firmwarePath': 'previous.elf'},
+        'firmware': {'status': 'ready'},
         'symbols': [_symbol],
       });
-      await controller.loadSymbolsFromPath('invalid.elf');
+      await controller.loadFirmware('invalid.elf');
       expect(controller.isSymbolLoading, isFalse);
-      expect(controller.symbolFile, 'previous.elf');
+      expect(controller.firmwarePath, 'previous.elf');
       expect(controller.symbols.single.name, 'counter');
       expect(controller.lastBackendError?['code'], code);
     });
@@ -129,9 +131,7 @@ void main() {
         addTearDown(inputMode.dispose);
         await _loadFontsForCapture();
         await tester.pumpWidget(_harness(controller, inputMode));
-        final loading = controller.loadSymbolsFromPath(
-          r'C:\firmware\motor.elf',
-        );
+        final loading = controller.loadFirmware(r'C:\firmware\motor.elf');
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 250));
         expect(find.text('正在加载 ELF'), findsOneWidget);
@@ -178,7 +178,8 @@ void main() {
         await tester.pump();
         expect(find.byType(TalProgressDialog), findsOneWidget);
         controller.applySnapshot({
-          'symbolFile': 'motor.elf',
+          'sourceProject': {'firmwarePath': 'motor.elf'},
+          'firmware': {'status': 'ready'},
           'symbols': [_symbol],
         });
         operation.complete();
@@ -202,7 +203,7 @@ void main() {
         addTearDown(controller.dispose);
         addTearDown(inputMode.dispose);
         await tester.pumpWidget(_harness(controller, inputMode));
-        final loading = controller.loadSymbolsFromPath('broken.elf');
+        final loading = controller.loadFirmware('broken.elf');
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 250));
         operation.completeError(
@@ -241,7 +242,7 @@ void main() {
     addTearDown(controller.dispose);
     addTearDown(mode.dispose);
     await tester.pumpWidget(_harness(controller, mode));
-    final loading = controller.loadSymbolsFromPath(
+    final loading = controller.loadFirmware(
       'motor_control_with_a_long_firmware_file_name.axf',
     );
     await tester.pump();

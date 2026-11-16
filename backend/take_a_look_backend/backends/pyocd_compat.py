@@ -1,8 +1,76 @@
-"""Session-local workarounds for the pinned pyOCD runtime."""
+"""Private driver access and session-local workarounds for pyOCD 0.46."""
 from __future__ import annotations
 
+import io
+from dataclasses import dataclass
 from functools import wraps
 from typing import Any
+
+
+@dataclass(frozen=True)
+class UsbDeviceLocation:
+    bus: int
+    address: int
+    vendor_id: int
+    product_id: int
+    backend: Any
+
+
+def probe_usb_device(probe: Any) -> Any | None:
+    from pyocd.probe.cmsis_dap_probe import CMSISDAPProbe
+    from pyocd.probe.stlink_probe import StlinkProbe
+
+    link = getattr(probe, "_link", None)
+    if isinstance(probe, StlinkProbe):
+        return getattr(getattr(link, "_device", None), "_dev", None)
+    if isinstance(probe, CMSISDAPProbe):
+        return getattr(getattr(link, "_interface", None), "dev", None)
+    return None
+
+
+def usb_device_location(device: Any) -> UsbDeviceLocation | None:
+    bus, address = getattr(device, "bus", None), getattr(device, "address", None)
+    backend = getattr(getattr(device, "_ctx", None), "backend", None)
+    if bus is None or address is None or backend is None:
+        return None
+    return UsbDeviceLocation(bus, address, device.idVendor, device.idProduct, backend)
+
+
+def jlink_probe_connected(probe: Any) -> bool | None:
+    connected = getattr(getattr(probe, "_link", None), "connected", None)
+    return bool(connected()) if callable(connected) else None
+
+
+def close_pyocd_session(session: Any, *, probe_lost: bool) -> None:
+    if probe_lost:
+        # Session.close() uninits the board and can resume the target. Mark the
+        # session closed before releasing the host handle so it cannot do so later.
+        session._closed = True
+        session.probe.close()
+    else:
+        try:
+            session.close()
+        except Exception as error:
+            # An unexpected board-uninit failure must still release the host
+            # handle. Preserve that original error if the fallback also fails.
+            try:
+                session._closed = True
+                session.probe.close()
+            except Exception as cleanup_error:
+                error.add_note(f"探针句柄清理异常：{cleanup_error}")
+            raise
+
+
+def normalise_pack_svd(target: Any) -> None:
+    """Repair whitespace before a pack SVD's XML declaration in memory only."""
+    location = getattr(target, "_svd_location", None)
+    if location is None or not isinstance(location.filename, io.BytesIO):
+        return
+    data = location.filename.getvalue()
+    bom = b"\xef\xbb\xbf" if data.startswith(b"\xef\xbb\xbf") else b""
+    stripped = data[len(bom):].lstrip(b" \t\r\n")
+    if stripped.startswith(b"<?xml") and bom + stripped != data:
+        location.filename = io.BytesIO(bom + stripped)
 
 
 def guard_dap_error_recovery(target: Any) -> None:

@@ -50,9 +50,9 @@ def _protect(data: bytes, encrypt: bool) -> bytes:
 
 class PairingStore:
     def __init__(self, directory: Path | None = None):
-        from ..services.source_project import default_settings_file
+        from ..services.app_paths import config_directory
         self.directory = directory or Path(os.environ.get(
-            "TAL_EMBER_CONFIG_DIR", str(default_settings_file().parent / "ember")))
+            "TAL_EMBER_CONFIG_DIR", str(config_directory() / "ember")))
         self.path = self.directory / "paired-devices.dat"
         self.lock = threading.RLock()
 

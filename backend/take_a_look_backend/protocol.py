@@ -8,19 +8,22 @@ from enum import StrEnum
 from typing import Any
 
 
-PROTOCOL_VERSION = 2
+PROTOCOL_VERSION = 3
 SAMPLE_PAYLOAD_VERSION = 1
 SAMPLE_FRAME_MARKER = 0
 
 
 class RpcMethod(StrEnum):
+    CONFIGURE_FREERTOS = "configureFreeRtos"
+    ADD_FREERTOS_WATCH = "addFreeRtosWatch"
+    GET_FREERTOS_STACK = "getFreeRtosStack"
     EMBER = "ember"
     HANDSHAKE = "handshake"
     GET_STATE = "getState"
     CONNECT = "connect"
     TOGGLE_CONNECTION = "toggleConnection"
     DISCONNECT = "disconnect"
-    LOAD_SYMBOLS = "loadSymbols"
+    LOAD_FIRMWARE = "loadFirmware"
     SET_CONFIG = "setConfig"
     SET_WATCHES = "setWatches"
     SET_MONITOR_VISIBILITY = "setMonitorVisibility"
@@ -49,6 +52,7 @@ class RpcMethod(StrEnum):
 
 
 class EventName(StrEnum):
+    FREERTOS = "freeRtos"
     STATE = "state"
     SAMPLES = "samples"
     WATCH_VALUES = "watchValues"

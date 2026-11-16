@@ -31,7 +31,6 @@ void main() {
             'PYTHONUTF8': '1',
             'TAL_PACKS_DIR': '${directory.path}/packs',
             'TAL_RECORDINGS_DIR': '${directory.path}/recordings',
-            'TAL_SOURCE_SETTINGS': '${directory.path}/source.json',
           },
         ),
       );

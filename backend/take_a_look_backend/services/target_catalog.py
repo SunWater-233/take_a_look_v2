@@ -194,6 +194,30 @@ class TargetCatalog:
             except (OSError, ValueError, AttributeError, TypeError) as error:
                 self.warning = f"无法读取原芯片库索引：{error}。请重新导入芯片包。"
 
+        # Compaction changes file hashes. Restore supported selections saved with
+        # the upstream bundle's identity, including projects from older versions.
+        selected = self._data["selected"]
+        previous = selected.get("packId", "")
+        resolved = self._resolve_pack_id(selected["name"], previous)
+        if resolved != previous:
+            record = next(target for target in self._bundled[resolved]["targets"]
+                          if target["name"] == selected["name"])
+            self._data["selected"] = {key: record[key] for key in ("name", "packId", "partNumber", "packLabel")}
+        recent = []
+        for item in self._data.get("recent", []):
+            identity, separator, name = item.partition(":")
+            recent.append(f"{self._resolve_pack_id(name, identity)}:{name}" if separator else item)
+        self._data["recent"] = list(dict.fromkeys(recent))
+
+    def _resolve_pack_id(self, name: str, pack_id: str) -> str:
+        if not pack_id or pack_id in self._packs():
+            return pack_id
+        for identity, pack in self._bundled.items():
+            if (pack.get("sourceSha256") == pack_id
+                    and any(target["name"] == name for target in pack["targets"])):
+                return identity
+        return pack_id
+
     def _workspace(self) -> Path:
         if self.directory is None:
             if self._temporary is None:
@@ -336,6 +360,7 @@ class TargetCatalog:
     def select(self, name: str, pack_id: str = "", *, legacy: bool = False) -> None:
         name = normalise(name)
         with self._lock:
+            pack_id = self._resolve_pack_id(name, pack_id)
             if pack_id:
                 pack = self._packs().get(pack_id)
                 if pack is None or not self._pack_path(pack_id).is_file():

@@ -286,7 +286,7 @@ def test_sampler_fault_does_not_block_pause_disconnect_or_reconnect(tmp_path):
         item = SymbolInfo("position", 0x24000B64, 4, "float", "RW_IRAM2")
         with service._lock:
             service._connection_status = "connected"
-            service._connection_started_at = time.perf_counter()
+            service._reconcile_acquisition_clock_locked()
             service._debug.execution_state = "running"
             service._next_debug_poll_at = float("inf")
             service._watches[item.key] = WatchedVariable(item, "#00ff00")

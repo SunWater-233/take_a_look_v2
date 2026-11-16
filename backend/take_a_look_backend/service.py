@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import math
-from contextlib import ExitStack
 import threading
 import time
 from collections.abc import Callable, Mapping
+from enum import Enum
 from pathlib import Path
 
 from take_a_look_backend.backends.j_scope_rtt import JScopeRttBackend
@@ -17,25 +17,36 @@ from take_a_look_backend.backends.ember_pairing import PairingManager
 from take_a_look_backend.models import SymbolInfo, WatchedVariable, json_value
 from take_a_look_backend.protocol import EventName, PROTOCOL_VERSION, ProtocolError, RpcMethod
 from take_a_look_backend.services.sampling import SamplingServiceMixin
+from take_a_look_backend.services.acquisition_clock import AcquisitionClock
 from take_a_look_backend.services.sample_pipeline import SamplePipeline
 from take_a_look_backend.services.recording import RawRecording, export_recording_csv
 from take_a_look_backend.services.debug_info import DebugInfoIndex, load_debug_info_from_elf
 from take_a_look_backend.services.debug_session import DebugSession
 from take_a_look_backend.services.symbols import load_symbols_from_elf
-from take_a_look_backend.services.elf_context import ElfLoadContext
-from take_a_look_backend.services.source_project import SourceProjects
+from take_a_look_backend.services.source_project import default_config, project_snapshot
+from take_a_look_backend.services.firmware import FirmwareImage, FirmwareServiceMixin
+from take_a_look_backend.services.firmware_watch import FirmwareWatcher
 from take_a_look_backend.services.source_tasks import SourceTasks
 from take_a_look_backend.services.target_catalog import TargetCatalog
 from take_a_look_backend.services.online_packs import OnlinePacks
+from take_a_look_backend.services.freertos import FreeRtosInspector
+from take_a_look_backend.services.freertos_service import FreeRtosServiceMixin
+from take_a_look_backend.backends.rtt_session import RttSessionManager
 
 
 EventSink = Callable[[EventName, object], None]
 SymbolLoader = Callable[..., list[SymbolInfo]]
 DebugInfoLoader = Callable[..., DebugInfoIndex]
-SYMBOL_LOAD_TIMEOUT_SECONDS = 600
 
 
-class BackendService(SamplingServiceMixin):
+class _DisconnectReason(Enum):
+    USER = "user"
+    LOST = "lost"
+    CONNECT_FAILED = "connect_failed"
+    SHUTDOWN = "shutdown"
+
+
+class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareServiceMixin):
     """Owns hardware state and exposes it through a small command surface.
 
     pyOCD access is serialized by ``_lock``. The sampler runs on one worker
@@ -53,16 +64,24 @@ class BackendService(SamplingServiceMixin):
         debug_info_loader: DebugInfoLoader = load_debug_info_from_elf,
         remote_backend_factory: Callable[..., TargetBackend] = RemoteMemoryBackend,
         recording_directory: Path | None = None,
-        source_settings_file: Path | None = None,
         target_directory: Path | None = None,
         bundled_target_directory: Path | None = None,
+        monotonic_clock: Callable[[], float] | None = None,
     ) -> None:
         self._emit_event = event_sink
         self._memory: TargetBackend = memory_backend or PyOcdMemoryBackend()
         self._local_memory = self._memory
         self._remote_backend_factory = remote_backend_factory
-        self._normal_rtt = normal_rtt_backend or JScopeRttBackend()
-        self._plus_rtt = plus_rtt_backend or JScopeRttPlusBackend()
+        self._rtt_sessions = RttSessionManager()
+        self._normal_rtt = normal_rtt_backend or JScopeRttBackend(self._rtt_sessions)
+        self._plus_rtt = plus_rtt_backend or JScopeRttPlusBackend(self._rtt_sessions)
+        self._freertos = FreeRtosInspector()
+        self._freertos_snapshot: dict = {}
+        self._freertos_enabled = False
+        self._freertos_watch_identity = {}
+        self._freertos_rate = 2.0
+        self._freertos_tick_hz: int | None = None
+        self._next_freertos_at = 0.0
         self._symbol_loader = symbol_loader
         self._debug_info_loader = debug_info_loader
         self._lock = threading.RLock()
@@ -95,10 +114,12 @@ class BackendService(SamplingServiceMixin):
         self._rtt_enabled = False
         self._rtt_protocol = "normal"
         self._rtt_control_block_address: int | None = None
-        self._symbol_file = ""
-        self._connection_started_at: float | None = None
+        self._firmware = {"status": "empty", "revision": 0, "fingerprint": ""}
+        self._firmware_lock = threading.RLock()
+        self._acquisition_clock = AcquisitionClock(monotonic_clock or time.perf_counter)
+        self._last_sample_seconds = 0.0
         self._symbols: dict[str, SymbolInfo] = {}
-        self._symbol_cache: tuple[bytes, list[SymbolInfo], DebugInfoIndex] | None = None
+        self._symbol_cache: tuple[bytes, FirmwareImage] | None = None
         self.last_symbol_load_timings: dict[str, float | bool] = {}
         self._watches: dict[str, WatchedVariable] = {}
         self._capture_source = None
@@ -113,9 +134,15 @@ class BackendService(SamplingServiceMixin):
         self._debug = DebugSession()
         self._next_debug_poll_at = 0.0
         self._firmware_busy = False
-        self._source_projects = SourceProjects(source_settings_file)
-        self._source_tasks = SourceTasks(lambda payload: self._emit(EventName.SOURCE_TASK, payload), self._download_firmware)
+        self._source_project = default_config()
+        self._source_tasks = SourceTasks(lambda payload: self._emit(EventName.SOURCE_TASK, payload), self._download_firmware, self._firmware_built)
+        self._firmware_watch_error = None
+        self._firmware_watcher = FirmwareWatcher(
+            lambda: self._source_project["firmwarePath"], self._refresh_changed_firmware)
+        self._firmware_watch_thread = threading.Thread(
+            target=self._firmware_watcher.run, args=(self._shutdown,), name="tal-firmware-watch", daemon=True)
         self._sampler.start()
+        self._firmware_watch_thread.start()
 
     def close(self) -> None:
         if self._closed:
@@ -127,20 +154,21 @@ class BackendService(SamplingServiceMixin):
         self._shutdown.set()
         self._wake.set()
         self._sampler.join(timeout=2.0)
+        self._firmware_watch_thread.join(timeout=2.0)
         try:
-            with self._lock:
+            with self._connection_lock, self._lock:
                 try:
-                    self._flush_pending_samples_locked()
+                    errors = self._cleanup_connection_locked(_DisconnectReason.SHUTDOWN)
+                    if errors:
+                        self._emit(EventName.LOG, {"level": "warning", "message": f"关闭连接时清理异常：{'；'.join(errors)}"})
                     self._pipeline.drain()
-                    self._recording.close()
                 finally:
-                    self._stop_rtt_locked()
-                    self._debug.remove_breakpoints(self._memory, connected=self._connection_status == "connected")
-                    self._memory.disconnect()
-                    self._connection_status = "disconnected"
+                    self._recording.close()
         finally:
-            self._pipeline.close()
-            self._targets.close()
+            try:
+                self._pipeline.close()
+            finally:
+                self._targets.close()
 
     def handle(self, method: RpcMethod, params: Mapping[str, object]) -> dict[str, object]:
         priority = method in {
@@ -150,6 +178,7 @@ class BackendService(SamplingServiceMixin):
             RpcMethod.SET_CONFIG, RpcMethod.SET_RTT, RpcMethod.CLEAR_SAMPLES,
             RpcMethod.SELECT_TARGET,
             RpcMethod.SET_MONITOR_VISIBILITY,
+            RpcMethod.ADD_FREERTOS_WATCH, RpcMethod.GET_FREERTOS_STACK,
         }
         if not priority:
             return self._handle(method, params)
@@ -245,22 +274,20 @@ class BackendService(SamplingServiceMixin):
         if method is RpcMethod.SET_SOURCE_PROJECT:
             if self._source_tasks.running:
                 raise ProtocolError("source_task_busy", "任务执行期间不能更换工程配置。")
-            project = self._source_projects.select(dict(params))
-            self._emit(EventName.STATE, {"sourceProject": project})
-            return {"state": {"sourceProject": project}}
+            return self._set_source_project(params)
         if method is RpcMethod.START_SOURCE_TASK:
             kind = _required_string(params, "kind")
-            config = dict(self._source_projects.current)
+            if self._source_tasks.running:
+                raise ProtocolError("source_task_busy", "已有编译或下载任务正在执行。")
             if kind != "build":
                 if not capabilities_for_connection(self._connection_kind).firmware_download:
                     raise ProtocolError("download_unsupported", "当前连接不支持固件下载，请使用本地 pyOCD 或 EmberMobile 连接。")
                 if self._connection_status != "connected":
                     raise ProtocolError("not_connected", "请先连接调试目标。")
-                if not str(config["firmwarePath"]).strip():
-                    config["firmwarePath"] = self._symbol_file
-            return {"sourceTask": self._source_tasks.start(kind, config)}
+            with self._firmware_lock:
+                return {"sourceTask": self._source_tasks.start(kind, dict(self._source_project))}
         if self._source_tasks.running:
-            if method is RpcMethod.LOAD_SYMBOLS or (self._source_tasks.reserves_probe and method in {
+            if method is RpcMethod.LOAD_FIRMWARE or (self._source_tasks.reserves_probe and method in {
                 RpcMethod.CONNECT, RpcMethod.DISCONNECT, RpcMethod.TOGGLE_CONNECTION, RpcMethod.SET_CONFIG,
             }) or (self._firmware_busy and method in {
                 RpcMethod.WRITE_WATCH, RpcMethod.WRITE_WATCHES, RpcMethod.READ_WATCH, RpcMethod.SET_WATCHES, RpcMethod.DEBUG_CONTROL, RpcMethod.SET_BREAKPOINTS,
@@ -288,19 +315,27 @@ class BackendService(SamplingServiceMixin):
                     "sourceBuild",
                     "firmwareDownload",
                     "targetCatalog",
+                    "freeRtos",
+                    "rttSessions",
                 ],
                 "state": self.state_snapshot(),
             }
         if method is RpcMethod.GET_STATE:
             return {"state": self.state_snapshot()}
+        if method is RpcMethod.CONFIGURE_FREERTOS:
+            return self._configure_freertos(params)
+        if method is RpcMethod.ADD_FREERTOS_WATCH:
+            return self._add_freertos_watch(params)
+        if method is RpcMethod.GET_FREERTOS_STACK:
+            return self._freertos_stack(params)
         if method is RpcMethod.CONNECT:
             return self._connect(params)
         if method is RpcMethod.TOGGLE_CONNECTION:
             return self._disconnect() if self._connection_status == "connected" else self._connect(params)
         if method is RpcMethod.DISCONNECT:
             return self._disconnect()
-        if method is RpcMethod.LOAD_SYMBOLS:
-            return self._load_symbols(params)
+        if method is RpcMethod.LOAD_FIRMWARE:
+            return self._load_firmware(params)
         if method is RpcMethod.SET_CONFIG:
             return self._set_config(params)
         if method is RpcMethod.SET_WATCHES:
@@ -338,9 +373,10 @@ class BackendService(SamplingServiceMixin):
         with self._lock:
             return {
                 **self._runtime_state_locked(),
+                "freeRtos": self._freertos_snapshot,
                 "symbols": [self._symbol_json(symbol) for symbol in self._symbols.values()],
                 "watches": [self._watch_json(watch) for watch in self._watches.values()],
-                "sourceProject": self._source_projects.snapshot(),
+                "sourceProject": project_snapshot(self._source_project),
                 "sourceTask": self._source_tasks.snapshot(),
                 "debug": self._debug.snapshot(include_definitions=True),
             }
@@ -364,8 +400,9 @@ class BackendService(SamplingServiceMixin):
             "rttEnabled": self._rtt_enabled,
             "rttProtocol": self._rtt_protocol,
             "rttControlBlockAddress": self._rtt_control_block_address,
-            "symbolFile": self._symbol_file,
-            "elapsedSeconds": self._elapsed_locked(),
+            "firmware": dict(self._firmware),
+            "elapsedSeconds": self._last_sample_seconds,
+            **self._sampling_clock_state(),
             "sampleCount": self._recording.sample_count,
             "rawRecording": self._recording.status(),
             "debug": self._debug.snapshot(),
@@ -379,10 +416,13 @@ class BackendService(SamplingServiceMixin):
 
     def _connect(self, params: Mapping[str, object]) -> dict[str, object]:
         with self._lock:
+            if self._closed:
+                raise ProtocolError("service_closed", "Backend service is closed.")
             if self._connection_status == "connected":
                 return {"state": self._runtime_state_locked()}
             self._apply_config_locked(params)
             self._connection_status = "connecting"
+            self._invalidate_freertos_locked()
             self._latest_rtt_values.clear()
             self._monitor_schedule_revision += 1
             for watch in self._watches.values():
@@ -409,15 +449,10 @@ class BackendService(SamplingServiceMixin):
                 self._debug.execution_state = initial_execution_state
                 self._refresh_debug_state_locked(force=True)
         except Exception as error:
-            try:
-                self._memory.disconnect()
-            except Exception:
-                pass
             with self._lock:
-                self._connection_status = "disconnected"
-                self._debug.execution_state = "unavailable"
-                self._debug.stopped_location = None
-                self._debug.registers = {}
+                cleanup_errors = self._cleanup_connection_locked(_DisconnectReason.CONNECT_FAILED)
+                for cleanup_error in cleanup_errors:
+                    error.add_note(cleanup_error)
                 failed_state = self._runtime_state_locked()
             self._emit(EventName.LOG, {"level": "error", "message": f"连接调试探针失败：{error}"})
             self._emit(EventName.STATE, failed_state)
@@ -426,10 +461,13 @@ class BackendService(SamplingServiceMixin):
             raise ProtocolError("connect_failed", "Unable to connect to the debug probe.", str(error)) from error
         with self._lock:
             self._connection_status = "connected"
-            self._connection_started_at = time.perf_counter()
-            self._sampling_paused = False
+            self._sampling_paused = True
+            self._acquisition_clock.reset()
             self._debug.execution_state = initial_execution_state
-            self._debug.apply_breakpoints(self._memory, connected=self._connection_status == "connected")
+            self._debug.apply_breakpoints(self._memory, connected=not self._firmware.get("requiresDownload"))
+            if self._firmware.get("requiresDownload"):
+                self._debug.execution_state = "unknown"
+                self._debug.mark_breakpoints_pending(message="固件已变化，请重新下载后应用断点。")
             state = self._runtime_state_locked()
         label = {"local": "pyOCD 调试探针", "ember": "EmberMobile 私有协议",
                  "emberGdb": "EmberMobile + GDB", "gdb": "远程 GDB"}[self._connection_kind]
@@ -440,200 +478,53 @@ class BackendService(SamplingServiceMixin):
 
     def _disconnect(self) -> dict[str, object]:
         with self._lock:
-            self._flush_pending_samples_locked()
-            self._stop_rtt_locked()
-            self._debug.remove_breakpoints(self._memory, connected=self._connection_status == "connected")
-            self._memory.disconnect()
-            self._connection_status = "disconnected"
-            self._connection_started_at = None
-            self._sampling_paused = False
-            self._debug.execution_state = "unavailable"
-            self._debug.stopped_location = None
-            self._debug.registers = {}
-            self._debug.mark_breakpoints_pending()
+            cleanup_errors = self._cleanup_connection_locked(_DisconnectReason.USER)
             state = self._runtime_state_locked()
+        if cleanup_errors:
+            self._emit(EventName.LOG, {"level": "warning", "message": f"断开连接时清理异常：{'；'.join(cleanup_errors)}"})
         self._emit(EventName.LOG, {"level": "info", "message": "已断开调试探针。"})
         self._emit(EventName.STATE, state)
         return {"state": state}
 
-    def _load_symbols(self, params: Mapping[str, object], *, display_path: Path | None = None) -> dict[str, object]:
-        started = time.perf_counter()
-        self.last_symbol_load_timings = {}
-        path_text = _required_string(params, "path")
-        load_id = params.get("loadId")
-        deadline = time.perf_counter() + SYMBOL_LOAD_TIMEOUT_SECONDS
-        last_phase = ""
-        last_report_at = 0.0
+    def _cleanup_connection_locked(self, reason: _DisconnectReason) -> list[str]:
+        """Finalize state and attempt every cleanup under the shared probe lock."""
+        connected = self._connection_status == "connected"
+        lost = reason is _DisconnectReason.LOST
+        self._connection_status = "disconnected"
+        self._acquisition_clock.reset()
+        if lost:
+            self._sampling_paused = True
+            self._rtt_enabled = False
+        elif reason is _DisconnectReason.USER:
+            self._sampling_paused = False
+        self._debug.execution_state = "unavailable"
+        self._debug.stopped_location = None
+        self._debug.registers = {}
+        self._last_rtt_error = ""
+        self._next_rtt_retry_at = 0.0
+        self._latest_rtt_values.clear()
 
-        def report_progress(phase: str, current: int = 0, total: int = 0) -> None:
-            nonlocal last_phase, last_report_at
-            now = time.perf_counter()
-            # Also checked before committing, so a late parse cannot replace
-            # the previous symbols after the frontend has timed out.
-            if now > deadline:
-                raise ProtocolError("symbol_load_timeout", "读取 ELF 文件超时，请检查文件后重试。")
-            if phase == last_phase and current != total and now - last_report_at < 0.1:
-                return
-            last_phase, last_report_at = phase, now
-            self._emit(EventName.SYMBOL_LOAD_PROGRESS, {
-                "loadId": load_id, "path": path_text, "phase": phase,
-                "current": current, "total": total,
-            })
-
-        report_progress("check")
-        path = Path(path_text).expanduser()
-        if not path.is_file():
-            raise ProtocolError("file_not_found", "Symbol file does not exist.", str(path))
-        if path.suffix.lower() not in {".elf", ".axf"}:
-            raise ProtocolError("unsupported_symbol_file", "Symbol file must use .elf or .axf.", str(path))
-        with ExitStack() as resources:
-            context = None
-            cached = None
+        disconnect = self._memory.disconnect
+        if lost and self._connection_kind == "local":
+            disconnect = getattr(self._memory, "disconnect_lost_probe", disconnect)
+        cleanups = [
+            ("采样缓冲", lambda: self._flush_pending_samples_locked(wait=not lost)),
+            ("内存采集", self._stop_memory_sampling_locked),
+            ("RTT Normal", self._normal_rtt.stop),
+            ("RTT Plus", self._plus_rtt.stop),
+            ("RTT 会话", self._rtt_sessions.close),
+        ]
+        if connected and reason in {_DisconnectReason.USER, _DisconnectReason.SHUTDOWN}:
+            cleanups.append(("断点", lambda: self._debug.remove_breakpoints(self._memory, connected=True)))
+        cleanups.append(("目标连接", disconnect))
+        errors = []
+        for name, cleanup in cleanups:
             try:
-                options = {}
-                if self._symbol_loader is load_symbols_from_elf and self._debug_info_loader is load_debug_info_from_elf:
-                    context = resources.enter_context(ElfLoadContext(path))
-                    options["context"] = context
-                    if self._symbol_cache is not None and self._symbol_cache[0] == context.fingerprint:
-                        cached = self._symbol_cache
-                symbols = cached[1] if cached is not None else self._symbol_loader(path, progress=report_progress, **options)
-            except ProtocolError:
-                raise
+                cleanup()
             except Exception as error:
-                raise ProtocolError("symbol_load_failed", "Unable to parse the symbol file.", str(error)) from error
-            symbols_s = time.perf_counter() - started
-            source_started = time.perf_counter()
-            source_complete = False
-            try:
-                report_progress("source")
-                debug_info = cached[2] if cached is not None else self._debug_info_loader(path, progress=report_progress, **options)
-                source_complete = True
-            except ProtocolError:
-                raise
-            except Exception as error:
-                debug_info = DebugInfoIndex()
-                self._emit(EventName.LOG, {"level": "warning", "message": f"无法读取源码行调试信息：{error}"})
-            source_s = time.perf_counter() - source_started
-        with self._lock:
-            report_progress("ui")
-            self._source_projects.sync_firmware_path(display_path or path)
-            breakpoints_started = time.perf_counter()
-            self._debug.remove_breakpoints(self._memory, connected=self._connection_status == "connected")
-            breakpoints_s = time.perf_counter() - breakpoints_started
-            self._symbols = {symbol.key: symbol for symbol in symbols}
-            self._symbol_file = str(display_path or path)
-            self._debug.info = debug_info
-            # Watches are only valid for symbols in the current file. RTT symbols
-            # are recreated after a connection is established.
-            watches_started = time.perf_counter()
-            self._watches = self._rebind_watches(self._watches, symbols)
-            watches_s = time.perf_counter() - watches_started
-            breakpoints_started = time.perf_counter()
-            self._debug.apply_breakpoints(self._memory, connected=self._connection_status == "connected")
-            breakpoints_s += time.perf_counter() - breakpoints_started
-            if context is not None and source_complete:
-                # Keep one parsed image only; failed/partial parses never enter
-                # the cache. Rebuilt files are identified by their bytes.
-                self._symbol_cache = (context.fingerprint, symbols, debug_info)
-        publish_started = time.perf_counter()
-        self._emit(EventName.LOG, {"level": "info", "message": f"已读取符号文件：{path.name}，变量 {len(symbols)} 个。"})
-        state = self.state_snapshot()
-        self._emit(EventName.STATE, state)
-        self.last_symbol_load_timings = {
-            "symbols_s": symbols_s, "source_s": source_s, "watches_s": watches_s,
-            "breakpoints_s": breakpoints_s, "publish_s": time.perf_counter() - publish_started,
-            "cache_hit": cached is not None, "total_s": time.perf_counter() - started,
-        }
-        return {"state": state, "symbolFile": str(path)}
-
-    @staticmethod
-    def _rebind_watches(previous: dict[str, WatchedVariable], symbols: list[SymbolInfo]) -> dict[str, WatchedVariable]:
-        # Addresses change after a rebuild. Match by source/name only when unambiguous.
-        if not previous:
-            return {}
-        by_source_name: dict[tuple[str, str], SymbolInfo | None] = {}
-        for symbol in symbols:
-            if not symbol.is_rtt:
-                key = (symbol.source_file, symbol.name)
-                by_source_name[key] = None if key in by_source_name else symbol
-        result = {}
-        for watch in previous.values():
-            symbol = by_source_name.get((watch.symbol.source_file, watch.symbol.name))
-            if symbol is not None:
-                result[symbol.key] = WatchedVariable(
-                    symbol, watch.color, watch.plot_enabled, watch.sampling_enabled,
-                    read_mode=watch.mode, monitor_rate_hz=watch.monitor_rate_hz,
-                    monitor_enabled=watch.monitor_enabled,
-                )
-        return result
-
-    def _download_firmware(self, staged: Path, original: Path, config: dict[str, object], task: SourceTasks) -> None:
-        successful = False
-        with self._lock:
-            self._firmware_busy = True
-            was_paused, was_rtt = self._sampling_paused, self._rtt_enabled
-            self._sampling_paused, self._rtt_enabled = True, False
-        self._emit(EventName.STATE, {"samplingPaused": True, "rttEnabled": False})
-        try:
-            with self._lock:
-                self._flush_pending_samples_locked()
-                self._stop_rtt_locked()
-                self._memory.halt()
-                self._debug.remove_breakpoints(self._memory, connected=self._connection_status == "connected")
-            task.log(f"下载文件：{original}")
-            last_progress = 0.0
-            def progress(value: float) -> None:
-                nonlocal last_progress
-                now = time.monotonic()
-                if now - last_progress >= 0.1 or value >= 1:
-                    last_progress = now
-                    task.phase("download", f"正在下载与校验固件 {value * 100:.0f}%", max(0.0, min(1.0, value)))
-            # The sampler and RPC guards reserve the session without holding the
-            # service lock throughout flash; getState and shutdown stay responsive.
-            self._memory.program_firmware(str(staged), progress)
-            if stats := getattr(self._memory, "last_flash_stats", None):
-                if stats.get("engine") == "jlink":
-                    task.log(f"J-Link 官方 Flash（{stats['device']}）：{stats['data_bytes'] / 1024:.1f} KiB；"
-                             f"原生下载 {stats['program_s']:.2f} 秒，"
-                             f"写后校验 {stats['verify_s']:.2f} 秒，总计 {stats['total_s']:.2f} 秒。")
-                else:
-                    task.log(f"本地固件：{stats['data_bytes'] / 1024:.1f} KiB；"
-                             f"跳过 {stats['skipped_sectors']} 个相同扇区（{stats['skipped_bytes'] / 1024:.1f} KiB）；"
-                             f"比较 {stats['compare_s']:.2f} 秒，擦写 {stats['program_s']:.2f} 秒，"
-                             f"写后校验 {stats['verify_s']:.2f} 秒，总计 {stats['total_s']:.2f} 秒。")
-            if timings := getattr(self._memory, "last_flash_timings", None):
-                task.log(f"固件传输：{timings['upload_bytes'] / 1024:.1f} KiB，"
-                         f"{timings['upload_s']:.2f} 秒；手机比较、擦写与校验：{timings['flash_s']:.2f} 秒。")
-            self._memory.reset(halt=True)
-            task.phase("symbols", "正在加载新符号与断点…")
-            self._load_symbols({"path": str(staged)}, display_path=original)
-            timings = self.last_symbol_load_timings
-            task.log(f"符号与断点：{'复用相同固件解析结果' if timings['cache_hit'] else '解析新固件'}；"
-                     f"变量 {timings['symbols_s']:.2f} 秒，源码索引 {timings['source_s']:.2f} 秒，"
-                     f"监视重绑定 {timings['watches_s']:.2f} 秒，断点 {timings['breakpoints_s']:.2f} 秒，"
-                     f"状态发布 {timings['publish_s']:.2f} 秒，总计 {timings['total_s']:.2f} 秒。")
-            with self._lock:
-                self._symbol_file = str(original)
-                self._clear_samples()
-                self._debug.stopped_location, self._debug.registers = None, {}
-                self._rtt_control_block_address = None
-                self._next_rtt_retry_at = 0.0
-                if config["afterDownload"] == "run":
-                    self._memory.resume()
-                self._refresh_debug_state_locked(force=True)
-                self._sampling_paused, self._rtt_enabled = was_paused, was_rtt
-                successful = True
-        finally:
-            with self._lock:
-                if not successful:
-                    self._sampling_paused, self._rtt_enabled = True, False
-                    self._debug.execution_state = "unknown"
-                    self._debug.stopped_location, self._debug.registers = None, {}
-                    self._debug.mark_breakpoints_pending()
-                self._firmware_busy = False
-                state = self.state_snapshot()
-            self._emit(EventName.STATE, state)
-            self._wake.set()
+                errors.append(f"{name}：{error}")
+        self._debug.mark_breakpoints_pending()
+        return errors
 
     def _get_debug_info(self) -> dict[str, object]:
         with self._lock:
@@ -652,7 +543,9 @@ class BackendService(SamplingServiceMixin):
             raise ProtocolError("invalid_request", "lines must contain positive integers.")
         with self._lock:
             self._debug.set_breakpoints(path, raw_lines, self._memory,
-                                        connected=self._connection_status == "connected")
+                                        connected=self._connection_status == "connected" and not self._firmware.get("requiresDownload"))
+            if self._firmware.get("requiresDownload"):
+                self._debug.mark_breakpoints_pending(message="固件已变化，请重新下载后应用断点。")
             payload = self._debug.snapshot()
         self._emit(EventName.DEBUG, payload)
         return {"debug": payload}
@@ -664,6 +557,8 @@ class BackendService(SamplingServiceMixin):
         with self._lock:
             if self._connection_status != "connected":
                 raise ProtocolError("not_connected", "Connect a debug probe before controlling the target.")
+            if action != "halt":
+                self._require_current_firmware_locked()
             try:
                 if action == "halt":
                     self._memory.halt()
@@ -701,15 +596,9 @@ class BackendService(SamplingServiceMixin):
             isinstance(error, EmberError) and error.code in {"unauthorized", "stale_session", "stale_memory", "not_attached"})
         if not fatal:
             return False
-        self._stop_rtt_locked()
-        self._memory.disconnect()
-        self._connection_status = "disconnected"
-        self._connection_started_at = None
-        self._debug.execution_state = "unavailable"
-        self._debug.stopped_location = None
-        self._debug.registers = {}
-        self._debug.mark_breakpoints_pending()
-        self._emit(EventName.LOG, {"level": "error", "message": f"远程连接已中断：{error}"})
+        cleanup_errors = self._cleanup_connection_locked(_DisconnectReason.LOST)
+        details = f"；清理异常：{'；'.join(cleanup_errors)}" if cleanup_errors else ""
+        self._emit(EventName.LOG, {"level": "error", "message": f"远程连接已中断：{error}{details}"})
         self._emit(EventName.STATE, self._runtime_state_locked())
         return True
 
@@ -730,26 +619,7 @@ class BackendService(SamplingServiceMixin):
         else:
             return False
 
-        self._connection_status = "disconnected"
-        self._connection_started_at = None
-        self._sampling_paused = True
-        self._rtt_enabled = False
-        self._debug.execution_state = "unavailable"
-        self._debug.stopped_location = None
-        self._debug.registers = {}
-        self._debug.mark_breakpoints_pending()
-        self._last_rtt_error = ""
-        self._next_rtt_retry_at = 0.0
-        self._latest_rtt_values.clear()
-        disconnect = getattr(self._memory, "disconnect_lost_probe", self._memory.disconnect)
-        cleanup_errors = []
-        for cleanup in (lambda: self._flush_pending_samples_locked(wait=False),
-                        self._stop_memory_sampling_locked,
-                        self._normal_rtt.stop, self._plus_rtt.stop, disconnect):
-            try:
-                cleanup()
-            except Exception as cleanup_error:
-                cleanup_errors.append(str(cleanup_error))
+        cleanup_errors = self._cleanup_connection_locked(_DisconnectReason.LOST)
         message = "本地调试探针连接已中断，已停止采样；请重新连接探针。"
         self._emit(EventName.STATE, self._runtime_state_locked())
         # ERROR already creates the frontend log entry and connection feedback.
@@ -758,8 +628,12 @@ class BackendService(SamplingServiceMixin):
         return True
 
     def _refresh_debug_state_locked(self, *, force: bool) -> None:
+        if self._firmware.get("requiresDownload"):
+            return
         if not self._debug.refresh(self._memory, force=force):
             return
+        if self._reconcile_acquisition_clock_locked():
+            self._emit(EventName.STATE, self._sampling_clock_state())
         if self._debug.execution_state == "halted" and not backend_capabilities(self._memory).memory_sampling:
             symbols = [watch.symbol for watch in self._watches.values()
                        if not watch.symbol.is_rtt and watch.mode != "manual"
@@ -789,6 +663,7 @@ class BackendService(SamplingServiceMixin):
             self._connect({})
         finally:
             self._sampling_paused = paused
+            self._reconcile_acquisition_clock_locked()
             self._emit(EventName.STATE, self._runtime_state_locked())
 
     def _set_watches(self, params: Mapping[str, object]) -> dict[str, object]:
@@ -876,6 +751,7 @@ class BackendService(SamplingServiceMixin):
         key = _required_string(params, "key")
         value_text = _required_string(params, "value")
         with self._lock:
+            self._require_current_firmware_locked()
             watch = self._watches.get(key)
             if watch is None:
                 raise ProtocolError("unknown_watch", "Watch does not exist.", key)
@@ -900,6 +776,7 @@ class BackendService(SamplingServiceMixin):
         if not isinstance(raw, list) or not 1 <= len(raw) <= 64:
             raise ProtocolError("invalid_request", "writes must contain 1..64 entries.")
         with self._lock:
+            self._require_current_firmware_locked()
             if self._connection_status != "connected":
                 raise ProtocolError("not_connected", "Connect a debug probe before writing variables.")
             if not backend_capabilities(self._memory).memory_write:
@@ -945,6 +822,7 @@ class BackendService(SamplingServiceMixin):
     def _read_watch(self, params: Mapping[str, object]) -> dict[str, object]:
         key = _required_string(params, "key")
         with self._lock:
+            self._require_current_firmware_locked()
             watch = self._watches.get(key)
             if watch is None:
                 raise ProtocolError("unknown_watch", "Watch does not exist.", key)
@@ -972,15 +850,19 @@ class BackendService(SamplingServiceMixin):
         if not isinstance(paused, bool):
             raise ProtocolError("invalid_request", "paused must be a boolean.")
         with self._lock:
+            if not paused:
+                self._require_current_firmware_locked()
             if not paused and self._recording.failure is not None:
                 self._emit(EventName.STATE, {"samplingPaused": True})
                 raise ProtocolError("raw_recording_failed", "请解决记录写入错误后清空采样，开启新记录。")
             self._sampling_paused = paused
+            self._reconcile_acquisition_clock_locked()
             if paused:
                 self._stop_memory_sampling_locked()
             state = {
                 "samplingPaused": self._sampling_paused,
-                "elapsedSeconds": self._elapsed_locked(),
+                "elapsedSeconds": self._last_sample_seconds,
+                **self._sampling_clock_state(),
             }
         self._emit(EventName.LOG, {"level": "info", "message": "采集已暂停，低频监视继续。" if paused else "采集已继续。"})
         self._emit(EventName.STATE, state)
@@ -995,12 +877,15 @@ class BackendService(SamplingServiceMixin):
         if protocol not in {"normal", "plus"}:
             raise ProtocolError("invalid_request", "RTT protocol must be normal or plus.")
         with self._lock:
+            if enabled:
+                self._require_current_firmware_locked()
             if enabled and self._connection_kind == "gdb":
                 raise ProtocolError("unsupported_operation", "独立 GDB 连接不提供 RTT，请使用 EmberMobile + GDB。")
             self._rtt_enabled = enabled
             self._rtt_protocol = str(protocol)
             if "rateHz" in params:
                 self._rtt_sample_rate_hz = _positive_number(params["rateHz"], "rateHz")
+                self._configure_rtt_timebases_locked()
             if "controlBlockAddress" in params:
                 self._rtt_control_block_address = _optional_address(params["controlBlockAddress"])
             self._stop_rtt_locked()
@@ -1014,8 +899,11 @@ class BackendService(SamplingServiceMixin):
             self._stop_memory_sampling_locked()
             self._flush_pending_samples_locked()
             self._pipeline.rotate()
-            self._connection_started_at = time.perf_counter() if self._connection_status == "connected" else None
-            state = {"elapsedSeconds": 0.0, "sampleCount": 0, "rawRecording": self._recording.status()}
+            self._last_sample_seconds = 0.0
+            self._reset_capture_timing_locked()
+            self._acquisition_clock.reset(running=self._acquisition_should_run())
+            state = {"elapsedSeconds": 0.0, "sampleCount": 0, "rawRecording": self._recording.status(),
+                     **self._sampling_clock_state()}
         self._emit(EventName.SAMPLES_CLEARED, {})
         self._emit(EventName.STATE, state)
         return {"state": state}
@@ -1030,6 +918,8 @@ class BackendService(SamplingServiceMixin):
             try:
                 self._stop_rtt_locked()
                 self._memory.reset(halt=halt)
+                self._rtt_sessions.close()
+                self._invalidate_freertos_locked()
                 self._refresh_debug_state_locked(force=True)
             except Exception as error:
                 raise ProtocolError("reset_failed", "Unable to reset target.", str(error)) from error
@@ -1101,6 +991,7 @@ class BackendService(SamplingServiceMixin):
                     watch.next_monitor_at = 0.0
         if "rttSampleRateHz" in params:
             self._rtt_sample_rate_hz = _positive_number(params["rttSampleRateHz"], "rttSampleRateHz")
+            self._configure_rtt_timebases_locked()
 
     @staticmethod
     def _symbol_json(symbol: SymbolInfo) -> dict[str, object]:
@@ -1114,6 +1005,8 @@ class BackendService(SamplingServiceMixin):
             "section": symbol.section,
             "writable": symbol.is_writable,
             "dataSource": symbol.data_source,
+            **({"encoding": symbol.encoding} if symbol.encoding else {}),
+            **({"diagnostic": symbol.diagnostic} if symbol.diagnostic else {}),
         }
 
     @staticmethod

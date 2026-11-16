@@ -5,12 +5,16 @@ typedef JsonObject = Map<String, Object?>;
 /// Detached windows still cross a platform-channel boundary as strings, but
 /// strings are converted to this closed set immediately at the boundary.
 enum ControllerCommand {
+  configureFreeRtos,
+  setFreeRtosViewVisible,
+  setFreeRtosSettings,
+  addFreeRtosWatch,
   setSourceProject,
   startSourceTask,
   cancelSourceTask,
   clearSourceOutput,
   toggleConnection,
-  loadSymbols,
+  loadFirmware,
   setSampleRate,
   setMonitorRate,
   setDisplayRefreshMode,
@@ -51,6 +55,7 @@ enum ControllerCommand {
   addSelectedToWatch,
   removeWatch,
   removeWatches,
+  restoreWatchMembers,
   undoWatchDeletion,
   redoWatchDeletion,
   configureProject,
@@ -89,6 +94,9 @@ enum ControllerCommand {
 
 /// Commands implemented by the Python hardware process.
 enum BackendMethod {
+  configureFreeRtos,
+  addFreeRtosWatch,
+  getFreeRtosStack,
   ember,
   listTargets,
   onlineTargetPacks,
@@ -105,7 +113,7 @@ enum BackendMethod {
   connect,
   toggleConnection,
   disconnect,
-  loadSymbols,
+  loadFirmware,
   setConfig,
   setWatches,
   setMonitorVisibility,
@@ -142,6 +150,19 @@ class BackendCommandMapper {
     JsonObject backendState,
   ) {
     switch (command) {
+      case ControllerCommand.configureFreeRtos:
+        return BackendCall(
+          BackendMethod.configureFreeRtos,
+          Map<String, Object?>.from(arguments! as Map),
+        );
+      case ControllerCommand.addFreeRtosWatch:
+        return BackendCall(
+          BackendMethod.addFreeRtosWatch,
+          Map<String, Object?>.from(arguments! as Map),
+        );
+      case ControllerCommand.setFreeRtosViewVisible:
+      case ControllerCommand.setFreeRtosSettings:
+        return null;
       case ControllerCommand.configureProject:
         return BackendCall(
           BackendMethod.setConfig,
@@ -163,9 +184,9 @@ class BackendCommandMapper {
         return null;
       case ControllerCommand.toggleConnection:
         return const BackendCall(BackendMethod.toggleConnection);
-      case ControllerCommand.loadSymbols:
+      case ControllerCommand.loadFirmware:
         return BackendCall(
-          BackendMethod.loadSymbols,
+          BackendMethod.loadFirmware,
           arguments is Map
               ? Map<String, Object?>.from(arguments)
               : {'path': arguments},
@@ -274,6 +295,7 @@ class BackendCommandMapper {
       case ControllerCommand.addSelectedToWatch:
       case ControllerCommand.removeWatch:
       case ControllerCommand.removeWatches:
+      case ControllerCommand.restoreWatchMembers:
       case ControllerCommand.undoWatchDeletion:
       case ControllerCommand.redoWatchDeletion:
       case ControllerCommand.reorderWatch:

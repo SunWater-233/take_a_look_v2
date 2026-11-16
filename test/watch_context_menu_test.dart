@@ -325,7 +325,7 @@ void main() {
         (watch) => watch.symbol.key == 'motor.speed',
       );
       expect(speed.samplingEnabled, isTrue);
-      expect(speed.plotted, isFalse);
+      expect(speed.plotted, isTrue);
       await tester.ensureVisible(
         find.byKey(const ValueKey('watch-visibility-motor.speed')),
       );
@@ -334,14 +334,32 @@ void main() {
       );
       await tester.pump();
       expect(speed.samplingEnabled, isTrue);
-      expect(speed.plotted, isTrue);
+      expect(speed.plotted, isFalse);
       await tester.tap(
         find.byKey(const ValueKey('watch-visibility-motor.speed')),
       );
       await tester.pump();
       expect(speed.samplingEnabled, isTrue);
-      expect(speed.plotted, isFalse);
+      expect(speed.plotted, isTrue);
       expect(find.byType(Checkbox), findsNothing);
+
+      await tester.ensureVisible(find.text('current'));
+      await rightClick(tester, find.text('current'));
+      expect(find.text('恢复成员'), findsNothing);
+      await tester.tap(find.text('移除该变量'));
+      await tester.pumpAndSettle();
+      expect(find.text('current'), findsNothing);
+      await tester.ensureVisible(find.text('motor'));
+      await rightClick(tester, find.text('motor'));
+      expect(find.text('恢复成员'), findsOneWidget);
+      await tester.tap(find.text('恢复成员'));
+      await tester.pumpAndSettle();
+      expect(find.text('current'), findsOneWidget);
+      expect(controller.watches.map((w) => w.symbol.key), [
+        'motor',
+        'motor.speed',
+        'motor.current',
+      ]);
 
       controller.dispose();
       await tester.pumpWidget(const SizedBox.shrink());

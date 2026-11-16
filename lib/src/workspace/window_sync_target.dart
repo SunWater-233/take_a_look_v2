@@ -13,6 +13,7 @@ class WindowSyncTarget {
   final WindowStateSender send;
   Map<String, int> _versions = {};
   Map<String, int> _cursors = {};
+  int _telemetryEpoch = -1;
   int _analysisRevision = -1;
   bool active = false;
   bool history = true;
@@ -89,6 +90,7 @@ class WindowSyncTarget {
           if (full != null || !_initialized) {
             final versions = controller.snapshotVersions();
             final cursors = controller.telemetryCursors();
+            final epoch = controller.samplingEpoch;
             final analysisRevision = controller.analysisDataRevision;
             final data = controller.snapshot(
               includeSamples: history,
@@ -99,6 +101,7 @@ class WindowSyncTarget {
             await send('state', data);
             _versions = versions;
             _cursors = cursors;
+            _telemetryEpoch = epoch;
             _analysisRevision = analysis ? analysisRevision : -1;
             _initialized = true;
             full?.complete();
@@ -138,6 +141,8 @@ class WindowSyncTarget {
                 _statePending = _telemetryPending = true;
                 continue;
               }
+              final epoch = controller.samplingEpoch;
+              if (epoch != _telemetryEpoch) _cursors.clear();
               final data = controller.telemetryDeltaSnapshot(
                 _cursors,
                 packedSamples: true,
@@ -146,6 +151,7 @@ class WindowSyncTarget {
               final cursors = controller.telemetryCursors();
               await send('telemetryDelta', data);
               _cursors = cursors;
+              _telemetryEpoch = epoch;
             }
           }
         } catch (error, stack) {

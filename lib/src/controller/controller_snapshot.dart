@@ -30,6 +30,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
         logs: _logs,
         uiScale: uiScale,
         samplingElapsedSeconds: samplingElapsedSeconds,
+        samplingClockRunning: _samplingClock.running,
         plotWindowEndSeconds: plotWindowEndSeconds,
         canUndoWatchDeletion: canUndoWatchDeletion,
         canRedoWatchDeletion: canRedoWatchDeletion,
@@ -46,11 +47,14 @@ extension TakeALookControllerSnapshot on TakeALookController {
   Map<String, dynamic> telemetrySnapshot() {
     return {
       'elapsedSeconds': elapsedSeconds,
+      'samplingElapsedSeconds': samplingElapsedSeconds,
+      'samplingClockRunning': _samplingClock.running,
+      'samplingEpoch': samplingEpoch,
       'watches': [
         for (final watch in _watches)
           {
             'key': watch.symbol.key,
-            'value': watch.value,
+            'value': watch.wireValue,
             'updatedAtMs': watch.updatedAtMs,
             'sampleCursor': watch.totalSampleCount,
             'samples': [
@@ -72,6 +76,9 @@ extension TakeALookControllerSnapshot on TakeALookController {
   }) {
     return {
       'elapsedSeconds': elapsedSeconds,
+      'samplingElapsedSeconds': samplingElapsedSeconds,
+      'samplingClockRunning': _samplingClock.running,
+      'samplingEpoch': samplingEpoch,
       'watches': [
         for (final watch in _watches)
           _watchTelemetryDelta(
@@ -96,7 +103,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
     final skip = sampleStart - retainedStart;
     return {
       'key': watch.symbol.key,
-      'value': watch.value,
+      'value': watch.wireValue,
       'sampleStart': sampleStart,
       'updatedAtMs': watch.updatedAtMs,
       'sampleCursor': watch.totalSampleCount,
@@ -112,13 +119,20 @@ extension TakeALookControllerSnapshot on TakeALookController {
   }
 
   void _applySnapshot(JsonObject data) {
+    _applySamplingEpoch(data);
+    if (data['freeRtos'] case final Map snapshot) {
+      state.freeRtos = FreeRtosSnapshot(snapshot);
+    }
+    if (data['freeRtosSettings'] case final Map settings) {
+      state.freeRtosSettings.addAll(Map<String, dynamic>.from(settings));
+      if (!_isDetachedRemote) _scheduleFreeRtosConfig();
+    }
     final previousSymbolRevision = _symbolRevision;
     final hadDeletedWatches = _watchRegistry.canUndo;
     _touchSnapshotFields(data.keys);
     final hasConnectionState = ControllerSnapshotSchema.containsDomain(
       data,
       SnapshotDomain.connection,
-      except: {SnapshotField.symbolFile},
     );
     final hasSamplingState = ControllerSnapshotSchema.containsDomain(
       data,
@@ -127,7 +141,6 @@ extension TakeALookControllerSnapshot on TakeALookController {
     final hasSymbolState = ControllerSnapshotSchema.containsDomain(
       data,
       SnapshotDomain.symbols,
-      except: {SnapshotField.symbolFile},
       include: {SnapshotField.symbols},
     );
     final hasWatchState = ControllerSnapshotSchema.containsDomain(
@@ -213,7 +226,9 @@ extension TakeALookControllerSnapshot on TakeALookController {
             )
           : null;
     }
-    symbolFile = data['symbolFile'] as String? ?? symbolFile;
+    if (data['firmware'] case final Map firmware) {
+      state.firmware = Map<String, dynamic>.from(firmware);
+    }
     sampleRateHz = (data['sampleRateHz'] as num?)?.toDouble() ?? sampleRateHz;
     monitorRateHz =
         (data['monitorRateHz'] as num?)?.toDouble() ?? monitorRateHz;
@@ -291,17 +306,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
     if (data.containsKey('plotInvertY')) {
       plotInvertY = data['plotInvertY'] == true;
     }
-    if (data.containsKey('samplingElapsedSeconds')) {
-      _samplingElapsedBaseSeconds =
-          (data['samplingElapsedSeconds'] as num?)?.toDouble() ??
-          _samplingElapsedBaseSeconds;
-      _samplingElapsedStopwatch.reset();
-    }
-    if (data.containsKey('connectionStatus') ||
-        data.containsKey('samplingPaused') ||
-        data.containsKey('samplingElapsedSeconds')) {
-      _reconcileSamplingClock();
-    }
+    _applySamplingClockSnapshot(data);
     final nextUiScale = (data['uiScale'] as num?)?.toDouble() ?? uiScale;
     if ((nextUiScale - uiScale).abs() >= 0.001) {
       _uiScale.value = nextUiScale.clamp(0.5, 2).toDouble();
@@ -360,9 +365,9 @@ extension TakeALookControllerSnapshot on TakeALookController {
                     sampling: item['sampling'] != false,
                   )
                   ..monitorRateHz = (item['monitorRateHz'] as num?)?.toDouble()
-                  ..updatedAtMs =
-                      (item['updatedAtMs'] as num?)?.toInt() ??
-                      previousWatches[symbol.key]?.updatedAtMs
+                  ..updatedAtMs = item.containsKey('updatedAtMs')
+                      ? (item['updatedAtMs'] as num?)?.toInt()
+                      : previousWatches[symbol.key]?.updatedAtMs
                   ..plotted = item['plotted'] == true
                   ..pinned =
                       item['pinned'] as bool? ??
@@ -376,6 +381,11 @@ extension TakeALookControllerSnapshot on TakeALookController {
                     item['value'],
                     fallback: previousWatches[symbol.key]?.value ?? 0,
                   );
+            if (item.containsKey('value')) {
+              watch.applyValue(item['value']);
+            } else {
+              watch.valueIssue = previousWatches[symbol.key]?.valueIssue;
+            }
             telemetryStore.configureWatch(watch);
             _appendWireSamples(watch.samples, samples);
             watch.totalSampleCount = samples == null
@@ -443,7 +453,6 @@ extension TakeALookControllerSnapshot on TakeALookController {
     }
     if (data['sourceProject'] case final Map project) {
       sourceProject.applyJson(Map<String, dynamic>.from(project));
-      debugState.sourceRoot = sourceProject.sourceRoot;
     }
     if (data['sourceTask'] case final Map task) {
       sourceTask.applyJson(Map<String, dynamic>.from(task));
@@ -470,6 +479,8 @@ extension TakeALookControllerSnapshot on TakeALookController {
         hadDeletedWatches && previousSymbolRevision != _symbolRevision;
     if (deletedWatchesInvalidated && !_isDetachedRemote) _syncWatchesBackend();
     _emitState([
+      if (data.containsKey('freeRtos') || data.containsKey('freeRtosSettings'))
+        signals.freeRtos,
       if (hasConnectionState) signals.connection,
       if (hasTargetCatalog) signals.targetCatalog,
       if (hasSamplingState) signals.sampling,

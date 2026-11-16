@@ -22,7 +22,7 @@ Future<String?> pickTargetPack() async {
   return file?.path;
 }
 
-Future<String?> pickSymbolFile() async {
+Future<String?> pickFirmwareFile() async {
   final file = await openFile(
     acceptedTypeGroups: const [
       XTypeGroup(label: 'ELF/AXF 固件符号', extensions: ['elf', 'axf']),

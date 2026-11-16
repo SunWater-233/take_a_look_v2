@@ -193,7 +193,7 @@ void main() {
       addTearDown(original.dispose);
       original.selectSymbols([demoSymbols.first.key]);
       original.addSelectedToWatch();
-      original.symbolFile = file.path;
+      original.sourceProject.firmwarePath = file.path;
       final settings = original.projectSettings();
       final commands = <ControllerCommand>[];
       final configurations = <Map>[];
@@ -209,8 +209,10 @@ void main() {
           if (command == ControllerCommand.configureProject) {
             configurations.add(args as Map);
           }
-          if (command == ControllerCommand.loadSymbols) {
+          if (command == ControllerCommand.setSourceProject) {
             restored.applySnapshot({
+              'sourceProject': args,
+              'firmware': {'status': 'ready'},
               'symbols': settings['symbols'],
               'watches': [],
             });
@@ -230,7 +232,6 @@ void main() {
           ControllerCommand.setSamplingPaused,
           ControllerCommand.clearSamples,
           ControllerCommand.setSourceProject,
-          ControllerCommand.loadSymbols,
           ControllerCommand.setWatches,
         ]),
       );

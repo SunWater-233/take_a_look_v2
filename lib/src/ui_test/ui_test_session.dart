@@ -11,6 +11,7 @@ import '../models/models.dart';
 import '../protocol/commands.dart';
 import '../protocol/events.dart';
 import '../telemetry/raw_recording.dart';
+import 'freertos_fixture.dart';
 
 enum UiTestScenario {
   live('实时波形'),
@@ -34,7 +35,7 @@ class UiTestSession extends ChangeNotifier {
        ) {
     controller = TakeALookController(
       backendCommand: _command,
-      symbolFilePicker: () async => 'ui_test_fixture.axf',
+      firmwareFilePicker: () async => 'ui_test_fixture.axf',
       sourceRootPicker: pickSourceRootDirectory,
       csvImportContentsPicker: pickCsvImportContents,
       csvImportPathPicker: pickCsvImportPath,
@@ -57,6 +58,8 @@ class UiTestSession extends ChangeNotifier {
   int _generation = 0;
   double _sampleRemainder = 0;
   int _sourceLine = 10;
+  bool _freeRtosEnabled = false;
+  int _lastFreeRtosAt = 0;
 
   static const sourceText = '''#include <stdint.h>
 
@@ -113,7 +116,8 @@ void motor_control_tick(void)
       'watches': const [],
       'logs': const [],
       'selectedSymbols': const [],
-      'symbolFile': '',
+      'sourceProject': {'sourceRoot': '', 'firmwarePath': ''},
+      'firmware': {'status': 'empty'},
       'elapsedSeconds': 0,
       'samplingElapsedSeconds': 0,
       'debug': {
@@ -151,12 +155,16 @@ void motor_control_tick(void)
     notifyListeners();
   }
 
-  void _loadFixture({bool dense = false}) {
+  void _loadFixture({
+    bool dense = false,
+    String firmwarePath = 'ui_test_fixture.axf',
+  }) {
     controller.applySnapshot({
       'symbols': _symbols(
         dense: dense,
       ).map((symbol) => symbol.toJson()).toList(),
-      'symbolFile': 'ui_test_fixture.axf',
+      'sourceProject': {'firmwarePath': firmwarePath},
+      'firmware': {'status': 'ready'},
     });
     _debug(
       controller.connectionStatus == ConnectionStatus.connected
@@ -168,7 +176,7 @@ void motor_control_tick(void)
   Future<void> simulateLoad({bool fail = false}) async {
     if (_disposed || controller.isSymbolLoading) return;
     _failNextLoad = fail;
-    await controller.loadSymbolsFromPath('ui_test_fixture.axf');
+    await controller.loadFirmware('ui_test_fixture.axf');
   }
 
   void injectDisconnect() {
@@ -195,6 +203,21 @@ void motor_control_tick(void)
       controller.stateSnapshot(),
     );
     switch (call?.method) {
+      case BackendMethod.configureFreeRtos:
+        _freeRtosEnabled = call!.params['enabled'] == true;
+        if (call.params['enabled'] == true &&
+            controller.connectionStatus == ConnectionStatus.connected) {
+          controller.applyBackendEvent(
+            BackendEventType.freeRtos,
+            freeRtosFixture(
+              halted:
+                  controller.debugState.executionState ==
+                  DebugExecutionState.halted,
+            ),
+          );
+        }
+      case BackendMethod.addFreeRtosWatch:
+        controller.addLog('UI 测试：已请求加入只读 FreeRTOS 字段。');
       case BackendMethod.toggleConnection:
         if (controller.connectionStatus == ConnectionStatus.connecting) return;
         if (controller.connectionStatus == ConnectionStatus.connected) {
@@ -212,7 +235,7 @@ void motor_control_tick(void)
         controller.applySnapshot({'connectionStatus': 'connected'});
         _debug('running');
         controller.addLog('已连接模拟探针。');
-      case BackendMethod.loadSymbols:
+      case BackendMethod.loadFirmware:
         final fail = _failNextLoad;
         _failNextLoad = false;
         for (final phase in [
@@ -239,8 +262,22 @@ void motor_control_tick(void)
             );
           }
         }
-        _loadFixture(dense: scenario == UiTestScenario.dense);
+        _loadFixture(
+          dense: scenario == UiTestScenario.dense,
+          firmwarePath: call!.params['path'] as String,
+        );
         controller.addLog('模拟符号加载完成。');
+      case BackendMethod.setSourceProject:
+        controller.applySnapshot({'sourceProject': call!.params});
+        if (controller.firmwarePath.isNotEmpty) {
+          _loadFixture(firmwarePath: controller.firmwarePath);
+        } else {
+          controller.applySnapshot({
+            'firmware': {'status': 'empty'},
+            'symbols': [],
+            'watches': [],
+          });
+        }
       case BackendMethod.setConfig:
         controller.applySnapshot(call!.params);
       case BackendMethod.setSamplingPaused:
@@ -387,6 +424,17 @@ void motor_control_tick(void)
       return;
     }
     final now = DateTime.now().millisecondsSinceEpoch;
+    if (_freeRtosEnabled && now - _lastFreeRtosAt >= 500) {
+      _lastFreeRtosAt = now;
+      controller.applyBackendEvent(
+        BackendEventType.freeRtos,
+        freeRtosFixture(
+          halted:
+              controller.debugState.executionState ==
+              DebugExecutionState.halted,
+        ),
+      );
+    }
     final monitored = <Map<String, Object>>[];
     for (final (index, watch) in controller.watches.indexed) {
       if (watch.readMode != WatchReadMode.monitor ||

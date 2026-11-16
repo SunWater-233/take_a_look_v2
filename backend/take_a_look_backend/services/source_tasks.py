@@ -134,8 +134,8 @@ def shell_command(config: dict[str, object], directory: Path) -> list[str] | str
 
 
 class SourceTasks:
-    def __init__(self, emit, download) -> None:
-        self._emit, self._download = emit, download
+    def __init__(self, emit, download, built=lambda: None) -> None:
+        self._emit, self._download, self._built = emit, download, built
         self._lock = threading.RLock()
         self._cancel = threading.Event()
         self._thread: threading.Thread | None = None
@@ -271,6 +271,7 @@ class SourceTasks:
                     self._download(staged, firmware, config, self)
                 self._finish("succeeded", "下载完成，可以调试。" if config["afterDownload"] == "halt" else "下载完成，目标已运行。")
             else:
+                self._built()
                 self._finish("succeeded", "编译成功，待下载。")
         except Exception as error:
             details = getattr(error, "details", None)

@@ -5,6 +5,10 @@
 #include "flutter_window.h"
 #include "utils.h"
 
+#ifdef TAL_WINDOW_RESIZE_DIAGNOSTICS
+#include "windows_resize_trace.h"
+#endif
+
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
   // Attach to console when present (e.g., 'flutter run') or create a
@@ -18,6 +22,13 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
   flutter::DartProject project(L"data");
+  // Keep Dart frame production independent of the Windows event loop, which
+  // synchronously waits for frames during native window resizing. Secondary
+  // engines in desktop_multi_window already use the same policy.
+  project.set_ui_thread_policy(flutter::UIThreadPolicy::RunOnSeparateThread);
+#ifdef TAL_WINDOW_RESIZE_DIAGNOSTICS
+  tal::resize_trace::ConfigureThreadPolicy(project);
+#endif
 
   std::vector<std::string> command_line_arguments =
       GetCommandLineArguments();
@@ -39,5 +50,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   }
 
   ::CoUninitialize();
+#ifdef TAL_WINDOW_RESIZE_DIAGNOSTICS
+  tal::resize_trace::Save();
+#endif
   return EXIT_SUCCESS;
 }

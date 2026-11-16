@@ -12,32 +12,19 @@ extension TakeALookControllerDebug on TakeALookController {
     if (picker == null) return;
     final path = await picker();
     if (path == null || path.isEmpty) return;
-    setSourceRoot(path);
+    await setSourceRoot(path);
   }
 
-  void setSourceRoot(String path) {
-    if (sourceTask.running) return;
-    final normalized = path.trim();
-    if (_isDetachedRemote &&
-        _dispatchRemote(ControllerCommand.setSourceRoot, normalized)) {
-      return;
+  Future<void> setSourceRoot(String path) async {
+    if (sourceTask.running || isSymbolLoading) return;
+    try {
+      await saveSourceProject({'sourceRoot': path.trim()});
+    } on Object catch (error) {
+      applyBackendEvent(BackendEventType.error, {
+        'code': 'source_project_failed',
+        'message': error.toString(),
+      });
     }
-    if (debugState.sourceRoot == normalized) return;
-    debugState.sourceRoot = normalized;
-    sourceProject.sourceRoot = normalized;
-    if (backendCommand != null) {
-      unawaited(
-        saveSourceProject({'sourceRoot': normalized}).catchError((
-          Object error,
-        ) {
-          applyBackendEvent(BackendEventType.error, {
-            'code': 'source_project_failed',
-            'message': error.toString(),
-          });
-        }),
-      );
-    }
-    _emitState([signals.debug]);
   }
 
   void toggleBreakpoint(String path, int line) {
@@ -157,9 +144,6 @@ extension TakeALookControllerDebug on TakeALookController {
                 ),
               ),
         );
-    }
-    if (data['sourceRoot'] case final String sourceRoot) {
-      debugState.sourceRoot = sourceRoot;
     }
     if (data['breakpoints'] case final List rawBreakpoints) {
       debugState.resolvedBreakpoints

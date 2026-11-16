@@ -15,6 +15,24 @@ Future<JsonObject> executeControllerCommand(
   bool includeResultState = true,
 }) async {
   switch (command) {
+    case ControllerCommand.configureFreeRtos:
+      break;
+    case ControllerCommand.setFreeRtosViewVisible:
+      final values = Map<String, dynamic>.from(arguments! as Map);
+      controller.setFreeRtosViewVisible(
+        values['viewId'] as String,
+        values['visible'] == true,
+      );
+    case ControllerCommand.setFreeRtosSettings:
+      controller.setFreeRtosSettings(
+        Map<String, dynamic>.from(arguments! as Map),
+      );
+    case ControllerCommand.addFreeRtosWatch:
+      final values = arguments! as Map;
+      controller.addFreeRtosWatch(
+        values['handle'] as int,
+        values['field'] as String,
+      );
     case ControllerCommand.setSourceProject:
       await controller.saveSourceProject(
         Map<String, dynamic>.from(arguments! as Map),
@@ -27,11 +45,11 @@ Future<JsonObject> executeControllerCommand(
       controller.clearSourceOutput();
     case ControllerCommand.toggleConnection:
       await controller.toggleConnection();
-    case ControllerCommand.loadSymbols:
+    case ControllerCommand.loadFirmware:
       if (arguments is String && arguments.isNotEmpty) {
-        controller.loadSymbolsFromPath(arguments);
+        await controller.loadFirmware(arguments);
       } else {
-        await controller.chooseSymbolFile();
+        await controller.chooseFirmwareFile();
       }
     case ControllerCommand.setSampleRate:
       controller.setSampleRate((arguments as num).toDouble());
@@ -94,7 +112,7 @@ Future<JsonObject> executeControllerCommand(
       controller.resetTarget(halt: arguments == true);
     case ControllerCommand.setSourceRoot:
       if (arguments is String) {
-        controller.setSourceRoot(arguments);
+        await controller.setSourceRoot(arguments);
       } else {
         await controller.chooseSourceRoot();
       }
@@ -146,6 +164,8 @@ Future<JsonObject> executeControllerCommand(
       controller.removeWatch(arguments as String);
     case ControllerCommand.removeWatches:
       controller.removeWatches((arguments as List).cast<String>());
+    case ControllerCommand.restoreWatchMembers:
+      controller.restoreWatchMembers(arguments as String);
     case ControllerCommand.undoWatchDeletion:
       controller.undoWatchDeletion();
     case ControllerCommand.redoWatchDeletion:

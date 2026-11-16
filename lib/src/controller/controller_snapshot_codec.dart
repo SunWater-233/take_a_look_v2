@@ -13,6 +13,7 @@ class ControllerSnapshotView {
     required this.logs,
     required this.uiScale,
     required this.samplingElapsedSeconds,
+    required this.samplingClockRunning,
     required this.plotWindowEndSeconds,
     required this.canUndoWatchDeletion,
     required this.canRedoWatchDeletion,
@@ -25,6 +26,7 @@ class ControllerSnapshotView {
   final Iterable<LogEntry> logs;
   final double uiScale;
   final double samplingElapsedSeconds;
+  final bool samplingClockRunning;
   final double plotWindowEndSeconds;
   final bool canUndoWatchDeletion;
   final bool canRedoWatchDeletion;
@@ -60,6 +62,10 @@ class ControllerSnapshotCodec {
     required bool packedSamples,
     required bool? includeAnalysisData,
   }) => switch (field) {
+    SnapshotField.freeRtos => source.state.freeRtos.data,
+    SnapshotField.freeRtosSettings => Map<String, dynamic>.from(
+      source.state.freeRtosSettings,
+    ),
     SnapshotField.connectionStatus => source.state.connection.status.name,
     SnapshotField.probeType => source.state.connection.probeType,
     SnapshotField.targetName => source.state.connection.targetName,
@@ -80,7 +86,7 @@ class ControllerSnapshotCodec {
     SnapshotField.remoteConfig => Map<String, String>.from(
       source.state.connection.remoteConfig,
     ),
-    SnapshotField.symbolFile => source.state.connection.symbolFile,
+    SnapshotField.firmware => Map<String, dynamic>.of(source.state.firmware),
     SnapshotField.symbolLoad => source.state.symbolLoad!.toJson(),
     SnapshotField.sampleRateHz => source.state.acquisition.sampleRateHz,
     SnapshotField.monitorRateHz => source.state.acquisition.monitorRateHz,
@@ -88,6 +94,8 @@ class ControllerSnapshotCodec {
     SnapshotField.displayRefreshMode =>
       source.state.acquisition.displayRefreshMode,
     SnapshotField.samplingElapsedSeconds => source.samplingElapsedSeconds,
+    SnapshotField.samplingClockRunning => source.samplingClockRunning,
+    SnapshotField.samplingEpoch => source.state.acquisition.samplingEpoch,
     SnapshotField.elapsedSeconds => source.state.acquisition.elapsedSeconds,
     SnapshotField.samplingPaused => source.state.acquisition.samplingPaused,
     SnapshotField.rawRecording => source.state.acquisition.rawRecording,
@@ -134,7 +142,7 @@ class ControllerSnapshotCodec {
           'plotted': watch.plotted,
           'pinned': watch.pinned,
           'displayHex': watch.displayHex,
-          'value': watch.value,
+          'value': watch.wireValue,
           'sampleCursor': watch.totalSampleCount,
           'historyStartSeconds': watch.historyStartSeconds,
           if (includeSamples)
@@ -165,7 +173,6 @@ class ControllerSnapshotCodec {
               for (final definition in source.state.debug.sourceDefinitions)
                 definition.toJson(),
             ],
-      'sourceRoot': source.state.debug.sourceRoot,
       'executableLines': {
         for (final entry in source.state.debug.executableLines.entries)
           entry.key: entry.value.toList()..sort(),

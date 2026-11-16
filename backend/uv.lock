@@ -771,13 +771,13 @@ dependencies = [
     { name = "psutil" },
     { name = "pyelftools" },
     { name = "pygdbmi" },
+    { name = "pyinstaller" },
     { name = "pyocd" },
     { name = "zeroconf" },
 ]
 
 [package.optional-dependencies]
 dev = [
-    { name = "pyinstaller" },
     { name = "pytest" },
 ]
 
@@ -789,7 +789,7 @@ requires-dist = [
     { name = "psutil", specifier = ">=5,<8" },
     { name = "pyelftools", specifier = ">=0.32" },
     { name = "pygdbmi", specifier = ">=0.11,<0.12" },
-    { name = "pyinstaller", marker = "extra == 'dev'", specifier = ">=6.0" },
+    { name = "pyinstaller", specifier = ">=6.0" },
     { name = "pyocd", specifier = "==0.46.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "zeroconf", specifier = ">=0.148,<1" },

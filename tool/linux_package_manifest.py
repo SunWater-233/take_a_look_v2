@@ -41,6 +41,7 @@ if maximum and tuple(map(int, minimum.split("."))) > tuple(map(int, maximum.spli
 flutter_info = json.loads(subprocess.check_output([flutter, "--version", "--machine"], text=True))
 manifest = {
     "version": version,
+    "build_mode": sys.argv[4] if len(sys.argv) > 4 else "release",
     "built_at_utc": datetime.now(timezone.utc).isoformat(),
     "architecture": platform.machine(),
     "glibc_minimum": minimum,
@@ -54,7 +55,8 @@ manifest = {
 bundled_index = package_root / "backend/runtime/take_a_look_backend/bundled_packs/index.json"
 bundled = json.loads(bundled_index.read_text())
 manifest["bundled_packs"] = [{key: pack[key] for key in
-                              ("vendor", "name", "version", "id", "sourceUrl", "requiredPrefix", "size")}
+                              ("vendor", "name", "version", "id", "sourceUrl", "sourceSha256",
+                               "sourceSize", "compactionVersion", "targetPrefixes", "requiredPrefix", "size")}
                              for pack in bundled["packs"].values()]
 (package_root / "BUILD-INFO.json").write_text(json.dumps(manifest, indent=2) + "\n")
 licenses = package_root / "licenses"

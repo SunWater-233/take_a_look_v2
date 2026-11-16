@@ -153,6 +153,9 @@ void main() {
       expect(c.watches.single.displayHex, isTrue);
       final restored = TakeALookController(backendCommand: (_, _) async {});
       addTearDown(restored.dispose);
+      restored.applySnapshot({
+        'symbols': [for (final symbol in c.symbols) symbol.toJson()],
+      });
       await restored.restoreProjectSettings(c.projectSettings());
       expect(restored.watches.single.displayHex, isTrue);
       final remote = TakeALookController(backendCommand: (_, _) async {});

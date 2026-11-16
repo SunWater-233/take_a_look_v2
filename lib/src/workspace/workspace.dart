@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -37,6 +38,7 @@ class DockingWorkspace extends StatefulWidget {
     this.workbenchLayout = false,
     this.projectOpenPathPicker,
     this.projectSavePathPicker,
+    this.updateSession,
     super.key,
   });
 
@@ -47,6 +49,7 @@ class DockingWorkspace extends StatefulWidget {
   final bool workbenchLayout;
   final PathPicker? projectOpenPathPicker;
   final PathPicker? projectSavePathPicker;
+  final File? updateSession;
 
   @override
   DockingWorkspaceState createState() => DockingWorkspaceState();
@@ -71,6 +74,11 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   Offset? _lastTabDragPreviewPosition;
   int _sourceAdditionRevision = 0;
   final Map<WorkspacePanelId, GlobalKey> _panelBodyKeys = {};
+  final _panelBodies =
+      <
+        WorkspacePanelId,
+        ({TakeALookController controller, bool visible, Widget child})
+      >{};
   bool _resizing = false;
   double? _outputDragHeight;
   Future<void> _nativeTransfers = Future<void>.value();
@@ -409,6 +417,9 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     _sourceAdditionRevision =
         widget.controller.sourceWorkspace.additionRevision;
     widget.controller.sourceWorkspaceChanges.addListener(_handleSourceAddition);
+    widget.controller.compactWatchDetailsExpanded.addListener(
+      _scheduleLayoutSave,
+    );
     windowSubscription = detachedWindows.changes.listen(
       (_) => _syncExternalWindows(),
     );
@@ -425,7 +436,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_captureMainWindowOrigin());
     });
-    unawaited(_restoreLayout(reportMissing: false));
+    unawaited(_restoreStartupWorkspace());
   }
 
   @override
@@ -438,6 +449,9 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     _persistence.dispose();
     widget.controller.sourceWorkspaceChanges.removeListener(
       _handleSourceAddition,
+    );
+    widget.controller.compactWatchDetailsExpanded.removeListener(
+      _scheduleLayoutSave,
     );
     windowSubscription?.cancel();
     detachedTabDragSubscription?.cancel();
@@ -452,12 +466,19 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     super.didUpdateWidget(oldWidget);
     _layout.workbenchLayout = widget.workbenchLayout;
     if (oldWidget.controller != widget.controller) {
+      _panelBodies.clear();
       widget.controller.initializeWatchMonitorVisibility();
       oldWidget.controller.sourceWorkspaceChanges.removeListener(
         _handleSourceAddition,
       );
       widget.controller.sourceWorkspaceChanges.addListener(
         _handleSourceAddition,
+      );
+      oldWidget.controller.compactWatchDetailsExpanded.removeListener(
+        _scheduleLayoutSave,
+      );
+      widget.controller.compactWatchDetailsExpanded.addListener(
+        _scheduleLayoutSave,
       );
       _sourceAdditionRevision =
           widget.controller.sourceWorkspace.additionRevision;
@@ -487,6 +508,12 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         final size = Size(constraints.maxWidth, constraints.maxHeight);
         final resized = _session.workspaceSize != size;
         _session.workspaceSize = size;
+        // Native resizing supplies the intermediate sizes. Animating toward
+        // each of them makes panels trail the border and keeps laying out
+        // their contents after the window has stopped moving.
+        final layoutDuration = resized
+            ? Duration.zero
+            : _layoutAnimationDuration;
         if (usesWorkbenchLayout || (resized && _layout.automatic)) {
           _reflowWorkbench();
         }
@@ -532,8 +559,9 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
                         group == _outputGroup &&
                         group.outputCollapsed &&
                         _outputDragHeight == null))
-                      _buildGroup(group, size),
-                  if (usesWorkbenchLayout) ..._dockOverlays(size),
+                      _buildGroup(group, size, layoutDuration),
+                  if (usesWorkbenchLayout)
+                    ..._dockOverlays(size, layoutDuration),
                 ],
               ),
             ),
@@ -543,7 +571,11 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     );
   }
 
-  Widget _buildGroup(WorkspaceGroup group, Size workspaceSize) {
+  Widget _buildGroup(
+    WorkspaceGroup group,
+    Size workspaceSize,
+    Duration layoutDuration,
+  ) {
     final expanded = group == _primaryGroup && _layout.focused;
     final hidden =
         _sidebarHidden(group) || (_layout.focused && group != _primaryGroup);
@@ -561,7 +593,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         (usesWorkbenchLayout ? ui.panelHeaderHeight : ui.panelTabStripHeight);
     return AnimatedPositioned(
       key: ValueKey('workspace-group-${group.id}'),
-      duration: _layoutAnimationDuration,
+      duration: layoutDuration,
       curve: Curves.easeOutCubic,
       left: rect.left,
       top: rect.top,
@@ -761,21 +793,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
                     visible: visible && panel == activePanel,
                     child: KeyedSubtree(
                       key: _panelBodyKeys[panel],
-                      child: buildWorkspacePanelBody(
-                        panel,
-                        widget.controller,
-                        workbench: true,
-                        adaptiveWorkbench: true,
-                        visible: visible && panel == activePanel,
-                        onShowSource: () => unawaited(
-                          activateWorkbenchView(WorkspacePanelId.sourceDebug),
-                        ),
-                        onShowSymbols: () {
-                          if (!resourceDocked) {
-                            unawaited(toggleWorkbenchResource());
-                          }
-                        },
-                      ),
+                      child: _panelBody(panel, visible && panel == activePanel),
                     ),
                   ),
                 ),
@@ -785,7 +803,37 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     );
   }
 
-  List<Widget> _dockOverlays(Size size) {
+  Widget _panelBody(WorkspacePanelId panel, bool visible) {
+    final cached = _panelBodies[panel];
+    if (cached != null &&
+        identical(cached.controller, widget.controller) &&
+        cached.visible == visible) {
+      return cached.child;
+    }
+    // Geometry changes still propagate through render constraints and nested
+    // LayoutBuilders. Reuse the body so resizing doesn't also rebuild every
+    // unrelated control. Model listeners and inherited themes remain active.
+    final child = buildWorkspacePanelBody(
+      panel,
+      widget.controller,
+      workbench: true,
+      adaptiveWorkbench: true,
+      visible: visible,
+      onShowSource: () =>
+          unawaited(activateWorkbenchView(WorkspacePanelId.sourceDebug)),
+      onShowSymbols: () {
+        if (!resourceDocked) unawaited(toggleWorkbenchResource());
+      },
+    );
+    _panelBodies[panel] = (
+      controller: widget.controller,
+      visible: visible,
+      child: child,
+    );
+    return child;
+  }
+
+  List<Widget> _dockOverlays(Size size, Duration layoutDuration) {
     final widgets = <Widget>[];
     for (final side in WorkspaceSidebarSide.values) {
       final group = _sidebarGroup(side);
@@ -795,7 +843,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         widgets.add(
           AnimatedPositioned(
             key: ValueKey('sidebar-handle-${side.name}'),
-            duration: _layoutAnimationDuration,
+            duration: layoutDuration,
             curve: Curves.easeOutCubic,
             left: side == WorkspaceSidebarSide.left ? rect.right : null,
             right: side == WorkspaceSidebarSide.right
@@ -932,8 +980,61 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
 
   Future<void> saveLayout() => _persistLayout(report: true);
 
+  Future<void> _restoreStartupWorkspace() async {
+    await _restoreLayout(reportMissing: false);
+    final file = widget.updateSession;
+    if (!mounted || file == null) return;
+    try {
+      final json =
+          jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+      final document = ProjectDocument.fromJson(
+        Map<String, dynamic>.from(json['document'] as Map),
+      );
+      await widget.controller.restoreProjectSettings(document.settings);
+      if (!mounted) return;
+      _persistence.restoreProjectPath(json['projectPath'] as String?);
+      _session.gridMode = document.gridMode;
+      _layout.focused = document.focused;
+      applyProjectLayout(document.layout);
+      _scheduleLayoutSave();
+      widget.controller.report('更新前的工作区已恢复，请按需重新连接设备。');
+    } catch (error) {
+      if (mounted) {
+        widget.controller.report('恢复更新前的工作区失败：$error；快照保留在 ${file.path}');
+      }
+    }
+  }
+
+  /// Keep unsaved watch/input/layout changes without overwriting the user's
+  /// project. The external updater passes this snapshot to the next launch.
+  Future<void> saveUpdateSession(File file) async {
+    await _nativeTransfers;
+    final document = ProjectDocument(
+      settings: widget.controller.projectSettings(),
+      layout: projectLayout(),
+      gridMode: _session.gridMode,
+      focused: _layout.focused,
+    );
+    await file.parent.create(recursive: true);
+    await file.writeAsString(
+      jsonEncode({'document': document.toJson(), 'projectPath': projectPath}),
+      flush: true,
+    );
+    await _persistence.saveLayout(
+      WorkspaceLayoutSnapshot(
+        groups: _session.groups,
+        uiScale: widget.controller.uiScale,
+        watchDetailsExpanded:
+            widget.controller.compactWatchDetailsExpanded.value,
+        version: widget.workbenchLayout ? 4 : 1,
+        legacyPanels: _layout.legacyPanels,
+      ),
+    );
+  }
+
   WorkspaceLayoutSnapshot projectLayout() => _layout.projectLayout(
     uiScale: widget.controller.uiScale,
+    watchDetailsExpanded: widget.controller.compactWatchDetailsExpanded.value,
     detachedPlacements: _detachedPlacements,
   );
 
@@ -1000,6 +1101,8 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         WorkspaceLayoutSnapshot(
           groups: _session.groups,
           uiScale: widget.controller.uiScale,
+          watchDetailsExpanded:
+              widget.controller.compactWatchDetailsExpanded.value,
           version: widget.workbenchLayout ? 4 : 1,
           legacyPanels: _layout.legacyPanels,
         ),
@@ -1041,6 +1144,8 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     );
     widget.onPanelVisibilityChanged?.call();
     widget.controller.setUiScale(snapshot.uiScale);
+    widget.controller.compactWatchDetailsExpanded.value =
+        snapshot.watchDetailsExpanded;
   }
 
   void resetLayout() {

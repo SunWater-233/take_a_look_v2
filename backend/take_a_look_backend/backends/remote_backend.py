@@ -387,6 +387,8 @@ class RemoteMemoryBackend(TypedMemoryBackend):
         buffers = [bytearray() for _ in symbols]
         batch, size = [], 0
         for index, symbol in enumerate(symbols):
+            if symbol.diagnostic:
+                continue
             length = _access_size(symbol)
             for offset in range(0, length, 65536):
                 count = min(length - offset, 65536)
@@ -411,7 +413,8 @@ class RemoteMemoryBackend(TypedMemoryBackend):
                 buffers[index].extend(block["data"])
                 byte_count += count
         self.last_read_metrics = {"symbol_count": len(symbols), "block_count": reads, "byte_count": byte_count}
-        return {symbol.key: decode_symbol_value(symbol, bytes(data)) for symbol, data in zip(symbols, buffers)}
+        return {symbol.key: symbol.diagnostic or decode_symbol_value(symbol, bytes(data))
+                for symbol, data in zip(symbols, buffers)}
 
     def set_breakpoint(self, address: int) -> bool:
         # Remote adapters apply changes through their own protocol, without a

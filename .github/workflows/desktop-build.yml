@@ -2,6 +2,7 @@ name: Desktop build
 
 on:
   push:
+    branches: [master]
   pull_request:
 
 jobs:
@@ -46,7 +47,7 @@ jobs:
         if: matrix.target == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libusb-1.0-0-dev
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test

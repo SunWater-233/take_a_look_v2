@@ -177,12 +177,15 @@ class _WatchValueCellState extends State<_WatchValueCell> {
         animation: widget.controller.telemetryChanges,
         builder: (_, _) => LayoutBuilder(
           builder: (context, constraints) => Text(
-            widget.watch.updatedAtMs == null
+            widget.watch.updatedAtMs == null &&
+                    widget.watch.valueDiagnostic == null
                 ? '—'
                 : _displayValue(context, style, constraints.maxWidth),
             key: ValueKey('$_prefix-watch-value-$_key'),
             style: style.copyWith(
-              color: _error == null ? null : TalColors.error,
+              color: _error == null && widget.watch.valueDiagnostic == null
+                  ? null
+                  : TalColors.error,
             ),
             textAlign: TextAlign.right,
             maxLines: 1,
@@ -203,6 +206,7 @@ class _WatchValueCellState extends State<_WatchValueCell> {
         triggerMode: TooltipTriggerMode.manual,
         message:
             _error ??
+            widget.watch.valueDiagnostic ??
             (_writing
                 ? '正在写入并等待回读'
                 : _editing
@@ -223,6 +227,7 @@ class _WatchValueCellState extends State<_WatchValueCell> {
 
   String _displayValue(BuildContext context, TextStyle style, double width) {
     final watch = widget.watch;
+    if (watch.valueDiagnostic != null) return watch.valueLabel;
     if (!watch.isFloatingPoint || !watch.value.isFinite) {
       return watch.valueLabel;
     }

@@ -22,7 +22,7 @@ from take_a_look_backend.protocol import (
 
 class ProtocolTests(unittest.TestCase):
     def test_parses_versioned_request(self) -> None:
-        request_id, method, params = parse_request('{"v":2,"id":7,"method":"getState","params":{}}')
+        request_id, method, params = parse_request('{"v":3,"id":7,"method":"getState","params":{}}')
 
         self.assertEqual(request_id, 7)
         self.assertIs(method, RpcMethod.GET_STATE)
@@ -32,7 +32,7 @@ class ProtocolTests(unittest.TestCase):
         with self.assertRaisesRegex(ProtocolError, "version"):
             parse_request('{"v":1,"id":1,"method":"getState"}')
         with self.assertRaisesRegex(ProtocolError, "Params"):
-            parse_request('{"v":2,"id":1,"method":"getState","params":[]}')
+            parse_request('{"v":3,"id":1,"method":"getState","params":[]}')
 
     def test_response_and_event_keep_the_protocol_version(self) -> None:
         self.assertEqual(response("a", {"ok": True})["v"], PROTOCOL_VERSION)

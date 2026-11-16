@@ -51,6 +51,54 @@ void receive(
 
 void main() {
   test(
+    'a full snapshot after clear retains its new timeline and recording',
+    () {
+      final controller = source();
+      final replica = TakeALookController(remoteCommand: (_, _) async {});
+      addTearDown(controller.dispose);
+      addTearDown(replica.dispose);
+      controller.applyBackendSamplesCleared();
+      append(controller, [1, 2]);
+      controller.state.acquisition.rawRecording = {
+        'path': 'new-session.talraw',
+      };
+      replica.applySnapshot(controller.snapshot());
+      expect(replica.samplingEpoch, controller.samplingEpoch);
+      expect(replica.elapsedSeconds, 2);
+      expect(replica.watches.single.samples.map((point) => point.dx), [1, 2]);
+      expect(
+        replica.state.acquisition.rawRecording['path'],
+        'new-session.talraw',
+      );
+    },
+  );
+
+  test(
+    'clear replaces old samples even when new sample cursors match',
+    () async {
+      final controller = source();
+      final replica = TakeALookController(remoteCommand: (_, _) async {});
+      final target = WindowSyncTarget(controller, (method, data) async {
+        receive(replica, method, data);
+      });
+      addTearDown(controller.dispose);
+      addTearDown(replica.dispose);
+      addTearDown(target.dispose);
+      append(controller, [10, 11]);
+      await target.initialize(includeHistory: true, includeAnalysis: false);
+      controller.applyBackendSamplesCleared();
+      append(controller, [0.02, 0.04]);
+      target.requestState();
+      target.requestTelemetry();
+      await target.settled;
+      expect(replica.watches.single.samples.map((point) => point.dx), [
+        0.02,
+        0.04,
+      ]);
+    },
+  );
+
+  test(
     'undo restores full remote data when only deletion metadata was delivered',
     () async {
       final controller = source();

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from time import perf_counter
 
-from .local_firmware import flash_sector_plan, sector_matches, verify_firmware
+from .local_firmware import batched_flash_pages, flash_sector_plan, sector_matches, verify_firmware
 
 
 def program_pyocd(session, segments: list[tuple[int, bytes]], progress) -> dict[str, int | float | str]:
@@ -57,7 +57,11 @@ def program_pyocd(session, segments: list[tuple[int, bytes]], progress) -> dict[
     program_started = perf_counter()
     wrote = sectors is None or bool(changed)
     if wrote:
-        loader.commit()
+        if sectors is None:
+            loader.commit()
+        else:
+            with batched_flash_pages(target, changed):
+                loader.commit()
     program_s = perf_counter() - program_started
     target.halt()
     target.flush()

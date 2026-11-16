@@ -35,7 +35,7 @@ extension _SourceNavigation on _SourceDebugPanelState {
     final definitions = _definitionsFor(selection);
     if (definitions.isEmpty) {
       final message = !controller.debugState.hasSourceDefinitionIndex
-          ? controller.symbolFile.isEmpty
+          ? controller.firmwarePath.isEmpty
                 ? '请先加载带调试信息的 ELF / AXF，再跳转到定义。'
                 : '当前后端尚未提供源码定义索引，请重启完整新版应用后刷新符号文件。'
           : '未找到 ${selection.token} 的定义，请确认已加载包含该定义调试信息的 ELF / AXF。';

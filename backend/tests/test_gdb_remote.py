@@ -294,7 +294,7 @@ def test_ember_private_rtt_and_real_gdb_run_together(tmp_path):
             try:
                 path = tmp_path / "test.axf"
                 path.write_bytes(b"fake elf; symbol loader is injected")
-                service.handle(RpcMethod.LOAD_SYMBOLS, {"path": str(path)})
+                service.handle(RpcMethod.LOAD_FIRMWARE, {"path": str(path)})
                 service.handle(RpcMethod.SET_WATCHES, {"watches": [{"key": symbol.key}]})
                 state = service.handle(RpcMethod.CONNECT, {
                     "connectionKind": "emberGdb", "remoteConfig": options,

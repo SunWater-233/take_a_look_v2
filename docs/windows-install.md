@@ -1,11 +1,34 @@
 # Take A Look V2：Windows MSI 打包与安装
 
+MSI 与便携包均包含独立更新程序和 `UPDATE-MANIFEST.json`。点击左上角品牌图标可在
+应用内下载并安装 GitHub Release 更新；发布步骤和数据保留规则见 [应用内更新](app-updates.md)。
+
+## Portable ZIP
+
+推荐使用统一入口，所有参数见 [桌面构建](build.md)。`-Mode debug` 生成带 `-debug` 后缀的开发调试包。
+
+在 Windows x64 项目根目录运行：
+
+```powershell
+.\tool\build.ps1 -Target windows -WindowsPackage portable
+.\tool\build.ps1 -Target windows -WindowsPackage portable -Version 1.2.3+4
+```
+
+也可以双击 `tool/build_release_windows_portable.cmd`，或给 CMD 入口传递相同参数。
+脚本在 `build/work/windows/release/` 中隔离构建应用和 Python 后端，将 x64 Visual C++
+运行库一起打入 ZIP，并验证压缩包内每个文件的 SHA-256 及后端自检。产物和校验文件位于
+`build/releases/<版本>/windows/`；工作区的 `pubspec.yaml` 不会被版本覆盖修改。
+
+用户将 ZIP 解压到可写目录后运行 `take_a_look_v2.exe`。应保留完整目录结构；采样记录保存在
+可执行文件旁的 `recordings/` 中，不包含在发布压缩包内。
+
 ## 一键构建
 
 在项目根目录执行：
 
 ```powershell
-.\tool\build_release_windows.ps1
+.\tool\build.ps1 -Target windows  # 同时生成 MSI 和 portable ZIP
+.\tool\build.ps1 -Target windows -WindowsPackage msi  # 只生成 MSI
 ```
 
 或双击 `tool/build_release_windows.cmd`。双击入口会显示进度，并在结束后保留窗口；
@@ -21,6 +44,17 @@ PowerShell 执行策略阻止脚本时，也可以使用 CMD 入口。
 - .NET SDK 8 或更新版本，用于下载并运行 WiX。
 - 首次下载 Flutter/Python/NuGet 依赖时需要网络。
 
+使用 uv 创建后端虚拟环境后，还需要安装项目依赖。建议同时安装 `dev`，准备好打包工具和测试环境。
+在项目根目录运行：
+
+```powershell
+uv venv --python 3.12 backend/.venv  # 仅在尚未创建环境时执行
+uv pip install --python .\backend\.venv\Scripts\python.exe -e "./backend[dev]"
+```
+
+已有环境在 `pyproject.toml` 更新后也需要重新执行安装命令。
+构建脚本会在准备芯片包前检查解释器和 PyInstaller。
+
 脚本将 WiX Toolset **5.0.2** 和同版本 UI 扩展固定在 `build/tools/wix-5.0.2/`，
 不会向全局安装 WiX 或修改系统 PATH。这个固定版本用于保持安装器配置和生成行为一致；
 升级工具时需要同步更新脚本中的工具版本、扩展路径并重新验证安装器。
@@ -28,15 +62,15 @@ PowerShell 执行策略阻止脚本时，也可以使用 CMD 入口。
 完整流程：
 
 1. 读取 `pubspec.yaml` 中的版本并检查 x64 Visual C++ 运行库。
-2. 将当前工作区源码（含未提交及未被 Git 忽略的新文件）复制到 `build/windows_msi/source/`。
+2. 自动清空并重建 `build/work/windows/release/source/`，复制当前工作区源码（含未提交及未被 Git 忽略的新文件）。
 3. 独立打包 Python 后端并编译 Flutter Windows x64 Release；不会覆盖正常开发构建或源码目录下的后端运行包。
 4. 收集程序、字体、Flutter 资源、Python/pyOCD 依赖和 Visual C++ DLL，排除采样记录、日志和调试文件。
 5. 运行后端离线自检，生成 MSI，并执行 WiX 的 MSI 一致性校验。
 6. 将 MSI 管理性解包到带空格和中文的路径，逐个核对文件 SHA-256，再运行包内后端自检及 RPC 检查。
 7. 全部通过后发布 MSI 和 SHA-256 文件。失败返回非零状态，保留之前成功的发布文件。
 
-验证步骤不会注册应用、创建桌面快捷方式或连接硬件。解包文件和诊断日志保留在
-`build/msi-verify-*/`，便于检查；这些目录可能占用较多空间。
+验证步骤不会注册应用、创建桌面快捷方式或连接硬件。成功后自动清理 `build/msi-verify-*/`
+解包文件，诊断日志保存到 `build/logs/`；失败时保留现场。直接验证时可加 `-KeepFiles` 保留文件。
 项目目录过深时脚本会提示缩短路径，以避开 Windows Installer 的路径长度限制。
 
 Windows 构建会将生成的应用、打包后端及受管理的虚拟环境 Python 设置为 Medium
@@ -49,18 +83,18 @@ Windows 构建会将生成的应用、打包后端及受管理的虚拟环境 Py
 例如版本为 `0.1.0+1` 时：
 
 ```text
-build/releases/Take-A-Look-V2-0.1.0-windows-x64.msi
-build/releases/Take-A-Look-V2-0.1.0-windows-x64.msi.sha256
-build/logs/windows-msi-<时间>.log
+build/releases/0.1.0+1/windows/Take-A-Look-V2-0.1.0-windows-x64.msi
+build/releases/0.1.0+1/windows/Take-A-Look-V2-0.1.0-windows-x64.msi.sha256
+build/logs/windows-release-<时间>-<PID>.log
 ```
 
 只调整安装配置、无需重新编译程序时：
 
 ```powershell
-.\tool\build_release_windows.ps1 -SkipBuild
+.\tool\build.ps1 -Target windows -SkipBuild
 ```
 
-该参数只复用上次成功构建的独立 Release；要求其版本与当前 `pubspec.yaml` 一致。
+该参数复用同一构建模式上次成功编译的应用；要求完整版本号（含构建号）与本次请求一致。
 修改 Dart、C++ 或 Python 代码后应执行完整构建，不能用 `-SkipBuild` 更新应用代码。
 
 指定工具位置或 x64 Visual C++ CRT 目录：
@@ -118,8 +152,9 @@ GDB 仍是外部工具；J-Link 原生 RTT 需要按 SEGGER 的许可另行安�
 
 ## 配置文件
 
-- `tool/build_release_windows.ps1`：构建、收集文件、生成文件组件、打包和发布。
-- `tool/build_release_windows.cmd`：双击入口。
+- `tool/build.py` / `tool/build.ps1`：统一构建入口和参数。
+- `tool/package_windows.ps1`：共用的 Windows 编译、文件收集、验证与打包。
+- `tool/build.cmd`：双击入口；旧的 `build_release_windows*` 入口继续兼容。
 - `tool/verify_windows_msi.ps1`：MSI 元数据、解包完整性和后端自检。
 - `windows/installer/Package.wxs`：当前用户安装、升级标识、快捷方式及卸载规则。
 - `windows/installer/UI.wxs`：中文向导流程。

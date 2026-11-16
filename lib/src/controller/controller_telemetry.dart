@@ -2,6 +2,7 @@ part of 'controller.dart';
 
 extension TakeALookControllerTelemetry on TakeALookController {
   void applyTelemetrySnapshot(Map<String, dynamic> data) {
+    _applySamplingClockSnapshot(data);
     elapsedSeconds =
         (data['elapsedSeconds'] as num?)?.toDouble() ?? elapsedSeconds;
     final watchesByKey = {
@@ -11,9 +12,10 @@ extension TakeALookControllerTelemetry on TakeALookController {
       final item = Map<String, dynamic>.from(raw as Map);
       final watch = watchesByKey[item['key'] as String?];
       if (watch == null) continue;
-      watch.value = _numericValue(item['value'], fallback: watch.value);
-      watch.updatedAtMs =
-          (item['updatedAtMs'] as num?)?.toInt() ?? watch.updatedAtMs;
+      if (item.containsKey('value')) watch.applyValue(item['value']);
+      if (item.containsKey('updatedAtMs')) {
+        watch.updatedAtMs = (item['updatedAtMs'] as num?)?.toInt();
+      }
       final samples = item['samples'];
       if (samples != null) {
         watch.samples.clear();
@@ -26,6 +28,7 @@ extension TakeALookControllerTelemetry on TakeALookController {
   }
 
   void applyTelemetryDelta(Map<String, dynamic> data) {
+    _applySamplingClockSnapshot(data);
     elapsedSeconds =
         (data['elapsedSeconds'] as num?)?.toDouble() ?? elapsedSeconds;
     final watchesByKey = {
@@ -35,9 +38,10 @@ extension TakeALookControllerTelemetry on TakeALookController {
       final item = Map<String, dynamic>.from(raw as Map);
       final watch = watchesByKey[item['key'] as String?];
       if (watch == null) continue;
-      watch.value = _numericValue(item['value'], fallback: watch.value);
-      watch.updatedAtMs =
-          (item['updatedAtMs'] as num?)?.toInt() ?? watch.updatedAtMs;
+      if (item.containsKey('value')) watch.applyValue(item['value']);
+      if (item.containsKey('updatedAtMs')) {
+        watch.updatedAtMs = (item['updatedAtMs'] as num?)?.toInt();
+      }
       final sampleStart = item['sampleStart'] as int? ?? 0;
       final sampleCursor = item['sampleCursor'] as int? ?? sampleStart;
       if (item['reset'] == true ||
@@ -59,6 +63,11 @@ extension TakeALookControllerTelemetry on TakeALookController {
 
   void applyBackendEvent(BackendEventType event, Object? params) {
     switch (event) {
+      case BackendEventType.freeRtos:
+        if (params is Map) {
+          state.freeRtos = FreeRtosSnapshot(params);
+          _emitState([signals.freeRtos]);
+        }
       case BackendEventType.state:
         final state = _asMap(params);
         if (state != null) {
@@ -166,7 +175,7 @@ extension TakeALookControllerTelemetry on TakeALookController {
           updated < watch.updatedAtMs!) {
         continue;
       }
-      watch.value = _numericValue(raw['value'], fallback: watch.value);
+      watch.applyValue(raw['value']);
       watch.updatedAtMs = updated ?? DateTime.now().millisecondsSinceEpoch;
     }
     // Latest-only values never enter the plot buffer or recording history.
@@ -192,14 +201,20 @@ extension TakeALookControllerTelemetry on TakeALookController {
   }
 
   void applyBackendSamplesCleared() {
+    _clearSampleHistory();
+    _emitState([signals.sampling, signals.telemetry, signals.plot]);
+    signals.telemetrySync.emit();
+  }
+
+  void _clearSampleHistory({bool advanceEpoch = true}) {
+    if (advanceEpoch) state.acquisition.samplingEpoch++;
     plotHistory.clear();
     state.acquisition.rawRecording = {};
     elapsedSeconds = 0;
+    _resetSamplingElapsedClock();
     telemetryStore.clear(_allRetainedWatches);
     _frozenPlotSamples.clear();
     if (plottingPaused || !followLatest) _frozenPlotEndSeconds = 0;
-    _emitState([signals.sampling, signals.telemetry, signals.plot]);
-    signals.telemetrySync.emit();
   }
 }
 

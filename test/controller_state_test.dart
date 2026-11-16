@@ -120,7 +120,7 @@ void main() {
     expect(source.executableLinesFor('D:/checkout/src/main.c'), {10, 12});
 
     final target = TakeALookController()..applySnapshot(source.stateSnapshot());
-    expect(target.debugState.sourceRoot, 'D:/firmware');
+    expect(target.sourceProject.sourceRoot, 'D:/firmware');
     expect(target.debugState.executableLines[sourcePath], {10, 12});
     expect(target.debugState.requestedBreakpoints[sourcePath], {12});
 

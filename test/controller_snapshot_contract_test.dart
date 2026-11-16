@@ -24,6 +24,7 @@ void main() {
         logs: const [],
         uiScale: 1.25,
         samplingElapsedSeconds: 7,
+        samplingClockRunning: false,
         plotWindowEndSeconds: 9,
         canUndoWatchDeletion: false,
         canRedoWatchDeletion: false,
@@ -54,13 +55,13 @@ void main() {
       revisions.record({SnapshotDomain.symbols});
       final first = revisions.versions(symbolRevision: 12);
       expect(first['symbols'], 12);
-      expect(first['symbolFile'], greaterThan(0));
+      expect(first['firmware'], greaterThan(0));
       expect(first['selectedSymbols'], greaterThan(0));
       expect(first['watches'], 0);
 
-      revisions.record({SnapshotDomain.connection});
+      revisions.record({SnapshotDomain.debug});
       final second = revisions.versions(symbolRevision: 12);
-      expect(second['symbolFile'], greaterThan(first['symbolFile']!));
+      expect(second['firmware'], greaterThan(first['firmware']!));
       expect(second['selectedSymbols'], first['selectedSymbols']);
       expect(second['symbols'], 12);
       expect(second['uiScale'], greaterThan(first['uiScale']!));

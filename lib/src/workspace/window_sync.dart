@@ -137,6 +137,13 @@ class MainWindowSync {
         Map<String, Object?>.from(envelope['arguments'] as Map),
       );
     }
+    if (call.method == 'freeRtos') {
+      final envelope = Map<String, dynamic>.from(call.arguments as Map);
+      return controller.requestFreeRtos(
+        envelope['operation'] as String,
+        Map<String, Object?>.from(envelope['arguments'] as Map),
+      );
+    }
     if (call.method == 'snapshot') {
       // Prewarmed windows need metadata only. Assignment supplies the exact
       // history and analysis dataset before the window becomes visible.
@@ -145,6 +152,10 @@ class MainWindowSync {
     if (call.method == 'command') {
       final envelope = Map<String, dynamic>.from(call.arguments as Map);
       final command = ControllerCommand.parse(envelope['name'] as String);
+      if (command == ControllerCommand.setFreeRtosViewVisible &&
+          _releasedMonitorWindows.contains(envelope['windowId'])) {
+        return null;
+      }
       if (command == ControllerCommand.setWatchMonitorScope) {
         final scope = Map<String, Object?>.from(envelope['arguments'] as Map);
         setWatchMonitorScopeForWindow(
@@ -212,6 +223,7 @@ class MainWindowSync {
   }
 
   void releaseWatchMonitorScopesForWindow(String windowId) {
+    controller.releaseFreeRtosViewsForWindow(windowId);
     _releasedMonitorWindows.add(windowId);
     controller.removeWatchMonitorScopesForWindow(windowId);
   }
@@ -449,7 +461,9 @@ Future<void> sendCommandToMain(
   ControllerCommand command,
   Object? arguments,
 ) async {
-  if (command == ControllerCommand.setSourceViewVisible && arguments is Map) {
+  if ((command == ControllerCommand.setSourceViewVisible ||
+          command == ControllerCommand.setFreeRtosViewVisible) &&
+      arguments is Map) {
     final currentWindow = await WindowController.fromCurrentEngine();
     arguments = {
       ...Map<String, Object?>.from(arguments),
@@ -470,4 +484,15 @@ Future<void> sendCommandToMain(
   if (state != null) {
     controller.applySnapshot(Map<String, dynamic>.from(state));
   }
+}
+
+Future<Map<String, Object?>> requestFreeRtosFromMain(
+  String operation,
+  Map<String, Object?> arguments,
+) async {
+  final result = await _mainChannel.invokeMethod<Map<Object?, Object?>>(
+    'freeRtos',
+    {'operation': operation, 'arguments': arguments},
+  );
+  return Map<String, Object?>.from(result ?? const {});
 }

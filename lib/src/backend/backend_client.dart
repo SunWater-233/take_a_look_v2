@@ -40,7 +40,7 @@ class BackendClient {
     this.processStarter,
   });
 
-  static const protocolVersion = 2;
+  static const protocolVersion = 3;
 
   BackendEventHandler? eventHandler;
   final Duration commandTimeout;
@@ -66,6 +66,10 @@ class BackendClient {
   bool _closed = false;
 
   bool get isRunning => _process != null;
+  Future<JsonObject> freeRtosRequest(String operation, JsonObject arguments) {
+    if (operation != 'stack') throw ArgumentError.value(operation, 'operation');
+    return request(BackendMethod.getFreeRtosStack, arguments);
+  }
 
   Future<JsonObject> emberRequest(String operation, JsonObject arguments) =>
       request(BackendMethod.ember, {...arguments, 'operation': operation});
@@ -180,7 +184,7 @@ class BackendClient {
     } catch (error) {
       // These operations await completion and own error feedback in the controller.
       if (const {
-        ControllerCommand.loadSymbols,
+        ControllerCommand.loadFirmware,
         ControllerCommand.configureProject,
         ControllerCommand.setSourceProject,
         ControllerCommand.startSourceTask,
@@ -285,7 +289,10 @@ class BackendClient {
       // Listen to the response before yielding for stdin.flush(): a fast
       // protocol error or process exit can arrive while the pipe is flushing.
       final response = completer.future.timeout(
-        method == BackendMethod.loadSymbols
+        const {
+              BackendMethod.loadFirmware,
+              BackendMethod.setSourceProject,
+            }.contains(method)
             ? symbolLoadTimeout
             : const {
                 BackendMethod.listTargets,
@@ -323,6 +330,19 @@ class BackendClient {
       return await response;
     } finally {
       _pending.remove(requestId);
+    }
+  }
+
+  /// Updates must wait for the frozen backend to release its executable/DLLs.
+  Future<void> closeForUpdate() async {
+    final process = _process;
+    await close();
+    if (process == null) return;
+    try {
+      await process.exitCode.timeout(const Duration(seconds: 5));
+    } on TimeoutException {
+      process.kill();
+      await process.exitCode.timeout(const Duration(seconds: 5));
     }
   }
 
@@ -504,6 +524,10 @@ class BackendClient {
       Directory('${Directory.current.path}${Platform.pathSeparator}backend'),
       Directory(
         '${File(Platform.resolvedExecutable).parent.path}${Platform.pathSeparator}backend',
+      ),
+      Directory(
+        '${File(Platform.resolvedExecutable).parent.parent.path}${Platform.pathSeparator}Resources'
+        '${Platform.pathSeparator}backend',
       ),
       Directory(
         '${File(Platform.resolvedExecutable).parent.path}${Platform.pathSeparator}data'

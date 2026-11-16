@@ -120,6 +120,37 @@ def test_bundled_pack_hash_is_checked_before_connection(tmp_path):
         catalog.close()
 
 
+def test_compact_bundle_restores_older_selection_and_project_pack_identity(tmp_path):
+    source, directory, identity = bundled_fixture(tmp_path)
+    index = directory / "index.json"
+    data = json.loads(index.read_text(encoding="utf-8"))
+    original = tmp_path / "original.pack"
+    original.write_bytes(source.read_bytes() + b"original pack")
+    upstream = hashlib.sha256(original.read_bytes()).hexdigest()
+    data["packs"][identity]["sourceSha256"] = upstream
+    index.write_text(json.dumps(data), encoding="utf-8")
+    library = tmp_path / "user"
+    library.mkdir()
+    (library / "index.json").write_text(json.dumps({"version": 1, "packs": {},
+        "recent": [f"{upstream}:nrf52840"], "selected": {"name": "nrf52840", "packId": upstream}}), encoding="utf-8")
+    catalog = TargetCatalog(library, bundled_directory=directory)
+    try:
+        assert catalog.selected["packId"] == identity
+        assert catalog.snapshot()["recent"] == [f"{identity}:nrf52840"]
+        assert not catalog.selection_state()["targetPackMissing"]
+        assert Path(catalog.connection_pack()).name == f"{identity}.pack"
+        catalog.select("nrf52840", upstream)  # A saved project still carries the old identity.
+        assert catalog.selected["packId"] == identity
+        with pytest.raises(ProtocolError, match="target_pack_missing"):
+            catalog.select("removed_chip", upstream)
+        # A user-imported original stays independent and takes precedence.
+        assert install(catalog, original) == upstream
+        catalog.select("nrf52840", upstream)
+        assert catalog.selected["packId"] == upstream
+    finally:
+        catalog.close()
+
+
 def test_import_copies_metadata_without_registering_targets_and_restores_selection(tmp_path, catalog):
     original = dict(TARGET)
     path = make_pack(tmp_path, extra='<device Dname="Demo100"><variant Dvariant="Demo100A"/><variant Dvariant="Demo100B"/></device>')
@@ -234,12 +265,12 @@ def test_pack_svd_declaration_is_normalised_before_session_open(tmp_path, prefix
 
 def test_svd_without_declaration_is_preserved():
     from pyocd.debug.svd.loader import SVDFile
-    from take_a_look_backend.backends.pyocd_memory import _normalise_pack_svd
+    from take_a_look_backend.backends.pyocd_compat import normalise_pack_svd
 
     data = io.BytesIO(b' \n<!-- comment --><device><name>TestChip</name>'
                       b'<addressUnitBits>8</addressUnitBits><width>32</width><peripherals/></device>')
     target = SimpleNamespace(_svd_location=SVDFile(data))
-    _normalise_pack_svd(target)
+    normalise_pack_svd(target)
     assert target._svd_location.filename is data
     target._svd_location.load()
     assert target._svd_location.device.name == 'TestChip'
@@ -378,9 +409,9 @@ def test_denied_selection_returns_rpc_error_and_keeps_backend_responsive(tmp_pat
     try:
         with patch("tempfile.mkstemp", side_effect=AssertionError("unbounded retry")), \
                 patch.object(Path, "open", side_effect=PermissionError("directory is not writable")):
-            server._handle_line('{"v":2,"id":1,"method":"selectTarget","params":{"name":"auto"}}')
+            server._handle_line('{"v":3,"id":1,"method":"selectTarget","params":{"name":"auto"}}')
             server._catalog_worker.submit(lambda: None).result(timeout=2)
-        server._handle_line('{"v":2,"id":2,"method":"getState"}')
+        server._handle_line('{"v":3,"id":2,"method":"getState"}')
         server._output_worker.drain()
         replies = {message["id"]: message for line in output.getvalue().splitlines()
                    if "id" in (message := json.loads(line))}
@@ -526,9 +557,9 @@ def test_pack_worker_does_not_block_control_requests(tmp_path, monkeypatch):
         return {"targetCount": 1}
     try:
         with patch.object(server._service._targets, "inspect", side_effect=inspect):
-            server._handle_line(json.dumps({"v": 2, "id": 1, "method": "inspectTargetPack", "params": {"path": "test.pack"}}))
+            server._handle_line(json.dumps({"v": 3, "id": 1, "method": "inspectTargetPack", "params": {"path": "test.pack"}}))
             assert entered.wait(1)
-            server._handle_line('{"v":2,"id":2,"method":"getState"}')
+            server._handle_line('{"v":3,"id":2,"method":"getState"}')
             server._output_worker.drain()
             assert any(json.loads(line).get("id") == 2 for line in output.getvalue().splitlines())
             assert not any(json.loads(line).get("id") == 1 for line in output.getvalue().splitlines())

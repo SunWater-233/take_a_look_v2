@@ -24,6 +24,7 @@ extension TakeALookControllerSync on TakeALookController {
 
   void _recordStateChanges(Set<ControllerSignal> changes) =>
       _snapshotRevisions.record({
+        if (changes.contains(signals.freeRtos)) SnapshotDomain.freeRtos,
         if (changes.contains(signals.connection)) SnapshotDomain.connection,
         if (changes.contains(signals.sampling)) SnapshotDomain.sampling,
         if (changes.contains(signals.targetCatalog))

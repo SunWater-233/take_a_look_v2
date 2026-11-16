@@ -12,12 +12,14 @@ void main() {
       WorkspacePanelId.sourceDebug,
       WorkspacePanelId.analysis,
       WorkspacePanelId.plot,
+      WorkspacePanelId.freeRtos,
     ]);
     layout.movePanelToGroup(WorkspacePanelId.analysis, sidebar, 0);
     expect(sidebar.panels, [WorkspacePanelId.analysis, WorkspacePanelId.watch]);
     expect(primary.panels, [
       WorkspacePanelId.sourceDebug,
       WorkspacePanelId.plot,
+      WorkspacePanelId.freeRtos,
     ]);
     expect(sidebar.activePanel, WorkspacePanelId.analysis);
     final panels = layout.session.groups

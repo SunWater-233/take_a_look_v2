@@ -32,5 +32,11 @@ fi
   "$backend_root/take_a_look_backend/stdio.py"
 
 cp -a "$backend_root/bundled_packs" "$dist_root/take_a_look_backend/"
+# Remove upstream/obsolete packs left by an earlier direct runtime build.
+for pack in "$dist_root/take_a_look_backend/bundled_packs/"*.pack; do
+  if [[ -f "$pack" && ! -f "$backend_root/bundled_packs/$(basename "$pack")" ]]; then
+    rm -f -- "$pack"
+  fi
+done
 
 echo "Packaged backend: $dist_root/take_a_look_backend"

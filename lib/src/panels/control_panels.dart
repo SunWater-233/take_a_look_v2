@@ -223,10 +223,6 @@ class SamplingPanel extends StatelessWidget {
                     onPressed: controller.toggleSampling,
                     child: Text(controller.samplingPaused ? '继续采样' : '采样暂停'),
                   ),
-                  TalButton(
-                    onPressed: controller.clearSamples,
-                    child: const Text('清空采样'),
-                  ),
                 ],
               ),
               if (controller.rttEnabled) ...[

@@ -19,7 +19,7 @@ class ProjectDocument {
 
   Map<String, dynamic> toJson() => {
     'format': 'take-a-look-project',
-    'version': 1,
+    'version': 2,
     'settings': settings,
     'layout': layout.toJson(),
     'gridMode': gridMode,
@@ -27,7 +27,7 @@ class ProjectDocument {
   };
 
   factory ProjectDocument.fromJson(Map<String, dynamic> data) {
-    if (data['format'] != 'take-a-look-project' || data['version'] != 1) {
+    if (data['format'] != 'take-a-look-project' || data['version'] != 2) {
       throw const FormatException('不支持的 Take A Look 项目格式。');
     }
     final settings = Map<String, dynamic>.from(data['settings'] as Map);

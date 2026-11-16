@@ -9,6 +9,7 @@ from pyocd.core.exceptions import ProbeDisconnected, TransferFaultError, Transfe
 from pyocd.probe.cmsis_dap_probe import CMSISDAPProbe
 from pyocd.probe.debug_probe import DebugProbe
 from pyocd.probe.jlink_probe import JLinkProbe
+from pyocd.probe.stlink_probe import StlinkProbe
 
 from take_a_look_backend.backends.pyocd_memory import PyOcdMemoryBackend
 from take_a_look_backend.models import SymbolInfo, WatchedVariable
@@ -38,20 +39,25 @@ def wrapped_read_error(cause):
         return error
 
 
-def cmsis_dap_memory_backend():
+def usb_memory_backend(driver):
     memory, _ = memory_backend()
     device = SimpleNamespace(bus=3, address=10, idVendor=0xFAED, idProduct=0x4873,
                              _ctx=SimpleNamespace(backend=object()))
-    probe = CMSISDAPProbe(SimpleNamespace(_interface=SimpleNamespace(dev=device),
-                                         get_unique_id=lambda: "active-probe"))
+    if driver is StlinkProbe:
+        device.idVendor, device.idProduct = 0x0483, 0x3748
+        probe = StlinkProbe(SimpleNamespace(_dev=device, serial_number="active-probe"))
+    else:
+        probe = CMSISDAPProbe(SimpleNamespace(_interface=SimpleNamespace(dev=device),
+                                             get_unique_id=lambda: "active-probe"))
     probe.close = Mock()
     memory.session.probe = probe
     return memory, probe, device
 
 
-def test_open_cmsis_dap_uses_usb_location_without_reopening_exclusive_interface():
-    memory, probe, device = cmsis_dap_memory_backend()
-    with patch.object(CMSISDAPProbe, "get_probe_with_id", return_value=None) as driver_scan, \
+@pytest.mark.parametrize("driver", [CMSISDAPProbe, StlinkProbe])
+def test_open_usb_probe_uses_location_without_reopening_exclusive_interface(driver):
+    memory, probe, device = usb_memory_backend(driver)
+    with patch.object(driver, "get_probe_with_id", return_value=None) as driver_scan, \
             patch("usb.core.find", return_value=[device]) as usb_scan:
         memory.check_connection(force=True)
     driver_scan.assert_not_called()
@@ -62,20 +68,24 @@ def test_open_cmsis_dap_uses_usb_location_without_reopening_exclusive_interface(
 
 
 @pytest.mark.parametrize("remaining", [[], [SimpleNamespace(bus=3, address=11)]])
-def test_cmsis_dap_loss_checks_active_location_even_with_another_identical_probe(remaining):
-    memory, _, _ = cmsis_dap_memory_backend()
-    with patch.object(CMSISDAPProbe, "get_probe_with_id", return_value=object()) as driver_scan, \
+@pytest.mark.parametrize("driver", [CMSISDAPProbe, StlinkProbe])
+def test_usb_probe_loss_checks_active_location_even_with_another_identical_probe(driver, remaining):
+    memory, _, _ = usb_memory_backend(driver)
+    with patch.object(driver, "get_probe_with_id", return_value=object()) as driver_scan, \
             patch("usb.core.find", return_value=remaining):
         with pytest.raises(ProbeDisconnected):
             memory.check_connection(force=True)
     driver_scan.assert_not_called()
 
 
-@pytest.mark.parametrize("field", ["bus", "address"])
-def test_cmsis_dap_unknown_usb_location_is_inconclusive(field):
-    memory, _, device = cmsis_dap_memory_backend()
+@pytest.mark.parametrize("field", ["bus", "address", "backend"])
+@pytest.mark.parametrize("driver", [CMSISDAPProbe, StlinkProbe])
+def test_usb_probe_unknown_location_is_inconclusive(driver, field):
+    memory, _, device = usb_memory_backend(driver)
+    if field == "backend":
+        device = device._ctx
     setattr(device, field, None)
-    with patch.object(CMSISDAPProbe, "get_probe_with_id", return_value=None) as driver_scan, \
+    with patch.object(driver, "get_probe_with_id", return_value=None) as driver_scan, \
             patch("usb.core.find") as usb_scan:
         memory.check_connection(force=True)
     driver_scan.assert_not_called()
@@ -85,9 +95,10 @@ def test_cmsis_dap_unknown_usb_location_is_inconclusive(field):
 
 @pytest.mark.parametrize("cause", [PermissionError(errno.EACCES, "interface already open"),
                                    OSError(errno.ENODEV, "another USB device disappeared")])
-def test_cmsis_dap_failed_system_enumeration_does_not_prove_active_probe_loss(cause):
-    memory, _, _ = cmsis_dap_memory_backend()
-    with patch.object(CMSISDAPProbe, "get_probe_with_id", return_value=object()), \
+@pytest.mark.parametrize("driver", [CMSISDAPProbe, StlinkProbe])
+def test_usb_probe_failed_system_enumeration_does_not_prove_active_probe_loss(driver, cause):
+    memory, _, _ = usb_memory_backend(driver)
+    with patch.object(driver, "get_probe_with_id", return_value=object()), \
             patch("usb.core.find", side_effect=cause):
         memory.check_connection(force=True)
     assert memory.is_connected
@@ -96,7 +107,7 @@ def test_cmsis_dap_failed_system_enumeration_does_not_prove_active_probe_loss(ca
 def test_jlink_presence_uses_emulator_status_and_throttles_healthy_checks(monkeypatch):
     memory, probe = memory_backend()
     clock = [10.0]
-    monkeypatch.setattr("take_a_look_backend.backends.pyocd_memory.perf_counter", lambda: clock[0])
+    monkeypatch.setattr("take_a_look_backend.backends.probe_presence.perf_counter", lambda: clock[0])
     memory.check_connection()
     for _ in range(20):
         memory.check_connection()

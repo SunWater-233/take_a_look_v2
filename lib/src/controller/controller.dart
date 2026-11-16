@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -20,12 +19,14 @@ import '../models/models.dart';
 import '../models/watch_tree.dart';
 import '../models/connection_capabilities.dart';
 import '../models/source_tools.dart';
+import '../models/freertos.dart';
 import '../protocol/commands.dart';
 import '../protocol/events.dart';
 import '../telemetry/telemetry_store.dart';
 import '../telemetry/sample_buffer.dart';
 import '../telemetry/numeric_history.dart';
 import '../telemetry/plot_history.dart';
+import '../telemetry/sampling_display_clock.dart';
 
 export '../models/demo_data.dart';
 
@@ -33,6 +34,7 @@ part 'controller_snapshot.dart';
 part 'controller_sync.dart';
 part 'controller_telemetry.dart';
 part 'controller_connection.dart';
+part 'controller_firmware.dart';
 part 'controller_plot.dart';
 part 'controller_analysis.dart';
 part 'controller_watch.dart';
@@ -41,6 +43,7 @@ part 'controller_source_workspace.dart';
 part 'controller_source_tools.dart';
 part 'controller_targets.dart';
 part 'controller_project.dart';
+part 'controller_freertos.dart';
 
 typedef RemoteCommand =
     Future<void> Function(ControllerCommand command, Object? arguments);
@@ -60,16 +63,18 @@ class TakeALookController extends ChangeNotifier {
     this.remoteCommand,
     this.backendCommand,
     this.projectBackendCommand,
-    this.symbolFilePicker,
+    this.firmwareFilePicker,
     this.sourceRootPicker,
     this.csvExportPathPicker,
     this.csvImportContentsPicker,
     this.csvImportPathPicker,
     this.targetCatalogRequest,
+    this.freeRtosRequest,
     this.emberRequest,
     this.targetPackPicker,
     HistoryReader? historyReader,
-  }) {
+    double Function()? monotonicSeconds,
+  }) : _samplingClock = SamplingDisplayClock(now: monotonicSeconds) {
     plotHistory = PlotHistory(
       reader: historyReader,
       onChanged: () {
@@ -86,12 +91,13 @@ class TakeALookController extends ChangeNotifier {
   final RemoteCommand? remoteCommand;
   final BackendCommand? backendCommand;
   final BackendCommand? projectBackendCommand;
-  final PathPicker? symbolFilePicker;
+  final PathPicker? firmwareFilePicker;
   final PathPicker? sourceRootPicker;
   final PathPicker? csvExportPathPicker;
   final TextFilePicker? csvImportContentsPicker;
   final PathPicker? csvImportPathPicker;
   final TargetCatalogRequest? targetCatalogRequest;
+  final TargetCatalogRequest? freeRtosRequest;
   final TargetCatalogRequest? emberRequest;
   final PathPicker? targetPackPicker;
   final List<SymbolItem> _symbols = <SymbolItem>[];
@@ -110,15 +116,14 @@ class TakeALookController extends ChangeNotifier {
   final Set<String> _selectedSymbols = <String>{};
   final Set<String> _expandedSymbolTreeNodes = <String>{};
   int _symbolRevision = 0;
-  bool _pickingSymbolFile = false;
+  bool _pickingFirmwareFile = false;
   bool _restoringProject = false;
   bool get isProjectRestoring => _restoringProject;
   int _nextSymbolLoadId = 0;
   Timer? _ticker;
   Timer? _plotRefreshTimer;
   Timer? _samplingClockTimer;
-  final Stopwatch _samplingElapsedStopwatch = Stopwatch();
-  double _samplingElapsedBaseSeconds = 0;
+  final SamplingDisplayClock _samplingClock;
   bool _telemetryDisplayPending = false;
   bool _telemetrySyncPending = false;
   bool _disposed = false;
@@ -134,12 +139,18 @@ class TakeALookController extends ChangeNotifier {
   String? get compactWatchSelection => _watchRegistry.selection;
   set compactWatchSelection(String? value) => _watchRegistry.selection = value;
   Set<String> get compactExpandedWatches => _watchRegistry.expanded;
+  final compactWatchDetailsExpanded = ValueNotifier<bool>(true);
   double? compactWatchSummaryFraction;
+  double? compactWatchPinnedFraction;
+  // Each browser section has its own display order, independent of acquisition.
+  final Map<String, List<String>> compactWatchSectionOrders = {};
   String watchSearchQuery = '';
   final Map<String, Set<String>> _watchMonitorScopes = {};
   bool _watchMonitorVisibilityKnown = false;
   bool _watchMonitorSyncPending = false;
   final Map<String, Set<String>?> _pendingRemoteMonitorScopes = {};
+  final Set<String> _freeRtosViews = {};
+  bool _freeRtosConfigPending = false;
   Set<String>? _lastMonitorEnabledKeys;
   ({String path, int line})? sourceLocationRequest;
   int _analysisDataRevision = 0;
@@ -176,8 +187,9 @@ class TakeALookController extends ChangeNotifier {
   bool get supportsTargetControl => state.connection.capabilities.targetControl;
   bool get supportsFirmwareDownload =>
       state.connection.capabilities.firmwareDownload;
-  String get symbolFile => state.connection.symbolFile;
-  set symbolFile(String value) => state.connection.symbolFile = value;
+  String get firmwarePath => sourceProject.firmwarePath;
+  bool get hasFirmwareSymbols =>
+      const {'ready', 'stale'}.contains(state.firmware['status']);
   Map<String, dynamic>? get lastBackendError => state.connection.lastError;
   set lastBackendError(Map<String, dynamic>? value) =>
       state.connection.lastError = value;
@@ -407,7 +419,7 @@ class TakeALookController extends ChangeNotifier {
     if (connectionStatus != ConnectionStatus.connected) {
       return;
     }
-    elapsedSeconds += 0.033;
+    if (!samplingPaused) elapsedSeconds = samplingElapsedSeconds;
     _phase += 0.033;
     final now = DateTime.now().millisecondsSinceEpoch;
     final acquiring = acquisitionWatches.toList();
@@ -553,27 +565,18 @@ class TakeALookController extends ChangeNotifier {
 
   void _reconcileSamplingClock() {
     final shouldRun =
-        _presentationActive &&
         connectionStatus == ConnectionStatus.connected &&
-        !samplingPaused;
-    if (!shouldRun) {
-      if (_samplingElapsedStopwatch.isRunning) {
-        _samplingElapsedStopwatch.stop();
-        _samplingElapsedBaseSeconds +=
-            _samplingElapsedStopwatch.elapsedMicroseconds /
-            Duration.microsecondsPerSecond;
-        _samplingElapsedStopwatch.reset();
-      }
+        (state.acquisition.samplingClockRunning ?? !samplingPaused);
+    if (connectionStatus == ConnectionStatus.disconnected) {
+      _samplingClock.synchronize(0, running: false);
+    } else {
+      _samplingClock.setRunning(shouldRun);
+    }
+    if (!shouldRun || !_presentationActive) {
       _samplingClockTimer?.cancel();
       _samplingClockTimer = null;
-      if (connectionStatus == ConnectionStatus.disconnected) {
-        _samplingElapsedBaseSeconds = 0;
-      }
       signals.clock.emit();
       return;
-    }
-    if (!_samplingElapsedStopwatch.isRunning) {
-      _samplingElapsedStopwatch.start();
     }
     _samplingClockTimer ??= Timer.periodic(const Duration(milliseconds: 10), (
       _,
@@ -583,9 +586,39 @@ class TakeALookController extends ChangeNotifier {
   }
 
   void _resetSamplingElapsedClock() {
-    _samplingElapsedBaseSeconds = 0;
-    _samplingElapsedStopwatch.reset();
+    _samplingClock.reset();
     signals.clock.emit();
+  }
+
+  void _applySamplingEpoch(Map<String, dynamic> data) {
+    final epoch = data['samplingEpoch'] as int?;
+    if (epoch != null && epoch != samplingEpoch) {
+      _clearSampleHistory(advanceEpoch: false);
+      state.acquisition.samplingEpoch = epoch;
+    }
+  }
+
+  void _applySamplingClockSnapshot(Map<String, dynamic> data) {
+    _applySamplingEpoch(data);
+    if (data.containsKey('samplingClockRunning')) {
+      state.acquisition.samplingClockRunning =
+          data['samplingClockRunning'] as bool?;
+    }
+    final seconds = (data['samplingElapsedSeconds'] as num?)?.toDouble();
+    if (seconds != null) {
+      _samplingClock.synchronize(
+        seconds,
+        running:
+            connectionStatus == ConnectionStatus.connected &&
+            (state.acquisition.samplingClockRunning ?? !samplingPaused),
+      );
+    }
+    if (data.containsKey('connectionStatus') ||
+        data.containsKey('samplingPaused') ||
+        data.containsKey('samplingElapsedSeconds') ||
+        data.containsKey('samplingClockRunning')) {
+      _reconcileSamplingClock();
+    }
   }
 
   @override
@@ -596,8 +629,8 @@ class TakeALookController extends ChangeNotifier {
     _plotRefreshTimer?.cancel();
     _samplingClockTimer?.cancel();
     _clearWatchDeletionHistory();
-    _samplingElapsedStopwatch.stop();
     _uiScale.dispose();
+    compactWatchDetailsExpanded.dispose();
     signals.dispose();
     super.dispose();
   }

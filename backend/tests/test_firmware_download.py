@@ -10,8 +10,9 @@ from pyocd.core.options_manager import OptionsManager
 from pyocd.core.target import Target
 from pyocd.coresight.coresight_target import CoreSightTarget
 from pyocd.flash.builder import FlashBuilder, ProgrammingInfo
-from pyocd.flash.flash import FlashInfo, PageInfo, SectorInfo
+from pyocd.flash.flash import Flash, FlashInfo, PageInfo, SectorInfo
 
+from take_a_look_backend.backends.local_firmware import batched_flash_pages
 from take_a_look_backend.backends.pyocd_memory import PyOcdMemoryBackend
 from take_a_look_backend.protocol import ProtocolError, RpcMethod
 from take_a_look_backend.service import BackendService
@@ -233,6 +234,57 @@ def test_identical_h723_sized_image_is_read_once_without_flash_algorithms(tmp_pa
     assert device.backend.last_flash_stats['skipped_bytes'] == len(data)
     assert device.backend.last_flash_stats['skipped_sectors'] == 2
     assert progress[-1] == 1 and progress == sorted(progress)
+
+
+@pytest.mark.parametrize('ram_length,expected_page_size', [
+    (0x20000, 0x1000), (0x2000, 0x400),
+])
+def test_batch_pages_uses_spare_ram_and_restores_configuration(ram_length, expected_page_size):
+    region = FlashRegion(start=0x10000000, length=0x100000,
+                         sector_size=0x20000, page_size=0x400)
+    memory_map = MemoryMap(region, RamRegion(start=0x30000000, length=ram_length))
+    target = SimpleNamespace(memory_map=memory_map, selected_core=SimpleNamespace(node_name=None))
+    algo = {'load_address': 0x30000000, 'instructions': [0] * 128,
+            'pc_erase_sector': 0x30000001, 'pc_program_page': 0x30000005,
+            'page_buffers': [0x30000220], 'begin_stack': 0x30001A20,
+            'end_stack': 0x30000620, 'min_program_length': 0x400,
+            'analyzer_supported': False, 'static_base': 0x30000218}
+    flash = Flash(target, algo)
+    flash.region = region
+    region.flash = flash
+    original_buffers = flash.page_buffers
+
+    with batched_flash_pages(target, [(region.start, b'data')]):
+        assert region.page_size == expected_page_size
+        if expected_page_size > 0x400:
+            assert flash.page_buffers == [0x30002000]
+        else:
+            assert flash.page_buffers is original_buffers
+
+    assert region.page_size == 0x400
+    assert flash.page_buffers is original_buffers
+
+
+def test_batch_pages_restores_configuration_on_failure():
+    region = FlashRegion(start=0x10000000, length=0x100000,
+                         sector_size=0x20000, page_size=0x400)
+    memory_map = MemoryMap(region, RamRegion(start=0x30000000, length=0x20000))
+    target = SimpleNamespace(memory_map=memory_map, selected_core=SimpleNamespace(node_name=None))
+    algo = {'load_address': 0x30000000, 'instructions': [0] * 128,
+            'pc_erase_sector': 0x30000001, 'pc_program_page': 0x30000005,
+            'page_buffers': [0x30000220], 'begin_stack': 0x30001A20,
+            'end_stack': 0x30000620, 'min_program_length': 0x400,
+            'analyzer_supported': False, 'static_base': 0x30000218}
+    flash = Flash(target, algo)
+    flash.region = region
+    region.flash = flash
+    original_buffers = flash.page_buffers
+
+    with pytest.raises(RuntimeError, match='program failed'):
+        with batched_flash_pages(target, [(region.start, b'data')]):
+            raise RuntimeError('program failed')
+    assert region.page_size == 0x400
+    assert flash.page_buffers is original_buffers
 
 
 def test_changed_sector_rewrites_matching_pages_and_keeps_other_sectors(tmp_path, sector_device):

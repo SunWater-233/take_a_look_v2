@@ -100,12 +100,14 @@ class WorkspaceLayoutSnapshot {
   const WorkspaceLayoutSnapshot({
     required this.groups,
     required this.uiScale,
+    this.watchDetailsExpanded = true,
     this.version = 1,
     this.legacyPanels = false,
   });
 
   final List<WorkspaceGroup> groups;
   final double uiScale;
+  final bool watchDetailsExpanded;
   final int version;
   final bool legacyPanels;
 
@@ -113,6 +115,7 @@ class WorkspaceLayoutSnapshot {
     'version': version,
     if (version >= 2) 'legacyPanels': legacyPanels,
     'uiScale': uiScale,
+    'watchDetailsExpanded': watchDetailsExpanded,
     'groups': [for (final group in groups) group.toJson()],
   };
 
@@ -129,6 +132,7 @@ class WorkspaceLayoutSnapshot {
           WorkspaceGroup.fromJson(Map<String, dynamic>.from(entry as Map)),
       ],
       uiScale: (json['uiScale'] as num?)?.toDouble() ?? 1,
+      watchDetailsExpanded: json['watchDetailsExpanded'] as bool? ?? true,
     );
   }
 }

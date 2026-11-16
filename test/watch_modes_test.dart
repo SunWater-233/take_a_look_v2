@@ -21,23 +21,26 @@ void main() {
   }
 
   test(
-    'joining capture never enables plotting through any enrollment command',
+    'joining capture from monitoring enables plotting by default',
     () {
       final c = fixture();
       final watch = c.watches.single;
       final key = watch.symbol.key;
       c.setWatchReadMode(key, WatchReadMode.capture);
       expect(watch.samplingEnabled, isTrue);
-      expect(watch.plotted, isFalse);
+      expect(watch.plotted, isTrue);
       c.toggleWatchPlot(key, true);
       expect(watch.plotted, isTrue);
       expect(watch.samplingEnabled, isTrue);
       c.toggleWatchPlot(key, false);
       expect(watch.samplingEnabled, isTrue);
+      c.setWatchReadMode(key, WatchReadMode.capture);
+      expect(watch.plotted, isFalse);
       c.toggleWatchSampling(key, false);
+      expect(watch.plotted, isFalse);
       c.toggleWatchSampling(key, true);
       expect(watch.samplingEnabled, isTrue);
-      expect(watch.plotted, isFalse);
+      expect(watch.plotted, isTrue);
       c.selectSymbols([demoSymbols[1].key]);
       c.addSelectedToWatch(mode: WatchReadMode.capture);
       expect(c.watches.last.samplingEnabled, isTrue);
@@ -87,7 +90,7 @@ void main() {
       detached.setWatchReadMode(key, WatchReadMode.capture);
       await Future<void>.delayed(Duration.zero);
       expect(detached.watches.single.samplingEnabled, isTrue);
-      expect(detached.watches.single.plotted, isFalse);
+      expect(detached.watches.single.plotted, isTrue);
       detached.toggleWatchPlot(key, true);
       await Future<void>.delayed(Duration.zero);
       expect(c.watches.single.plotted, isTrue);

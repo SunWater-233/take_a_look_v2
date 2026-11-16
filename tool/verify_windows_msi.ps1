@@ -2,7 +2,8 @@
 [CmdletBinding()]
 param(
   [Parameter(Mandatory = $true)][string]$MsiPath,
-  [Parameter(Mandatory = $true)][string]$PayloadDirectory
+  [Parameter(Mandatory = $true)][string]$PayloadDirectory,
+  [switch]$KeepFiles
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -128,4 +129,18 @@ try {
   foreach ($name in $environmentNames) { [Environment]::SetEnvironmentVariable($name, $savedEnvironment[$name], 'Process') }
 }
 Write-Host "MSI verified: $($expectedFiles.Count) files, SHA-256 matches, x64 EXEs, per-user metadata, shortcuts and offline backend RPC."
-Write-Host "Verification files: $verificationRoot"
+if ($KeepFiles) {
+  Write-Host "Verification files: $verificationRoot"
+} else {
+  $allowedRoot = [IO.Path]::GetFullPath((Join-Path $projectDirectory 'build')) + [IO.Path]::DirectorySeparatorChar
+  $resolvedRoot = [IO.Path]::GetFullPath($verificationRoot)
+  if (-not $resolvedRoot.StartsWith($allowedRoot, [StringComparison]::OrdinalIgnoreCase) -or
+      ((Get-Item -LiteralPath $resolvedRoot -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+    throw "Refusing to clean an unexpected verification directory: $resolvedRoot"
+  }
+  $savedLog = Join-Path $projectDirectory ('build\logs\' + (Split-Path -Leaf $verificationRoot) + '.log')
+  New-Item -ItemType Directory -Path (Split-Path -Parent $savedLog) -Force | Out-Null
+  Copy-Item -LiteralPath $extractLog -Destination $savedLog -Force
+  Remove-Item -LiteralPath $resolvedRoot -Recurse -Force
+  Write-Host "Verification log: $savedLog (extracted files cleaned)."
+}

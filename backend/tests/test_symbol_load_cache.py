@@ -37,7 +37,14 @@ def loading(tmp_path, monkeypatch):
 
 
 def load(service, path, **kwargs):
-    return service._load_symbols({'path': str(path)}, **kwargs)['state']
+    display_path = kwargs.get('display_path')
+    if display_path is None:
+        return service.handle(RpcMethod.LOAD_FIRMWARE, {'path': str(path)})['state']
+    with service._firmware_lock:
+        image = service._parse_firmware(path)
+        with service._lock:
+            service._commit_firmware({**service._source_project, 'firmwarePath': str(display_path)}, image)
+            return service.state_snapshot()
 
 
 def test_same_image_at_new_staging_path_reuses_parsed_results(loading, tmp_path):
@@ -51,7 +58,7 @@ def test_same_image_at_new_staging_path_reuses_parsed_results(loading, tmp_path)
     assert candidates.call_count == 1
     assert second['symbols'] == first['symbols']
     assert second['debug'] == first['debug']
-    assert second['symbolFile'] == str(path)
+    assert second['sourceProject']['firmwarePath'] == str(path)
 
 
 def test_rebuild_with_same_size_and_timestamp_invalidates_cache(loading):
@@ -78,7 +85,7 @@ def test_cache_keeps_only_the_latest_successfully_parsed_image(loading):
 def test_timeout_during_cache_hit_keeps_the_current_state(loading, monkeypatch):
     service, path, candidates = loading
     before = load(service, path)
-    monkeypatch.setattr('take_a_look_backend.service.SYMBOL_LOAD_TIMEOUT_SECONDS', 0)
+    monkeypatch.setattr('take_a_look_backend.services.firmware.SYMBOL_LOAD_TIMEOUT_SECONDS', 0)
     with pytest.raises(ProtocolError) as error:
         load(service, path)
     assert error.value.code == 'symbol_load_timeout'
@@ -108,6 +115,31 @@ def test_context_hash_and_parsers_use_the_same_snapshot(loading):
         path.write_bytes(b'B version')
         assert context.fingerprint == hashlib.sha256(original).digest()
         assert context.elf.address == 0x20000000 + original[0]
+
+
+def test_cache_reuses_freertos_layout_with_the_same_firmware(loading, monkeypatch):
+    service, path, candidates = loading
+    candidates.side_effect = lambda elf: [SymbolCandidate('pxCurrentTCB', 'STT_OBJECT', elf.address, 4, '.data')]
+    layout = Mock()
+    parse_layout = Mock(return_value=layout)
+    monkeypatch.setattr('take_a_look_backend.services.firmware.FreeRtosLayout.from_context', parse_layout)
+    load(service, path)
+    load(service, path)
+    assert service.last_symbol_load_timings['cache_hit']
+    assert parse_layout.call_count == 1
+    assert service._symbol_cache[1].freertos_layout is layout
+
+
+def test_failed_freertos_layout_is_retried_instead_of_cached(loading, monkeypatch):
+    service, path, candidates = loading
+    candidates.side_effect = lambda elf: [SymbolCandidate('pxCurrentTCB', 'STT_OBJECT', elf.address, 4, '.data')]
+    parse_layout = Mock(side_effect=ValueError('incomplete FreeRTOS types'))
+    monkeypatch.setattr('take_a_look_backend.services.firmware.FreeRtosLayout.from_context', parse_layout)
+    load(service, path)
+    load(service, path)
+    assert parse_layout.call_count == 2
+    assert service._symbol_cache is None
+    assert not service.last_symbol_load_timings['cache_hit']
 
 
 def test_watch_rebinding_retains_only_unambiguous_memory_symbols():
@@ -149,14 +181,14 @@ def test_real_multidimensional_record_and_pointer_arrays_keep_member_addresses(t
     assert symbols['pointers[1][1]'].address == symbols['pointers'].address + 12
     assert symbols['pointers[1][1]'].is_pointer
 
-    # C++ linkage names can differ from DW_AT_name. A matching address must
-    # retain the type and members even when the candidate's name differs.
+    # An unrelated linkage name at the same address cannot borrow another
+    # variable's type; real C++ aliases are covered by test_symbol_matching.
     with patch('take_a_look_backend.services.symbols.symbol_candidates_from_elf', return_value=[
         SymbolCandidate('_ZN5drive4gridE', 'STT_OBJECT', base, symbols['grid'].size, '.bss')
     ]):
         mangled = {s.name: s for s in load_symbols_from_elf(path)}
-    assert mangled['_ZN5drive4gridE'].kind == symbols['grid'].kind
-    assert mangled['grid[1][2].ptr'] == symbols['grid[1][2].ptr']
+    assert mangled['_ZN5drive4gridE'].encoding == 'unsupported'
+    assert len(mangled) == 1
 
     # A cached source index must still reinstall hardware breakpoints after a
     # firmware download clears them. Cache parsed data, never installed state.

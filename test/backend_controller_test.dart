@@ -9,26 +9,89 @@ import 'package:take_a_look_v2/src/protocol/commands.dart';
 import 'package:take_a_look_v2/src/protocol/events.dart';
 
 void main() {
+  test('simulated probe connection starts with acquisition paused', () async {
+    final controller = TakeALookController();
+    addTearDown(controller.dispose);
+
+    await controller.toggleConnection();
+
+    expect(controller.connectionStatus, ConnectionStatus.connected);
+    expect(controller.samplingPaused, isTrue);
+  });
+
+  for (final paused in [true, false]) {
+    test(
+      'backend sample clear resets the ${paused ? 'paused' : 'running'} acquisition clock',
+      () async {
+        final commands = <ControllerCommand>[];
+        final controller = TakeALookController(
+          backendCommand: (command, _) async => commands.add(command),
+        );
+        addTearDown(controller.dispose);
+        controller.applyBackendEvent(BackendEventType.state, {
+          'connectionStatus': 'connected',
+          'samplingPaused': paused,
+          'elapsedSeconds': 602.68,
+          'samplingElapsedSeconds': 602.68,
+        });
+        var clockEvents = 0;
+        controller.clockChanges.addListener(() => clockEvents++);
+
+        controller.clearSamples();
+        expect(commands, [ControllerCommand.clearSamples]);
+        controller.applyBackendEvent(BackendEventType.samplesCleared, const {});
+        controller.applyBackendEvent(BackendEventType.state, {
+          'elapsedSeconds': 0,
+          'sampleCount': 0,
+        });
+
+        expect(controller.elapsedSeconds, 0);
+        expect(controller.samplingElapsedSeconds, closeTo(0, 0.1));
+        expect(controller.samplingPaused, paused);
+        expect(clockEvents, 1);
+        final clearedElapsed = controller.samplingElapsedSeconds;
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        if (paused) {
+          expect(controller.samplingElapsedSeconds, 0);
+          expect(controller.elapsedLabel, '00:00');
+        } else {
+          expect(
+            controller.samplingElapsedSeconds,
+            greaterThan(clearedElapsed),
+          );
+        }
+
+        controller.applyBackendEvent(BackendEventType.samples, {
+          'frames': [
+            {'elapsed': 0.02, 'values': <String, Object?>{}},
+          ],
+        });
+        expect(controller.elapsedSeconds, 0.02);
+      },
+    );
+  }
+
   test('controller maps backend state, commands, and sample events', () async {
     final commands = <(ControllerCommand, Object?)>[];
     final controller = TakeALookController(
       backendCommand: (method, arguments) async {
         commands.add((method, arguments));
       },
-      symbolFilePicker: () async => r'C:\firmware\motor.axf',
+      firmwareFilePicker: () async => r'C:\firmware\motor.axf',
       csvExportPathPicker: () async => r'C:\capture\samples.csv',
     );
     addTearDown(controller.dispose);
 
-    await controller.chooseSymbolFile();
+    await controller.chooseFirmwareFile();
     final loadCommand = commands.removeAt(0);
-    expect(loadCommand.$1, ControllerCommand.loadSymbols);
+    expect(loadCommand.$1, ControllerCommand.loadFirmware);
     expect((loadCommand.$2 as Map)['path'], r'C:\firmware\motor.axf');
     expect((loadCommand.$2 as Map)['loadId'], isA<String>());
 
     controller.applyBackendEvent(BackendEventType.state, {
       'connectionStatus': 'connected',
-      'symbolFile': r'C:\firmware\motor.axf',
+      'sourceProject': {'firmwarePath': r'C:\firmware\motor.axf'},
+      'firmware': {'status': 'ready'},
       'sampleRateHz': 200,
       'rttSampleRateHz': 1000,
       'samplingPaused': false,

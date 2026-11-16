@@ -3,7 +3,7 @@
 Build the Linux Release package in WSL.
 .DESCRIPTION
 Uses the prepared Debian 11 build environment by default. Outputs are written
-to build/releases and logs to build/logs. Native uses the WSL host toolchain.
+to build/releases/<version>/linux and logs to build/logs. Native uses the WSL host toolchain.
 Version overrides pubspec.yaml for this build only (major.minor.patch[+build]).
 .EXAMPLE
 .\tool\build_release_wsl.ps1
@@ -20,6 +20,8 @@ param(
   [switch]$Check,
   [switch]$Native,
   [switch]$KeepBuild,
+  [ValidateSet('release', 'debug')]
+  [string]$Mode = 'release',
   [ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+(?:\+[0-9]+)?\z')]
   [string]$Version = ''
 )
@@ -38,6 +40,7 @@ try {
   if (-not $Native) { $wslArguments += @('--user', 'root') }
   # Pass arguments directly; never interpolate paths into a shell command.
   $wslArguments += @('--cd', $projectDirectory, '--exec', 'bash', 'tool/build_release_wsl.sh')
+  $wslArguments += @('--mode', $Mode.ToLowerInvariant())
   if ($Check) { $wslArguments += '--check' }
   if ($Native) { $wslArguments += '--native' }
   if ($KeepBuild) { $wslArguments += '--keep-build' }

@@ -73,7 +73,7 @@ void main() {
     'projects save the visibility from before temporary isolation',
     () async {
       final c = fixture();
-      c.symbolFile = '';
+      c.sourceProject.firmwarePath = '';
       final keys = c.watches.map((w) => w.symbol.key).toList();
       c.toggleWatchPlot(keys[1], false);
       c.isolateWatchPlots([keys[1]]);

@@ -1,5 +1,8 @@
 # Take A Look V2：Linux 安装与打包
 
+完整发布包包含独立更新程序和 `UPDATE-MANIFEST.json`，支持从左上角品牌入口检查、
+下载和重启安装 GitHub Release 更新，见 [应用内更新](app-updates.md)。
+
 发布文件为 `take-a-look-v2-<版本>-git.<提交>-linux-<架构>.tar.gz`，旁边的 `.sha256`
 文件用于校验。包内包含 Flutter Release 程序、字体、Python 解释器、pyOCD、
 ELF/DWARF 解析库、libusb 和安装脚本；使用者不需要安装 Flutter、Dart、Python 或 pip。
@@ -137,8 +140,8 @@ ARM/Cortex-M 目标使用 `arm-none-eabi-gdb` 或 `gdb-multiarch`，并在连接
 
 安装器先完成新包自检和临时目录复制，再替换程序；旧库会被清理，原有 `recordings/`
 及旧后端目录内的采样记录会被保留，用户配置目录中的布局不会被改动。
-源码工程的编译命令、解释器及固件路径保存在
-`${XDG_CONFIG_HOME:-$HOME/.config}/TakeALook/source-projects.json`，升级时同样保留。
+源码工程的编译命令、解释器及固件路径随 `.talproj` 工程保存。当前使用 v2 工程格式；
+旧版工程和旧的 `source-projects.json` 不再读取。
 同一版本重复运行安装器也可修复安装。升级过程中请勿运行程序或同时运行多个安装器。
 
 自定义安装位置可用 `./install.sh --prefix "$HOME/apps/tal"`；程序会放在该前缀的
@@ -167,15 +170,19 @@ sudo udevadm control --reload-rules
 
 ### 一键构建（WSL）
 
-Windows 主入口是 **`tool/build_release_wsl.ps1`**，在项目根目录的 PowerShell 中运行：
+推荐统一入口 **`tool/build.ps1 -Target linux`**，完整参数见 [桌面构建](build.md)。
+产物按版本和系统归类到 `build/releases/<版本>/linux/`。
+可用 `-Mode release/debug`，`-Target all` 同时生成 Windows 和 Linux 包；原来的 WSL 入口继续兼容。
+在项目根目录的 PowerShell 中运行：
 
 ```powershell
-.\tool\build_release_wsl.ps1
-.\tool\build_release_wsl.ps1 -Version 1.2.3  # 指定本次发布版本
-.\tool\build_release_wsl.ps1 -Version '1.2.3+4'  # 可附带构建号
-.\tool\build_release_wsl.ps1 -Check  # 只检查环境
-.\tool\build_release_wsl.ps1 -Distribution Ubuntu-24.04
-.\tool\build_release_wsl.ps1 -KeepBuild  # 成功后也保留中间目录
+.\tool\build.ps1 -Target linux
+.\tool\build.ps1 -Target linux -Version 1.2.3  # 指定本次发布版本
+.\tool\build.ps1 -Target linux -Version '1.2.3+4'  # 可附带构建号
+.\tool\build.ps1 -Target linux -Mode debug
+.\tool\build.ps1 -Target linux -Check  # 只检查环境
+.\tool\build.ps1 -Target linux -Distribution Ubuntu-24.04
+.\tool\build.ps1 -Target linux -KeepBuild  # 成功后也保留中间目录
 ```
 
 脚本自动定位工程，默认调用 WSL 的默认发行版；也可从其他工作目录使用脚本的完整
@@ -186,8 +193,8 @@ Windows 主入口是 **`tool/build_release_wsl.ps1`**，在项目根目录的 Po
 WSL 内直接运行：
 
 ```bash
-bash tool/build_release_wsl.sh
-bash tool/build_release_wsl.sh --version 1.2.3
+bash tool/build.sh --target linux
+bash tool/build.sh --target linux --version 1.2.3 --mode release
 ```
 
 `-Version` / `--version` 接受 `主版本.次版本.修订号`，可附加 `+构建号`。
@@ -231,7 +238,7 @@ FLUTTER=/path/to/linux/flutter/bin/flutter PYTHON=python3 \
 ```
 
 构建使用当前工作区（包括未提交修改），在 Linux 临时目录编译，不改写 Windows
-开发缓存。产物为 `build/releases/` 下的 `.tar.gz`、`.sha256`、`.BUILD-INFO.json`
+开发缓存。产物为 `build/releases/<版本>/linux/` 下的 `.tar.gz`、`.sha256`、`.BUILD-INFO.json`
 和 `INSTALL.md`；完整日志为 `build/logs/linux-release-<时间>-<进程号>.log`。
 任何检查或构建失败都会返回非零退出码，压缩包验证成功后才发布产物。
 PowerShell 加 `-KeepBuild`、Bash 加 `--keep-build` 可保留成功构建的中间目录；
@@ -269,7 +276,8 @@ wsl -d Ubuntu-24.04 -- env FLUTTER=/path/to/linux/flutter/bin/flutter bash /mnt/
 脚本在临时 Linux 目录复制源码，排除 Windows 的 `.venv`、runtime 和 Flutter 缓存，
 执行后端测试、Flutter analyze/test、PyInstaller 和 Flutter Release 构建，生成 tar.gz、
 SHA-256 和依赖清单，并对压缩包做解压迁移、安装、升级、卸载验证。
-输出默认在工程的 `build/releases/`；`TAL_OUTPUT_DIR` 可修改输出位置，
+输出默认在工程的 `build/releases/<版本>/linux/`；`TAL_OUTPUT_DIR` 可修改发行包根目录，
+其下仍按 `<版本>/linux/` 分类，
 `TAL_KEEP_BUILD=1` 可保留中间产物。构建失败时中间目录自动保留，方便排查。
 Flutter SDK 固定的依赖只在临时副本内解析，原工作区的 `pubspec.lock` 不被改写；
 发布包中的 `FLUTTER-PACKAGES.lock` 是实际构建使用的锁文件。

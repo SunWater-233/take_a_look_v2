@@ -55,6 +55,7 @@ class SamplePipeline:
         elif self._labels is not labels:
             self._labels = {**self._labels, **labels}
         received = False
+        latest_elapsed = None
         for acquired in frames:
             elapsed, values = acquired
             normalized = {key: json_value(value) for key, value in values.items() if key in labels}
@@ -64,8 +65,10 @@ class SamplePipeline:
             self._pending.append(SampleFrame(elapsed, normalized, timing))
             self._weight += 128 + len(normalized) * 96 + (256 if timing is not None else 0)
             received = True
+            latest_elapsed = elapsed if latest_elapsed is None else max(latest_elapsed, elapsed)
         if received:
             self._updated_at_ms = time.time_ns() // 1_000_000
+        return latest_elapsed
 
     def flush(self, *, wait=True, block=None):
         if self.recording.failure is not None:

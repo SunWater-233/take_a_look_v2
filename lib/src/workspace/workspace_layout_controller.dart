@@ -294,6 +294,7 @@ class WorkspaceLayoutController {
                     WorkspacePanelId.plot,
                     WorkspacePanelId.sourceDebug,
                     WorkspacePanelId.analysis,
+                    WorkspacePanelId.freeRtos,
                   ],
                   activePanel: WorkspacePanelId.plot,
                   rect: const Rect.fromLTWH(0, 0, .72, 1),
@@ -367,6 +368,7 @@ class WorkspaceLayoutController {
 
   WorkspaceLayoutSnapshot projectLayout({
     required double uiScale,
+    bool watchDetailsExpanded = true,
     required Map<WorkspacePanelId, DetachedPanelPlacement> detachedPlacements,
   }) {
     final groups = [
@@ -397,6 +399,7 @@ class WorkspaceLayoutController {
     return WorkspaceLayoutSnapshot(
       groups: groups,
       uiScale: uiScale,
+      watchDetailsExpanded: watchDetailsExpanded,
       version: workbenchLayout ? 4 : 1,
       legacyPanels: legacyPanels,
     );

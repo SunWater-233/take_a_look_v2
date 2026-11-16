@@ -20,6 +20,14 @@ add_executable(${BINARY_NAME} WIN32
 # that need different build settings.
 apply_standard_settings(${BINARY_NAME})
 
+option(TAL_WINDOW_RESIZE_DIAGNOSTICS "Measure window resizing and DwmFlush" OFF)
+if(TAL_WINDOW_RESIZE_DIAGNOSTICS)
+  target_sources(${BINARY_NAME} PRIVATE
+    "../../tool/benchmarks/windows_resize_trace.cpp")
+  target_include_directories(${BINARY_NAME} PRIVATE "../../tool/benchmarks")
+  target_compile_definitions(${BINARY_NAME} PRIVATE TAL_WINDOW_RESIZE_DIAGNOSTICS)
+endif()
+
 # Add preprocessor definitions for the build version.
 target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION=\"${FLUTTER_VERSION}\"")
 target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_MAJOR=${FLUTTER_VERSION_MAJOR}")

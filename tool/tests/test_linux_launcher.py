@@ -3,11 +3,12 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
 
-@unittest.skipUnless(os.name == "posix", "Linux launcher")
+@unittest.skipUnless(sys.platform == "linux", "Linux launcher")
 class LinuxLauncherTest(unittest.TestCase):
     def test_native_wayland_default_and_explicit_x11_override(self):
         launcher = Path(__file__).resolve().parents[2] / "packaging/linux/take-a-look"

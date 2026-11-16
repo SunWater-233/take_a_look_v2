@@ -138,6 +138,7 @@ class TakeALookController extends ChangeNotifier {
   String? get compactWatchSelection => _watchRegistry.selection;
   set compactWatchSelection(String? value) => _watchRegistry.selection = value;
   Set<String> get compactExpandedWatches => _watchRegistry.expanded;
+  final compactWatchDetailsExpanded = ValueNotifier<bool>(true);
   double? compactWatchSummaryFraction;
   double? compactWatchPinnedFraction;
   // Each browser section has its own display order, independent of acquisition.
@@ -628,6 +629,7 @@ class TakeALookController extends ChangeNotifier {
     _samplingClockTimer?.cancel();
     _clearWatchDeletionHistory();
     _uiScale.dispose();
+    compactWatchDetailsExpanded.dispose();
     signals.dispose();
     super.dispose();
   }

@@ -417,6 +417,9 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     _sourceAdditionRevision =
         widget.controller.sourceWorkspace.additionRevision;
     widget.controller.sourceWorkspaceChanges.addListener(_handleSourceAddition);
+    widget.controller.compactWatchDetailsExpanded.addListener(
+      _scheduleLayoutSave,
+    );
     windowSubscription = detachedWindows.changes.listen(
       (_) => _syncExternalWindows(),
     );
@@ -447,6 +450,9 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     widget.controller.sourceWorkspaceChanges.removeListener(
       _handleSourceAddition,
     );
+    widget.controller.compactWatchDetailsExpanded.removeListener(
+      _scheduleLayoutSave,
+    );
     windowSubscription?.cancel();
     detachedTabDragSubscription?.cancel();
     _tabDrag.dispose();
@@ -467,6 +473,12 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
       );
       widget.controller.sourceWorkspaceChanges.addListener(
         _handleSourceAddition,
+      );
+      oldWidget.controller.compactWatchDetailsExpanded.removeListener(
+        _scheduleLayoutSave,
+      );
+      widget.controller.compactWatchDetailsExpanded.addListener(
+        _scheduleLayoutSave,
       );
       _sourceAdditionRevision =
           widget.controller.sourceWorkspace.additionRevision;
@@ -1012,6 +1024,8 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
       WorkspaceLayoutSnapshot(
         groups: _session.groups,
         uiScale: widget.controller.uiScale,
+        watchDetailsExpanded:
+            widget.controller.compactWatchDetailsExpanded.value,
         version: widget.workbenchLayout ? 4 : 1,
         legacyPanels: _layout.legacyPanels,
       ),
@@ -1020,6 +1034,7 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
 
   WorkspaceLayoutSnapshot projectLayout() => _layout.projectLayout(
     uiScale: widget.controller.uiScale,
+    watchDetailsExpanded: widget.controller.compactWatchDetailsExpanded.value,
     detachedPlacements: _detachedPlacements,
   );
 
@@ -1086,6 +1101,8 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
         WorkspaceLayoutSnapshot(
           groups: _session.groups,
           uiScale: widget.controller.uiScale,
+          watchDetailsExpanded:
+              widget.controller.compactWatchDetailsExpanded.value,
           version: widget.workbenchLayout ? 4 : 1,
           legacyPanels: _layout.legacyPanels,
         ),
@@ -1127,6 +1144,8 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     );
     widget.onPanelVisibilityChanged?.call();
     widget.controller.setUiScale(snapshot.uiScale);
+    widget.controller.compactWatchDetailsExpanded.value =
+        snapshot.watchDetailsExpanded;
   }
 
   void resetLayout() {

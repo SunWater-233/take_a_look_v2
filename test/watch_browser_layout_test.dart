@@ -99,10 +99,19 @@ void main() {
         ])
           tester.widget<ListView>(find.byKey(ValueKey(key))).controller!,
       ];
+      final headers = [
+        for (final section in ['pinned', 'capture', 'members'])
+          find.byKey(ValueKey('watch-$section-section')),
+      ];
+      final headerRects = headers.map(tester.getRect).toList();
       for (final (i, scroll) in lists.indexed) {
         scroll.jumpTo(40);
         await tester.pump();
         expect(scroll.offset, 40);
+        for (final (index, header) in headers.indexed) {
+          expect(tester.getRect(header), headerRects[index]);
+          expect(header.hitTestable(), findsOneWidget);
+        }
         for (var j = i + 1; j < lists.length; j++) {
           expect(lists[j].offset, 0);
         }
@@ -116,6 +125,77 @@ void main() {
       }
       await tester.pumpWidget(const SizedBox.shrink());
     });
+
+    testWidgets(
+      '$mode collapsed panes occupy one header and restore their sizes',
+      (tester) async {
+        final c = structureFixture();
+        addTearDown(c.dispose);
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        for (var i = 0; i < 12; i++) {
+          c.setWatchPinned('motor.samples[$i]', true);
+          c.setWatchReadMode('motor.samples[$i]', WatchReadMode.capture);
+        }
+        c.compactWatchPinnedFraction = .2;
+        c.compactWatchSummaryFraction = .55;
+        await mount(tester, c, width: 1040, inputMode: mode);
+        final sections = ['pinned', 'capture', 'members'];
+        final expandedHeights = [
+          for (final name in sections) tester.getSize(pane(name)).height,
+        ];
+        final headerHeight = mode == TalInputMode.touch ? 48.0 : 30.0;
+        for (final name in sections) {
+          await tester.tap(find.byKey(ValueKey('watch-$name-section')));
+          await tester.pump();
+          expect(tester.getSize(pane(name)).height, closeTo(headerHeight, .01));
+        }
+        for (final name in sections) {
+          expect(tester.getSize(pane(name)).height, closeTo(headerHeight, .01));
+          expect(
+            find.byKey(ValueKey('watch-$name-section')).hitTestable(),
+            findsOneWidget,
+          );
+        }
+        expect(c.compactWatchPinnedFraction, .2);
+        expect(c.compactWatchSummaryFraction, .55);
+        for (final height in [280.0, 80.0, 850.0]) {
+          await mount(tester, c, width: 1040, height: height, inputMode: mode);
+          expect(tester.takeException(), isNull);
+        }
+        for (final name in sections) {
+          await tester.tap(find.byKey(ValueKey('watch-$name-section')));
+          await tester.pump();
+        }
+        for (final (index, name) in sections.indexed) {
+          expect(
+            tester.getSize(pane(name)).height,
+            closeTo(expandedHeights[index], .01),
+          );
+        }
+        await tester.drag(
+          find.byKey(const ValueKey('watch-pinned-capture-resize')),
+          const Offset(0, 2000),
+          kind: kind,
+        );
+        await tester.pump();
+        expect(
+          tester.getSize(pane('capture')).height,
+          closeTo(headerHeight, .01),
+        );
+        await tester.drag(
+          find.byKey(const ValueKey('watch-pinned-capture-resize')),
+          const Offset(0, -2000),
+          kind: kind,
+        );
+        await tester.pump();
+        expect(
+          tester.getSize(pane('pinned')).height,
+          closeTo(headerHeight, .01),
+        );
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
 
     testWidgets('$mode each section reorders without changing other sections', (
       tester,

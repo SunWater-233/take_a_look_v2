@@ -10,13 +10,14 @@ Future<void> showWatchWidget(WidgetTester tester, Finder finder) async {
     await tester.pump();
     while (finder.evaluate().isEmpty &&
         scroll.offset < scroll.position.maxScrollExtent) {
+      final step = (scroll.position.viewportDimension / 2).clamp(1.0, 80.0);
       scroll.jumpTo(
-        (scroll.offset + 80).clamp(0, scroll.position.maxScrollExtent),
+        (scroll.offset + step).clamp(0, scroll.position.maxScrollExtent),
       );
       await tester.pump();
     }
   }
-  await tester.ensureVisible(finder);
+  await Scrollable.ensureVisible(tester.element(finder), alignment: .5);
   await tester.pump();
 }
 

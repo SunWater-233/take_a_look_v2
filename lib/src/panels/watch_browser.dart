@@ -78,6 +78,81 @@ class _WatchRowDragRecognizer extends ImmediateMultiDragGestureRecognizer {
   }
 }
 
+class _WatchScrollHints extends StatefulWidget {
+  const _WatchScrollHints({required this.section, required this.child});
+
+  final _WatchBrowserSection section;
+  final Widget child;
+
+  @override
+  State<_WatchScrollHints> createState() => _WatchScrollHintsState();
+}
+
+class _WatchScrollHintsState extends State<_WatchScrollHints> {
+  bool _above = false;
+  bool _below = false;
+
+  void _update(ScrollMetrics metrics) {
+    final above = metrics.viewportDimension > 0 && metrics.extentBefore > .5;
+    final below = metrics.viewportDimension > 0 && metrics.extentAfter > .5;
+    if (_above == above && _below == below) return;
+    setState(() {
+      _above = above;
+      _below = below;
+    });
+  }
+
+  @override
+  Widget build(
+    BuildContext context,
+  ) => NotificationListener<ScrollMetricsNotification>(
+    onNotification: (notification) {
+      if (notification.depth == 0) _update(notification.metrics);
+      return false;
+    },
+    child: NotificationListener<ScrollNotification>(
+      onNotification: (notification) {
+        if (notification.depth == 0) _update(notification.metrics);
+        return false;
+      },
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          const edge = TalColors.surface;
+          final clear = edge.withValues(alpha: 0);
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              widget.child,
+              for (final top in [if (_above) true, if (_below) false])
+                Positioned(
+                  key: ValueKey(
+                    'watch-${widget.section.name}-overflow-${top ? 'top' : 'bottom'}',
+                  ),
+                  left: 0,
+                  right: 0,
+                  top: top ? 0 : null,
+                  bottom: top ? null : 0,
+                  height: math.min(24, constraints.maxHeight * .3),
+                  child: IgnorePointer(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: top ? [edge, clear] : [clear, edge],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          );
+        },
+      ),
+    ),
+  );
+}
+
 class CompactWatchPanel extends StatefulWidget {
   const CompactWatchPanel({
     super.key,
@@ -1014,10 +1089,6 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
     IconData? icon,
     int? count,
     String? hint,
-    EdgeInsets padding = const EdgeInsets.symmetric(
-      horizontal: 12,
-      vertical: 4,
-    ),
   }) {
     final expanded = !_collapsedSections.contains(section);
     return Tooltip(
@@ -1034,7 +1105,7 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
             minHeight: TalUiTheme.of(context).targetExtent(30),
           ),
           child: Padding(
-            padding: padding,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
             child: Row(
               children: [
                 Icon(
@@ -1108,6 +1179,34 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
     ),
   );
 
+  Widget _sectionPane({
+    required _WatchBrowserSection section,
+    required Widget header,
+    required Widget list,
+  }) => LayoutBuilder(
+    builder: (context, constraints) {
+      final headerHeight = TalUiTheme.of(context).targetExtent(30);
+      return Column(
+        children: [
+          SizedBox(
+            height: math.min(headerHeight, constraints.maxHeight),
+            child: ClipRect(
+              child: OverflowBox(
+                alignment: Alignment.topCenter,
+                minHeight: headerHeight,
+                maxHeight: headerHeight,
+                child: header,
+              ),
+            ),
+          ),
+          Expanded(
+            child: _WatchScrollHints(section: section, child: list),
+          ),
+        ],
+      );
+    },
+  );
+
   Widget _splitLists({
     required Widget summary,
     required Widget members,
@@ -1126,12 +1225,27 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
           ? 0.0
           : math.min(handleHeight, available);
       final minHeight = math.min(
+        ui.targetExtent(30),
+        math.max(0.0, available - innerHandleHeight) / (pinned == null ? 2 : 3),
+      );
+      final preferredMinHeight = math.min(
         ui.targetExtent(30) + ui.targetExtent(32),
         math.max(0.0, available - innerHandleHeight) / (pinned == null ? 2 : 3),
+      );
+      final pinnedExpanded = !_collapsedSections.contains(
+        _WatchBrowserSection.pinned,
+      );
+      final captureExpanded = !_collapsedSections.contains(
+        _WatchBrowserSection.capture,
+      );
+      final membersExpanded = !_collapsedSections.contains(
+        _WatchBrowserSection.members,
       );
       final maxHeight = available - minHeight;
       final pinnedHeight = pinned == null
           ? 0.0
+          : !pinnedExpanded
+          ? minHeight
           : (controller.compactWatchPinnedFraction == null
                     ? initialPinnedHeight
                     : available * controller.compactWatchPinnedFraction!)
@@ -1139,18 +1253,70 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
                   minHeight,
                   math.max(
                     minHeight,
-                    maxHeight - innerHandleHeight - minHeight,
+                    controller.compactWatchPinnedFraction == null
+                        ? available - innerHandleHeight - preferredMinHeight * 2
+                        : maxHeight - innerHandleHeight - minHeight,
                   ),
                 )
                 .toDouble();
       final minSummaryHeight = pinned == null
           ? minHeight
           : math.min(maxHeight, pinnedHeight + innerHandleHeight + minHeight);
-      final summaryHeight =
+      final preferredMinSummaryHeight = pinned == null
+          ? preferredMinHeight
+          : math.min(
+              maxHeight,
+              pinnedHeight + innerHandleHeight + preferredMinHeight,
+            );
+      final preferredSummaryHeight =
           (controller.compactWatchSummaryFraction == null
-                  ? math.min(initialSummaryHeight, available * .45)
-                  : available * controller.compactWatchSummaryFraction!)
-              .clamp(minSummaryHeight, maxHeight);
+          ? math
+                .min(initialSummaryHeight, available * .45)
+                .clamp(
+                  preferredMinSummaryHeight,
+                  math.max(
+                    preferredMinSummaryHeight,
+                    available - preferredMinHeight,
+                  ),
+                )
+          : (available * controller.compactWatchSummaryFraction!).clamp(
+              minSummaryHeight,
+              maxHeight,
+            ));
+      final heights = <_WatchBrowserSection, double>{
+        if (pinned != null) _WatchBrowserSection.pinned: pinnedHeight,
+        _WatchBrowserSection.capture:
+            preferredSummaryHeight - pinnedHeight - innerHandleHeight,
+        _WatchBrowserSection.members: available - preferredSummaryHeight,
+      };
+      // Collapsed panes retain only their header. Give their space to the
+      // nearest expanded pane without changing the saved expanded sizes.
+      for (final section in [
+        _WatchBrowserSection.capture,
+        _WatchBrowserSection.members,
+      ]) {
+        if (!_collapsedSections.contains(section)) continue;
+        final released = heights[section]! - minHeight;
+        heights[section] = minHeight;
+        final recipients = section == _WatchBrowserSection.capture
+            ? [_WatchBrowserSection.members, _WatchBrowserSection.pinned]
+            : [_WatchBrowserSection.capture, _WatchBrowserSection.pinned];
+        final recipient = recipients
+            .where(
+              (candidate) =>
+                  heights.containsKey(candidate) &&
+                  !_collapsedSections.contains(candidate),
+            )
+            .firstOrNull;
+        if (recipient != null) {
+          heights[recipient] = heights[recipient]! + released;
+        }
+      }
+      final visiblePinnedHeight = heights[_WatchBrowserSection.pinned] ?? 0;
+      final summaryHeight =
+          visiblePinnedHeight +
+          innerHandleHeight +
+          heights[_WatchBrowserSection.capture]!;
       return Column(
         children: [
           SizedBox(
@@ -1162,7 +1328,7 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
                     children: [
                       SizedBox(
                         key: const ValueKey('watch-pinned-pane'),
-                        height: pinnedHeight,
+                        height: visiblePinnedHeight,
                         child: pinned,
                       ),
                       _sectionResizeHandle(
@@ -1170,7 +1336,11 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
                         height: innerHandleHeight,
                         tooltip: '上下拖动调整已固定和正在采集区域高度',
                         onUpdate: (delta) {
-                          if (available <= innerHandleHeight) return;
+                          if (available <= innerHandleHeight ||
+                              !pinnedExpanded ||
+                              !captureExpanded) {
+                            return;
+                          }
                           setState(() {
                             final maximum = math.max(
                               minHeight,
@@ -1201,9 +1371,13 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
           _sectionResizeHandle(
             key: const ValueKey('watch-sections-resize'),
             height: handleHeight,
-            tooltip: '上下拖动调整正在采集和成员区域高度',
+            tooltip: '上下拖动调整正在采集和正在监视区域高度',
             onUpdate: (delta) {
-              if (available <= innerHandleHeight) return;
+              if (available <= innerHandleHeight ||
+                  !captureExpanded ||
+                  !membersExpanded) {
+                return;
+              }
               setState(() {
                 final currentHeight =
                     (available *
@@ -1216,7 +1390,15 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
               });
             },
           ),
-          Expanded(key: const ValueKey('watch-members-pane'), child: members),
+          SizedBox(
+            key: const ValueKey('watch-members-pane'),
+            height: heights[_WatchBrowserSection.members],
+            child: members,
+          ),
+          if (!captureExpanded &&
+              !membersExpanded &&
+              (pinned == null || !pinnedExpanded))
+            const Spacer(),
         ],
       );
     },
@@ -1262,6 +1444,7 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
       controller.watchChanges,
       controller.samplingChanges,
       controller.connectionChanges,
+      controller.compactWatchDetailsExpanded,
     ]),
     builder: (_, _) => LayoutBuilder(
       builder: (context, constraints) {
@@ -1369,18 +1552,21 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
               if (row.node != null) (row.key, _WatchBrowserSection.members),
         ];
         final wide = constraints.maxWidth >= 760;
+        final detailsExpanded = controller.compactWatchDetailsExpanded.value;
         final detailsVisible = wide || constraints.maxHeight > 260;
         final visible = <String>{
           if (membersExpanded)
             for (final row in rows)
               if (row.node != null && !row.expandable) row.key,
           if (detailsVisible &&
+              detailsExpanded &&
               selected != null &&
               allNodes[selected.symbol.key]!.children.isEmpty)
             selected.symbol.key,
         };
-        final listWidth = constraints.maxWidth - (wide ? 310 : 0);
         final ui = TalUiTheme.of(context);
+        final detailsWidth = detailsExpanded ? 310.0 : ui.iconButtonSize;
+        final listWidth = constraints.maxWidth - (wide ? detailsWidth : 0);
         final showPin = !ui.touchOptimized || listWidth >= 280;
         final maxDepth = rows.fold<int>(
           0,
@@ -1412,181 +1598,180 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
             child: _splitLists(
               initialSummaryHeight:
                   ui.targetExtent(30) +
-                  (captureExpanded
-                      ? (captured.isEmpty
-                            ? 28
-                            : math.min(captured.length, 3) *
-                                  ui.targetExtent(32))
-                      : 0) +
+                  (captured.isEmpty
+                      ? 28
+                      : math.min(captured.length, 3) * ui.targetExtent(32)) +
                   (pinned.isEmpty
                       ? 0
                       : ui.targetExtent(30) +
-                            (pinnedExpanded
-                                ? pinned.length * ui.targetExtent(32)
-                                : 0) +
+                            pinned.length * ui.targetExtent(32) +
                             12),
-              summary: ListView(
-                controller: _summaryScroll,
-                key: const ValueKey('watch-capture-list'),
-                primary: false,
-                children: [
-                  _sectionHeader(
-                    _WatchBrowserSection.capture,
-                    '正在采集',
-                    icon: Icons.sensors,
-                    count: captured.length,
-                  ),
-                  if (captureExpanded) ...[
-                    if (captured.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.fromLTRB(12, 4, 12, 8),
-                        child: Text('暂无正在采集的变量', style: workbenchMuted),
-                      )
-                    else
-                      for (final w in captured)
-                        _row(
-                          _WatchBrowserEntry(
-                            key: w.symbol.key,
-                            label: w.symbol.name,
-                            depth: 0,
-                            node: allNodes[w.symbol.key],
-                            section: _WatchBrowserSection.capture,
+              summary: _sectionPane(
+                section: _WatchBrowserSection.capture,
+                header: _sectionHeader(
+                  _WatchBrowserSection.capture,
+                  '正在采集',
+                  icon: Icons.sensors,
+                  count: captured.length,
+                ),
+                list: ListView(
+                  controller: _summaryScroll,
+                  key: const ValueKey('watch-capture-list'),
+                  primary: false,
+                  children: [
+                    if (captureExpanded) ...[
+                      if (captured.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.fromLTRB(12, 4, 12, 8),
+                          child: Text('暂无正在采集的变量', style: workbenchMuted),
+                        )
+                      else
+                        for (final w in captured)
+                          _row(
+                            _WatchBrowserEntry(
+                              key: w.symbol.key,
+                              label: w.symbol.name,
+                              depth: 0,
+                              node: allNodes[w.symbol.key],
+                              section: _WatchBrowserSection.capture,
+                            ),
+                            wide,
+                            valueWidth,
                           ),
-                          wide,
-                          valueWidth,
-                        ),
+                    ],
                   ],
-                ],
+                ),
               ),
               initialPinnedHeight:
-                  ui.targetExtent(30) +
-                  (pinnedExpanded ? pinned.length * ui.targetExtent(32) : 0),
+                  ui.targetExtent(30) + pinned.length * ui.targetExtent(32),
               pinned: pinned.isEmpty
                   ? null
-                  : ListView(
-                      controller: _pinnedScroll,
-                      key: const ValueKey('watch-pinned-list'),
-                      primary: false,
-                      children: [
-                        _sectionHeader(
-                          _WatchBrowserSection.pinned,
-                          '已固定',
-                          icon: Icons.push_pin_outlined,
-                          hint: '折叠后仍刷新',
-                        ),
-                        if (pinnedExpanded)
-                          for (final w in pinned)
-                            _row(
-                              _WatchBrowserEntry(
-                                key: w.symbol.key,
-                                label: w.symbol.name,
-                                depth: 0,
-                                node: allNodes[w.symbol.key],
-                                section: _WatchBrowserSection.pinned,
-                              ),
-                              wide,
-                              valueWidth,
-                            ),
-                      ],
-                    ),
-              members: ListView(
-                controller: _scroll,
-                key: const ValueKey('compact-watch-list'),
-                primary: false,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 2, 5, 2),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: _sectionHeader(
-                            _WatchBrowserSection.members,
-                            _search.text.trim().isEmpty ? '成员' : '搜索结果',
-                            padding: EdgeInsets.zero,
-                          ),
-                        ),
-                        if (membersExpanded) ...[
-                          Tooltip(
-                            message: '左右拖动调整当前值列宽',
-                            child: MouseRegion(
-                              cursor: SystemMouseCursors.resizeColumn,
-                              child: GestureDetector(
-                                key: const ValueKey(
-                                  'watch-value-column-resize',
+                  : _sectionPane(
+                      section: _WatchBrowserSection.pinned,
+                      header: _sectionHeader(
+                        _WatchBrowserSection.pinned,
+                        '已固定',
+                        icon: Icons.push_pin_outlined,
+                        hint: '折叠后仍刷新',
+                      ),
+                      list: ListView(
+                        controller: _pinnedScroll,
+                        key: const ValueKey('watch-pinned-list'),
+                        primary: false,
+                        children: [
+                          if (pinnedExpanded)
+                            for (final w in pinned)
+                              _row(
+                                _WatchBrowserEntry(
+                                  key: w.symbol.key,
+                                  label: w.symbol.name,
+                                  depth: 0,
+                                  node: allNodes[w.symbol.key],
+                                  section: _WatchBrowserSection.pinned,
                                 ),
-                                behavior: HitTestBehavior.opaque,
-                                onHorizontalDragUpdate: (details) =>
-                                    setState(() {
-                                      _valueColumnWidth =
-                                          (valueWidth - details.delta.dx).clamp(
-                                            64.0,
-                                            maxValueWidth,
-                                          );
-                                    }),
-                                child: const SizedBox(
-                                  width: 12,
-                                  height: 24,
-                                  child: Center(
-                                    child: SizedBox(
-                                      width: 1,
-                                      height: 14,
-                                      child: ColoredBox(
-                                        color: TalColors.border,
+                                wide,
+                                valueWidth,
+                              ),
+                        ],
+                      ),
+                    ),
+              members: _sectionPane(
+                section: _WatchBrowserSection.members,
+                header: _sectionHeader(
+                  _WatchBrowserSection.members,
+                  _search.text.trim().isEmpty ? '正在监视' : '搜索结果',
+                  icon: Icons.monitor_heart_outlined,
+                  count: rows.where((row) => row.depth == 0).length,
+                ),
+                list: ListView(
+                  controller: _scroll,
+                  key: const ValueKey('compact-watch-list'),
+                  primary: false,
+                  children: [
+                    if (membersExpanded) ...[
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 2, 5, 2),
+                        child: Row(
+                          children: [
+                            const Spacer(),
+                            Tooltip(
+                              message: '左右拖动调整当前值列宽',
+                              child: MouseRegion(
+                                cursor: SystemMouseCursors.resizeColumn,
+                                child: GestureDetector(
+                                  key: const ValueKey(
+                                    'watch-value-column-resize',
+                                  ),
+                                  behavior: HitTestBehavior.opaque,
+                                  onHorizontalDragUpdate: (details) =>
+                                      setState(() {
+                                        _valueColumnWidth =
+                                            (valueWidth - details.delta.dx)
+                                                .clamp(64.0, maxValueWidth);
+                                      }),
+                                  child: const SizedBox(
+                                    width: 12,
+                                    height: 24,
+                                    child: Center(
+                                      child: SizedBox(
+                                        width: 1,
+                                        height: 14,
+                                        child: ColoredBox(
+                                          color: TalColors.border,
+                                        ),
                                       ),
                                     ),
                                   ),
                                 ),
                               ),
                             ),
-                          ),
-                          SizedBox(
-                            width: valueWidth,
-                            child: const Text(
-                              '当前值',
-                              style: workbenchMuted,
-                              textAlign: TextAlign.right,
-                            ),
-                          ),
-                          if (showPin)
-                            SizedBox(width: ui.compactIconButtonSize),
-                          _actionHeader(ui, '采集'),
-                          _actionHeader(ui, '绘制'),
-                        ],
-                      ],
-                    ),
-                  ),
-                  if (membersExpanded) ...[
-                    if (rows.isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.all(20),
-                        child: Column(
-                          children: [
-                            Text(
-                              controller.watches.isEmpty
-                                  ? '从符号变量加入变量'
-                                  : '没有匹配的成员',
-                              style: workbenchMuted,
-                            ),
-                            if (_search.text.isNotEmpty)
-                              TalButton(
-                                onPressed: () => setState(() {
-                                  _search.clear();
-                                  controller.watchSearchQuery = '';
-                                }),
-                                child: const Text('清空搜索'),
+                            SizedBox(
+                              width: valueWidth,
+                              child: const Text(
+                                '当前值',
+                                style: workbenchMuted,
+                                textAlign: TextAlign.right,
                               ),
-                            if (controller.watches.isEmpty &&
-                                widget.onShowSymbols != null)
-                              TalButton(
-                                onPressed: widget.onShowSymbols,
-                                child: const Text('打开符号变量'),
-                              ),
+                            ),
+                            if (showPin)
+                              SizedBox(width: ui.compactIconButtonSize),
+                            _actionHeader(ui, '采集'),
+                            _actionHeader(ui, '绘制'),
                           ],
                         ),
                       ),
-                    for (final row in rows) _row(row, wide, valueWidth),
+                      if (rows.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.all(20),
+                          child: Column(
+                            children: [
+                              Text(
+                                controller.watches.isEmpty
+                                    ? '从符号变量加入变量'
+                                    : '没有匹配的成员',
+                                style: workbenchMuted,
+                              ),
+                              if (_search.text.isNotEmpty)
+                                TalButton(
+                                  onPressed: () => setState(() {
+                                    _search.clear();
+                                    controller.watchSearchQuery = '';
+                                  }),
+                                  child: const Text('清空搜索'),
+                                ),
+                              if (controller.watches.isEmpty &&
+                                  widget.onShowSymbols != null)
+                                TalButton(
+                                  onPressed: widget.onShowSymbols,
+                                  child: const Text('打开符号变量'),
+                                ),
+                            ],
+                          ),
+                        ),
+                      for (final row in rows) _row(row, wide, valueWidth),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
           ),
@@ -1598,6 +1783,11 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
                 controller: controller,
                 watch: selected,
                 node: allNodes[selected.symbol.key]!,
+                expanded: detailsExpanded,
+                compactHeader: wide && !detailsExpanded,
+                onToggleExpanded: () =>
+                    controller.compactWatchDetailsExpanded.value =
+                        !detailsExpanded,
               );
         return _WatchMonitorScope(
           controller: controller,
@@ -1647,10 +1837,10 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
                             children: [
                               Expanded(child: list),
                               SizedBox(
-                                width: 310,
+                                width: detailsWidth,
                                 child: ColoredBox(
                                   color: TalColors.background,
-                                  child: SingleChildScrollView(child: details),
+                                  child: details,
                                 ),
                               ),
                             ],
@@ -1667,7 +1857,7 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
                                       constraints.maxHeight * .46,
                                     ),
                                   ),
-                                  child: SingleChildScrollView(child: details),
+                                  child: details,
                                 ),
                             ],
                           ),

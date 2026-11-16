@@ -200,6 +200,98 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets(
+    'watch details button stays collapsed across selection and restart',
+    (tester) async {
+      void addWatches() {
+        controller.loadDemoSymbols();
+        controller.selectSymbols(
+          demoSymbols.take(2).map((symbol) => symbol.key),
+        );
+        controller.addSelectedToWatch();
+      }
+
+      addWatches();
+      await pumpWorkbench(tester);
+      await tester.runAsync(() async {});
+      await tester.pumpAndSettle();
+      final toggle = find.byKey(const ValueKey('watch-member-details-toggle'));
+      final details = find.byKey(const ValueKey('watch-member-details'));
+      final first = controller.watches.first.symbol;
+      final second = controller.watches[1].symbol;
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(ValueKey('compact-watch-${first.key}')),
+          matching: find.text(first.name),
+        ),
+      );
+      await tester.pump();
+      final expandedHeight = tester.getSize(details).height;
+
+      await tester.tap(
+        find.descendant(of: details, matching: find.text(first.name)),
+      );
+      await tester.pump();
+      expect(controller.compactWatchDetailsExpanded.value, isTrue);
+      await tester.tap(toggle);
+      await tester.pump();
+      expect(controller.compactWatchDetailsExpanded.value, isFalse);
+      expect(tester.getSize(details).height, lessThan(expandedHeight));
+      expect(
+        find.byKey(ValueKey('watch-detail-value-${first.key}')),
+        findsNothing,
+      );
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(ValueKey('compact-watch-${second.key}')),
+          matching: find.text(second.name),
+        ),
+      );
+      await tester.pump();
+      expect(controller.compactWatchDetailsExpanded.value, isFalse);
+      expect(
+        find.descendant(of: details, matching: find.text(second.name)),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(ValueKey('watch-detail-value-${second.key}')),
+        findsNothing,
+      );
+      await tester.runAsync(workspace(tester).saveLayout);
+      expect(
+        (await tester.runAsync(
+          () => WorkspaceLayoutRepository(layoutFile).load(),
+        ))!.watchDetailsExpanded,
+        isFalse,
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await windowSync.dispose();
+      controller.dispose();
+      await tester.runAsync(() async {
+        controller = TakeALookController();
+        windowSync = MainWindowSync(controller);
+      });
+      addWatches();
+      await pumpWorkbench(tester);
+      await waitForLog(tester, '已恢复保存的工作区布局');
+      expect(controller.compactWatchDetailsExpanded.value, isFalse);
+      expect(
+        find.byKey(ValueKey('watch-detail-value-${first.key}')),
+        findsNothing,
+      );
+      await tester.tap(toggle);
+      await tester.pump();
+      expect(controller.compactWatchDetailsExpanded.value, isTrue);
+      expect(
+        find.byKey(ValueKey('watch-detail-value-${first.key}')),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   testWidgets('missing saved layout quietly keeps defaults on startup', (
     tester,
   ) async {

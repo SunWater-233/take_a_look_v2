@@ -129,10 +129,11 @@ void main() {
       final lower = find.byKey(const ValueKey('watch-members-pane'));
       await tester.drag(handle, const Offset(0, 2000));
       await tester.pump();
-      expect(tester.getSize(lower).height, greaterThanOrEqualTo(62));
+      final headerHeight = mode == TalInputMode.touch ? 48.0 : 30.0;
+      expect(tester.getSize(lower).height, closeTo(headerHeight, .01));
       await tester.drag(handle, const Offset(0, -2000));
       await tester.pump();
-      expect(tester.getSize(upper).height, greaterThanOrEqualTo(62));
+      expect(tester.getSize(upper).height, closeTo(headerHeight, .01));
       expect(tester.getSize(lower).height, greaterThan(0));
       c.compactWatchSummaryFraction = .4;
       for (final height in [600.0, 280.0, 160.0, 80.0, 850.0]) {

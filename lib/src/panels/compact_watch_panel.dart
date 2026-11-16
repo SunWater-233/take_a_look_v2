@@ -38,10 +38,16 @@ class _WatchMemberDetails extends StatelessWidget {
     required this.controller,
     required this.watch,
     required this.node,
+    required this.expanded,
+    required this.onToggleExpanded,
+    this.compactHeader = false,
   });
   final TakeALookController controller;
   final WatchItem watch;
   final WatchTreeNode node;
+  final bool expanded;
+  final VoidCallback onToggleExpanded;
+  final bool compactHeader;
   String get _key => watch.symbol.key;
 
   @override
@@ -55,96 +61,150 @@ class _WatchMemberDetails extends StatelessWidget {
         color: TalColors.background,
         border: Border(top: BorderSide(color: TalColors.border)),
       ),
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(watch.symbol.name, style: talMono, softWrap: true),
-          const SizedBox(height: 3),
-          Text(
-            '${watch.symbol.type}  ${watch.symbol.addressLabel}${watch.symbol.writable ? '' : '  只读'}',
-            style: talMuted.copyWith(fontSize: 11),
-          ),
-          if (aggregate) ...[
-            const SizedBox(height: 12),
-            Text('${node.children.length} 个直接成员', style: talMuted),
-            const SizedBox(height: 4),
-            const Text('展开后刷新可见成员。', style: talMuted),
-          ] else ...[
-            const SizedBox(height: 6),
-            AnimatedBuilder(
-              animation: controller.telemetryChanges,
-              builder: (_, _) => Text(
-                watch.updatedAtMs == null ? '—' : watch.valueLabel,
-                key: ValueKey('watch-detail-value-$_key'),
-                style: talMono.copyWith(fontSize: 22),
-              ),
+          Padding(
+            padding: EdgeInsets.only(
+              left: compactHeader ? 0 : 12,
+              right: compactHeader ? 0 : 4,
             ),
-            const SizedBox(height: 7),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              crossAxisAlignment: WrapCrossAlignment.center,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                TalButton.icon(
-                  onPressed: () =>
-                      controller.setWatchPinned(_key, !watch.pinned),
-                  icon: Icon(
-                    watch.pinned ? Icons.push_pin : Icons.push_pin_outlined,
-                    size: 14,
-                  ),
-                  label: Text(watch.pinned ? '已固定' : '固定成员'),
-                ),
-                TalButton.icon(
-                  key: ValueKey('watch-detail-capture-$_key'),
-                  onPressed: () {
-                    controller.setWatchReadMode(
-                      _key,
-                      watch.samplingEnabled
-                          ? WatchReadMode.monitor
-                          : WatchReadMode.capture,
-                    );
-                  },
-                  icon: const Icon(Icons.sensors, size: 15),
-                  label: Text(watch.samplingEnabled ? '移出采集' : '加入采集'),
-                ),
-                if (watch.samplingEnabled)
-                  TalButton.icon(
-                    key: ValueKey('watch-detail-plot-$_key'),
-                    onPressed: () =>
-                        controller.toggleWatchPlot(_key, !watch.plotted),
-                    icon: Icon(
-                      watch.plotted
-                          ? Icons.visibility_outlined
-                          : Icons.visibility_off_outlined,
-                      size: 15,
+                if (!compactHeader)
+                  Expanded(
+                    child: Text(
+                      watch.symbol.name,
+                      style: talMono,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    label: Text(watch.plotted ? '隐藏曲线' : '显示曲线'),
                   ),
-                SizedBox(
-                  width: ui.touchOptimized ? 112 : 96,
-                  child: TalDropdown<WatchReadMode>(
-                    key: ValueKey('watch-read-mode-$_key'),
-                    subtle: true,
-                    value: watch.readMode,
-                    values: WatchReadMode.values,
-                    label: (mode) => mode.label,
-                    onChanged: (mode) =>
-                        controller.setWatchReadMode(_key, mode),
+                Semantics(
+                  expanded: expanded,
+                  child: TalIconButton(
+                    key: const ValueKey('watch-member-details-toggle'),
+                    tooltip:
+                        '${expanded ? '收起' : '展开'}变量详情：${watch.symbol.name}',
+                    onPressed: onToggleExpanded,
+                    icon: Icon(
+                      expanded ? Icons.expand_more : Icons.expand_less,
+                      size: 18,
+                      color: TalColors.muted,
+                    ),
                   ),
                 ),
-                if (watch.readMode == WatchReadMode.manual)
-                  TalButton(
-                    onPressed:
-                        controller.connectionStatus ==
-                            ConnectionStatus.connected
-                        ? () => controller.readWatch(_key)
-                        : null,
-                    child: const Text('立即读取'),
-                  ),
               ],
             ),
-          ],
+          ),
+          if (expanded)
+            Flexible(
+              fit: FlexFit.loose,
+              child: SingleChildScrollView(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        '${watch.symbol.type}  ${watch.symbol.addressLabel}${watch.symbol.writable ? '' : '  只读'}',
+                        style: talMuted.copyWith(fontSize: 11),
+                      ),
+                      if (aggregate) ...[
+                        const SizedBox(height: 12),
+                        Text('${node.children.length} 个直接成员', style: talMuted),
+                        const SizedBox(height: 4),
+                        const Text('展开后刷新可见成员。', style: talMuted),
+                      ] else ...[
+                        const SizedBox(height: 6),
+                        AnimatedBuilder(
+                          animation: controller.telemetryChanges,
+                          builder: (_, _) => Text(
+                            watch.updatedAtMs == null ? '—' : watch.valueLabel,
+                            key: ValueKey('watch-detail-value-$_key'),
+                            style: talMono.copyWith(fontSize: 22),
+                          ),
+                        ),
+                        const SizedBox(height: 7),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            TalButton.icon(
+                              onPressed: () => controller.setWatchPinned(
+                                _key,
+                                !watch.pinned,
+                              ),
+                              icon: Icon(
+                                watch.pinned
+                                    ? Icons.push_pin
+                                    : Icons.push_pin_outlined,
+                                size: 14,
+                              ),
+                              label: Text(watch.pinned ? '已固定' : '固定成员'),
+                            ),
+                            TalButton.icon(
+                              key: ValueKey('watch-detail-capture-$_key'),
+                              onPressed: () {
+                                controller.setWatchReadMode(
+                                  _key,
+                                  watch.samplingEnabled
+                                      ? WatchReadMode.monitor
+                                      : WatchReadMode.capture,
+                                );
+                              },
+                              icon: const Icon(Icons.sensors, size: 15),
+                              label: Text(
+                                watch.samplingEnabled ? '移出采集' : '加入采集',
+                              ),
+                            ),
+                            if (watch.samplingEnabled)
+                              TalButton.icon(
+                                key: ValueKey('watch-detail-plot-$_key'),
+                                onPressed: () => controller.toggleWatchPlot(
+                                  _key,
+                                  !watch.plotted,
+                                ),
+                                icon: Icon(
+                                  watch.plotted
+                                      ? Icons.visibility_outlined
+                                      : Icons.visibility_off_outlined,
+                                  size: 15,
+                                ),
+                                label: Text(watch.plotted ? '隐藏曲线' : '显示曲线'),
+                              ),
+                            SizedBox(
+                              width: ui.touchOptimized ? 112 : 96,
+                              child: TalDropdown<WatchReadMode>(
+                                key: ValueKey('watch-read-mode-$_key'),
+                                subtle: true,
+                                value: watch.readMode,
+                                values: WatchReadMode.values,
+                                label: (mode) => mode.label,
+                                onChanged: (mode) =>
+                                    controller.setWatchReadMode(_key, mode),
+                              ),
+                            ),
+                            if (watch.readMode == WatchReadMode.manual)
+                              TalButton(
+                                onPressed:
+                                    controller.connectionStatus ==
+                                        ConnectionStatus.connected
+                                    ? () => controller.readWatch(_key)
+                                    : null,
+                                child: const Text('立即读取'),
+                              ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );

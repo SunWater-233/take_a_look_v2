@@ -368,6 +368,7 @@ class WorkspaceLayoutController {
 
   WorkspaceLayoutSnapshot projectLayout({
     required double uiScale,
+    bool watchDetailsExpanded = true,
     required Map<WorkspacePanelId, DetachedPanelPlacement> detachedPlacements,
   }) {
     final groups = [
@@ -398,6 +399,7 @@ class WorkspaceLayoutController {
     return WorkspaceLayoutSnapshot(
       groups: groups,
       uiScale: uiScale,
+      watchDetailsExpanded: watchDetailsExpanded,
       version: workbenchLayout ? 4 : 1,
       legacyPanels: legacyPanels,
     );

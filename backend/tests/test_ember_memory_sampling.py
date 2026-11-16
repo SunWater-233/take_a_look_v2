@@ -383,7 +383,12 @@ def test_service_push_recording_pause_clear_resume_and_watch_removal(fixture_ser
         with service._lock:
             service._symbols = {symbol.key: symbol}
         service.handle(RpcMethod.SET_WATCHES, {"watches": [{"key": symbol.key}]})
-        service.handle(RpcMethod.CONNECT, {})
+        connected = service.handle(RpcMethod.CONNECT, {})['state']
+        assert connected['samplingPaused']
+        assert not connected['samplingClockRunning']
+        assert service._recording.sample_count == 0
+        assert service._memory._memory_samples is None
+        service.handle(RpcMethod.SET_SAMPLING_PAUSED, {"paused": False})
         deadline = time.perf_counter() + 3
         while service._recording.sample_count < 20 and time.perf_counter() < deadline:
             time.sleep(.01)

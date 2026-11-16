@@ -91,7 +91,7 @@ def test_legacy_ember_upload_uses_bounded_chunks_and_the_same_flash_lifecycle(tm
 
 
 @pytest.mark.parametrize('fails', [False, True])
-def test_source_download_over_real_ember_quic_reloads_symbols_only_after_flash(phone_factory, tmp_path, fails):
+def test_source_download_over_real_ember_quic_commits_only_successful_downloads(phone_factory, tmp_path, fails):
     phone = phone_factory()
     if fails:
         phone.local('fail_flash')
@@ -106,22 +106,33 @@ def test_source_download_over_real_ember_quic_reloads_symbols_only_after_flash(p
         service._sampling_paused = True
         service._symbols = {old.key: old}
         service._watches = {old.key: WatchedVariable(old, '#123456')}
-        service.handle(RpcMethod.SET_SOURCE_PROJECT, {'sourceRoot': str(tmp_path), 'firmwarePath': str(path), 'afterDownload': 'run'})
+        selected = service.handle(RpcMethod.SET_SOURCE_PROJECT, {
+            'sourceRoot': str(tmp_path), 'firmwarePath': str(path), 'afterDownload': 'run'})['state']
+        # Selecting the firmware already refreshes symbols and rebinds watches.
+        # A download failure must retain that selected generation unchanged.
+        assert old.key not in service._symbols
+        assert service._watches[new.key].color == '#123456'
+        selected_watches = selected['watches']
         service.handle(RpcMethod.START_SOURCE_TASK, {'kind': 'download'})
         deadline = time.monotonic() + 10
         while service._source_tasks.running and time.monotonic() < deadline:
             time.sleep(.02)
         result = service._source_tasks.snapshot()
         state = phone.local('backend')
+        current = service.state_snapshot()
         if fails:
             assert result['status'] == 'failed', result
-            assert old.key in service._watches and not service._rtt_enabled
+            assert current['firmware'] == selected['firmware']
+            assert current['watches'] == selected_watches
+            assert current['samplingPaused'] and not current['rttEnabled']
             assert state['resets'] == state['resumes'] == 0
         else:
             assert result['status'] == 'succeeded', result
+            assert current['firmware']['revision'] == selected['firmware']['revision'] + 1
             assert service._watches[new.key].color == '#123456'
             assert service._source_project['firmwarePath'] == str(path)
             assert state['resets'] == state['resumes'] == 1
+        assert current['sourceProject'] == selected['sourceProject']
         assert state['firmware']['received'] == Path(path).stat().st_size
         assert state['firmware']['sha256'] == hashlib.sha256(Path(path).read_bytes()).hexdigest()
     finally:

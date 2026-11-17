@@ -75,7 +75,8 @@ class TakeALookController extends ChangeNotifier {
     this.targetPackPicker,
     HistoryReader? historyReader,
     double Function()? monotonicSeconds,
-  }) : _samplingClock = SamplingDisplayClock(now: monotonicSeconds) {
+  }) : _historyReader = historyReader,
+       _samplingClock = SamplingDisplayClock(now: monotonicSeconds) {
     plotHistory = PlotHistory(
       reader: historyReader,
       onChanged: () {
@@ -120,6 +121,7 @@ class TakeALookController extends ChangeNotifier {
   int _symbolRevision = 0;
   bool _pickingFirmwareFile = false;
   bool _restoringProject = false;
+  WatchRefreshWarning? watchRefreshWarning;
   bool get isProjectRestoring => _restoringProject;
   int _nextSymbolLoadId = 0;
   Timer? _ticker;
@@ -162,6 +164,8 @@ class TakeALookController extends ChangeNotifier {
   final ControllerState state = ControllerState();
   final TelemetryStore telemetryStore = TelemetryStore();
   late final PlotHistory plotHistory;
+  final HistoryReader? _historyReader;
+  final Map<String, PlotHistory> _archivedPlotHistories = {};
   double _plotPixelWidth = 1000;
   final ControllerSnapshotCodec snapshotCodec = const ControllerSnapshotCodec();
 
@@ -272,7 +276,8 @@ class TakeALookController extends ChangeNotifier {
   set plotInvertY(bool value) => state.plot.invertY = value;
   AnalysisSession get analysisSession => state.analysis;
 
-  List<SymbolItem> get symbols => List.unmodifiable(_symbols);
+  List<SymbolItem> get symbols =>
+      List.unmodifiable(_symbols.where((s) => !s.missing));
   int get symbolRevision => _symbolRevision;
   bool isSymbolTreeNodeExpanded(String key) =>
       _expandedSymbolTreeNodes.contains(key);
@@ -316,7 +321,10 @@ class TakeALookController extends ChangeNotifier {
     final recent = plottingPaused
         ? _frozenPlotSamples[watch.symbol.key] ?? watch.samples
         : watch.samples;
-    final history = plotHistory.samplesFor(
+    final source = watch.archivedHistoryPath == rawRecording['historyPath']
+        ? plotHistory
+        : _archivedPlotHistories[watch.archivedHistoryPath] ?? plotHistory;
+    final history = source.samplesFor(
       watch.symbol.key,
       minimumTime: watch.historyStartSeconds,
     );
@@ -389,6 +397,7 @@ class TakeALookController extends ChangeNotifier {
           for (final watch in acquisitionWatches)
             {
               'key': watch.symbol.key,
+              if (watch.symbol.missing) 'symbol': watch.symbol.toJson(),
               'color':
                   '#${watch.color.toARGB32().toRadixString(16).padLeft(8, '0')}',
               'sampling': watch.samplingEnabled,
@@ -427,6 +436,7 @@ class TakeALookController extends ChangeNotifier {
     final acquiring = acquisitionWatches.toList();
     for (var index = 0; index < acquiring.length; index += 1) {
       final watch = acquiring[index];
+      if (watch.symbol.missing) continue;
       if (watch.readMode == WatchReadMode.manual) continue;
       if (watch.readMode == WatchReadMode.monitor &&
           !isWatchMonitorActive(watch)) {
@@ -595,7 +605,10 @@ class TakeALookController extends ChangeNotifier {
   void _applySamplingEpoch(Map<String, dynamic> data) {
     final epoch = data['samplingEpoch'] as int?;
     if (epoch != null && epoch != samplingEpoch) {
-      _clearSampleHistory(advanceEpoch: false);
+      _clearSampleHistory(
+        advanceEpoch: false,
+        preserveMissing: data['preserveMissingHistory'] == true,
+      );
       state.acquisition.samplingEpoch = epoch;
     }
   }
@@ -627,6 +640,9 @@ class TakeALookController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     plotHistory.dispose();
+    for (final history in _archivedPlotHistories.values) {
+      history.dispose();
+    }
     _ticker?.cancel();
     _plotRefreshTimer?.cancel();
     _samplingClockTimer?.cancel();

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'controls.dart';
@@ -45,6 +47,8 @@ class TalDialog extends StatelessWidget {
 
 /// Owns at most one notice. New errors replace that notice; complete history
 /// remains in the event log. Touch errors keep the confirmation route.
+enum _NoticeKind { error, warning, action }
+
 class TalFeedbackController {
   TalFeedbackController({this.onNoticeDismissed});
 
@@ -88,9 +92,23 @@ class TalFeedbackController {
       title: title,
       message: message,
       details: details,
-      isError: true,
+      kind: _NoticeKind.error,
     );
   }
+
+  /// Warnings reuse the non-modal corner notice for every input mode.
+  void showWarning({
+    required BuildContext context,
+    required String title,
+    required String message,
+    String? details,
+  }) => _presentNotice(
+    context: context,
+    title: title,
+    message: message,
+    details: details,
+    kind: _NoticeKind.warning,
+  );
 
   /// Optional housekeeping actions stay non-modal for every input mode.
   void showActionNotice({
@@ -103,7 +121,7 @@ class TalFeedbackController {
     context: context,
     title: title,
     message: message,
-    isError: false,
+    kind: _NoticeKind.action,
     actionLabel: actionLabel,
     onAction: onAction,
   );
@@ -112,7 +130,7 @@ class TalFeedbackController {
     required BuildContext context,
     required String title,
     required String message,
-    required bool isError,
+    required _NoticeKind kind,
     String? details,
     String? actionLabel,
     Future<void> Function()? onAction,
@@ -123,7 +141,7 @@ class TalFeedbackController {
       title: title,
       message: message,
       details: details,
-      isError: isError,
+      kind: kind,
       actionLabel: actionLabel,
       onAction: onAction,
       onClose: () {
@@ -156,7 +174,7 @@ class _DesktopNotice extends StatefulWidget {
     required this.message,
     required this.details,
     required this.onClose,
-    required this.isError,
+    required this.kind,
     this.actionLabel,
     this.onAction,
     super.key,
@@ -166,7 +184,7 @@ class _DesktopNotice extends StatefulWidget {
   final String message;
   final String? details;
   final VoidCallback onClose;
-  final bool isError;
+  final _NoticeKind kind;
   final String? actionLabel;
   final Future<void> Function()? onAction;
 
@@ -179,8 +197,8 @@ class _DesktopNoticeState extends State<_DesktopNotice>
   late final AnimationController _entranceController;
   late final AnimationController _dismissController;
   late final Animation<double> _entrance;
-  late final Animation<double> _dismissScale;
-  late final Animation<double> _dismissOpacity;
+  late final Animation<double> _exit;
+  Timer? _autoDismiss;
   bool _expanded = false;
   bool _closing = false;
   bool _acting = false;
@@ -199,17 +217,9 @@ class _DesktopNoticeState extends State<_DesktopNotice>
     _entrance = _entranceController.drive(
       CurveTween(curve: Curves.easeOutCubic),
     );
-    _dismissScale = _dismissController.drive(
-      Tween<double>(begin: 1, end: 0.86).chain(
-        CurveTween(curve: const Interval(0, 0.7, curve: Curves.easeOutCubic)),
-      ),
-    );
-    _dismissOpacity = _dismissController.drive(
-      Tween<double>(begin: 1, end: 0).chain(
-        CurveTween(curve: const Interval(0.25, 1, curve: Curves.easeInQuad)),
-      ),
-    );
+    _exit = _dismissController.drive(CurveTween(curve: Curves.easeInCubic));
     _entranceController.forward();
+    _autoDismiss = Timer(const Duration(seconds: 5), _close);
   }
 
   @override
@@ -222,6 +232,7 @@ class _DesktopNoticeState extends State<_DesktopNotice>
 
   Future<void> _close() async {
     if (_closing) return;
+    _autoDismiss?.cancel();
     if (MediaQuery.disableAnimationsOf(context)) {
       widget.onClose();
       return;
@@ -249,6 +260,7 @@ class _DesktopNoticeState extends State<_DesktopNotice>
 
   @override
   void dispose() {
+    _autoDismiss?.cancel();
     _entranceController.dispose();
     _dismissController.dispose();
     super.dispose();
@@ -272,20 +284,17 @@ class _DesktopNoticeState extends State<_DesktopNotice>
         child: SizedBox(
           width: width,
           child: AnimatedBuilder(
-            animation: _entrance,
+            animation: Listenable.merge([_entrance, _exit]),
             builder: (context, child) => Transform.translate(
-              offset: Offset(slideDistance * (1 - _entrance.value), 0),
+              offset: Offset(
+                slideDistance * (1 - _entrance.value + _exit.value),
+                0,
+              ),
               child: child,
             ),
             child: IgnorePointer(
               ignoring: _closing,
-              child: FadeTransition(
-                opacity: _dismissOpacity,
-                child: ScaleTransition(
-                  scale: _dismissScale,
-                  child: _buildContent(context),
-                ),
-              ),
+              child: _buildContent(context),
             ),
           ),
         ),
@@ -297,14 +306,18 @@ class _DesktopNoticeState extends State<_DesktopNotice>
     final ui = TalUiTheme.of(context);
     final size = MediaQuery.sizeOf(context);
     final hasDetails = widget.details?.isNotEmpty == true;
-    final color = widget.isError
+    final color = widget.kind == _NoticeKind.error
         ? Theme.of(context).colorScheme.error
         : TalColors.amber;
     return Semantics(
       container: true,
       liveRegion: true,
       child: Material(
-        key: ValueKey(widget.isError ? 'tal-error-popup' : 'tal-notice-popup'),
+        key: ValueKey(switch (widget.kind) {
+          _NoticeKind.error => 'tal-error-popup',
+          _NoticeKind.warning => 'tal-warning-popup',
+          _NoticeKind.action => 'tal-notice-popup',
+        }),
         color: TalColors.surfaceAlt,
         elevation: 12,
         shadowColor: TalColors.shadow,
@@ -332,9 +345,11 @@ class _DesktopNoticeState extends State<_DesktopNotice>
                   Row(
                     children: [
                       Icon(
-                        widget.isError
-                            ? Icons.error_outline
-                            : Icons.folder_open,
+                        switch (widget.kind) {
+                          _NoticeKind.error => Icons.error_outline,
+                          _NoticeKind.warning => Icons.warning_amber_rounded,
+                          _NoticeKind.action => Icons.folder_open,
+                        },
                         size: 20,
                         color: color,
                       ),

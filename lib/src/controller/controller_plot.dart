@@ -1,7 +1,10 @@
 part of 'controller.dart';
 
 extension TakeALookControllerPlot on TakeALookController {
-  double get maximumPlotWindowSeconds => math.max(120, elapsedSeconds);
+  double get maximumPlotWindowSeconds => _watches.fold<double>(
+    math.max(120, elapsedSeconds),
+    (maximum, watch) => math.max(maximum, watch.archivedHistoryEndSeconds),
+  );
 
   void preparePlotHistory({double? pixelWidth}) {
     if (pixelWidth != null && pixelWidth.isFinite && pixelWidth > 0) {
@@ -28,6 +31,41 @@ extension TakeALookControllerPlot on TakeALookController {
                     watch.totalSampleCount > watch.samples.length,
               )),
     );
+    final archived = <String, List<WatchItem>>{};
+    for (final watch in plotted) {
+      final path = watch.archivedHistoryPath;
+      if (path != null && path != rawRecording['historyPath']) {
+        (archived[path] ??= []).add(watch);
+      }
+    }
+    _archivedPlotHistories.removeWhere((path, history) {
+      if (archived.containsKey(path)) return false;
+      history.dispose();
+      return true;
+    });
+    for (final entry in archived.entries) {
+      final history = _archivedPlotHistories.putIfAbsent(
+        entry.key,
+        () => PlotHistory(
+          reader: _historyReader,
+          onChanged: () {
+            if (!_disposed) signals.plot.emit();
+          },
+        ),
+      );
+      history.update(
+        path: entry.key,
+        keys: entry.value.map((w) => w.symbol.key).toList(),
+        start: start,
+        end: math.max(start + 0.2, end),
+        sourceEnd: entry.value.fold<double>(
+          0,
+          (end, w) => math.max(end, w.archivedHistoryEndSeconds),
+        ),
+        pixelWidth: _plotPixelWidth,
+        enabled: _presentationActive,
+      );
+    }
   }
 
   void setPlotHighlightedWatch(String? key, {bool selectWatchRow = false}) {
@@ -227,6 +265,18 @@ extension TakeALookControllerPlot on TakeALookController {
             last = math.max(last, point.dx);
           }
         }
+      }
+    }
+    for (final watch in _watches.where((w) => w.plotted && w.symbol.missing)) {
+      if (watch.archivedHistoryPath != null || watch.samples.isNotEmpty) {
+        first = math.min(first, watch.historyStartSeconds);
+        last = math.max(
+          last,
+          math.max(
+            watch.archivedHistoryEndSeconds,
+            watch.samples.isEmpty ? 0 : watch.samples.last.dx,
+          ),
+        );
       }
     }
     if (!first.isFinite || !last.isFinite) {

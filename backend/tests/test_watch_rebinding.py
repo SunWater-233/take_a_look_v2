@@ -6,8 +6,10 @@ import pytest
 
 from take_a_look_backend.models import SymbolInfo, WatchedVariable
 from take_a_look_backend.protocol import RpcMethod
+from take_a_look_backend.protocol import ProtocolError
 from take_a_look_backend.service import BackendService
 from take_a_look_backend.services.watch_rebinding import rebind_watches
+from take_a_look_backend.services.debug_info import DebugInfoIndex
 from test_service import _FakeMemory, _FakeRtt
 
 
@@ -23,7 +25,8 @@ def test_watch_rebinding_retains_only_unambiguous_memory_symbols():
     assert (rebound.symbol, rebound.color, rebound.plot_enabled, rebound.mode,
             rebound.monitor_rate_hz, rebound.monitor_enabled) == (new, '#123456', True, 'manual', 7, False)
     duplicate = SymbolInfo('gain', 0x20000080, 4, 'float', '.data', 'motor.c')
-    assert rebind_watches({old.key: watch}, [new, duplicate, rtt]) == {}
+    unavailable = rebind_watches({old.key: watch}, [new, duplicate, rtt])[old.key]
+    assert unavailable.symbol.missing and not unavailable.captures and not unavailable.symbol.is_writable
 
 
 def test_watch_rebinding_adds_new_members_without_restoring_omitted_branches():
@@ -50,7 +53,8 @@ def test_watch_rebinding_adds_new_members_without_restoring_omitted_branches():
     result = rebind_watches(previous, symbols, old.values())
     watched = {watch.symbol.name: watch for watch in result.values()}
     retained_names = [name for name in watched_names if name != 'motor.removed']
-    assert set(watched) == set(retained_names + added_names)
+    assert set(watched) == set(watched_names + added_names)
+    assert watched['motor.removed'].symbol.missing and not watched['motor.removed'].captures
     assert [name for name in watched if name in retained_names] == retained_names
     assert list(watched).index('motor.samples[0]') < list(watched).index('motor.samples[1]')
     assert list(watched).index('motor.current.q') < list(watched).index('motor.current.d')
@@ -67,6 +71,77 @@ def test_watch_rebinding_adds_new_members_without_restoring_omitted_branches():
         assert watch.value == '' and watch.updated_at_ms is None
     assert watched['motor.current.d'].color == '#abcdef'
     assert watched['motor.added.value'].color == '#123456'
+
+
+def test_missing_watch_keeps_recording_and_settings_without_accessing_old_memory(tmp_path):
+    old = SymbolInfo('motor.removed', 0x20000004, 4, 'float', '.data', 'motor.c', encoding='float')
+    current = [old]
+    memory = _FakeMemory()
+    service = BackendService(lambda *_: None, memory_backend=memory,
+        normal_rtt_backend=_FakeRtt(), plus_rtt_backend=_FakeRtt(),
+        recording_directory=tmp_path / 'records', symbol_loader=lambda *a, **k: current,
+        debug_info_loader=lambda *a, **k: DebugInfoIndex())
+    service._shutdown.set(); service._wake.set()
+    service._sampler.join(2); service._firmware_watch_thread.join(2)
+    firmware = tmp_path / 'motor.axf'
+    firmware.write_bytes(b'old')
+    try:
+        service.handle(RpcMethod.LOAD_FIRMWARE, {'path': str(firmware)})
+        service.handle(RpcMethod.SET_WATCHES, {'watches': [
+            {'key': old.key, 'readMode': 'capture', 'plotted': True, 'color': '#abcdef'}]})
+        service._queue_samples_locked([(1.0, {old.key: 12.5})])
+        service._flush_pending_samples_locked()
+        raw_path = service._recording.path
+        current = [SymbolInfo('other', 0x20000004, 4, 'float', '.data', 'motor.c')]
+        firmware.write_bytes(b'new')
+        service.handle(RpcMethod.LOAD_FIRMWARE, {'path': str(firmware)})
+        service.handle(RpcMethod.LOAD_FIRMWARE, {'path': str(firmware)})
+        missing = service._watches[old.key]
+        assert missing.symbol.missing and not missing.captures
+        assert missing.plot_enabled and missing.mode == 'capture' and missing.color == '#abcdef'
+        service._connection_status = 'connected'
+        service._debug.execution_state = 'running'
+        assert service._read_memory_locked(False, 'normal') == {}
+        service._poll_monitors_locked(100)
+        service._remember_values_locked({old.key: 99})
+        assert missing.value != 99 and memory.values == {}
+        memory.supports_running_memory = False
+        memory.execution_state = 'halted'
+        service._refresh_debug_state_locked(force=True)
+        assert memory.values == {}
+        memory.execution_state = 'running'
+        memory.supports_running_memory = True
+        for method, params in [
+            (RpcMethod.READ_WATCH, {'key': old.key}),
+            (RpcMethod.WRITE_WATCH, {'key': old.key, 'value': '1'}),
+            (RpcMethod.WRITE_WATCHES, {'writes': [{'key': old.key, 'value': '1'}]}),
+        ]:
+            with pytest.raises(ProtocolError) as error:
+                service.handle(method, params)
+            assert error.value.code in {'symbol_missing', 'readonly_symbol'}
+        csv = tmp_path / 'samples.csv'
+        service.handle(RpcMethod.EXPORT_CSV, {'path': str(csv)})
+        assert raw_path.exists() and service._recording.path == raw_path
+        assert 'motor.removed' in csv.read_text(encoding='utf-8-sig')
+        assert '12.5' in csv.read_text(encoding='utf-8-sig')
+        # Removing/reloading the same generation cannot reactivate the old address.
+        service.handle(RpcMethod.SET_WATCHES, {'watches': [{'key': old.key, 'readMode': 'monitor'}]})
+        service._poll_monitors_locked(101)
+        assert memory.values == {}
+        saved = service._symbol_json(service._watches[old.key].symbol)
+        service._symbols.pop(old.key)
+        service._watches = {}
+        restored = service.handle(RpcMethod.SET_WATCHES, {'watches': [
+            {'key': old.key, 'symbol': saved, 'readMode': 'capture', 'plotted': True}]})['state']
+        assert next(s for s in restored['symbols'] if s['key'] == old.key)['missing']
+        assert not service._watches[old.key].captures
+        current = [SymbolInfo('motor.removed', 0x20000100, 4, 'float', '.data', 'motor.c')]
+        firmware.write_bytes(b'restored')
+        service.handle(RpcMethod.LOAD_FIRMWARE, {'path': str(firmware)})
+        rebound = next(iter(service._watches.values()))
+        assert not rebound.symbol.missing and rebound.symbol.address == 0x20000100
+    finally:
+        service.close()
 
 
 @pytest.mark.parametrize('refresh', ['reload', 'settings', 'automatic'])
@@ -134,11 +209,15 @@ def test_real_elf_rebuild_refreshes_watched_members(tmp_path, refresh, language,
             state = service.state_snapshot()
         symbols = {symbol['key']: symbol for symbol in state['symbols']}
         watches = {symbols[watch['key']]['name']: watch for watch in state['watches']}
-        assert set(watches) == expected
+        assert set(watches) == expected | original
+        assert {name for name, watch in watches.items() if not symbols[watch['key']].get('missing')} == expected
         assert symbols[watches['motor']['key']]['address'] == 0x20000100
         for name, watch in watches.items():
             assert watch['color'] == '#123456'
-            assert symbols[watch['key']]['address'] >= 0x20000100
+            if name not in expected:
+                assert symbols[watch['key']]['missing'] and not service._watches[watch['key']].captures
+            else:
+                assert symbols[watch['key']]['address'] >= 0x20000100
             if name in original:
                 assert watch['readMode'] == 'capture' and watch['plotted']
                 assert watch['monitorRateHz'] == 5

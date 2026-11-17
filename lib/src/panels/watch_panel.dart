@@ -913,10 +913,14 @@ class _WatchRowState extends State<_WatchRow> {
                       child: Tooltip(
                         message: watch.symbol.name,
                         child: Text(
-                          widget.label,
+                          watch.symbol.missing
+                              ? '${widget.label}（新固件中不存在）'
+                              : widget.label,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: talBody,
+                          style: watch.symbol.missing
+                              ? talBody.copyWith(color: TalColors.warning)
+                              : talBody,
                         ),
                       ),
                     ),
@@ -1004,8 +1008,9 @@ class _WatchRowState extends State<_WatchRow> {
                         key: ValueKey('watch-read-${watch.symbol.key}'),
                         tooltip: '立即读取',
                         onPressed:
-                            widget.controller.connectionStatus ==
-                                ConnectionStatus.connected
+                            !watch.symbol.missing &&
+                                widget.controller.connectionStatus ==
+                                    ConnectionStatus.connected
                             ? () =>
                                   widget.controller.readWatch(watch.symbol.key)
                             : null,
@@ -1074,7 +1079,9 @@ class _WatchRowState extends State<_WatchRow> {
               _WatchCell(
                 width: widget.columnWidths[8],
                 selected: widget.selectedColumns.contains(8),
-                child: widget.expandable
+                child: watch.symbol.missing
+                    ? Text('不可用', style: talMuted)
+                    : widget.expandable
                     ? const Text('—', style: talMuted)
                     : TalDropdown<WatchReadMode>(
                         key: ValueKey('watch-table-mode-${watch.symbol.key}'),

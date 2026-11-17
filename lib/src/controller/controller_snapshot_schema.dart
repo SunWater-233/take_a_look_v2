@@ -41,6 +41,7 @@ enum SnapshotField {
   samplingElapsedSeconds({}, alwaysRevised: true),
   samplingClockRunning({SnapshotDomain.sampling}),
   samplingEpoch({SnapshotDomain.sampling}),
+  preserveMissingHistory({SnapshotDomain.sampling}),
   elapsedSeconds({}, alwaysRevised: true),
   samplingPaused({SnapshotDomain.sampling}, persistInProject: true),
   rawRecording({SnapshotDomain.sampling}),

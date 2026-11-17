@@ -82,7 +82,9 @@ extension TakeALookControllerTelemetry on TakeALookController {
           if (payload != null) applyBackendSamples(payload);
         }
       case BackendEventType.samplesCleared:
-        applyBackendSamplesCleared();
+        applyBackendSamplesCleared(
+          preserveMissing: _asMap(params)?['preserveMissing'] == true,
+        );
       case BackendEventType.watchValues:
         final payload = _asMap(params);
         if (payload != null) applyWatchValues(payload);
@@ -168,7 +170,7 @@ extension TakeALookControllerTelemetry on TakeALookController {
     for (final raw in payload['values'] as List? ?? const []) {
       if (raw is! Map) continue;
       final watch = byKey[raw['key']];
-      if (watch == null) continue;
+      if (watch == null || watch.symbol.missing) continue;
       final updated = (raw['updatedAtMs'] as num?)?.toInt();
       if (updated != null &&
           watch.updatedAtMs != null &&
@@ -200,21 +202,49 @@ extension TakeALookControllerTelemetry on TakeALookController {
     _emitTelemetry();
   }
 
-  void applyBackendSamplesCleared() {
-    _clearSampleHistory();
+  void applyBackendSamplesCleared({bool preserveMissing = false}) {
+    _clearSampleHistory(preserveMissing: preserveMissing);
     _emitState([signals.sampling, signals.telemetry, signals.plot]);
     signals.telemetrySync.emit();
   }
 
-  void _clearSampleHistory({bool advanceEpoch = true}) {
+  void _clearSampleHistory({
+    bool advanceEpoch = true,
+    bool preserveMissing = false,
+  }) {
+    final previousEnd = plotWindowEndSeconds;
+    state.acquisition.preserveMissingHistory = preserveMissing;
     if (advanceEpoch) state.acquisition.samplingEpoch++;
     plotHistory.clear();
+    if (!preserveMissing) {
+      for (final history in _archivedPlotHistories.values) {
+        history.dispose();
+      }
+      _archivedPlotHistories.clear();
+    }
     state.acquisition.rawRecording = {};
     elapsedSeconds = 0;
     _resetSamplingElapsedClock();
-    telemetryStore.clear(_allRetainedWatches);
+    final retained = _allRetainedWatches.toList();
+    for (final watch in retained) {
+      if (!preserveMissing || !watch.symbol.missing) {
+        watch.archivedHistoryPath = null;
+        watch.archivedHistoryEndSeconds = 0;
+        telemetryStore.clear([watch]);
+      }
+    }
     _frozenPlotSamples.clear();
     if (plottingPaused || !followLatest) _frozenPlotEndSeconds = 0;
+    if (preserveMissing &&
+        retained.any(
+          (w) =>
+              w.symbol.missing &&
+              w.plotted &&
+              (w.samples.isNotEmpty || w.archivedHistoryPath != null),
+        )) {
+      followLatest = false;
+      _frozenPlotEndSeconds = previousEnd;
+    }
   }
 }
 

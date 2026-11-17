@@ -146,7 +146,7 @@ class SamplingServiceMixin:
         stamp = updated_at_ms if updated_at_ms is not None else time.time_ns() // 1_000_000
         for key, value in values.items():
             watch = self._watches.get(key)
-            if watch is not None and (watch.updated_at_ms is None or stamp >= watch.updated_at_ms):
+            if watch is not None and not watch.symbol.missing and (watch.updated_at_ms is None or stamp >= watch.updated_at_ms):
                 watch.value = value
                 watch.updated_at_ms = stamp
 
@@ -227,7 +227,7 @@ class SamplingServiceMixin:
                         target,
                         self._rtt_control_block_address,
                         binding.probe,
-                        list(self._watches.values()),
+                        [watch for watch in self._watches.values() if not watch.symbol.missing],
                     )
                 if self._rtt_protocol == "normal":
                     for symbol in symbols:

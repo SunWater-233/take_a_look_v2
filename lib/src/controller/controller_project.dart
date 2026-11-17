@@ -32,6 +32,8 @@ extension TakeALookControllerProject on TakeALookController {
           'updatedAtMs',
           'sampleCursor',
           'historyStartSeconds',
+          'archivedHistoryPath',
+          'archivedHistoryEndSeconds',
         }.contains(key),
       );
     }
@@ -245,12 +247,21 @@ extension TakeALookControllerProject on TakeALookController {
       if (firmwarePath.isNotEmpty) {
         final loadedKeys = _symbols.map((s) => s.key).toSet();
         if ((data['watches'] as List).any(
-          (w) => !loadedKeys.contains((w as Map)['key']),
+          (w) =>
+              !loadedKeys.contains((w as Map)['key']) &&
+              (w['symbol'] as Map?)?['missing'] != true,
         )) {
           throw const FormatException('固件符号已变化，无法恢复项目变量，请使用保存项目时的 ELF / AXF。');
         }
       }
-      settings['symbols'] = [for (final symbol in _symbols) symbol.toJson()];
+      settings['symbols'] = [
+        for (final symbol in _symbols) symbol.toJson(),
+        for (final raw in data['watches'] as List)
+          if ((raw as Map)['symbol'] case final Map saved)
+            if (saved['missing'] == true &&
+                !_symbols.any((s) => s.key == saved['key']))
+              saved,
+      ];
       settings['sourceProject'] = sourceProject.toJson();
       // Await the backend before applying the UI, so a delayed state echo cannot
       // replace the project's variables with the previous watch list.

@@ -131,6 +131,7 @@ class ConnectionState {
 }
 
 class AcquisitionState {
+  bool preserveMissingHistory = false;
   Map<String, dynamic> rawRecording = <String, dynamic>{};
   double sampleRateHz = 50;
   double monitorRateHz = 10;

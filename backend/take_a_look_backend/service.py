@@ -444,7 +444,7 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
             initial_execution_state = self._memory.debug_state()
             # A successful reconnect restarts the time axis. Keep the previous
             # journal on disk and start a fresh plot/recording epoch together.
-            self._clear_samples()
+            self._clear_samples(preserve_missing=True)
             with self._lock:
                 self._debug.execution_state = initial_execution_state
                 self._refresh_debug_state_locked(force=True)
@@ -636,7 +636,7 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
             self._emit(EventName.STATE, self._sampling_clock_state())
         if self._debug.execution_state == "halted" and not backend_capabilities(self._memory).memory_sampling:
             symbols = [watch.symbol for watch in self._watches.values()
-                       if not watch.symbol.is_rtt and watch.mode != "manual"
+                       if not watch.symbol.missing and not watch.symbol.is_rtt and watch.mode != "manual"
                        and (watch.mode != "monitor" or watch.monitor_enabled)]
             if symbols:
                 self._publish_watch_values_locked(self._memory.read_symbols(symbols))
@@ -672,11 +672,24 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
             raise ProtocolError("invalid_request", "watches must be an array.")
         with self._lock:
             new_watches: dict[str, WatchedVariable] = {}
+            restored_missing: dict[str, SymbolInfo] = {}
             for raw in raw_watches:
                 if not isinstance(raw, Mapping):
                     raise ProtocolError("invalid_request", "Each watch must be an object.")
                 key = _required_string(raw, "key")
                 symbol = self._symbols.get(key)
+                saved = raw.get("symbol")
+                if symbol is None and isinstance(saved, Mapping) and saved.get("missing") is True:
+                    address, size = saved.get("address"), saved.get("size")
+                    if not isinstance(address, int) or address < 0 or not isinstance(size, int) or size < 0:
+                        raise ProtocolError("invalid_request", "Invalid historical symbol metadata.")
+                    symbol = SymbolInfo(_required_string(saved, "name"), address, size,
+                        _required_string(saved, "type"), _required_string(saved, "section"),
+                        _required_string(saved, "source"), encoding=_optional_string(saved, "encoding") or "",
+                        diagnostic="新固件中不存在或无法唯一匹配", missing=True)
+                    if symbol.key != key:
+                        raise ProtocolError("invalid_request", "Historical symbol key does not match metadata.")
+                    restored_missing[key] = symbol
                 if symbol is None:
                     raise ProtocolError("unknown_symbol", "Watch references an unknown symbol.", key)
                 old = self._watches.get(key)
@@ -709,6 +722,7 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
             self._flush_pending_samples_locked(wait=False)
             membership_changed = set(new_watches) != set(self._watches)
             self._watches = new_watches
+            self._symbols.update(restored_missing)
             self._latest_rtt_values = {key: value for key, value in self._latest_rtt_values.items() if key in new_watches}
             self._monitor_schedule_revision += 1
             if (self._connection_status == "connected" and self._debug.execution_state == "halted"
@@ -717,6 +731,8 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
             if self._rtt_protocol == "plus" and membership_changed:
                 self._stop_rtt_locked()
             state = {"watches": [self._watch_json(watch) for watch in self._watches.values()]}
+            if restored_missing:
+                state["symbols"] = [self._symbol_json(symbol) for symbol in self._symbols.values()]
         self._emit(EventName.STATE, state)
         self._wake.set()
         return {"state": state}
@@ -826,6 +842,8 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
             watch = self._watches.get(key)
             if watch is None:
                 raise ProtocolError("unknown_watch", "Watch does not exist.", key)
+            if watch.symbol.missing:
+                raise ProtocolError("symbol_missing", "新固件中不存在此变量，已停止读取。", watch.symbol.name)
             if self._connection_status != "connected":
                 raise ProtocolError("not_connected", "请先连接调试探针。")
             can_read_memory = (backend_capabilities(self._memory).memory_sampling
@@ -894,7 +912,7 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
         self._wake.set()
         return {"state": state}
 
-    def _clear_samples(self) -> dict[str, object]:
+    def _clear_samples(self, *, preserve_missing=False) -> dict[str, object]:
         with self._lock:
             self._stop_memory_sampling_locked()
             self._flush_pending_samples_locked()
@@ -904,7 +922,7 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
             self._acquisition_clock.reset(running=self._acquisition_should_run())
             state = {"elapsedSeconds": 0.0, "sampleCount": 0, "rawRecording": self._recording.status(),
                      **self._sampling_clock_state()}
-        self._emit(EventName.SAMPLES_CLEARED, {})
+        self._emit(EventName.SAMPLES_CLEARED, {"preserveMissing": True} if preserve_missing else {})
         self._emit(EventName.STATE, state)
         return {"state": state}
 
@@ -1007,6 +1025,7 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
             "dataSource": symbol.data_source,
             **({"encoding": symbol.encoding} if symbol.encoding else {}),
             **({"diagnostic": symbol.diagnostic} if symbol.diagnostic else {}),
+            **({"missing": True} if symbol.missing else {}),
         }
 
     @staticmethod

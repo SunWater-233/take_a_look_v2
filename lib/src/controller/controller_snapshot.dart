@@ -50,6 +50,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
       'samplingElapsedSeconds': samplingElapsedSeconds,
       'samplingClockRunning': _samplingClock.running,
       'samplingEpoch': samplingEpoch,
+      'preserveMissingHistory': state.acquisition.preserveMissingHistory,
       'watches': [
         for (final watch in _watches)
           {
@@ -79,6 +80,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
       'samplingElapsedSeconds': samplingElapsedSeconds,
       'samplingClockRunning': _samplingClock.running,
       'samplingEpoch': samplingEpoch,
+      'preserveMissingHistory': state.acquisition.preserveMissingHistory,
       'watches': [
         for (final watch in _watches)
           _watchTelemetryDelta(
@@ -119,6 +121,10 @@ extension TakeALookControllerSnapshot on TakeALookController {
   }
 
   void _applySnapshot(JsonObject data) {
+    final previouslyAvailable = {
+      for (final watch in _watches)
+        if (!watch.symbol.missing) watch.symbol.identity,
+    };
     _applySamplingEpoch(data);
     if (data['freeRtos'] case final Map snapshot) {
       state.freeRtos = FreeRtosSnapshot(snapshot);
@@ -361,6 +367,20 @@ extension TakeALookControllerSnapshot on TakeALookController {
                       (item['historyStartSeconds'] as num?)?.toDouble() ??
                       previousWatches[symbol.key]?.historyStartSeconds ??
                       0
+                  ..archivedHistoryPath = symbol.missing
+                      ? item['archivedHistoryPath'] as String? ??
+                            previousWatches[symbol.key]?.archivedHistoryPath ??
+                            rawRecording['historyPath'] as String?
+                      : null
+                  ..archivedHistoryEndSeconds = symbol.missing
+                      ? (item['archivedHistoryEndSeconds'] as num?)
+                                ?.toDouble() ??
+                            (previousWatches[symbol.key]?.archivedHistoryPath !=
+                                    null
+                                ? previousWatches[symbol.key]!
+                                      .archivedHistoryEndSeconds
+                                : elapsedSeconds)
+                      : 0
                   ..readMode = WatchReadMode.parse(
                     item['readMode'],
                     sampling: item['sampling'] != false,
@@ -477,6 +497,21 @@ extension TakeALookControllerSnapshot on TakeALookController {
       }
     }
     final symbolsChanged = previousSymbolRevision != _symbolRevision;
+    final newlyMissing = _watches
+        .where(
+          (w) =>
+              w.symbol.missing &&
+              previouslyAvailable.contains(w.symbol.identity),
+        )
+        .map((w) => w.symbol)
+        .toList();
+    if (newlyMissing.isNotEmpty && !_isDetachedRemote) {
+      watchRefreshWarning = WatchRefreshWarning(newlyMissing);
+      _appendLog(
+        '${watchRefreshWarning!.message}\n${watchRefreshWarning!.details}',
+        level: LogLevel.warning,
+      );
+    }
     final deletedWatchesInvalidated = hadDeletedWatches && symbolsChanged;
     if (deletedWatchesInvalidated && !_isDetachedRemote) _syncWatchesBackend();
     _emitState([
@@ -494,7 +529,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
       if (hasWatchState || hasElapsedState || symbolsChanged) signals.telemetry,
       if (hasPlotState || hasPlotHighlightState || symbolsChanged) signals.plot,
       if (hasPlotState) signals.plotControls,
-      if (data.containsKey('logs')) signals.logs,
+      if (data.containsKey('logs') || newlyMissing.isNotEmpty) signals.logs,
       if (hasAnalysisState) signals.analysis,
       if (hasDebugState) signals.debug,
       if (data['sourceProject'] is Map && !hasDebugState) signals.debug,

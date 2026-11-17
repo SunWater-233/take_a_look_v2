@@ -1,5 +1,6 @@
 """Reconcile watched trees against a new ELF declaration hierarchy."""
 from collections.abc import Iterable
+from dataclasses import replace
 
 from ..models import SymbolInfo, WatchedVariable
 from .symbol_hierarchy import SymbolHierarchy, SymbolIdentity, symbol_ancestors, symbol_identity
@@ -9,7 +10,7 @@ def rebind_watches(previous: dict[str, WatchedVariable], symbols: Iterable[Symbo
                    previous_symbols: Iterable[SymbolInfo] = ()) -> dict[str, WatchedVariable]:
     if not previous:
         return {}
-    hierarchy = SymbolHierarchy(symbol for symbol in symbols if not symbol.is_rtt)
+    hierarchy = SymbolHierarchy(symbol for symbol in symbols if not symbol.is_rtt and not symbol.missing)
     rebound: dict[SymbolIdentity, WatchedVariable] = {}
     for watch in previous.values():
         symbol = hierarchy.resolve(watch.symbol)
@@ -19,6 +20,9 @@ def rebind_watches(previous: dict[str, WatchedVariable], symbols: Iterable[Symbo
                 read_mode=watch.mode, monitor_rate_hz=watch.monitor_rate_hz,
                 monitor_enabled=watch.monitor_enabled,
             )
+        elif not watch.symbol.is_rtt and watch.symbol.section != '.rodata.freertos':
+            rebound[symbol_identity(watch.symbol)] = replace(
+                watch, symbol=replace(watch.symbol, missing=True, diagnostic="新固件中不存在或无法唯一匹配"))
 
     # Missing old declarations represent omitted members/branches. New members
     # join their nearest watched ancestor without restoring an omitted branch.
@@ -29,7 +33,7 @@ def rebind_watches(previous: dict[str, WatchedVariable], symbols: Iterable[Symbo
         if symbol is None or identity in old_names:
             continue
         for parent in symbol_ancestors(symbol):
-            if parent in rebound:
+            if parent in rebound and not rebound[parent].symbol.missing:
                 additions.setdefault(parent, []).append(symbol)
                 break
             if parent in old_names:

@@ -75,10 +75,10 @@ class FirmwareServiceMixin:
 
     def _commit_firmware(self, config, image, *, requires_download=False):
         started = time.perf_counter()
+        self._flush_pending_samples_locked()
+        self._stop_memory_sampling_locked()
         if requires_download:
             # Monitoring also reads addresses, so pausing capture alone is insufficient.
-            self._flush_pending_samples_locked()
-            self._stop_memory_sampling_locked()
             self._stop_rtt_locked()
             self._latest_rtt_values.clear()
             self._sampling_paused, self._rtt_enabled = True, False
@@ -102,7 +102,10 @@ class FirmwareServiceMixin:
         self._debug.info = image.debug_info if image else DebugInfoIndex()
         self._debug.stopped_location, self._debug.registers = None, {}
         watches_started = time.perf_counter()
-        self._watches = rebind_watches(self._watches, symbols, previous_symbols)
+        self._watches = rebind_watches(self._watches, symbols, previous_symbols) if image else {}
+        # Preserve unavailable channel identities for historical curves only.
+        self._symbols.update({watch.symbol.key: watch.symbol for watch in self._watches.values()
+                              if watch.symbol.missing})
         watches_s = time.perf_counter() - watches_started
         breakpoints_started = time.perf_counter()
         if requires_download:
@@ -296,7 +299,10 @@ class FirmwareServiceMixin:
             task.phase("symbols", "正在加载新符号与断点…")
             with self._lock:
                 self._commit_firmware(config, image)
-                self._clear_samples()
+                # Publish missing-member metadata before the new recording epoch
+                # so the desktop can retain the correct historical channels.
+                self._emit(EventName.STATE, self.state_snapshot())
+                self._clear_samples(preserve_missing=True)
                 self._debug.stopped_location, self._debug.registers = None, {}
                 self._rtt_control_block_address = None
                 self._next_rtt_retry_at = 0.0

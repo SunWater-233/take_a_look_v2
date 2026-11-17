@@ -39,6 +39,8 @@ class _WorkbenchFeedbackState extends State<WorkbenchFeedback> {
   late final _feedback = TalFeedbackController(onNoticeDismissed: _changed);
   Map<String, dynamic>? _lastError;
   Map<String, dynamic>? _pendingError;
+  WatchRefreshWarning? _lastWatchWarning;
+  WatchRefreshWarning? _pendingWatchWarning;
   SymbolLoadProgress? _pendingLoad;
   DialogRoute<void>? _loadRoute;
   ValueNotifier<SymbolLoadProgress>? _progress;
@@ -115,6 +117,7 @@ class _WorkbenchFeedbackState extends State<WorkbenchFeedback> {
     widget.controller.connectionChanges.addListener(_changed);
     widget.controller.symbolChanges.addListener(_changed);
     widget.controller.sourceToolsChanges.addListener(_changed);
+    widget.controller.watchChanges.addListener(_changed);
     _changed();
   }
 
@@ -123,6 +126,7 @@ class _WorkbenchFeedbackState extends State<WorkbenchFeedback> {
     controller.connectionChanges.removeListener(_changed);
     controller.symbolChanges.removeListener(_changed);
     controller.sourceToolsChanges.removeListener(_changed);
+    controller.watchChanges.removeListener(_changed);
   }
 
   @override
@@ -142,10 +146,17 @@ class _WorkbenchFeedbackState extends State<WorkbenchFeedback> {
     _presentedLoadId = null;
     _lastError = null;
     _pendingError = null;
+    _lastWatchWarning = null;
+    _pendingWatchWarning = null;
     _listen();
   }
 
   void _changed() {
+    final warning = widget.controller.watchRefreshWarning;
+    if (warning != null && !identical(warning, _lastWatchWarning)) {
+      _lastWatchWarning = warning;
+      _pendingWatchWarning = warning;
+    }
     final load = widget.controller.symbolLoadProgress;
     if (load?.isLoading == true) _pendingLoad = load;
     final error = widget.controller.lastBackendError;
@@ -267,10 +278,31 @@ class _WorkbenchFeedbackState extends State<WorkbenchFeedback> {
       _showingError = false;
       if (mounted) {
         unawaited(_showFirmwareChange());
+        _showWatchWarning();
         _showRecordingNotice();
         _showUpdateNotice();
       }
     }
+  }
+
+  void _showWatchWarning() {
+    if (_pendingWatchWarning == null ||
+        _feedback.isShowingNotice ||
+        _pendingError != null ||
+        _loadRoute != null ||
+        _firmwareRoute != null ||
+        widget.controller.isSymbolLoading ||
+        widget.controller.sourceTask.running) {
+      return;
+    }
+    final warning = _pendingWatchWarning!;
+    _pendingWatchWarning = null;
+    _feedback.showWarning(
+      context: context,
+      title: '监视变量发生变化',
+      message: warning.message,
+      details: warning.details,
+    );
   }
 
   @override

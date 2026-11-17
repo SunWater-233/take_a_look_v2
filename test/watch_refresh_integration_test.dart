@@ -108,6 +108,7 @@ void main() {
       await c.loadFirmware(elf.path);
       expect(c.lastBackendError, isNull);
       expect(c.watches.map((w) => w.symbol.name).toSet(), {
+        'items[0].old',
         'items',
         'items[0]',
         'items[0].value',
@@ -125,6 +126,13 @@ void main() {
       );
       expect(value.symbol.address, 0x20000100);
       expect(value.symbol.size, 8);
+      final missing = c.watches.firstWhere(
+        (w) => w.symbol.name == 'items[0].old',
+      );
+      expect(missing.symbol.missing, isTrue);
+      expect(missing.symbol.writable, isFalse);
+      expect(c.symbols.any((s) => s.name == missing.symbol.name), isFalse);
+      expect(c.watchRefreshWarning?.members, hasLength(1));
       expect(value.pinned, isTrue);
       expect(c.watchInputDrafts[value.symbol.key], '3.25');
       final tree = buildWatchTree(c.watches).single;

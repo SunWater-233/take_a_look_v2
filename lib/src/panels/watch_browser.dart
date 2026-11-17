@@ -896,8 +896,15 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
                     triggerMode: TooltipTriggerMode.manual,
                     message: watch?.symbol.name ?? entry.label,
                     child: Text(
-                      entry.label,
-                      style: talMono.copyWith(fontSize: 12),
+                      watch?.symbol.missing == true
+                          ? '${entry.label}（新固件中不存在）'
+                          : entry.label,
+                      style: talMono.copyWith(
+                        fontSize: 12,
+                        color: watch?.symbol.missing == true
+                            ? TalColors.warning
+                            : null,
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -961,12 +968,14 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
                     Icons.sensors,
                     'compact-watch-capture-${entry.section.actionPrefix}${entry.key}',
                     watch.samplingEnabled,
-                    () => controller.setWatchReadMode(
-                      entry.key,
-                      watch.samplingEnabled
-                          ? WatchReadMode.monitor
-                          : WatchReadMode.capture,
-                    ),
+                    watch.symbol.missing
+                        ? null
+                        : () => controller.setWatchReadMode(
+                            entry.key,
+                            watch.samplingEnabled
+                                ? WatchReadMode.monitor
+                                : WatchReadMode.capture,
+                          ),
                   ),
                   if (watch.samplingEnabled)
                     _rowIcon(
@@ -1059,7 +1068,7 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
     IconData icon,
     String key,
     bool active,
-    VoidCallback onPressed, {
+    VoidCallback? onPressed, {
     Color? color,
   }) => SizedBox.square(
     dimension: ui.compactIconButtonSize,

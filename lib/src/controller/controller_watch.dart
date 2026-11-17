@@ -303,10 +303,13 @@ extension TakeALookControllerWatches on TakeALookController {
       watch.symbol.dataSource == 'rtt' || (rttEnabled && rttProtocol == 'plus');
 
   bool isWatchMonitorActive(WatchItem watch) =>
-      usesDevicePush(watch) ||
-      watch.pinned ||
-      !_watchMonitorVisibilityKnown ||
-      _watchMonitorScopes.values.any((keys) => keys.contains(watch.symbol.key));
+      !watch.symbol.missing &&
+      (usesDevicePush(watch) ||
+          watch.pinned ||
+          !_watchMonitorVisibilityKnown ||
+          _watchMonitorScopes.values.any(
+            (keys) => keys.contains(watch.symbol.key),
+          ));
 
   /// Once the workspace exists, no visible inspectors means no memory polling.
   /// Headless controllers retain their previous policy until visibility is known.
@@ -446,6 +449,7 @@ extension TakeALookControllerWatches on TakeALookController {
       watch.monitorRateHz ?? monitorRateHz;
 
   void setWatchReadMode(String key, WatchReadMode mode) {
+    if (_watchByKey(key)?.symbol.missing == true) return;
     if (_isDetachedRemote &&
         _dispatchRemote(ControllerCommand.setWatchReadMode, {
           'key': key,
@@ -478,6 +482,7 @@ extension TakeALookControllerWatches on TakeALookController {
   }
 
   void readWatch(String key) {
+    if (_watchByKey(key)?.symbol.missing == true) return;
     if (_dispatchCommand(ControllerCommand.readWatch, key)) return;
     final watch = _watchByKey(key);
     if (watch == null || connectionStatus != ConnectionStatus.connected) return;
@@ -618,6 +623,7 @@ extension TakeALookControllerWatches on TakeALookController {
   }
 
   Future<bool> writeWatch(String key, String input) async {
+    if (_watchByKey(key)?.symbol.missing == true) return false;
     watchInputDrafts[key] = input;
     try {
       final sender = backendCommand ?? remoteCommand;

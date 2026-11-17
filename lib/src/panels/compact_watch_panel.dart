@@ -148,14 +148,16 @@ class _WatchMemberDetails extends StatelessWidget {
                             ),
                             TalButton.icon(
                               key: ValueKey('watch-detail-capture-$_key'),
-                              onPressed: () {
-                                controller.setWatchReadMode(
-                                  _key,
-                                  watch.samplingEnabled
-                                      ? WatchReadMode.monitor
-                                      : WatchReadMode.capture,
-                                );
-                              },
+                              onPressed: watch.symbol.missing
+                                  ? null
+                                  : () {
+                                      controller.setWatchReadMode(
+                                        _key,
+                                        watch.samplingEnabled
+                                            ? WatchReadMode.monitor
+                                            : WatchReadMode.capture,
+                                      );
+                                    },
                               icon: const Icon(Icons.sensors, size: 15),
                               label: Text(
                                 watch.samplingEnabled ? '移出采集' : '加入采集',
@@ -178,21 +180,24 @@ class _WatchMemberDetails extends StatelessWidget {
                               ),
                             SizedBox(
                               width: ui.touchOptimized ? 112 : 96,
-                              child: TalDropdown<WatchReadMode>(
-                                key: ValueKey('watch-read-mode-$_key'),
-                                subtle: true,
-                                value: watch.readMode,
-                                values: WatchReadMode.values,
-                                label: (mode) => mode.label,
-                                onChanged: (mode) =>
-                                    controller.setWatchReadMode(_key, mode),
-                              ),
+                              child: watch.symbol.missing
+                                  ? Text('不可用', style: talMuted)
+                                  : TalDropdown<WatchReadMode>(
+                                      key: ValueKey('watch-read-mode-$_key'),
+                                      subtle: true,
+                                      value: watch.readMode,
+                                      values: WatchReadMode.values,
+                                      label: (mode) => mode.label,
+                                      onChanged: (mode) => controller
+                                          .setWatchReadMode(_key, mode),
+                                    ),
                             ),
                             if (watch.readMode == WatchReadMode.manual)
                               TalButton(
                                 onPressed:
-                                    controller.connectionStatus ==
-                                        ConnectionStatus.connected
+                                    !watch.symbol.missing &&
+                                        controller.connectionStatus ==
+                                            ConnectionStatus.connected
                                     ? () => controller.readWatch(_key)
                                     : null,
                                 child: const Text('立即读取'),

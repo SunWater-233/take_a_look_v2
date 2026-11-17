@@ -96,6 +96,8 @@ class ControllerSnapshotCodec {
     SnapshotField.samplingElapsedSeconds => source.samplingElapsedSeconds,
     SnapshotField.samplingClockRunning => source.samplingClockRunning,
     SnapshotField.samplingEpoch => source.state.acquisition.samplingEpoch,
+    SnapshotField.preserveMissingHistory =>
+      source.state.acquisition.preserveMissingHistory,
     SnapshotField.elapsedSeconds => source.state.acquisition.elapsedSeconds,
     SnapshotField.samplingPaused => source.state.acquisition.samplingPaused,
     SnapshotField.rawRecording => source.state.acquisition.rawRecording,
@@ -145,6 +147,11 @@ class ControllerSnapshotCodec {
           'value': watch.wireValue,
           'sampleCursor': watch.totalSampleCount,
           'historyStartSeconds': watch.historyStartSeconds,
+          if (watch.symbol.missing) ...{
+            'symbol': watch.symbol.toJson(),
+            'archivedHistoryPath': watch.archivedHistoryPath,
+            'archivedHistoryEndSeconds': watch.archivedHistoryEndSeconds,
+          },
           if (includeSamples)
             'samples': packedSamples
                 ? watch.samples.packedRange()

@@ -42,7 +42,10 @@ class TelemetryStore {
     Iterable<WatchItem> watches, {
     required double currentElapsed,
   }) {
-    final watchesByKey = {for (final watch in watches) watch.symbol.key: watch};
+    final watchesByKey = {
+      for (final watch in watches)
+        if (!watch.symbol.missing) watch.symbol.key: watch,
+    };
     for (final watch in watchesByKey.values) {
       configureWatch(watch);
     }
@@ -92,7 +95,10 @@ class TelemetryStore {
     Iterable<WatchItem> watches, {
     required double currentElapsed,
   }) {
-    final watchesByKey = {for (final watch in watches) watch.symbol.key: watch};
+    final watchesByKey = {
+      for (final watch in watches)
+        if (!watch.symbol.missing) watch.symbol.key: watch,
+    };
     final schemaWatches = [for (final key in batch.keys) watchesByKey[key]];
     for (final watch in watchesByKey.values) {
       configureWatch(watch);

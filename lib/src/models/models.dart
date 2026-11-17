@@ -59,11 +59,12 @@ class SymbolItem {
     required this.size,
     this.section = '',
     this.backendKey,
-    this.writable = true,
+    bool writable = true,
     this.dataSource = 'memory',
     this.encoding = '',
     this.diagnostic = '',
-  });
+    this.missing = false,
+  }) : _writable = writable;
 
   final String source;
   final String name;
@@ -72,10 +73,12 @@ class SymbolItem {
   final int size;
   final String section;
   final String? backendKey;
-  final bool writable;
+  final bool _writable;
+  bool get writable => _writable && !missing;
   final String dataSource;
   final String encoding;
   final String diagnostic;
+  final bool missing;
 
   SymbolIdentity get identity => (dataSource, source, name);
 
@@ -88,7 +91,8 @@ class SymbolItem {
       section == other.section &&
       writable == other.writable &&
       encoding == other.encoding &&
-      diagnostic == other.diagnostic;
+      diagnostic == other.diagnostic &&
+      missing == other.missing;
 
   factory SymbolItem.fromJson(Map<String, dynamic> json) {
     return SymbolItem(
@@ -103,6 +107,7 @@ class SymbolItem {
       dataSource: json['dataSource'] as String? ?? 'memory',
       encoding: json['encoding'] as String? ?? '',
       diagnostic: json['diagnostic'] as String? ?? '',
+      missing: json['missing'] == true,
     );
   }
 
@@ -118,10 +123,13 @@ class SymbolItem {
     'dataSource': dataSource,
     if (encoding.isNotEmpty) 'encoding': encoding,
     if (diagnostic.isNotEmpty) 'diagnostic': diagnostic,
+    if (missing) 'missing': true,
   };
 
   String get key => backendKey ?? '${address.toRadixString(16)}:$name';
-  String get addressLabel => dataSource == 'rtt'
+  String get addressLabel => missing
+      ? '—'
+      : dataSource == 'rtt'
       ? 'RTT'
       : '0x${address.toRadixString(16).padLeft(8, '0').toUpperCase()}';
 
@@ -160,6 +168,8 @@ class WatchItem {
   final SampleBuffer samples;
   int totalSampleCount = 0;
   double historyStartSeconds = 0;
+  String? archivedHistoryPath;
+  double archivedHistoryEndSeconds = 0;
   WatchReadMode readMode = WatchReadMode.capture;
   double? monitorRateHz;
   int? updatedAtMs;
@@ -176,6 +186,8 @@ class WatchItem {
       WatchItem(symbol: replacement, color: color, samples: samples)
         ..totalSampleCount = totalSampleCount
         ..historyStartSeconds = historyStartSeconds
+        ..archivedHistoryPath = archivedHistoryPath
+        ..archivedHistoryEndSeconds = archivedHistoryEndSeconds
         ..readMode = readMode
         ..monitorRateHz = monitorRateHz
         ..updatedAtMs = updatedAtMs
@@ -198,6 +210,7 @@ class WatchItem {
   }
 
   String? get valueDiagnostic {
+    if (symbol.missing) return '新固件中不存在，已停止读取；历史数据已保留。';
     if (symbol.diagnostic.isNotEmpty) return symbol.diagnostic;
     if (symbol.encoding == 'unsupported') return '暂不支持该类型的数值解码';
     if (symbol.encoding == 'bytes') return '该变量为复合类型，请展开成员查看数值';
@@ -239,6 +252,7 @@ class WatchItem {
   }
 
   String get _decimalValueLabel {
+    if (symbol.missing) return '新固件中不存在';
     if (symbol.diagnostic.isNotEmpty) return '解析失败';
     if (symbol.encoding == 'unsupported') return '类型不支持';
     if (symbol.encoding == 'bytes') return '非标量';
@@ -253,6 +267,17 @@ class WatchItem {
     }
     return value.round().toString();
   }
+}
+
+class WatchRefreshWarning {
+  WatchRefreshWarning(Iterable<SymbolItem> symbols)
+    : members = List.unmodifiable(symbols.map((s) => '${s.name}（${s.source}）'));
+
+  final List<String> members;
+  String get message =>
+      '新固件中有 ${members.length} 个监视变量不存在或无法唯一匹配，'
+      '已停止读取并保留历史曲线。';
+  String get details => members.join('\n');
 }
 
 enum LogLevel {

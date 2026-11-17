@@ -183,7 +183,9 @@ class _WatchValueCellState extends State<_WatchValueCell> {
                 : _displayValue(context, style, constraints.maxWidth),
             key: ValueKey('$_prefix-watch-value-$_key'),
             style: style.copyWith(
-              color: _error == null && widget.watch.valueDiagnostic == null
+              color: widget.watch.symbol.missing
+                  ? TalColors.warning
+                  : _error == null && widget.watch.valueDiagnostic == null
                   ? null
                   : TalColors.error,
             ),

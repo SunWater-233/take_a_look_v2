@@ -33,35 +33,41 @@ extension TakeALookControllerFirmware on TakeALookController {
       for (var index = 0; index < next.length; index += 1) {
         final current = _symbols[index];
         final replacement = next[index];
-        if (current.source != replacement.source ||
-            current.name != replacement.name ||
-            current.address != replacement.address ||
-            current.type != replacement.type ||
-            current.size != replacement.size ||
-            current.section != replacement.section ||
-            current.key != replacement.key ||
-            current.writable != replacement.writable ||
-            current.dataSource != replacement.dataSource) {
+        if (!current.hasSameDefinition(replacement)) {
           unchanged = false;
           break;
         }
       }
       if (unchanged) return;
     }
-    final removedNames = {
+    final hierarchy = SymbolHierarchy(next);
+    final replacements = <String, SymbolItem>{
       for (final symbol in _symbols)
-        if (_removedWatchKeys.contains(symbol.key))
-          (symbol.source, symbol.name),
+        if (_symbolHierarchy.resolve(symbol)?.key == symbol.key)
+          if (hierarchy.resolve(symbol) case final SymbolItem replacement)
+            symbol.key: replacement,
     };
-    // An undo entry belongs to one symbol table/recording, never a new binary.
-    _clearWatchDeletionHistory();
-    _removedWatchKeys.addAll(
-      next
-          .where(
-            (symbol) => removedNames.contains((symbol.source, symbol.name)),
-          )
-          .map((symbol) => symbol.key),
-    );
+    _watchRegistry.rebindSymbols(replacements, hierarchy);
+    _rekeySymbolSet(_selectedSymbols, replacements);
+    _rekeySymbolMap(_frozenPlotSamples, replacements);
+    final visibility = state.plot.visibilityBeforeIsolation;
+    if (visibility != null) _rekeySymbolMap(visibility, replacements);
+    state.plot.highlightedWatchKey =
+        replacements[state.plot.highlightedWatchKey]?.key;
+    for (final order in compactWatchSectionOrders.values) {
+      final rebound = [
+        for (final key in order)
+          if (replacements[key] case final SymbolItem symbol) symbol.key,
+      ];
+      order
+        ..clear()
+        ..addAll(rebound);
+    }
+    for (final scope in _watchMonitorScopes.values) {
+      _rekeySymbolSet(scope, replacements);
+    }
+    _lastMonitorEnabledKeys = null;
+    _symbolHierarchy = hierarchy;
     _symbols
       ..clear()
       ..addAll(next);
@@ -217,4 +223,28 @@ extension TakeALookControllerFirmware on TakeALookController {
     }
     loadFirmware(firmwarePath);
   }
+}
+
+void _rekeySymbolSet(Set<String> values, Map<String, SymbolItem> replacements) {
+  final rebound = {
+    for (final key in values)
+      if (replacements[key] case final SymbolItem symbol) symbol.key,
+  };
+  values
+    ..clear()
+    ..addAll(rebound);
+}
+
+void _rekeySymbolMap<T>(
+  Map<String, T> values,
+  Map<String, SymbolItem> replacements,
+) {
+  final rebound = {
+    for (final entry in values.entries)
+      if (replacements[entry.key] case final SymbolItem symbol)
+        symbol.key: entry.value,
+  };
+  values
+    ..clear()
+    ..addAll(rebound);
 }

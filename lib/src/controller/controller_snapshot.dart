@@ -318,17 +318,18 @@ extension TakeALookControllerSnapshot on TakeALookController {
       lastBackendError = null;
     }
 
-    if (data.containsKey('selectedSymbols')) {
-      _selectedSymbols
-        ..clear()
-        ..addAll((data['selectedSymbols'] as List? ?? const []).cast<String>());
-    }
     if (data.containsKey('symbols')) {
       _replaceSymbols(
         (data['symbols'] as List? ?? const []).map((raw) {
           return SymbolItem.fromJson(Map<String, dynamic>.from(raw as Map));
         }),
       );
+    }
+
+    if (data.containsKey('selectedSymbols')) {
+      _selectedSymbols
+        ..clear()
+        ..addAll((data['selectedSymbols'] as List? ?? const []).cast<String>());
     }
 
     if (data.containsKey('watches')) {
@@ -475,8 +476,8 @@ extension TakeALookControllerSnapshot on TakeALookController {
         _frozenPlotSamples.clear();
       }
     }
-    final deletedWatchesInvalidated =
-        hadDeletedWatches && previousSymbolRevision != _symbolRevision;
+    final symbolsChanged = previousSymbolRevision != _symbolRevision;
+    final deletedWatchesInvalidated = hadDeletedWatches && symbolsChanged;
     if (deletedWatchesInvalidated && !_isDetachedRemote) _syncWatchesBackend();
     _emitState([
       if (data.containsKey('freeRtos') || data.containsKey('freeRtosSettings'))
@@ -486,12 +487,12 @@ extension TakeALookControllerSnapshot on TakeALookController {
       if (hasSamplingState) signals.sampling,
       if (hasSymbolState) signals.symbols,
       if (hasWatchState ||
-          deletedWatchesInvalidated ||
+          symbolsChanged ||
           hasPlotWatchSelection ||
           data.containsKey('connectionKind'))
         signals.watches,
-      if (hasWatchState || hasElapsedState) signals.telemetry,
-      if (hasPlotState || hasPlotHighlightState) signals.plot,
+      if (hasWatchState || hasElapsedState || symbolsChanged) signals.telemetry,
+      if (hasPlotState || hasPlotHighlightState || symbolsChanged) signals.plot,
       if (hasPlotState) signals.plotControls,
       if (data.containsKey('logs')) signals.logs,
       if (hasAnalysisState) signals.analysis,

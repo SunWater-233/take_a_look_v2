@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from take_a_look_backend.models import SymbolInfo, WatchedVariable
+from take_a_look_backend.models import SymbolInfo
 from take_a_look_backend.protocol import ProtocolError, RpcMethod
 from take_a_look_backend.service import BackendService
 from take_a_look_backend.services.elf_context import ElfLoadContext
@@ -140,21 +140,6 @@ def test_failed_freertos_layout_is_retried_instead_of_cached(loading, monkeypatc
     assert parse_layout.call_count == 2
     assert service._symbol_cache is None
     assert not service.last_symbol_load_timings['cache_hit']
-
-
-def test_watch_rebinding_retains_only_unambiguous_memory_symbols():
-    old = SymbolInfo('gain', 0x20000000, 4, 'float', '.data', 'motor.c')
-    new = SymbolInfo('gain', 0x20000040, 4, 'float', '.data', 'motor.c')
-    watch = WatchedVariable(old, '#123456', True, False, read_mode='manual',
-                            monitor_rate_hz=7, monitor_enabled=False)
-    rtt = SymbolInfo('gain', 0, 4, 'float', '', 'motor.c', data_source='rtt')
-    result = BackendService._rebind_watches({old.key: watch}, [new, rtt])
-    assert list(result) == [new.key]
-    rebound = result[new.key]
-    assert (rebound.symbol, rebound.color, rebound.plot_enabled, rebound.mode,
-            rebound.monitor_rate_hz, rebound.monitor_enabled) == (new, '#123456', True, 'manual', 7, False)
-    duplicate = SymbolInfo('gain', 0x20000080, 4, 'float', '.data', 'motor.c')
-    assert BackendService._rebind_watches({old.key: watch}, [new, duplicate, rtt]) == {}
 
 
 def test_real_multidimensional_record_and_pointer_arrays_keep_member_addresses(tmp_path):

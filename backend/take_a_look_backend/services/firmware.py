@@ -11,7 +11,7 @@ import hashlib
 from pathlib import Path
 import time
 
-from ..models import SymbolInfo, WatchedVariable
+from ..models import SymbolInfo
 from ..protocol import EventName, ProtocolError
 from .debug_info import DebugInfoIndex, load_debug_info_from_elf
 from .elf_context import ElfLoadContext
@@ -20,6 +20,7 @@ from .freertos_layout import FreeRtosLayout
 from .source_project import normalize_config
 from .source_tasks import SourceTasks
 from .symbols import load_symbols_from_elf
+from .watch_rebinding import rebind_watches
 
 SYMBOL_LOAD_TIMEOUT_SECONDS = 600
 
@@ -85,6 +86,7 @@ class FirmwareServiceMixin:
         self._debug.remove_breakpoints(self._memory, connected=self._connection_status == "connected")
         breakpoints_s = time.perf_counter() - breakpoints_started
         symbols = image.symbols if image else []
+        previous_symbols = self._symbols.values()
         self._source_project = dict(config)
         self._symbols = {symbol.key: symbol for symbol in symbols}
         self._firmware = {
@@ -100,7 +102,7 @@ class FirmwareServiceMixin:
         self._debug.info = image.debug_info if image else DebugInfoIndex()
         self._debug.stopped_location, self._debug.registers = None, {}
         watches_started = time.perf_counter()
-        self._watches = self._rebind_watches(self._watches, symbols)
+        self._watches = rebind_watches(self._watches, symbols, previous_symbols)
         watches_s = time.perf_counter() - watches_started
         breakpoints_started = time.perf_counter()
         if requires_download:
@@ -243,27 +245,6 @@ class FirmwareServiceMixin:
             "cache_hit": cached is not None, "total_s": time.perf_counter() - started,
         }
         return image
-
-    @staticmethod
-    def _rebind_watches(previous: dict[str, WatchedVariable], symbols: list[SymbolInfo]) -> dict[str, WatchedVariable]:
-        # Addresses change after a rebuild. Match by source/name only when unambiguous.
-        if not previous:
-            return {}
-        by_source_name: dict[tuple[str, str], SymbolInfo | None] = {}
-        for symbol in symbols:
-            if not symbol.is_rtt:
-                key = (symbol.source_file, symbol.name)
-                by_source_name[key] = None if key in by_source_name else symbol
-        result = {}
-        for watch in previous.values():
-            symbol = by_source_name.get((watch.symbol.source_file, watch.symbol.name))
-            if symbol is not None:
-                result[symbol.key] = WatchedVariable(
-                    symbol, watch.color, watch.plot_enabled, watch.sampling_enabled,
-                    read_mode=watch.mode, monitor_rate_hz=watch.monitor_rate_hz,
-                    monitor_enabled=watch.monitor_enabled,
-                )
-        return result
 
     def _download_firmware(self, staged: Path, original: Path, config: dict[str, object], task: SourceTasks) -> None:
         with self._firmware_lock:

@@ -17,6 +17,7 @@ export 'controller_snapshot_codec.dart';
 import '../models/demo_data.dart';
 import '../models/models.dart';
 import '../models/watch_tree.dart';
+import '../models/symbol_hierarchy.dart';
 import '../models/connection_capabilities.dart';
 import '../models/source_tools.dart';
 import '../models/freertos.dart';
@@ -101,6 +102,7 @@ class TakeALookController extends ChangeNotifier {
   final TargetCatalogRequest? emberRequest;
   final PathPicker? targetPackPicker;
   final List<SymbolItem> _symbols = <SymbolItem>[];
+  SymbolHierarchy _symbolHierarchy = SymbolHierarchy(const []);
   late final WatchRegistry _watchRegistry = WatchRegistry(
     onExpired: () {
       _syncWatchesBackend();

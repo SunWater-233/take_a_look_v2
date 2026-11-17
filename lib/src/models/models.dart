@@ -48,6 +48,8 @@ class DebugBreakpoint {
   };
 }
 
+typedef SymbolIdentity = (String dataSource, String source, String name);
+
 class SymbolItem {
   const SymbolItem({
     required this.source,
@@ -74,6 +76,19 @@ class SymbolItem {
   final String dataSource;
   final String encoding;
   final String diagnostic;
+
+  SymbolIdentity get identity => (dataSource, source, name);
+
+  bool hasSameDefinition(SymbolItem other) =>
+      identity == other.identity &&
+      key == other.key &&
+      address == other.address &&
+      type == other.type &&
+      size == other.size &&
+      section == other.section &&
+      writable == other.writable &&
+      encoding == other.encoding &&
+      diagnostic == other.diagnostic;
 
   factory SymbolItem.fromJson(Map<String, dynamic> json) {
     return SymbolItem(
@@ -156,6 +171,19 @@ class WatchItem {
   bool displayHex = false;
   double value = 0;
   String? valueIssue;
+
+  WatchItem withSymbol(SymbolItem replacement) =>
+      WatchItem(symbol: replacement, color: color, samples: samples)
+        ..totalSampleCount = totalSampleCount
+        ..historyStartSeconds = historyStartSeconds
+        ..readMode = readMode
+        ..monitorRateHz = monitorRateHz
+        ..updatedAtMs = updatedAtMs
+        ..plotted = plotted
+        ..pinned = pinned
+        ..displayHex = displayHex
+        ..value = value
+        ..valueIssue = valueIssue;
 
   Object get wireValue => valueIssue ?? value;
 

@@ -83,12 +83,13 @@ extension TakeALookControllerWatches on TakeALookController {
         .where((item) => _selectedSymbols.contains(item.key))
         .toList();
     final aggregateRootKeys = <String>{};
+    final aggregateMemberKeys = <String>{};
     final selectedKeys = <String>{};
     for (final root in selectedRoots) {
       selectedKeys.add(root.key);
-      for (final candidate in _symbols) {
-        if (!_isDescendantSymbol(candidate, root)) continue;
+      for (final candidate in _symbolHierarchy.descendantsOf(root)) {
         aggregateRootKeys.add(root.key);
+        aggregateMemberKeys.addAll([root.key, candidate.key]);
         selectedKeys.add(candidate.key);
       }
     }
@@ -98,14 +99,11 @@ extension TakeALookControllerWatches on TakeALookController {
         .toList();
     if (selected.isNotEmpty) _watchRegistry.clearRedos();
     for (final symbol in selected) {
-      final isAggregateMember = selectedRoots.any(
-        (root) =>
-            aggregateRootKeys.contains(root.key) &&
-            (symbol.key == root.key || _isDescendantSymbol(symbol, root)),
-      );
       _insertWatchSymbol(
         symbol,
-        mode: isAggregateMember ? WatchReadMode.monitor : mode,
+        mode: aggregateMemberKeys.contains(symbol.key)
+            ? WatchReadMode.monitor
+            : mode,
       );
     }
     _selectedSymbols.clear();
@@ -146,7 +144,7 @@ extension TakeALookControllerWatches on TakeALookController {
   Iterable<SymbolItem> _watchMemberSymbols(String key) {
     final root = _watchByKey(key)?.symbol;
     if (root == null) return const [];
-    return _symbols.where((symbol) => _isDescendantSymbol(symbol, root));
+    return _symbolHierarchy.descendantsOf(root);
   }
 
   bool isAggregateWatch(String key) => _watchMemberSymbols(key).isNotEmpty;
@@ -199,11 +197,10 @@ extension TakeALookControllerWatches on TakeALookController {
         .where((watch) => removedKeys.contains(watch.symbol.key))
         .map((watch) => watch.symbol)
         .toList();
-    for (final watch in _watches) {
-      if (removedKeys.contains(watch.symbol.key)) continue;
-      if (roots.any((root) => _isDescendantSymbol(watch.symbol, root))) {
-        removedKeys.add(watch.symbol.key);
-      }
+    for (final root in roots) {
+      removedKeys.addAll(
+        _symbolHierarchy.descendantsOf(root).map((symbol) => symbol.key),
+      );
     }
     if (!_watchRegistry.remove(
       removedKeys,
@@ -655,12 +652,4 @@ extension TakeALookControllerWatches on TakeALookController {
       return false;
     }
   }
-}
-
-bool _isDescendantSymbol(SymbolItem candidate, SymbolItem root) {
-  if (candidate.source != root.source || candidate.key == root.key) {
-    return false;
-  }
-  return candidate.name.startsWith('${root.name}.') ||
-      candidate.name.startsWith('${root.name}[');
 }

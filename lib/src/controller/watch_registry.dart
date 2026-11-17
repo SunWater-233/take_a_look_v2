@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import '../models/models.dart';
+import '../models/symbol_hierarchy.dart';
 
 /// Owns watch membership, editor preferences and bounded deletion history.
 /// Backend commands and UI notifications are handled by the controller.
@@ -19,6 +20,49 @@ class WatchRegistry {
 
   bool get canUndo => _deletions.isNotEmpty;
   bool get canRedo => _redos.isNotEmpty;
+
+  /// UI preferences follow declarations when a rebuild moves their addresses.
+  /// Deleted branches also suppress children newly introduced by that rebuild.
+  void rebindSymbols(
+    Map<String, SymbolItem> replacements,
+    SymbolHierarchy hierarchy,
+  ) {
+    clearHistory();
+    final omitted = <String>{};
+    for (final key in removedKeys) {
+      final symbol = replacements[key];
+      if (symbol == null) continue;
+      omitted.add(symbol.key);
+      omitted.addAll(hierarchy.descendantsOf(symbol).map((item) => item.key));
+    }
+    final rebound = [
+      for (final watch in watches)
+        if (replacements[watch.symbol.key] case final SymbolItem symbol)
+          watch.withSymbol(symbol),
+    ];
+    final reboundDrafts = {
+      for (final entry in drafts.entries)
+        if (replacements[entry.key] case final SymbolItem symbol)
+          symbol.key: entry.value,
+    };
+    final reboundExpanded = {
+      for (final key in expanded)
+        if (replacements[key] case final SymbolItem symbol) symbol.key,
+    };
+    selection = replacements[selection]?.key;
+    watches
+      ..clear()
+      ..addAll(rebound);
+    drafts
+      ..clear()
+      ..addAll(reboundDrafts);
+    expanded
+      ..clear()
+      ..addAll(reboundExpanded);
+    removedKeys
+      ..clear()
+      ..addAll(omitted);
+  }
 
   Iterable<WatchItem> get retained sync* {
     yield* watches;

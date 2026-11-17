@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 
 import '../controller/controller.dart';
 import '../models/models.dart';
+import '../models/symbol_hierarchy.dart';
 import '../theme/theme.dart';
 import 'table_layout.dart';
 import 'firmware_notice.dart';
@@ -150,7 +151,7 @@ class _SymbolPanelState extends State<SymbolPanel> {
       if (source.trim().isNotEmpty && source != '未知来源') {
         parent!.sourcePath = source;
       }
-      final nameParts = _splitSymbolPath(symbol.name);
+      final nameParts = splitSymbolPath(symbol.name);
       var symbolKey = '${parent!.key}/symbol';
       for (var index = 0; index < nameParts.length; index += 1) {
         final part = nameParts[index];
@@ -188,20 +189,6 @@ class _SymbolPanelState extends State<SymbolPanel> {
       prepareNode(root);
     }
     return roots;
-  }
-
-  List<String> _splitSymbolPath(String name) {
-    final parts = <String>[];
-    final tokenPattern = RegExp(r'[^\[\]]+|\[[^\]]*\]');
-    for (final chunk in name.split('.')) {
-      parts.addAll(
-        tokenPattern
-            .allMatches(chunk)
-            .map((match) => match.group(0)!)
-            .where((part) => part.isNotEmpty),
-      );
-    }
-    return parts.isEmpty ? <String>[name] : parts;
   }
 
   List<_VisibleSymbolNode> _flatten(

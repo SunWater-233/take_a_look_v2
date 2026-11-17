@@ -4,9 +4,6 @@ extension TakeALookControllerFirmware on TakeALookController {
   bool get firmwareRequiresDownload =>
       state.firmware['requiresDownload'] == true;
 
-  bool get sourceDebugConfigured =>
-      hasFirmwareSymbols && sourceProject.sourceRoot.trim().isNotEmpty;
-
   String? get firmwareNotice => firmwareRequiresDownload
       ? '固件已变化，符号已自动刷新；请重新下载后继续采样或源码调试。'
       : switch (state.firmware['status']) {

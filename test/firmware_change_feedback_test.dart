@@ -41,28 +41,49 @@ TakeALookController _controller({BackendCommand? command}) {
 }
 
 void main() {
-  testWidgets(
-    'requires both loaded symbols and a source root before prompting',
-    (tester) async {
+  for (final extension in ['axf', 'elf']) {
+    testWidgets('prompts for changed $extension without a source root', (
+      tester,
+    ) async {
       final controller = _controller();
       addTearDown(controller.dispose);
+      controller.applySnapshot({
+        'sourceProject': {'firmwarePath': 'C:/project/motor.$extension'},
+      });
+      expect(controller.sourceProject.sourceRoot, isEmpty);
       await tester.pumpWidget(_harness(controller));
-      controller.applySnapshot({'firmware': _firmware('new')});
       await tester.pumpAndSettle();
       expect(find.byKey(_dialog), findsNothing);
-      expect(controller.firmwareNotice, contains('符号已自动刷新'));
 
-      controller.applySnapshot({
-        'sourceProject': {'sourceRoot': 'C:/project'},
-      });
+      controller.applySnapshot({'firmware': _firmware('new')});
       await tester.pumpAndSettle();
       expect(find.byKey(_dialog), findsOneWidget);
+      expect(controller.firmwareNotice, contains('符号已自动刷新'));
+      expect(
+        find.textContaining('C:/project/motor.$extension'),
+        findsOneWidget,
+      );
       await tester.tap(find.text('稍后'));
       await tester.pumpAndSettle();
       expect(controller.firmwareRequiresDownload, isTrue);
       await tester.pumpWidget(const SizedBox.shrink());
-    },
-  );
+    });
+  }
+
+  testWidgets('does not prompt without a selected firmware file', (
+    tester,
+  ) async {
+    final controller = _controller();
+    addTearDown(controller.dispose);
+    controller.applySnapshot({
+      'sourceProject': {'firmwarePath': '', 'sourceRoot': 'C:/project'},
+      'firmware': _firmware('new'),
+    });
+    await tester.pumpWidget(_harness(controller));
+    await tester.pumpAndSettle();
+    expect(find.byKey(_dialog), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
   testWidgets(
     'prompts once per content change and never downloads automatically',
@@ -75,7 +96,6 @@ void main() {
         },
       );
       addTearDown(controller.dispose);
-      controller.sourceProject.sourceRoot = 'C:/project';
       await tester.pumpWidget(_harness(controller));
       controller.applySnapshot({'firmware': _firmware('new')});
       await tester.pumpAndSettle();

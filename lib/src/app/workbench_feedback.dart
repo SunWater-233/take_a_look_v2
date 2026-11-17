@@ -356,7 +356,7 @@ class _WorkbenchFeedbackState extends State<WorkbenchFeedback> {
     final controller = widget.controller;
     if (!widget.showFirmwareChanges ||
         !controller.firmwareRequiresDownload ||
-        !controller.sourceDebugConfigured) {
+        controller.firmwarePath.trim().isEmpty) {
       return null;
     }
     return '${controller.firmwarePath}\n${controller.state.firmware['fingerprint']}';

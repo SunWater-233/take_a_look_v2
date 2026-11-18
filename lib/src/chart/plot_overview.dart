@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
@@ -14,9 +15,15 @@ import 'viewport.dart';
 
 typedef _TimeRange = ({double start, double end});
 typedef _OverviewSeries = ({Color color, List<Offset> points});
+typedef _OverviewFrame = ({
+  Size size,
+  CartesianPlotViewport? viewport,
+  List<_OverviewSeries> series,
+});
 
 const _overviewHandleColor = Color(0xFFF4A567);
 const _minimumSpan = 0.2;
+const _liveRefreshInterval = Duration(milliseconds: 100);
 
 enum _OverviewAction { seek, pan, startEdge, endEdge }
 
@@ -35,10 +42,15 @@ class PlotOverview extends StatefulWidget {
 }
 
 class _PlotOverviewState extends State<PlotOverview> {
-  final _historyChanges = ValueNotifier(0);
+  final _repaint = ValueNotifier(0);
   final _histories = <String, PlotHistory>{};
   final _historyEnds = <String, double>{};
   final _focus = FocusNode(debugLabel: 'Plot time overview');
+  Timer? _liveRefresh;
+  _OverviewFrame? _frame;
+  late _TimeRange _paintedWindow;
+  late double _retentionSeconds;
+  bool _dataDirty = true;
   _OverviewDrag? _drag;
   _OverviewAction? _hoverAction;
   bool _showFocus = false;
@@ -46,12 +58,61 @@ class _PlotOverviewState extends State<PlotOverview> {
   TakeALookController get controller => widget.controller;
 
   @override
+  void initState() {
+    super.initState();
+    _listenTo(controller);
+  }
+
+  @override
   void didUpdateWidget(PlotOverview oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != controller) {
+      _stopListeningTo(oldWidget.controller);
       _clearHistories();
+      _frame = null;
       _drag = null;
       _dragging = false;
+      _hoverAction = null;
+      _listenTo(controller);
+      _refreshData();
+    }
+  }
+
+  void _listenTo(TakeALookController source) {
+    _retentionSeconds = source.plotRetentionSeconds;
+    source.telemetryChanges.addListener(_scheduleLiveRefresh);
+    source.watchChanges.addListener(_refreshData);
+    source.samplingChanges.addListener(_refreshData);
+    source.plotControlChanges.addListener(_refreshWindow);
+  }
+
+  void _stopListeningTo(TakeALookController source) {
+    source.telemetryChanges.removeListener(_scheduleLiveRefresh);
+    source.watchChanges.removeListener(_refreshData);
+    source.samplingChanges.removeListener(_refreshData);
+    source.plotControlChanges.removeListener(_refreshWindow);
+    _liveRefresh?.cancel();
+    _liveRefresh = null;
+  }
+
+  void _scheduleLiveRefresh() {
+    // Coalesce telemetry into an overview frame even if sampling then stops.
+    _liveRefresh ??= Timer(_liveRefreshInterval, _refreshData);
+  }
+
+  void _refreshData() {
+    _liveRefresh?.cancel();
+    _liveRefresh = null;
+    _retentionSeconds = controller.plotRetentionSeconds;
+    _dataDirty = true;
+    _repaint.value++;
+  }
+
+  void _refreshWindow() {
+    if (_retentionSeconds != controller.plotRetentionSeconds) {
+      _refreshData();
+    } else {
+      _repaint.value++;
     }
   }
 
@@ -65,8 +126,9 @@ class _PlotOverviewState extends State<PlotOverview> {
 
   @override
   void dispose() {
+    _stopListeningTo(controller);
     _clearHistories();
-    _historyChanges.dispose();
+    _repaint.dispose();
     _focus.dispose();
     super.dispose();
   }
@@ -79,21 +141,38 @@ class _PlotOverviewState extends State<PlotOverview> {
     return (start: math.min(range.start, end - _minimumSpan), end: end);
   }
 
-  Rect _track(Size size) => (Offset.zero & size).deflate(1);
-
-  CartesianPlotViewport? _mapping(Size size) {
+  _OverviewFrame _frameFor(Size size) {
+    final cached = _frame;
+    if (!_dataDirty && cached != null && cached.size == size) return cached;
+    _dataDirty = false;
     final range = _dataRange;
-    if (range == null || size.width <= 2 || size.height <= 2) return null;
-    return CartesianPlotViewport(
-      plot: _track(size),
+    if (range == null || size.width <= 2 || size.height <= 2) {
+      if (range == null) _clearHistories();
+      return _frame = (size: size, viewport: null, series: const []);
+    }
+    final plot = (Offset.zero & size).deflate(1);
+    // A two-pixel bucket still shows both extrema in this compact preview.
+    final series = _series(range, plot.width / 2);
+    var low = double.infinity, high = double.negativeInfinity;
+    for (final entry in series) {
+      for (final point in entry.points) {
+        if (!point.isFinite) continue;
+        low = math.min(low, point.dy);
+        high = math.max(high, point.dy);
+      }
+    }
+    final pad = math.max(1e-9, (high - low) * 0.12);
+    final viewport = CartesianPlotViewport(
+      plot: plot,
       xMin: range.start,
       xMax: range.end,
-      yMin: 0,
-      yMax: 1,
+      yMin: low.isFinite ? low - pad : 0,
+      yMax: high.isFinite ? high + pad : 1,
     );
+    return _frame = (size: size, viewport: viewport, series: series);
   }
 
-  List<_OverviewSeries> _series(CartesianPlotViewport viewport) {
+  List<_OverviewSeries> _series(_TimeRange range, double pixelWidth) {
     final livePath = controller.rawRecording['historyPath'] as String?;
     final plotted = controller.watches.where((watch) => watch.plotted).toList();
     final byPath = <String, List<WatchItem>>{};
@@ -115,7 +194,7 @@ class _PlotOverviewState extends State<PlotOverview> {
       final watches = entry.value;
       final history = _histories.putIfAbsent(
         path,
-        () => PlotHistory(onChanged: () => _historyChanges.value++),
+        () => PlotHistory(onChanged: _refreshData),
       );
       final sourceEnd = path == livePath
           ? controller.elapsedSeconds
@@ -141,7 +220,7 @@ class _PlotOverviewState extends State<PlotOverview> {
         start: 0,
         end: math.max(_minimumSpan, end),
         sourceEnd: end,
-        pixelWidth: viewport.plot.width,
+        pixelWidth: pixelWidth,
         enabled: true,
       );
       for (final watch in watches) {
@@ -152,7 +231,7 @@ class _PlotOverviewState extends State<PlotOverview> {
       for (final watch in plotted)
         (
           color: watch.color,
-          points: _points(watch, cached[watch.symbol.key], viewport),
+          points: _points(watch, cached[watch.symbol.key], range, pixelWidth),
         ),
     ];
   }
@@ -160,27 +239,29 @@ class _PlotOverviewState extends State<PlotOverview> {
   List<Offset> _points(
     WatchItem watch,
     PlotHistory? cache,
-    CartesianPlotViewport viewport,
+    _TimeRange range,
+    double pixelWidth,
   ) {
     final recent = downsampleTelemetrySamples(
       watch.samples,
-      xMin: viewport.xMin,
-      xMax: viewport.xMax,
-      pixelWidth: viewport.plot.width,
+      xMin: range.start,
+      xMax: range.end,
+      pixelWidth: pixelWidth,
+      cacheResult: false,
     );
     final history = cache?.samplesFor(
       watch.symbol.key,
       minimumTime: watch.historyStartSeconds,
     );
     if (history == null) return recent;
-    final cutoff = recent.isEmpty ? viewport.xMax : recent.first.dx;
-    if (cutoff < viewport.xMin) return recent;
+    final cutoff = recent.isEmpty ? range.end : recent.first.dx;
+    if (cutoff < range.start) return recent;
     return [
       for (final point in downsampleTelemetrySamples(
         history,
-        xMin: viewport.xMin,
+        xMin: range.start,
         xMax: cutoff,
-        pixelWidth: viewport.plot.width,
+        pixelWidth: pixelWidth,
       ))
         if (recent.isEmpty || point.dx < cutoff) point,
       ...recent,
@@ -188,7 +269,7 @@ class _PlotOverviewState extends State<PlotOverview> {
   }
 
   _OverviewAction _actionAt(PointerEvent event, CartesianPlotViewport mapping) {
-    final window = telemetryTimeWindow(controller);
+    final window = _paintedWindow;
     final left = mapping.mapX(window.start.clamp(mapping.xMin, mapping.xMax));
     final right = mapping.mapX(window.end.clamp(mapping.xMin, mapping.xMax));
     if (right <= left) return _OverviewAction.seek;
@@ -202,20 +283,20 @@ class _PlotOverviewState extends State<PlotOverview> {
     return x > left && x < right ? _OverviewAction.pan : _OverviewAction.seek;
   }
 
-  void _onDown(PointerDownEvent event, Size size) {
+  void _onDown(PointerDownEvent event) {
     if (event.buttons & kSecondaryButton != 0) {
       widget.onOpenRange(event.position);
       return;
     }
     if (event.buttons & kPrimaryButton == 0 || _drag != null) return;
-    final mapping = _mapping(size);
+    final mapping = _frame?.viewport;
     if (mapping == null) return;
     _drag = _OverviewDrag(
       event.pointer,
       event.localPosition.dx,
       _actionAt(event, mapping),
       mapping,
-      telemetryTimeWindow(controller),
+      _paintedWindow,
     );
   }
 
@@ -280,17 +361,37 @@ class _PlotOverviewState extends State<PlotOverview> {
         time.clamp(math.min(maximum, left + _minimumSpan), maximum),
       ),
     };
-    _applyWindow(start.toDouble(), end.toDouble());
+    _applyWindow(
+      start.toDouble(),
+      end.toDouble(),
+      preserveFollowLatest:
+          drag.action == _OverviewAction.startEdge ||
+          drag.action == _OverviewAction.endEdge,
+    );
   }
 
-  void _applyWindow(double start, double end) {
+  void _applyWindow(
+    double start,
+    double end, {
+    bool preserveFollowLatest = false,
+  }) {
+    if (preserveFollowLatest && controller.followLatest) {
+      final span = end - start;
+      if ((controller.plotVisibleWindowSeconds - span).abs() < 1e-9) return;
+      controller.setPlotViewport(
+        xMin: start,
+        xMax: end,
+        preserveFollowLatest: true,
+      );
+      return;
+    }
     final current = telemetryTimeWindow(controller);
     if ((current.start - start).abs() < 1e-9 &&
         (current.end - end).abs() < 1e-9) {
       return;
     }
     controller.configurePlotView({
-      'followLatest': false,
+      if (!preserveFollowLatest) 'followLatest': false,
       'xMin': start,
       'xMax': end,
     });
@@ -308,15 +409,15 @@ class _PlotOverviewState extends State<PlotOverview> {
       LogicalKeyboardKey.arrowRight => 1,
       _ => 0,
     };
-    final range = _dataRange;
-    if (direction == 0 || range == null) return KeyEventResult.ignored;
+    final mapping = _frame?.viewport;
+    if (direction == 0 || mapping == null) return KeyEventResult.ignored;
     final window = telemetryTimeWindow(controller);
     final delta = direction * (window.end - window.start) / 8;
     final (start, end) = clampCartesianWindow(
       window.start + delta,
       window.end + delta,
-      range.start,
-      range.end,
+      mapping.xMin,
+      mapping.xMax,
     );
     _applyWindow(start, end);
     return KeyEventResult.handled;
@@ -324,72 +425,59 @@ class _PlotOverviewState extends State<PlotOverview> {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final size = constraints.biggest;
-        return Focus(
-          canRequestFocus: false,
-          onKeyEvent: _onKey,
-          child: FocusableActionDetector(
-            focusNode: _focus,
-            onShowFocusHighlight: (value) => setState(() => _showFocus = value),
-            child: Semantics(
-              button: true,
-              label: '记录缩略图',
-              hint: '拖动时间窗或两端调节范围。按 Enter 设置精确范围。',
-              onTap: () => widget.onOpenRange(null),
-              child: MouseRegion(
-                onHover: (event) {
-                  final mapping = _mapping(size);
-                  final action = mapping == null
-                      ? null
-                      : _actionAt(event, mapping);
-                  if (action != _hoverAction) {
-                    setState(() => _hoverAction = action);
-                  }
-                },
-                cursor: switch (_drag?.action ?? _hoverAction) {
-                  _OverviewAction.pan =>
-                    _dragging
-                        ? SystemMouseCursors.grabbing
-                        : SystemMouseCursors.grab,
-                  _OverviewAction.startEdge ||
-                  _OverviewAction.endEdge => SystemMouseCursors.resizeLeftRight,
-                  _OverviewAction.seek => SystemMouseCursors.precise,
-                  null => SystemMouseCursors.basic,
-                },
-                child: Listener(
-                  key: const ValueKey('plot-overview'),
-                  behavior: HitTestBehavior.opaque,
-                  onPointerDown: (event) => _onDown(event, size),
-                  onPointerMove: _onMove,
-                  onPointerUp: _onUp,
-                  onPointerCancel: (event) => _endDrag(event.pointer),
-                  child: RepaintBoundary(
-                    child: CustomPaint(
-                      painter: _PlotOverviewPainter(
-                        mapping: _mapping,
-                        series: _series,
-                        window: () => telemetryTimeWindow(controller),
-                        focused: _showFocus,
-                        showRange: _dragging,
-                        repaint: Listenable.merge([
-                          controller.telemetryChanges,
-                          controller.plotChanges,
-                          controller.watchChanges,
-                          controller.samplingChanges,
-                          _historyChanges,
-                        ]),
-                      ),
-                      child: const SizedBox.expand(),
-                    ),
+    return Focus(
+      canRequestFocus: false,
+      onKeyEvent: _onKey,
+      child: FocusableActionDetector(
+        focusNode: _focus,
+        onShowFocusHighlight: (value) => setState(() => _showFocus = value),
+        child: Semantics(
+          button: true,
+          label: '记录缩略图',
+          hint: '拖动时间窗或两端调节范围。按 Enter 设置精确范围。',
+          onTap: () => widget.onOpenRange(null),
+          child: MouseRegion(
+            onHover: (event) {
+              final mapping = _frame?.viewport;
+              final action = mapping == null ? null : _actionAt(event, mapping);
+              if (action != _hoverAction) {
+                setState(() => _hoverAction = action);
+              }
+            },
+            cursor: switch (_drag?.action ?? _hoverAction) {
+              _OverviewAction.pan =>
+                _dragging
+                    ? SystemMouseCursors.grabbing
+                    : SystemMouseCursors.grab,
+              _OverviewAction.startEdge ||
+              _OverviewAction.endEdge => SystemMouseCursors.resizeLeftRight,
+              _OverviewAction.seek => SystemMouseCursors.precise,
+              null => SystemMouseCursors.basic,
+            },
+            child: Listener(
+              key: const ValueKey('plot-overview'),
+              behavior: HitTestBehavior.opaque,
+              onPointerDown: _onDown,
+              onPointerMove: _onMove,
+              onPointerUp: _onUp,
+              onPointerCancel: (event) => _endDrag(event.pointer),
+              child: RepaintBoundary(
+                child: CustomPaint(
+                  painter: _PlotOverviewPainter(
+                    frameFor: _frameFor,
+                    window: () =>
+                        _paintedWindow = telemetryTimeWindow(controller),
+                    focused: _showFocus,
+                    showRange: _dragging,
+                    repaint: _repaint,
                   ),
+                  child: const SizedBox.expand(),
                 ),
               ),
             ),
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 }
@@ -411,16 +499,14 @@ class _OverviewDrag {
 
 class _PlotOverviewPainter extends CustomPainter {
   _PlotOverviewPainter({
-    required this.mapping,
-    required this.series,
+    required this.frameFor,
     required this.window,
     required this.focused,
     required this.showRange,
     required Listenable repaint,
   }) : super(repaint: repaint);
 
-  final CartesianPlotViewport? Function(Size) mapping;
-  final List<_OverviewSeries> Function(CartesianPlotViewport) series;
+  final _OverviewFrame Function(Size) frameFor;
   final _TimeRange Function() window;
   final bool focused;
   final bool showRange;
@@ -432,9 +518,9 @@ class _PlotOverviewPainter extends CustomPainter {
       const Radius.circular(4),
     );
     canvas.drawRRect(outline, Paint()..color = TalColors.input);
-    final track = mapping(size);
+    final frame = frameFor(size);
+    final track = frame.viewport;
     if (track != null) {
-      final record = series(track);
       final visible = window();
       final box = Rect.fromLTRB(
         track.mapX(visible.start.clamp(track.xMin, track.xMax)),
@@ -483,7 +569,7 @@ class _PlotOverviewPainter extends CustomPainter {
         }
         label.dispose();
       }
-      _drawSeries(canvas, size, track, record, box);
+      _drawSeries(canvas, size, track, frame.series, box);
       if (box.width > 0) {
         canvas.drawRect(
           box,
@@ -522,26 +608,10 @@ class _PlotOverviewPainter extends CustomPainter {
     List<_OverviewSeries> record,
     Rect box,
   ) {
-    var low = double.infinity, high = double.negativeInfinity;
-    for (final entry in record) {
-      for (final point in entry.points) {
-        if (!point.isFinite) continue;
-        low = math.min(low, point.dy);
-        high = math.max(high, point.dy);
-      }
-    }
-    if (!low.isFinite) return;
-    final pad = math.max(1e-9, (high - low) * 0.12);
     final renderer = CartesianChartRenderer(
       canvas: canvas,
       size: size,
-      viewport: CartesianPlotViewport(
-        plot: track.plot,
-        xMin: track.xMin,
-        xMax: track.xMax,
-        yMin: low - pad,
-        yMax: high + pad,
-      ),
+      viewport: track,
     );
     for (final entry in record) {
       renderer.drawPolyline(
@@ -560,5 +630,6 @@ class _PlotOverviewPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _PlotOverviewPainter oldDelegate) => true;
+  bool shouldRepaint(covariant _PlotOverviewPainter oldDelegate) =>
+      focused != oldDelegate.focused || showRange != oldDelegate.showRange;
 }

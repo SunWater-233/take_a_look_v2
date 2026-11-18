@@ -73,6 +73,8 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
   final FocusNode _panelFocusNode = FocusNode();
   final FocusNode _searchFocusNode = FocusNode();
   final TextEditingController _searchController = TextEditingController();
+  // Keep the input mounted when it moves between the toolbar and the editor.
+  final GlobalKey _searchFieldLayoutKey = GlobalKey();
   String? _selectedPath;
   List<HighlightedSourceLine> _lines = const [];
   final SourceHighlighter _highlighter = SourceHighlighter();
@@ -92,6 +94,8 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
   var _tabOverflow = (left: false, right: false);
   bool _draggingFiles = false;
   bool _searchVisible = false;
+  SourceSearchMode _searchMode = SourceSearchMode.source;
+  List<SourceDefinition> _searchDefinitions = const [];
   bool _searching = false;
   bool _searchSelectionChanged = false;
   int _activeSearchIndex = -1;
@@ -108,9 +112,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
   late final SourceReferencesController _references =
       SourceReferencesController(_sourceDocuments);
   List<SourceSearchResult> _searchResults = const [];
-  Map<String, String> get _resolvedSourcePaths =>
-      _sourceDocuments.resolvedPaths;
-  String _observedSourceRoot = '';
+  String? _observedSourceRoot;
   int _observedFirmwareRevision = -1;
   String? _observedCurrentSource;
   int? _observedCurrentLine;
@@ -193,12 +195,11 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     _externalPathKeys.clear();
     _sourceDocuments.clear();
     _sourceFiles = const [];
-    _resolvedSourcePaths.clear();
     _invalidateSearchFileIndex();
-    _sourceDocuments.clearIndex();
     _search.cancel();
     _searchController.clear();
     _searchResults = const [];
+    _searchDefinitions = const [];
     _sourceSelection = null;
     _hoveredToken = null;
     _sourcePeek = null;
@@ -207,6 +208,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     _searchVisible = false;
     _searching = false;
     _activeSearchIndex = -1;
+    _observedSourceRoot = null;
     _observedCurrentSource = null;
     _observedCurrentLine = null;
     _observedStopRevision = -1;
@@ -258,9 +260,8 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
   void _restoreSourceWorkspace() {
     // Reopening the panel must retain a user's file choice instead of treating
     // the same stopped PC as a new debugger stop.
-    if (controller.sourceWorkspace.selectedPath != null &&
-        controller.sourceWorkspace.viewedStopRevision ==
-            controller.debugState.stopRevision) {
+    if (controller.sourceWorkspace.viewedStopRevision ==
+        controller.debugState.stopRevision) {
       _observedCurrentSource = controller.debugState.currentSource;
       _observedCurrentLine = controller.debugState.currentLine;
       _observedStopRevision = controller.debugState.stopRevision;
@@ -289,20 +290,25 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
   void _handleDebugChange() {
     if (!mounted) return;
     _breakpointUnavailableReason = controller.breakpointEditDisabledReason;
+    final sourceRoot = controller.sourceProject.sourceRoot;
     final sourceRootChanged =
-        _observedSourceRoot != controller.sourceProject.sourceRoot;
+        _observedSourceRoot != null && _observedSourceRoot != sourceRoot;
+    _observedSourceRoot = sourceRoot;
     final firmwareRevision =
         (controller.state.firmware['revision'] as num?)?.toInt() ?? 0;
     final firmwareChanged = firmwareRevision != _observedFirmwareRevision;
     _observedFirmwareRevision = firmwareRevision;
+    if (sourceRootChanged) {
+      _tabKeys.clear();
+      _externalPathKeys
+        ..clear()
+        ..addAll(_openPaths.map(_pathKey));
+    }
     if (sourceRootChanged || firmwareChanged) {
       _sourcePeek = null;
       _references.cancel();
       _navigation.clear();
-      _observedSourceRoot = controller.sourceProject.sourceRoot;
-      _resolvedSourcePaths.clear();
       _sourceDocuments.clear();
-      _sourceDocuments.clearIndex();
       _invalidateSearchFileIndex();
     }
     final currentSource = controller.debugState.currentSource;
@@ -318,7 +324,10 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     final sourceFilesChanged = !listEquals(files, _sourceFiles);
     _sourceFiles = files;
     String? nextPath = controller.sourceWorkspace.selectedPath;
-    if (locationChanged && currentSource != null && currentSource.isNotEmpty) {
+    if (!sourceRootChanged &&
+        locationChanged &&
+        currentSource != null &&
+        currentSource.isNotEmpty) {
       nextPath = _matchingPath(currentSource, files) ?? currentSource;
     } else if (nextPath == null ||
         (!_externalPathKeys.contains(_pathKey(nextPath)) &&
@@ -331,9 +340,16 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
       setState(() {});
       if (locationChanged) _scrollToCurrentLine();
     }
-    if ((sourceRootChanged || sourceFilesChanged || firmwareChanged) &&
-        _searchVisible &&
-        _searchController.text.isNotEmpty) {
+    if (_searchVisible &&
+        _searchController.text.trim().isNotEmpty &&
+        (sourceRootChanged ||
+            sourceFilesChanged ||
+            firmwareChanged ||
+            (_searchMode == SourceSearchMode.source &&
+                !listEquals(
+                  _searchDefinitions,
+                  controller.debugState.sourceDefinitions,
+                )))) {
       _queueSearch(_searchController.text, immediate: true);
     }
   }
@@ -362,7 +378,11 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     }
   }
 
-  Future<void> _loadSource(String? path, {int? revealLine}) async {
+  Future<void> _loadSource(
+    String? path, {
+    int? revealLine,
+    String? verifiedLocalPath,
+  }) async {
     final request = controller.sourceLocationRequest;
     if (request != null &&
         path != null &&
@@ -371,8 +391,9 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
       controller.sourceLocationRequest = null;
     }
     if (path != null && !widget.readOnlyPreview && widget.visible) {
-      controller.openSourceFile(path);
-      path = controller.openSourcePathFor(path) ?? path;
+      final exactPath = verifiedLocalPath != null;
+      controller.openSourceFile(path, exactPath: exactPath);
+      path = controller.openSourcePathFor(path, exactPath: exactPath) ?? path;
     }
     final generation = ++_loadGeneration;
     setState(() {
@@ -388,7 +409,10 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     _ensureSelectedTabVisible();
     if (path == null) return;
     try {
-      final source = await _readSourceDocument(path);
+      final source = await _readSourceDocument(
+        path,
+        localPath: verifiedLocalPath,
+      );
       final highlighted = await _highlighter.prepare(source, path: path);
       if (!mounted || generation != _loadGeneration) return;
       setState(() {
@@ -421,9 +445,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
   }
 
   void _openSource(String path) {
-    final existing = _openPaths
-        .where((openPath) => controller.sourcePathsMatch(openPath, path))
-        .firstOrNull;
+    final existing = controller.openSourcePathFor(path);
     unawaited(_loadSource(existing ?? path));
     _restorePanelFocus();
   }
@@ -444,9 +466,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     }
     if (index < 0) return;
     final openPath = _openPaths[index];
-    final wasSelected =
-        _selectedPath != null &&
-        controller.sourcePathsMatch(_selectedPath!, openPath);
+    final wasSelected = _selectedPath == openPath;
     setState(() {
       _tabKeys.remove(_pathKey(openPath));
       if (_matchingPath(openPath, _sourceFiles) == null) {
@@ -543,7 +563,11 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
       return KeyEventResult.handled;
     }
     if (WorkspaceShortcut.findSource.matches(event)) {
-      _showSearch();
+      _showSearch(SourceSearchMode.source);
+      return KeyEventResult.handled;
+    }
+    if (WorkspaceShortcut.findSourceFile.matches(event)) {
+      _showSearch(SourceSearchMode.files);
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
@@ -619,15 +643,20 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     _tabController.jumpTo(target);
   }
 
-  void _showSearch() {
-    final wasVisible = _searchVisible;
-    if (!wasVisible) setState(() => _searchVisible = true);
-    unawaited(_getSearchFiles());
-    if (!wasVisible && _searchController.text.isNotEmpty) {
-      _queueSearch(_searchController.text, immediate: true);
+  void _showSearch(SourceSearchMode mode) {
+    final changed = !_searchVisible || _searchMode != mode;
+    if (changed) {
+      setState(() {
+        _searchVisible = true;
+        _searchMode = mode;
+      });
+      if (_searchController.text.trim().isNotEmpty) {
+        _queueSearch(_searchController.text, immediate: true);
+      }
     }
+    unawaited(_getSearchFiles());
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
+      if (!mounted || !_searchVisible) return;
       _searchFocusNode.requestFocus();
       _searchController.selection = TextSelection(
         baseOffset: 0,
@@ -641,6 +670,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     setState(() {
       _searchVisible = false;
       _searching = false;
+      _searchDefinitions = const [];
       _searchResults = const [];
       _activeSearchIndex = -1;
       _revealedSearchLine = null;
@@ -649,10 +679,11 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
   }
 
   void _queueSearch(String query, {bool immediate = false}) {
-    _search.cancel();
     if (query.trim().isEmpty) {
+      _search.cancel();
       setState(() {
         _searching = false;
+        _searchDefinitions = const [];
         _searchResults = const [];
         _activeSearchIndex = -1;
         _revealedSearchLine = null;
@@ -665,8 +696,13 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
       _activeSearchIndex = -1;
       _searchSelectionChanged = false;
     });
+    _searchDefinitions = _searchMode == SourceSearchMode.source
+        ? List.of(controller.debugState.sourceDefinitions)
+        : const [];
     _search.queue(
       query,
+      mode: _searchMode,
+      definitions: _searchDefinitions,
       immediate: immediate,
       getFiles: _getSearchFiles,
       readDocument: _readSearchDocument,
@@ -750,11 +786,21 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
   void _activateSearchResult(int index) {
     if (index < 0 || index >= _searchResults.length) return;
     final result = _searchResults[index];
+    final localPath = _searchMode == SourceSearchMode.files
+        ? result.localPath
+        : null;
+    final path = localPath == null
+        ? result.path
+        : controller.openSourcePathFor(result.path, exactPath: true) ??
+              controller.openSourcePathFor(localPath, exactPath: true) ??
+              result.path;
     _closeSearch();
-    if (_matchingPath(result.path, _sourceFiles) == null) {
-      _externalPathKeys.add(_pathKey(result.path));
+    if (localPath != null || _matchingPath(path, _sourceFiles) == null) {
+      _externalPathKeys.add(_pathKey(path));
     }
-    unawaited(_loadSource(result.path, revealLine: result.line));
+    unawaited(
+      _loadSource(path, revealLine: result.line, verifiedLocalPath: localPath),
+    );
   }
 
   List<SymbolItem> _symbolsForToken(String token, String sourcePath) {
@@ -1081,7 +1127,9 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
       position: _contextMenuPosition(menuContext, globalPosition),
       items: items,
     );
-    if (!context.mounted || action == null) return;
+    if (!context.mounted || generation != _loadGeneration || action == null) {
+      return;
+    }
     if (action == 'definition' && hit != null) {
       await _goToDefinition(hit);
     } else if (action == 'peek-definition' && hit != null) {
@@ -1187,10 +1235,8 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
                         buildDebugControls: _buildDebugControls,
                         sourceTabs: _buildSourceTabs(),
                       ),
-                      if (!widget.readOnlyPreview)
-                        _buildSourceActionRow(constraints.maxWidth),
                       Expanded(
-                        child: _buildSourceContent(constraints.maxWidth),
+                        child: _buildSourceWorkspace(constraints.maxWidth),
                       ),
                       _buildRegisterStrip(),
                       if (!widget.externalOutput)
@@ -1251,168 +1297,188 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     );
   }
 
-  Widget _buildSearchArea() {
-    final query = _searchController.text;
+  Widget _buildSearchField() {
+    final query = _searchController.text.trim();
+    final filesOnly = _searchMode == SourceSearchMode.files;
     final status = _searching
         ? '搜索中…'
         : query.isEmpty
-        ? '输入文件名或文本'
+        ? filesOnly
+              ? '输入文件名'
+              : '输入变量名或文本'
         : _searchResults.isEmpty
         ? '无结果'
         : '${_activeSearchIndex + 1} / ${_searchResults.length}';
-    final resultHeight = math.min(
-      168.0,
-      _searchResults.length * _searchResultHeight,
-    );
-    return Container(
-      key: const ValueKey('source-search-area'),
-      color: TalColors.surfaceAlt,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          SizedBox(
-            height: TalUiTheme.of(context).targetExtent(36),
-            child: Row(
-              children: [
-                const SizedBox(width: 10),
-                const Icon(Icons.search, size: 16, color: TalColors.muted),
-                const SizedBox(width: 7),
-                Expanded(
-                  child: TextField(
-                    key: const ValueKey('source-search-field'),
-                    controller: _searchController,
-                    focusNode: _searchFocusNode,
-                    autofocus: true,
-                    maxLines: 1,
-                    onChanged: _queueSearch,
-                    onSubmitted: (_) => _confirmSearchResult(),
-                    style: const TextStyle(
-                      color: TalColors.text,
-                      fontSize: 12,
-                      fontFamily: talFontFamily,
-                      fontFamilyFallback: talFontFamilyFallback,
-                    ),
-                    decoration: InputDecoration(
-                      isDense: true,
-                      hintText: '模糊查找文件名/路径，或搜索源码内容',
-                      hintStyle: talMuted.copyWith(fontSize: 12),
-                      border: InputBorder.none,
-                      contentPadding: const EdgeInsets.symmetric(vertical: 8),
-                    ),
+    final ui = TalUiTheme.of(context);
+    return LayoutBuilder(
+      key: _searchFieldLayoutKey,
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final buttonWidth = math.min(ui.iconButtonSize, width / 6);
+        return Container(
+          key: const ValueKey('source-search-area'),
+          color: TalColors.surfaceAlt,
+          height: ui.iconButtonSize + 1,
+          child: Row(
+            children: [
+              const SizedBox(width: 10),
+              const Icon(Icons.search, size: 16, color: TalColors.muted),
+              const SizedBox(width: 7),
+              Expanded(
+                child: TextField(
+                  key: const ValueKey('source-search-field'),
+                  controller: _searchController,
+                  focusNode: _searchFocusNode,
+                  autofocus: true,
+                  maxLines: 1,
+                  onChanged: _queueSearch,
+                  onSubmitted: (_) => _confirmSearchResult(),
+                  style: const TextStyle(
+                    color: TalColors.text,
+                    fontSize: 12,
+                    fontFamily: talFontFamily,
+                    fontFamilyFallback: talFontFamilyFallback,
+                  ),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: filesOnly ? '查找文本文件名或路径' : '查找变量、文件名或源码内容',
+                    hintStyle: talMuted.copyWith(fontSize: 12),
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 8),
                   ),
                 ),
+              ),
+              SizedBox(
+                width: math.min(106, width * .23),
+                child: Text(
+                  status,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: talMuted.copyWith(fontSize: 11),
+                ),
+              ),
+              for (final (name, label, icon, action) in [
+                (
+                  'previous',
+                  '上一个结果（↑）',
+                  Icons.keyboard_arrow_up,
+                  _searchResults.isEmpty ? null : () => _moveSearchResult(-1),
+                ),
+                (
+                  'next',
+                  '下一个结果（↓）',
+                  Icons.keyboard_arrow_down,
+                  _searchResults.isEmpty ? null : () => _moveSearchResult(1),
+                ),
+                ('close', '关闭搜索（Esc）', Icons.close, _closeSearch),
+              ])
                 SizedBox(
-                  width: 106,
-                  child: Text(
-                    status,
-                    textAlign: TextAlign.center,
-                    style: talMuted.copyWith(fontSize: 11),
+                  width: buttonWidth,
+                  child: _DebugToolbarButton(
+                    key: ValueKey('source-search-$name'),
+                    tooltip: label,
+                    icon: icon,
+                    onPressed: action,
                   ),
                 ),
-                _DebugToolbarButton(
-                  key: const ValueKey('source-search-previous'),
-                  tooltip: '上一个结果（↑）',
-                  icon: Icons.keyboard_arrow_up,
-                  onPressed: _searchResults.isEmpty
-                      ? null
-                      : () => _moveSearchResult(-1),
-                ),
-                _DebugToolbarButton(
-                  key: const ValueKey('source-search-next'),
-                  tooltip: '下一个结果（↓）',
-                  icon: Icons.keyboard_arrow_down,
-                  onPressed: _searchResults.isEmpty
-                      ? null
-                      : () => _moveSearchResult(1),
-                ),
-                _DebugToolbarButton(
-                  key: const ValueKey('source-search-close'),
-                  tooltip: '关闭搜索（Esc）',
-                  icon: Icons.close,
-                  onPressed: _closeSearch,
-                ),
-                const SizedBox(width: 4),
-              ],
-            ),
+              const SizedBox(width: 4),
+            ],
           ),
-          if (_searchResults.isNotEmpty)
-            Container(
-              height: resultHeight,
-              decoration: const BoxDecoration(
-                color: TalColors.surface,
-                border: Border(top: BorderSide(color: TalColors.borderSoft)),
-              ),
-              child: ListView.builder(
-                key: const ValueKey('source-search-results'),
-                controller: _searchResultsController,
-                itemExtent: _searchResultHeight,
-                itemCount: _searchResults.length,
-                itemBuilder: (context, index) {
-                  final result = _searchResults[index];
-                  final selected = index == _activeSearchIndex;
-                  return Tooltip(
-                    message: result.isFile ? result.preview : result.path,
-                    child: InkWell(
-                      key: ValueKey('source-search-result-$index'),
-                      onTap: () => _activateSearchResult(index),
-                      child: ColoredBox(
-                        color: selected
-                            ? TalColors.selection.withValues(alpha: 0.55)
-                            : Colors.transparent,
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 10),
-                          child: Row(
-                            children: [
-                              Icon(
-                                result.isFile
-                                    ? Icons.insert_drive_file_outlined
-                                    : Icons.find_in_page_outlined,
-                                size: 14,
-                                color: TalColors.muted,
-                              ),
-                              const SizedBox(width: 6),
-                              SizedBox(
-                                width: 220,
-                                child: Text(
-                                  result.isFile
-                                      ? _basename(result.path)
-                                      : '${_basename(result.path)}:${result.line}:${result.column}',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    color: TalColors.text,
-                                    fontSize: 11,
-                                    fontFamily: talFontFamily,
-                                    fontFamilyFallback: talFontFamilyFallback,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  result.preview,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: talMuted.copyWith(
-                                    fontSize: 11,
-                                    fontFamily: talFontFamily,
-                                    fontFamilyFallback: talFontFamilyFallback,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-        ],
-      ),
+        );
+      },
     );
   }
+
+  Widget _buildSearchResults() => LayoutBuilder(
+    builder: (context, constraints) {
+      final labelWidth = math.min(220.0, constraints.maxWidth / 2);
+      return Container(
+        height: math.min(168.0, _searchResults.length * _searchResultHeight),
+        decoration: const BoxDecoration(
+          color: TalColors.surface,
+          border: Border.symmetric(
+            horizontal: BorderSide(color: TalColors.borderSoft),
+          ),
+        ),
+        child: ListView.builder(
+          key: const ValueKey('source-search-results'),
+          controller: _searchResultsController,
+          itemExtent: _searchResultHeight,
+          itemCount: _searchResults.length,
+          itemBuilder: (context, index) {
+            final result = _searchResults[index];
+            final selected = index == _activeSearchIndex;
+            final variableName = result.variableName;
+            final filename = _basename(result.path);
+            final label =
+                variableName ??
+                (result.isFile
+                    ? filename
+                    : '$filename:${result.line}:${result.column}');
+            return Tooltip(
+              message: result.isFile || variableName != null
+                  ? result.preview
+                  : result.path,
+              child: InkWell(
+                key: ValueKey('source-search-result-$index'),
+                onTap: () => _activateSearchResult(index),
+                child: ColoredBox(
+                  color: selected
+                      ? TalColors.selection.withValues(alpha: 0.55)
+                      : Colors.transparent,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    child: Row(
+                      children: [
+                        Icon(
+                          variableName != null
+                              ? Icons.data_object
+                              : result.isFile
+                              ? Icons.insert_drive_file_outlined
+                              : Icons.find_in_page_outlined,
+                          size: 14,
+                          color: TalColors.muted,
+                        ),
+                        const SizedBox(width: 6),
+                        SizedBox(
+                          width: labelWidth,
+                          child: Text(
+                            label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: TalColors.text,
+                              fontSize: 11,
+                              fontFamily: talFontFamily,
+                              fontFamilyFallback: talFontFamilyFallback,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            result.preview,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: talMuted.copyWith(
+                              fontSize: 11,
+                              fontFamily: talFontFamily,
+                              fontFamilyFallback: talFontFamilyFallback,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      );
+    },
+  );
 
   Widget _buildDebugControls() {
     final state = controller.debugState.executionState;
@@ -1517,7 +1583,6 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
   );
 
   Widget _buildSourceTabs() {
-    final files = _sourceFiles;
     final clear = TalColors.surface.withValues(alpha: 0);
     return SizedBox(
       height: TalUiTheme.of(context).targetExtent(32),
@@ -1543,9 +1608,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
                           padding: const EdgeInsets.symmetric(horizontal: 10),
                           child: Center(
                             child: Text(
-                              files.isEmpty
-                                  ? 'ELF 中没有源码调试信息'
-                                  : '按 Ctrl+F 查找源码文件',
+                              '按 Ctrl+P 查找文件',
                               style: talMuted.copyWith(fontSize: 12),
                             ),
                           ),
@@ -1592,9 +1655,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
   }
 
   Widget _buildSourceTab(String path) {
-    final selected =
-        _selectedPath != null &&
-        controller.sourcePathsMatch(_selectedPath!, path);
+    final selected = _selectedPath == path;
     return Tooltip(
       message: path,
       child: Material(
@@ -1713,13 +1774,15 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
 
   Widget _buildBody() {
     if (_selectedPath == null) {
-      final hasSourceFiles = _sourceFiles.isNotEmpty;
+      final hasSourceFiles =
+          _sourceFiles.isNotEmpty ||
+          controller.sourceProject.sourceRoot.isNotEmpty;
       return _SourceDebugEmptyState(
         icon: hasSourceFiles ? Icons.code : Icons.code_off,
         title: hasSourceFiles ? '选择要查看的源码' : '没有可显示的源码',
         detail: hasSourceFiles
-            ? '按 Ctrl+F 查找并打开源码文件。'
-            : '请加载带 DWARF 调试信息的 ELF / AXF 文件',
+            ? '按 Ctrl+P 打开文件，或按 Ctrl+F 查找变量与源码内容。'
+            : '请选择源码根目录，或加载带 DWARF 调试信息的 ELF / AXF 文件。',
         actions: _buildSourceSetupActions(),
       );
     }

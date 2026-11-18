@@ -3,7 +3,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart' show RenderViewport, ViewportOffset;
+import 'package:flutter/rendering.dart'
+    show OverflowBoxFit, RenderViewport, ViewportOffset;
 
 import 'package:flutter/services.dart';
 
@@ -11,7 +12,6 @@ import '../chart/inspection_anchor.dart';
 import '../controller/controller.dart';
 import '../workspace/keyboard_shortcuts.dart';
 import '../models/models.dart';
-import '../models/symbol_hierarchy.dart' show splitSymbolPath;
 import '../models/watch_tree.dart';
 import '../theme/theme.dart';
 import 'table_layout.dart';

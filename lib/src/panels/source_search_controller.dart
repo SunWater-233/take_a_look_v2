@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import '../models/source_definition.dart';
 import 'source_documents.dart';
 import 'source_search.dart';
 
@@ -13,6 +15,7 @@ class SourceSearchController {
   final SourceDocuments documents;
   static const _maxSearchResults = 1000;
   static const _searchReadBatchSize = 8;
+  static final _binaryControlCharacters = RegExp(r'[\x00-\x08\x0E-\x1F\x7F]');
   List<String> _searchIndexPaths = const [];
   String _searchIndexRoot = '';
   Future<List<SourceSearchFile>>? _searchFileIndexFuture;
@@ -34,6 +37,8 @@ class SourceSearchController {
 
   void queue(
     String query, {
+    SourceSearchMode mode = SourceSearchMode.source,
+    Iterable<SourceDefinition> definitions = const [],
     required Future<List<SourceSearchFile>> Function() getFiles,
     required Future<SourceSearchText?> Function(SourceSearchFile) readDocument,
     required Future<void> Function() beforeContents,
@@ -43,16 +48,27 @@ class SourceSearchController {
     cancel();
     if (_disposed || query.trim().isEmpty) return;
     final generation = _searchGeneration;
-    void run() => unawaited(
-      _searchAcrossFiles(
-        query,
-        generation,
-        getFiles: getFiles,
-        readDocument: readDocument,
-        beforeContents: beforeContents,
-        publish: publish,
-      ),
-    );
+    void run() {
+      bool isCurrent() => !_disposed && generation == _searchGeneration;
+      void publishCurrent(List<SourceSearchResult> results, bool searching) {
+        if (isCurrent()) publish(results, searching);
+      }
+
+      unawaited(
+        mode == SourceSearchMode.files
+            ? _searchEditableFiles(query, getFiles, isCurrent, publishCurrent)
+            : _searchAcrossFiles(
+                query,
+                definitions: definitions,
+                getFiles: getFiles,
+                readDocument: readDocument,
+                beforeContents: beforeContents,
+                isCurrent: isCurrent,
+                publish: publishCurrent,
+              ),
+      );
+    }
+
     if (immediate) {
       run();
     } else {
@@ -157,41 +173,92 @@ class SourceSearchController {
     });
   }
 
-  Future<void> _searchAcrossFiles(
+  Future<void> _searchEditableFiles(
     String query,
-    int generation, {
+    Future<List<SourceSearchFile>> Function() getFiles,
+    bool Function() isCurrent,
+    void Function(List<SourceSearchResult>, bool searching) publish,
+  ) async {
+    final files = await getFiles();
+    if (!isCurrent()) return;
+    final matches = searchSourceFiles(
+      files.where((file) => !file.isBinaryArtifact),
+      query,
+      limit: files.length,
+    );
+    final results = <SourceSearchResult>[];
+    for (var start = 0; start < matches.length; start += _searchReadBatchSize) {
+      final batch = matches.skip(start).take(_searchReadBatchSize);
+      final editable = await Future.wait(
+        batch.map((file) => _isEditableFile(file.localPath, isCurrent)),
+      );
+      if (!isCurrent()) return;
+      for (final (index, file) in batch.indexed) {
+        if (editable[index]) {
+          results.add(SourceSearchResult.file(file));
+          if (results.length == _maxSearchResults) break;
+        }
+      }
+      if (results.length == _maxSearchResults) break;
+      if (start + _searchReadBatchSize < matches.length) {
+        publish(List.of(results), true);
+      }
+    }
+    publish(results, false);
+  }
+
+  Future<bool> _isEditableFile(String path, bool Function() isCurrent) async {
+    try {
+      // Use the same strict UTF-8 decoding as the source viewer. Streaming
+      // keeps large files out of the source document cache until opened.
+      await for (final chunk in File(path).openRead().transform(utf8.decoder)) {
+        if (!isCurrent() || _binaryControlCharacters.hasMatch(chunk)) {
+          return false;
+        }
+      }
+      return true;
+    } on FileSystemException {
+      return false;
+    } on FormatException {
+      return false;
+    }
+  }
+
+  Future<void> _searchAcrossFiles(
+    String query, {
+    required Iterable<SourceDefinition> definitions,
     required Future<List<SourceSearchFile>> Function() getFiles,
     required Future<SourceSearchText?> Function(SourceSearchFile) readDocument,
     required Future<void> Function() beforeContents,
+    required bool Function() isCurrent,
     required void Function(List<SourceSearchResult>, bool searching) publish,
   }) async {
-    void publishResults(
-      List<SourceSearchResult> results,
-      int expected, {
-      bool searching = true,
-    }) {
-      if (!_disposed && expected == _searchGeneration) {
-        publish(results, searching);
-      }
+    final variables = searchSourceVariables(
+      definitions,
+      query,
+      limit: _maxSearchResults,
+    ).map(SourceSearchResult.variable).toList();
+    if (variables.length == _maxSearchResults) {
+      publish(variables, false);
+      return;
     }
+    if (variables.isNotEmpty) publish(variables, true);
 
     final files = await getFiles();
-    if (_disposed || generation != _searchGeneration) return;
+    if (!isCurrent()) return;
     final fileResults = List.generate(3, (_) => <SourceSearchResult>[]);
     for (final file in searchSourceFiles(
       files,
       query,
-      limit: _maxSearchResults,
+      limit: _maxSearchResults - variables.length,
     )) {
-      fileResults[file.priority].add(
-        SourceSearchResult.file(path: file.path, preview: file.localPath),
-      );
+      fileResults[file.priority].add(SourceSearchResult.file(file));
     }
-    publishResults(fileResults.expand((group) => group).toList(), generation);
+    publish([...variables, ...fileResults.expand((group) => group)], true);
     // Render filename matches before reading and searching file contents.
     await beforeContents();
-    if (_disposed || generation != _searchGeneration) return;
-    final results = <SourceSearchResult>[];
+    if (!isCurrent()) return;
+    final results = [...variables];
     for (var priority = 0; priority < fileResults.length; priority += 1) {
       results.addAll(
         fileResults[priority].take(_maxSearchResults - results.length),
@@ -210,13 +277,13 @@ class SourceSearchController {
         start < contentFiles.length;
         start += _searchReadBatchSize
       ) {
-        if (_disposed || generation != _searchGeneration) return;
+        if (!isCurrent()) return;
         final batch = contentFiles
             .skip(start)
             .take(_searchReadBatchSize)
             .toList();
         final documents = await Future.wait(batch.map(readDocument));
-        if (_disposed || generation != _searchGeneration) return;
+        if (!isCurrent()) return;
         for (var index = 0; index < batch.length; index += 1) {
           final document = documents[index];
           if (document == null) continue;
@@ -235,12 +302,12 @@ class SourceSearchController {
           }
           if (results.length >= _maxSearchResults) break;
         }
-        publishResults(
+        publish(
           [
             ...results,
             ...fileResults.skip(priority + 1).expand((group) => group),
           ].take(_maxSearchResults).toList(),
-          generation,
+          true,
         );
         if (results.length >= _maxSearchResults) break;
         // Let new keystrokes cancel an obsolete content scan between batches.
@@ -250,7 +317,7 @@ class SourceSearchController {
       }
       if (results.length >= _maxSearchResults) break;
     }
-    publishResults(results, generation, searching: false);
+    publish(results, false);
   }
 }
 
@@ -260,16 +327,31 @@ class SourceSearchResult {
     required this.line,
     required this.column,
     required this.preview,
-  });
+  }) : localPath = null,
+       variableName = null;
 
-  const SourceSearchResult.file({required this.path, required this.preview})
-    : line = null,
-      column = null;
+  SourceSearchResult.file(SourceSearchFile file)
+    : path = file.path,
+      localPath = file.localPath,
+      preview = file.localPath,
+      line = null,
+      column = null,
+      variableName = null;
+
+  SourceSearchResult.variable(SourceDefinition definition)
+    : path = definition.path,
+      localPath = null,
+      line = definition.line,
+      column = null,
+      preview = '${definition.path}:${definition.line}',
+      variableName = definition.qualifiedName;
 
   final String path;
+  final String? localPath;
   final int? line;
   final int? column;
   final String preview;
+  final String? variableName;
 
   bool get isFile => line == null;
 }

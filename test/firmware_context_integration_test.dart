@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
 import 'package:take_a_look_v2/src/backend/backend_client.dart';
 import 'package:take_a_look_v2/src/controller/controller.dart';
 import 'package:take_a_look_v2/src/protocol/commands.dart';
@@ -73,9 +74,18 @@ void main() {
       expect(controller.state.firmware['fingerprint'], isNot(fingerprint));
       expect(detached.symbols.single.address, 0x20000009);
 
-      final otherRoot = Directory('${directory.path}/other')..createSync();
-      await controller.setSourceRoot(otherRoot.path);
+      final otherRoot = Directory(p.join(directory.path, 'other'))
+        ..createSync();
+      controller.openSourceFile('old.c');
+      controller.addSourceFileFromSymbols('old.h');
+      detached.applySnapshot(controller.stateSnapshot());
+      expect(detached.sourceWorkspace.openPaths, ['old.c', 'old.h']);
+      await detached.saveSourceProject({'sourceRoot': otherRoot.path});
       expect(controller.firmwarePath, image.path);
+      expect(controller.sourceProject.sourceRoot, otherRoot.path);
+      expect(controller.sourceWorkspace.openPaths, isEmpty);
+      expect(detached.sourceWorkspace.openPaths, isEmpty);
+      controller.openSourceFile('saved.c');
 
       await controller.saveSourceProject({'firmwarePath': 'not-built-yet.axf'});
       final pending = controller.firmwarePath;
@@ -98,6 +108,7 @@ void main() {
 
       await controller.loadFirmware(image.path);
       expect(controller.symbols, isNotEmpty);
+      await controller.setSourceRoot(directory.path);
       await controller.restoreProjectSettings(saved.settings);
       final result = await backend.request(BackendMethod.getState);
       final state = result['state'] as Map;
@@ -106,9 +117,19 @@ void main() {
       expect(controller.symbols, isEmpty);
       expect(state['symbols'], isEmpty);
       expect(controller.state.firmware['status'], 'missing');
+      expect(controller.sourceWorkspace.openPaths, ['saved.c']);
       detached.applySnapshot(controller.stateSnapshot());
       expect(detached.firmwarePath, pending);
       expect(detached.symbols, isEmpty);
+
+      await controller.createProject();
+      expect(controller.sourceProject.sourceRoot, isEmpty);
+      expect(controller.firmwarePath, isEmpty);
+      expect(controller.sourceWorkspace.openPaths, isEmpty);
+      final blank =
+          (await backend.request(BackendMethod.getState))['state'] as Map;
+      expect(blank['sourceProject'], containsPair('sourceRoot', ''));
+      expect(blank['sourceProject'], containsPair('firmwarePath', ''));
     },
     skip: !python.existsSync() ? 'Run tool/setup_backend first.' : false,
   );

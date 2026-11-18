@@ -1,3 +1,53 @@
+import '../models/source_definition.dart';
+
+enum SourceSearchMode { source, files }
+
+List<SourceDefinition> searchSourceVariables(
+  Iterable<SourceDefinition> definitions,
+  String query, {
+  int limit = 1000,
+}) {
+  final normalized = query.trim().toLowerCase();
+  if (normalized.isEmpty || limit <= 0) return const [];
+  final matches = <({SourceDefinition definition, int rank})>[];
+  for (final definition in definitions) {
+    if (definition.line <= 0 ||
+        definition.path.isEmpty ||
+        !const {'variable', 'parameter', 'member'}.contains(definition.kind)) {
+      continue;
+    }
+    final name = definition.name.toLowerCase();
+    final qualified = definition.qualifiedName.toLowerCase();
+    if (!qualified.contains(normalized)) continue;
+    final rank = name == normalized || qualified == normalized
+        ? 0
+        : name.startsWith(normalized) || qualified.startsWith(normalized)
+        ? 1
+        : 2;
+    matches.add((definition: definition, rank: rank));
+  }
+  matches.sort((left, right) {
+    var order = left.rank.compareTo(right.rank);
+    if (order != 0) return order;
+    final a = left.definition;
+    final b = right.definition;
+    if (a.isDeclaration != b.isDeclaration) return a.isDeclaration ? 1 : -1;
+    order = a.qualifiedName.compareTo(b.qualifiedName);
+    if (order != 0) return order;
+    order = a.path.compareTo(b.path);
+    return order != 0 ? order : a.line.compareTo(b.line);
+  });
+  final seen = <(String, int, String)>{};
+  return matches
+      .map((match) => match.definition)
+      .where(
+        (item) =>
+            seen.add((_normalize(item.path), item.line, item.qualifiedName)),
+      )
+      .take(limit)
+      .toList();
+}
+
 /// A cached filename candidate. Path normalization and file classification are
 /// performed once when the file list changes, rather than on every keystroke.
 class SourceSearchFile {

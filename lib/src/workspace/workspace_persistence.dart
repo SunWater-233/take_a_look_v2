@@ -118,6 +118,22 @@ class WorkspacePersistence {
     if (!_disposed && revision == _restoreRevision) apply(layout);
   }
 
+  Future<bool> createProject({
+    required Future<void> Function() reset,
+    required bool Function() isActive,
+  }) async {
+    if (_projectBusy || !_active(isActive)) return false;
+    _projectBusy = true;
+    try {
+      await reset();
+      if (!_active(isActive)) return false;
+      _projectPath = null;
+      return true;
+    } finally {
+      _projectBusy = false;
+    }
+  }
+
   Future<String?> saveProject({
     required Future<String?> Function() pickPath,
     required ProjectDocument Function() capture,

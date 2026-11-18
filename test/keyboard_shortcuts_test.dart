@@ -153,7 +153,7 @@ void main() {
 
       FocusManager.instance.rootScope.requestFocus();
       await tester.pump();
-      await command(tester, LogicalKeyboardKey.keyF);
+      await command(tester, LogicalKeyboardKey.keyP);
       expect(search, findsOneWidget);
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pump();
@@ -175,6 +175,8 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('panel-tab-plot')));
       await tester.pump();
       await command(tester, LogicalKeyboardKey.keyF);
+      expect(search, findsNothing);
+      await command(tester, LogicalKeyboardKey.keyP);
       expect(search, findsNothing);
       await tester.tap(find.byKey(const ValueKey('panel-tab-sourceDebug')));
       await tester.pump();
@@ -356,7 +358,11 @@ void main() {
       await tester.pump();
       FocusManager.instance.rootScope.requestFocus();
       await tester.pump();
-      await command(tester, LogicalKeyboardKey.keyF);
+      await command(
+        tester,
+        LogicalKeyboardKey.keyQ,
+        physicalKey: PhysicalKeyboardKey.keyP,
+      );
       expect(find.byKey(const ValueKey('source-search-field')), findsOneWidget);
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pump();

@@ -124,6 +124,7 @@ Future<JsonObject> executeControllerCommand(
       controller.openSourceFile(
         values['path'] as String,
         select: values['select'] != false,
+        exactPath: values['exactPath'] == true,
       );
     case ControllerCommand.closeSourceFile:
       controller.closeSourceFile(arguments as String);

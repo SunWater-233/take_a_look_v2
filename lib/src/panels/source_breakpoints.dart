@@ -4,35 +4,58 @@ extension _SourceBreakpoints on _SourceDebugPanelState {
   double get _breakpointDockWidth =>
       TalUiTheme.of(context).touchOptimized ? 380 : 320;
 
-  Widget _buildSourceActionRow(double width) {
+  Widget _buildSourceWorkspace(double width) {
     final ui = TalUiTheme.of(context);
-    final stepWidth = ui.iconButtonSize * 3 + 15;
+    final showActions = !widget.readOnlyPreview;
+    final stepWidth = showActions && _selectedPath != null
+        ? math.min(ui.iconButtonSize * 3 + 15, width)
+        : 0.0;
     final toolbarWidth = _breakpointDockOpen
         ? math.min(_breakpointDockWidth, width)
         : math.min(ui.touchOptimized ? 220.0 : 180.0, width);
-    final toolbar = _buildBreakpointToolbar(
-      toolbarWidth,
-      sideBySide: _usesSideBreakpointDock(width),
-    );
-    final steps = _selectedPath == null
+    final search = _searchVisible ? _buildSearchField() : null;
+    final minSearchWidth = ui.iconButtonSize * 3 + 180;
+    final inlineSearch =
+        search != null &&
+        showActions &&
+        width - stepWidth - toolbarWidth >= minSearchWidth;
+    final steps = stepWidth == 0
         ? null
-        : SizedBox(
-            width: math.min(stepWidth, width),
-            child: _buildSourceStepToolbar(),
-          );
-    if (steps == null || stepWidth + toolbarWidth > width) {
-      return Column(
-        children: [
-          if (steps != null)
-            Align(alignment: AlignmentDirectional.centerStart, child: steps),
-          Align(alignment: AlignmentDirectional.centerEnd, child: toolbar),
-        ],
-      );
-    }
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [steps, toolbar],
+        : SizedBox(width: stepWidth, child: _buildSourceStepToolbar());
+    final toolbar = showActions
+        ? _buildBreakpointToolbar(
+            toolbarWidth,
+            sideBySide: _usesSideBreakpointDock(width),
+          )
+        : null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (toolbar != null)
+          if (inlineSearch ||
+              (steps != null && stepWidth + toolbarWidth <= width))
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ?steps,
+                Expanded(
+                  child: inlineSearch ? search : const SizedBox.shrink(),
+                ),
+                toolbar,
+              ],
+            )
+          else ...[
+            if (steps != null)
+              Align(alignment: AlignmentDirectional.centerStart, child: steps),
+            Align(alignment: AlignmentDirectional.centerEnd, child: toolbar),
+          ],
+        Expanded(
+          child: _buildSourceContent(
+            width,
+            searchField: inlineSearch ? null : search,
+          ),
+        ),
+      ],
     );
   }
 
@@ -183,14 +206,12 @@ extension _SourceBreakpoints on _SourceDebugPanelState {
   bool _usesSideBreakpointDock(double width) =>
       width >= _breakpointDockWidth + 300;
 
-  Widget _buildSourceContent(double width) {
+  Widget _buildSourceContent(double width, {required Widget? searchField}) {
     final editor = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (_searchVisible) ...[
-          _buildSearchArea(),
-          const Divider(height: 1, color: TalColors.borderSoft),
-        ],
+        ?searchField,
+        if (_searchVisible && _searchResults.isNotEmpty) _buildSearchResults(),
         Expanded(child: _buildBody()),
       ],
     );
@@ -577,33 +598,12 @@ extension _SourceBreakpoints on _SourceDebugPanelState {
     );
   }
 
-  Future<void> _removeBreakpoints({String? path, int? line}) async {
-    final owner = controller;
-    final count = owner.debugState.requestedBreakpoints.values.fold(
-      0,
-      (total, lines) => total + lines.length,
-    );
-    final changed = await owner.editBreakpoints(
-      path == null ? BreakpointAction.clear : BreakpointAction.remove,
-      path: path,
-      line: line,
-    );
-    if (!mounted || controller != owner || !changed) return;
-    final undoId = owner.debugState.breakpointUndoId;
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    messenger?.clearSnackBars();
-    messenger?.showSnackBar(
-      SnackBar(
-        content: Text(path == null ? '已清除 $count 个断点' : '已删除断点'),
-        action: SnackBarAction(
-          label: '撤销',
-          onPressed: () => unawaited(
-            owner.editBreakpoints(BreakpointAction.undo, undoId: undoId),
-          ),
-        ),
-      ),
-    );
-  }
+  Future<bool> _removeBreakpoints({String? path, int? line}) =>
+      controller.editBreakpoints(
+        path == null ? BreakpointAction.clear : BreakpointAction.remove,
+        path: path,
+        line: line,
+      );
 }
 
 extension _BreakpointPresentation on BreakpointStatus {

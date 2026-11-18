@@ -1041,6 +1041,25 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     detachedPlacements: _detachedPlacements,
   );
 
+  Future<void> createProject() async {
+    try {
+      final created = await _persistence.createProject(
+        reset: widget.controller.createProject,
+        isActive: () => mounted,
+      );
+      if (!mounted || !created) return;
+      widget.controller.report('已创建新工程。');
+      widget.onPanelVisibilityChanged?.call();
+    } catch (error) {
+      if (mounted) {
+        widget.controller.applyBackendEvent(BackendEventType.error, {
+          'code': 'project_create_failed',
+          'message': '创建工程失败：$error',
+        });
+      }
+    }
+  }
+
   Future<void> saveProject({bool saveAs = false}) async {
     try {
       final path = await _persistence.saveProject(

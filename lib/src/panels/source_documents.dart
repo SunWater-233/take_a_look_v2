@@ -6,6 +6,7 @@ class SourceDocuments {
   final Map<String, String> resolvedPaths = {};
   final Map<String, Future<SourceSearchText>> _documents = {};
   final Map<String, Future<Map<String, List<String>>>> _indexes = {};
+  int _generation = 0;
 
   Future<SourceSearchText> read(
     String path, {
@@ -18,14 +19,15 @@ class SourceDocuments {
   Future<Map<String, List<String>>> indexRoot(String root) =>
       _indexes.putIfAbsent(root, () => _buildIndex(root));
   void invalidate(String path) => _documents.remove(_pathKey(path));
-  void clearIndex() => _indexes.clear();
   void clear() {
+    _generation++;
     _documents.clear();
     resolvedPaths.clear();
-    clearIndex();
+    _indexes.clear();
   }
 
   Future<String> resolve(String debugPath, String sourceRoot) async {
+    final generation = _generation;
     if (await File(debugPath).exists()) return debugPath;
     if (sourceRoot.isEmpty) return debugPath;
 
@@ -42,7 +44,7 @@ class SourceDocuments {
         '$sourceRoot${Platform.pathSeparator}${normalized.replaceAll('/', Platform.pathSeparator)}',
       );
       if (await direct.exists()) {
-        resolvedPaths[cacheKey] = direct.path;
+        if (generation == _generation) resolvedPaths[cacheKey] = direct.path;
         return direct.path;
       }
     }
@@ -59,7 +61,7 @@ class SourceDocuments {
       }
     }
     if (bestMatch != null) {
-      resolvedPaths[cacheKey] = bestMatch.path;
+      if (generation == _generation) resolvedPaths[cacheKey] = bestMatch.path;
       return bestMatch.path;
     }
     return debugPath;

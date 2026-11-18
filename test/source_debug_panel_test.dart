@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:take_a_look_v2/src/controller/controller.dart';
+import 'package:take_a_look_v2/src/models/debug_breakpoints.dart';
 import 'package:take_a_look_v2/src/protocol/commands.dart';
 import 'package:take_a_look_v2/src/workspace/panel_types.dart';
 import 'package:take_a_look_v2/src/panels/panels.dart';
@@ -306,8 +307,9 @@ void main() {
       );
 
       await tester.tap(find.byKey(const ValueKey('breakpoint-5')));
-      await tester.pump();
+      await tester.pumpAndSettle();
       expect(controller.debugState.requestedBreakpoints, isEmpty);
+      expect(find.byType(SnackBar), findsNothing);
 
       await tester.pumpWidget(const SizedBox.shrink());
       controller.dispose();
@@ -399,18 +401,27 @@ void main() {
       expect(controller.debugState.breakpointSettings.paused, isTrue);
       expect(controller.debugState.breakpointSettings.disabled[other], {67});
       await tester.tap(clear);
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pumpAndSettle();
       expect(controller.debugState.requestedBreakpoints, isEmpty);
-      expect(find.text('已清除 2 个断点'), findsOneWidget);
-      await tester.tap(find.text('撤销'));
-      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byType(SnackBar), findsNothing);
+      await controller.editBreakpoints(
+        BreakpointAction.undo,
+        undoId: controller.debugState.breakpointUndoId,
+      );
+      await tester.pump();
       expect(controller.debugState.requestedBreakpoints, {
         path: {4},
         other: {67},
       });
       expect(controller.debugState.breakpointSettings.disabled[other], {67});
       expect(controller.debugState.breakpointSettings.paused, isTrue);
+
+      await tester.tap(find.text('删除断点'));
+      await tester.pumpAndSettle();
+      expect(controller.debugState.requestedBreakpoints, {
+        other: {67},
+      });
+      expect(find.byType(SnackBar), findsNothing);
       await tester.pumpWidget(const SizedBox.shrink());
       controller.dispose();
     },
@@ -1012,6 +1023,179 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('Ctrl+F prioritizes variables and opens their definition lines', (
+    tester,
+  ) async {
+    late final Directory root;
+    late final File source;
+    late final File other;
+    await tester.runAsync(() async {
+      root = await Directory.systemTemp.createTemp('take_a_look_variables_');
+      source = File('${root.path}/main.c');
+      other = File('${root.path}/gain.c');
+      await source.writeAsString(
+        '${'// filler\n' * 44}int gain = 1;\n'
+        '${'// filler\n' * 12}int gain_limit = 5;\n',
+      );
+      await other.writeAsString('// gain appears before the definitions\n');
+    });
+    addTearDown(() => root.delete(recursive: true));
+    final controller = TakeALookController()..setSourceRoot(root.path);
+    controller.applyDebugState({
+      'sourceFiles': [other.path, source.path],
+      'sourceDefinitions': [
+        {'name': 'gain', 'path': source.path, 'line': 45, 'kind': 'variable'},
+        {
+          'name': 'gain_limit',
+          'path': source.path,
+          'line': 58,
+          'kind': 'member',
+          'scope': 'Motor',
+        },
+      ],
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: buildWorkspacePanel(WorkspacePanelId.sourceDebug, controller),
+        ),
+      ),
+    );
+
+    Finder row(int index) =>
+        find.byKey(ValueKey('source-search-result-$index'));
+    await _searchSources(tester, 'GaIn');
+    expect(
+      find.descendant(of: row(0), matching: find.text('gain')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: row(1), matching: find.text('Motor::gain_limit')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: row(2), matching: find.text('gain.c')),
+      findsOneWidget,
+    );
+
+    await _openSourceSearch(tester, LogicalKeyboardKey.keyP);
+    await _waitForSourceSearch(tester);
+    expect(
+      find.descendant(of: row(0), matching: find.text('gain.c')),
+      findsOneWidget,
+    );
+    expect(row(1), findsNothing);
+    await _openSourceSearch(tester, LogicalKeyboardKey.keyF);
+    await _waitForSourceSearch(tester);
+
+    Future<void> expectJump(int line) async {
+      expect(find.byKey(const ValueKey('source-search-field')), findsNothing);
+      expect(controller.sourceWorkspace.selectedPath, source.path);
+      await _expectSourceVisible(
+        tester,
+        find.byKey(ValueKey('source-line-$line')).hitTestable(),
+      );
+    }
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await expectJump(45);
+
+    await _searchSources(tester, 'gain');
+    await tester.tap(row(1));
+    await tester.pump();
+    await expectJump(58);
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+  });
+
+  testWidgets('Ctrl+P opens only readable text files by name or path', (
+    tester,
+  ) async {
+    late final Directory root;
+    late final File example;
+    await tester.runAsync(() async {
+      root = await Directory.systemTemp.createTemp('take_a_look_editable_');
+      Future<File> file(String name) async {
+        final file = File('${root.path}/$name');
+        await file.parent.create(recursive: true);
+        return file;
+      }
+
+      await (await file('src/motor.c')).writeAsString('int ready;\n');
+      example = await (await file(
+        'examples/motor.c',
+      )).writeAsString('int unique_example_text_123;\n');
+      await (await file('docs/motor')).writeAsString('电机\n');
+      await (await file('build/motor.o')).writeAsString('artifact');
+      await (await file('build/motor.data')).writeAsBytes([65, 0, 66]);
+      await (await file('build/motor.txt')).writeAsBytes([65, 0xff]);
+    });
+    addTearDown(() => root.delete(recursive: true));
+
+    const debugPath = 'Z:/firmware/src/motor.c';
+    final controller = TakeALookController()..setSourceRoot(root.path);
+    controller.applyDebugState({
+      'sourceFiles': [debugPath, 'Z:/firmware/src/motor_missing.h'],
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: buildWorkspacePanel(WorkspacePanelId.sourceDebug, controller),
+        ),
+      ),
+    );
+
+    await _openSourceSearch(tester, LogicalKeyboardKey.keyP);
+    await _searchSources(tester, 'motor');
+    expect(find.text('1 / 3'), findsOneWidget);
+    expect(find.text('motor.c'), findsNWidgets(2));
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('source-search-results')),
+        matching: find.text('motor'),
+      ),
+      findsOneWidget,
+    );
+
+    await _searchSources(tester, r'SRC\mtr.c');
+    expect(find.text('1 / 1'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    final field = find.byKey(const ValueKey('source-search-field'));
+    expect(field, findsNothing);
+    expect(controller.sourceWorkspace.selectedPath, debugPath);
+    await _expectSourceVisible(
+      tester,
+      find.text('int ready;', findRichText: true),
+    );
+
+    await _openSourceSearch(tester, LogicalKeyboardKey.keyP);
+    await _searchSources(tester, 'unique_example_text_123');
+    expect(find.text('无结果'), findsOneWidget);
+    await _searchSources(tester, 'examples/motor.c');
+    expect(find.text('1 / 1'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('source-search-result-0')));
+    await tester.pump();
+    expect(field, findsNothing);
+    expect(controller.sourceWorkspace.openPaths, contains(debugPath));
+    expect(controller.sourceWorkspace.selectedPath, isNot(debugPath));
+    expect(
+      controller.sourceWorkspace.selectedPath!.replaceAll('\\', '/'),
+      example.path.replaceAll('\\', '/'),
+    );
+    expect(
+      find.byKey(const ValueKey('source-tab-active-$debugPath')),
+      findsNothing,
+    );
+    await _expectSourceVisible(
+      tester,
+      find.text('int unique_example_text_123;', findRichText: true),
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+  });
+
   testWidgets(
     'fuzzy filename results appear before contents and cancel on new input',
     (tester) async {
@@ -1064,6 +1248,82 @@ void main() {
       controller.dispose();
     },
   );
+
+  testWidgets('source search adapts to the debugger toolbar and panel width', (
+    tester,
+  ) async {
+    const wide = Size(1000, 650);
+    await tester.binding.setSurfaceSize(wide);
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final path = File('test/fixtures/debug_source.c').absolute.path;
+    final controller = TakeALookController()..setPresentationActive(false);
+    controller.applyDebugState({
+      'sourceFiles': [path],
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTalTheme(),
+        home: Scaffold(
+          body: buildWorkspacePanelBody(
+            WorkspacePanelId.sourceDebug,
+            controller,
+          ),
+        ),
+      ),
+    );
+
+    final sourceToolbar = find.byKey(const ValueKey('source-toolbar'));
+    final breakpoints = find.byKey(const ValueKey('source-breakpoint-toolbar'));
+    final strip = find.byKey(const ValueKey('source-search-area'));
+    final field = find.byKey(const ValueKey('source-search-field'));
+    final stepOut = find.byKey(const ValueKey('debug-stepOut'));
+    await _openSourceSearch(tester, LogicalKeyboardKey.keyP);
+    final empty = tester.getRect(strip);
+    expect(stepOut, findsNothing);
+    expect(empty.top, tester.getRect(breakpoints).top);
+    expect(empty.left, tester.getRect(sourceToolbar).left);
+    expect(empty.right, tester.getRect(breakpoints).left);
+
+    await _searchSources(tester, 'debug_source.c');
+    final results = find.byKey(const ValueKey('source-search-results'));
+    expect(tester.getRect(results).top, greaterThanOrEqualTo(empty.bottom));
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(controller.sourceWorkspace.selectedPath, path);
+    expect(field, findsNothing);
+
+    await _openSourceSearch(tester, LogicalKeyboardKey.keyF);
+    final open = tester.getRect(strip);
+    final step = tester.getRect(stepOut);
+    expect(open.center.dy, closeTo(step.center.dy, 1));
+    expect(open.left, greaterThanOrEqualTo(step.right));
+    expect(open.right, tester.getRect(breakpoints).left);
+    expect(open.width, lessThan(empty.width));
+    final focus = tester.widget<TextField>(field).focusNode!;
+    expect(focus.hasFocus, isTrue);
+
+    await tester.binding.setSurfaceSize(const Size(420, 650));
+    await tester.pump();
+    final narrow = tester.getRect(strip);
+    expect(
+      narrow.top,
+      greaterThanOrEqualTo(tester.getRect(breakpoints).bottom),
+    );
+    expect(narrow.left, tester.getRect(sourceToolbar).left);
+    expect(narrow.right, tester.getRect(sourceToolbar).right);
+    expect(focus.hasFocus, isTrue);
+    expect(tester.widget<TextField>(field).controller!.text, 'debug_source.c');
+
+    await tester.binding.setSurfaceSize(wide);
+    await tester.pump();
+    expect(tester.getRect(strip), open);
+    expect(focus.hasFocus, isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    expect(field, findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+  });
 
   testWidgets('search keyboard selects, scrolls, confirms and cancels results', (
     tester,
@@ -1256,18 +1516,35 @@ void main() {
     addTearDown(() => root.delete(recursive: true));
     final controller = TakeALookController()
       ..setSourceRoot('${root.path}/first');
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: buildWorkspacePanel(WorkspacePanelId.sourceDebug, controller),
-        ),
+    controller.applyDebugState({
+      'executionState': 'halted',
+      'sourceFiles': ['main.c'],
+      'stoppedLocation': {'path': 'main.c', 'line': 1, 'address': 0x08000100},
+    });
+    controller.openSourceFile('main.c');
+    controller.addSourceFileFromSymbols('old_header.h');
+    final panel = MaterialApp(
+      home: Scaffold(
+        body: buildWorkspacePanel(WorkspacePanelId.sourceDebug, controller),
       ),
     );
+    await tester.pumpWidget(panel);
+    final mainTab = find.byKey(const ValueKey('source-tab-close-main.c'));
+    final oldTab = find.byKey(const ValueKey('source-tab-close-old_header.h'));
+    expect(mainTab, findsOneWidget);
+    expect(oldTab, findsOneWidget);
     await _searchSources(tester, 'new_header.h');
     expect(find.text('无结果'), findsOneWidget);
 
-    controller.setSourceRoot('${root.path}/second');
+    await controller.setSourceRoot('${root.path}/first/.');
+    expect(controller.sourceWorkspace.openPaths, hasLength(2));
+    await controller.setSourceRoot('${root.path}/second');
     await _waitForSourceSearch(tester);
+    expect(controller.sourceWorkspace.openPaths, isEmpty);
+    expect(controller.sourceWorkspace.unreadPaths, isEmpty);
+    expect(controller.sourceWorkspace.selectedPath, isNull);
+    expect(mainTab, findsNothing);
+    expect(oldTab, findsNothing);
     expect(find.text('1 / 1'), findsOneWidget);
     expect(
       find.descendant(
@@ -1277,6 +1554,15 @@ void main() {
       findsOneWidget,
     );
 
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpWidget(panel);
+    expect(mainTab, findsNothing);
+    controller.applyDebugState({
+      'executionState': 'halted',
+      'stoppedLocation': {'path': 'main.c', 'line': 2, 'address': 0x08000104},
+    });
+    await tester.pump();
+    expect(mainTab, findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
     controller.dispose();
   });
@@ -1489,14 +1775,31 @@ void main() {
 Future<void> _searchSources(WidgetTester tester, String query) async {
   final field = find.byKey(const ValueKey('source-search-field'));
   if (field.evaluate().isEmpty) {
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
-    await tester.pump();
+    await _openSourceSearch(tester, LogicalKeyboardKey.keyF);
   }
   await tester.enterText(field, query);
   await tester.pump(const Duration(milliseconds: 200));
   await _waitForSourceSearch(tester);
+}
+
+Future<void> _openSourceSearch(
+  WidgetTester tester,
+  LogicalKeyboardKey key,
+) async {
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+  await tester.sendKeyEvent(key);
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+  await tester.pump();
+}
+
+Future<void> _expectSourceVisible(WidgetTester tester, Finder source) async {
+  for (var attempt = 0; attempt < 50 && source.evaluate().isEmpty; attempt++) {
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 20)),
+    );
+    await tester.pump();
+  }
+  expect(source, findsOneWidget);
 }
 
 Future<void> _waitForSourceSearch(WidgetTester tester) async {

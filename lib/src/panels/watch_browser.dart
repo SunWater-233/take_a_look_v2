@@ -38,6 +38,63 @@ class _WatchBrowserEntry {
   bool get expandable => members.isNotEmpty;
 }
 
+class _WatchNameLabel extends StatelessWidget {
+  const _WatchNameLabel(this.name, {required this.style});
+
+  final String name;
+  final TextStyle style;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Text(
+      name,
+      style: style,
+      softWrap: false,
+      maxLines: 1,
+      overflow: TextOverflow.visible,
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth == 0) return const SizedBox.shrink();
+        final inheritedStyle = DefaultTextStyle.of(context).style.merge(style);
+        final width = TextPainter.computeWidth(
+          text: TextSpan(
+            text: name,
+            style: MediaQuery.boldTextOf(context)
+                ? inheritedStyle.copyWith(fontWeight: FontWeight.bold)
+                : inheritedStyle,
+          ),
+          textDirection: Directionality.of(context),
+          textScaler: MediaQuery.textScalerOf(context),
+          locale: Localizations.maybeLocaleOf(context),
+          maxLines: 1,
+        );
+        if (width <= constraints.maxWidth) return text;
+
+        // Fade the glyphs into the row's own background, including on hover.
+        return ShaderMask(
+          blendMode: BlendMode.dstIn,
+          shaderCallback: (bounds) => LinearGradient(
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+            colors: const [Colors.transparent, Colors.white],
+            stops: [0, math.min(16 / bounds.width, .5)],
+          ).createShader(bounds),
+          child: ClipRect(
+            child: OverflowBox(
+              alignment: Alignment.centerRight,
+              minWidth: 0,
+              maxWidth: double.infinity,
+              fit: OverflowBoxFit.deferToChild,
+              child: text,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 class _WatchBrowserDrag {
   const _WatchBrowserDrag(this.key, this.section);
   final String key;
@@ -578,7 +635,7 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
       final entry = _WatchBrowserEntry(
         key: n.watch.symbol.key,
         label: depth == 0 && standaloneRoot != null
-            ? splitSymbolPath(n.watch.symbol.name).last
+            ? n.watch.symbol.name
             : n.label,
         depth: depth,
         node: n,
@@ -1135,7 +1192,7 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
                   child: Tooltip(
                     triggerMode: TooltipTriggerMode.manual,
                     message: watch?.symbol.name ?? entry.label,
-                    child: Text(
+                    child: _WatchNameLabel(
                       watch?.symbol.missing == true
                           ? '${entry.label}（新固件中不存在）'
                           : entry.label,
@@ -1145,8 +1202,6 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
                             ? TalColors.warning
                             : null,
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ),

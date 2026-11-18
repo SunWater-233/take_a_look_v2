@@ -16,6 +16,71 @@ import 'package:take_a_look_v2/src/workspace/workspace.dart';
 import 'package:take_a_look_v2/src/workspace/workspace_layout.dart';
 
 void main() {
+  testWidgets('creating a project starts an empty unsaved workspace', (
+    tester,
+  ) async {
+    final directory = Directory.systemTemp.createTempSync('tal_new_project_');
+    final original = File(p.join(directory.path, 'original.talproj'));
+    final created = File(p.join(directory.path, 'created.talproj'));
+    final controller = (await tester.runAsync(
+      () async => TakeALookController(),
+    ))!..loadDemoSymbols();
+    final sync = MainWindowSync(controller);
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await sync.dispose();
+      controller.dispose();
+      directory.deleteSync(recursive: true);
+      await tester.binding.setSurfaceSize(null);
+    });
+    var savePath = original.path;
+    await tester.binding.setSurfaceSize(const Size(1400, 1000));
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTalTheme(),
+        home: MainWorkbench(
+          controller: controller,
+          windowSync: sync,
+          layoutFile: File(p.join(directory.path, 'layout.json')),
+          projectSavePathPicker: () async => savePath,
+        ),
+      ),
+    );
+    final workspace = tester.state<DockingWorkspaceState>(
+      find.byType(DockingWorkspace),
+    );
+    await controller.saveSourceProject({
+      'sourceRoot': directory.path,
+      'buildCommand': 'make debug',
+    });
+    controller.selectSymbols([demoSymbols.first.key]);
+    controller.addSelectedToWatch();
+    controller.openSourceFile('main.c');
+    await tester.pump();
+    await tester.runAsync(workspace.saveProject);
+    expect(workspace.projectPath, original.path);
+    final originalContents = original.readAsStringSync();
+
+    await tester.tap(find.text('文件'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('创建新工程'));
+    await tester.pumpAndSettle();
+    expect(find.text('创建新工程'), findsNothing);
+    expect(workspace.projectPath, isNull);
+    expect(controller.sourceProject.sourceRoot, isEmpty);
+    expect(controller.sourceProject.buildCommand, isEmpty);
+    expect(controller.firmwarePath, isEmpty);
+    expect(controller.symbols, isEmpty);
+    expect(controller.watches, isEmpty);
+    expect(controller.sourceWorkspace.openPaths, isEmpty);
+
+    savePath = created.path;
+    await tester.runAsync(workspace.saveProject);
+    expect(workspace.projectPath, created.path);
+    expect(created.existsSync(), isTrue);
+    expect(original.readAsStringSync(), originalContents);
+  });
+
   testWidgets(
     'project round trip restores variables, drafts, settings and layout after restart',
     (tester) async {

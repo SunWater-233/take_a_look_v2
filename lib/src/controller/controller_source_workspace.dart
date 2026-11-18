@@ -26,12 +26,12 @@ extension TakeALookControllerSourceWorkspace on TakeALookController {
     return matches.length == 1 ? matches.single : normalized;
   }
 
-  String? openSourcePathFor(String path) {
+  String? openSourcePathFor(String path, {bool exactPath = false}) {
     final exactKey = _sourcePathKey(path);
     final exact = sourceWorkspace.openPaths
         .where((candidate) => _sourcePathKey(candidate) == exactKey)
         .firstOrNull;
-    if (exact != null) return exact;
+    if (exact != null || exactPath) return exact;
     final key = _sourcePathKey(canonicalSourcePath(path));
     return sourceWorkspace.openPaths.where((candidate) {
       return _sourcePathKey(canonicalSourcePath(candidate)) == key;
@@ -94,9 +94,13 @@ extension TakeALookControllerSourceWorkspace on TakeALookController {
     _notifySourceWorkspace();
   }
 
-  void openSourceFile(String path, {bool select = true}) {
+  void openSourceFile(
+    String path, {
+    bool select = true,
+    bool exactPath = false,
+  }) {
     if (path.trim().isEmpty) return;
-    final existing = openSourcePathFor(path);
+    final existing = openSourcePathFor(path, exactPath: exactPath);
     final source = existing ?? path;
     final changed =
         existing == null ||
@@ -113,6 +117,7 @@ extension TakeALookControllerSourceWorkspace on TakeALookController {
       _dispatchRemote(ControllerCommand.openSourceFile, {
         'path': path,
         'select': select,
+        if (exactPath) 'exactPath': true,
       });
     }
     _notifySourceWorkspace();

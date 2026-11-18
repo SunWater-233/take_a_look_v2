@@ -16,7 +16,7 @@ extension TakeALookControllerDebug on TakeALookController {
   }
 
   Future<void> setSourceRoot(String path) async {
-    if (sourceTask.running || isSymbolLoading) return;
+    if (sourceTask.running || isSymbolLoading || isProjectRestoring) return;
     try {
       await saveSourceProject({'sourceRoot': path.trim()});
     } on Object catch (error) {

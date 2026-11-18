@@ -20,8 +20,12 @@ List<Offset> downsampleTelemetrySamples(
   required double xMin,
   required double xMax,
   required double pixelWidth,
+  bool cacheResult = true,
 }) {
   if (samples is SampleBuffer) {
+    // Independent views can keep their own result without evicting the main
+    // chart's reduction, which is shared by its paint and inspection layers.
+    if (!cacheResult) return _downsampleBuffer(samples, xMin, xMax, pixelWidth);
     final cached = _sampleReductions[samples];
     if (cached != null &&
         cached.revision == samples.revision &&

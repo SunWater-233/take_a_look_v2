@@ -22,9 +22,41 @@ extension TakeALookControllerSourceTools on TakeALookController {
         propagateFailure: true,
       );
     } else {
-      sourceProject.applyJson(values);
-      _emitState([signals.sourceTools, signals.debug]);
+      final closedTabs = _applySourceProjectConfig(values);
+      _emitState([
+        signals.sourceTools,
+        signals.debug,
+        if (closedTabs) signals.sourceWorkspace,
+      ]);
     }
+  }
+
+  bool _applySourceProjectConfig(
+    Map<String, dynamic> values, {
+    bool replaceSourceWorkspace = false,
+  }) {
+    final previousRoot = sourceProject.sourceRoot;
+    sourceProject.applyJson(values);
+    final root = sourceProject.sourceRoot;
+    if (previousRoot == root ||
+        (previousRoot.isNotEmpty &&
+            root.isNotEmpty &&
+            p.equals(previousRoot, root))) {
+      return false;
+    }
+
+    sourceLocationRequest = null;
+    // Project files and window snapshots can supply the tabs for the new root.
+    if (replaceSourceWorkspace) return false;
+
+    sourceWorkspace.openPaths.clear();
+    sourceWorkspace.unreadPaths.clear();
+    sourceWorkspace
+      ..selectedPath = null
+      ..viewedStopRevision = debugState.stopRevision
+      ..attentionStartedAtMs = 0
+      ..attentionUntilMs = 0;
+    return true;
   }
 
   Future<void> startSourceTask(String kind) async {

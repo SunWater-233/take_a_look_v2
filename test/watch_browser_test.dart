@@ -970,6 +970,74 @@ void main() {
     },
   );
 
+  testWidgets('long watch names keep their suffix and fade at the left', (
+    tester,
+  ) async {
+    const root = 'chassis_task';
+    const path = '$root.some_long_name';
+    final c = structureFixture(
+      additionalDefinitions: [(root, 'struct ChassisTask'), (path, 'float')],
+    );
+    addTearDown(c.dispose);
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    c.selectSymbols([root]);
+    c.addSelectedToWatch(mode: WatchReadMode.monitor);
+    c.setWatchStandalone(path, true);
+    c.compactWatchSelection = path;
+    await mount(tester, c, width: 320);
+
+    final name = find.descendant(
+      of: find.byKey(const ValueKey('compact-watch-list')),
+      matching: find.text(path),
+    );
+    final shortName = find.text('motor');
+    final mask = find.ancestor(of: name, matching: find.byType(ShaderMask));
+    expect(mask, findsOneWidget);
+    expect(tester.widget<ShaderMask>(mask).blendMode, BlendMode.dstIn);
+    final maskRect = tester.getRect(mask);
+    final nameRect = tester.getRect(name);
+    expect(nameRect.right, closeTo(maskRect.right, .01));
+    expect(nameRect.left, lessThan(maskRect.left));
+    expect(maskRect.left, closeTo(tester.getTopLeft(shortName).dx, .01));
+
+    final boundary = tester.renderObject<RenderRepaintBoundary>(
+      find.byKey(const ValueKey('browser-preview')),
+    );
+    final bounds = maskRect.shift(-boundary.localToGlobal(Offset.zero));
+    await tester.runAsync(() async {
+      final image = await boundary.toImage();
+      try {
+        final bytes = (await image.toByteData(
+          format: ui.ImageByteFormat.rawRgba,
+        ))!;
+        int brightestRed(double left, double right) {
+          var brightest = 0;
+          for (var y = bounds.top.ceil(); y < bounds.bottom.floor(); y++) {
+            for (var x = left.ceil(); x < right.floor(); x++) {
+              final red = bytes.getUint8((y * image.width + x) * 4);
+              if (red > brightest) brightest = red;
+            }
+          }
+          return brightest;
+        }
+
+        final leadingRed = brightestRed(bounds.left, bounds.left + 3);
+        final trailingRed = brightestRed(bounds.right - 24, bounds.right);
+        expect(leadingRed, lessThan(trailingRed));
+        expect(trailingRed, TalColors.text.toARGB32() >> 16 & 0xff);
+      } finally {
+        image.dispose();
+      }
+    });
+
+    await mount(tester, c, width: 1040);
+    expect(mask, findsNothing);
+    expect(
+      tester.getTopLeft(name).dx,
+      closeTo(tester.getTopLeft(shortName).dx, .01),
+    );
+  });
+
   testWidgets('a nested watch can also be monitored at the top level', (
     tester,
   ) async {
@@ -985,6 +1053,8 @@ void main() {
     final member = row('motor.current');
     final standalone = row('standalone:13:motor.current:motor.current');
     final standaloneLeaf = row('standalone:13:motor.current:motor.current.q');
+    Finder label(Finder target, String text) =>
+        find.descendant(of: target, matching: find.text(text));
     Future<void> choose(Finder target, String action) async {
       await tester.tap(target, buttons: kSecondaryMouseButton);
       await tester.pumpAndSettle();
@@ -995,8 +1065,11 @@ void main() {
     final original = c.watches.toList();
     await choose(member, '单独添加到监视');
     expect(standalone.hitTestable(), findsOneWidget);
+    expect(label(standalone, 'motor.current'), findsOneWidget);
     expect(standaloneLeaf.hitTestable(), findsOneWidget);
+    expect(label(standaloneLeaf, 'q'), findsOneWidget);
     expect(member.hitTestable(), findsOneWidget);
+    expect(label(member, 'current'), findsOneWidget);
     expect(row('motor.current.q'), findsNothing);
     expect(
       tester.getTopLeft(standalone).dy,
@@ -1022,10 +1095,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(member.hitTestable(), findsOneWidget);
     await choose(row('motor.speed'), '单独添加到监视');
-    expect(
-      row('standalone:11:motor.speed:motor.speed').hitTestable(),
-      findsOneWidget,
-    );
+    final standaloneSpeed = row('standalone:11:motor.speed:motor.speed');
+    expect(standaloneSpeed.hitTestable(), findsOneWidget);
+    expect(label(standaloneSpeed, 'motor.speed'), findsOneWidget);
     expect(c.watches, orderedEquals(original));
   });
 

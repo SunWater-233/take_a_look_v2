@@ -16,6 +16,7 @@ enum WorkspaceShortcut {
   saveProject(PhysicalKeyboardKey.keyS, LogicalKeyboardKey.keyS),
   openProject(PhysicalKeyboardKey.keyO, LogicalKeyboardKey.keyO),
   findSource(PhysicalKeyboardKey.keyF, LogicalKeyboardKey.keyF),
+  findSourceFile(PhysicalKeyboardKey.keyP, LogicalKeyboardKey.keyP),
   closeSource(PhysicalKeyboardKey.keyW, LogicalKeyboardKey.keyW),
   selectAllWatches(PhysicalKeyboardKey.keyA, LogicalKeyboardKey.keyA),
   undoWatchDeletion(PhysicalKeyboardKey.keyZ, LogicalKeyboardKey.keyZ),

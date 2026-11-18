@@ -386,6 +386,12 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
   List<Widget> _buildFileMenu() {
     return [
       _menuItem(
+        label: '创建新工程',
+        onPressed: () => unawaited(
+          widget.workspaceKey?.currentState?.createProject() ?? Future.value(),
+        ),
+      ),
+      _menuItem(
         label: '打开项目',
         shortcut: WorkspaceShortcut.openProject.menuActivator,
         onPressed: () => unawaited(

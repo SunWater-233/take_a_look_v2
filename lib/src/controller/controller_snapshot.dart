@@ -473,9 +473,13 @@ extension TakeALookControllerSnapshot on TakeALookController {
         Map<String, dynamic>.from(data['sourceWorkspace'] as Map),
       );
     }
-    if (data['sourceProject'] case final Map project) {
-      sourceProject.applyJson(Map<String, dynamic>.from(project));
-    }
+    final closedSourceTabs = switch (data['sourceProject']) {
+      final Map project => _applySourceProjectConfig(
+        Map<String, dynamic>.from(project),
+        replaceSourceWorkspace: hasSourceWorkspace,
+      ),
+      _ => false,
+    };
     if (data['sourceTask'] case final Map task) {
       sourceTask.applyJson(Map<String, dynamic>.from(task));
     }
@@ -537,7 +541,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
       if (hasDebugState) signals.debug,
       if (data['sourceProject'] is Map && !hasDebugState) signals.debug,
       if (hasSourceTools) signals.sourceTools,
-      if (hasSourceWorkspace) signals.sourceWorkspace,
+      if (hasSourceWorkspace || closedSourceTabs) signals.sourceWorkspace,
     ], sync: false);
   }
 }

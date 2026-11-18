@@ -1,5 +1,6 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart' show timeDilation;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -435,6 +436,7 @@ void main() {
       await tester.pump();
       expect(telemetryTimeWindow(controller).start, closeTo(4, 1e-8));
       expect(telemetryTimeWindow(controller).end, closeTo(14, 1e-8));
+      expect(controller.followLatest, isFalse);
 
       await tester.tapAt(at(1), kind: PointerDeviceKind.mouse);
       await tester.pump();
@@ -455,6 +457,99 @@ void main() {
       controller.dispose();
     },
   );
+
+  for (final plottingPaused in [false, true]) {
+    testWidgets(
+      'overview handles preserve follow when paused=$plottingPaused',
+      (tester) async {
+        final controller = await pumpChart(tester, withToolbar: true);
+        try {
+          if (plottingPaused) {
+            controller.togglePlotting();
+            await tester.pump();
+          }
+          final overview = find.byKey(const ValueKey('plot-overview'));
+          final rect = tester.getRect(overview).deflate(1);
+          Offset at(double seconds) =>
+              Offset(rect.left + rect.width * seconds / 20, rect.center.dy);
+
+          await tester.dragFrom(
+            at(8),
+            at(10) - at(8),
+            kind: PointerDeviceKind.mouse,
+          );
+          await tester.pump();
+          expect(controller.followLatest, isTrue);
+          expect(controller.plotVisibleWindowSeconds, closeTo(10, 1e-8));
+          expect(controller.plotWindowEndSeconds, closeTo(20, 1e-8));
+
+          await tester.dragFrom(
+            at(20),
+            at(18) - at(20),
+            kind: PointerDeviceKind.mouse,
+          );
+          await tester.pump();
+          expect(controller.followLatest, isTrue);
+          expect(controller.plotVisibleWindowSeconds, closeTo(8, 1e-8));
+          expect(controller.plotWindowEndSeconds, closeTo(20, 1e-8));
+          expect(find.text('停止跟随'), findsOneWidget);
+
+          controller.applyTelemetrySnapshot({'elapsedSeconds': 22});
+          await tester.pump(const Duration(milliseconds: 100));
+          expect(controller.plotWindowEndSeconds, plottingPaused ? 20 : 22);
+        } finally {
+          await tester.pumpWidget(const SizedBox.shrink());
+          controller.dispose();
+        }
+      },
+    );
+  }
+
+  testWidgets('overview coalesces telemetry and repaints on window changes', (
+    tester,
+  ) async {
+    final controller = await pumpChart(tester, withToolbar: true);
+    final overview = tester.renderObject<RenderRepaintBoundary>(
+      find.descendant(
+        of: find.byKey(const ValueKey('plot-overview')),
+        matching: find.byType(RepaintBoundary),
+      ),
+    );
+    final initialPicture = overview.debugLayer!.firstChild;
+    expect(initialPicture, isA<PictureLayer>());
+    var plotRefreshes = 0;
+    controller.plotChanges.addListener(() => plotRefreshes++);
+    final key = controller.watches.single.symbol.key;
+
+    for (var frame = 1; frame <= 12; frame++) {
+      controller.applyBackendSamples({
+        'frames': [
+          {
+            'elapsed': 20 + frame / 120,
+            'values': {key: frame},
+          },
+        ],
+      });
+      await tester.pump(const Duration(milliseconds: 8));
+    }
+    expect(plotRefreshes, 12);
+    expect(overview.debugLayer!.firstChild, same(initialPicture));
+
+    // The trailing refresh must still show the final data after input stops.
+    await tester.pump(const Duration(milliseconds: 4));
+    expect(overview.debugLayer!.firstChild, isNot(same(initialPicture)));
+
+    controller.setPlotViewport(xMin: 4, xMax: 10);
+    expect(overview.debugNeedsPaint, isTrue);
+    await tester.pump();
+    controller.clearSamples();
+    expect(overview.debugNeedsPaint, isTrue);
+
+    // Unmount with a telemetry refresh still scheduled.
+    controller.applyTelemetrySnapshot({'elapsedSeconds': 1});
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+  });
 
   testWidgets('plot toolbar and range panel fit a narrow window', (
     tester,

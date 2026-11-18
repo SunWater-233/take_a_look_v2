@@ -75,6 +75,27 @@ extension TakeALookControllerProject on TakeALookController {
     };
   }
 
+  Future<void> createProject() async {
+    final defaults = TakeALookController(backendCommand: (_, _) async {});
+    final settings = defaults.projectSettings()
+      ..['uiScale'] = uiScale
+      ..['sourceWorkspace'] = {
+        'viewedStopRevision': debugState.stopRevision,
+        'additionRevision': sourceWorkspace.additionRevision,
+      };
+    defaults.debugState.stopRevision = debugState.stopRevision;
+    defaults.debugState.breakpointRevision = debugState.breakpointRevision;
+    final localFirmwareState = defaults._encodeSnapshot(
+      fields: const {'firmware', 'debug'},
+    );
+    defaults.dispose();
+
+    await restoreProjectSettings(settings);
+    if (!_disposed && backendCommand == null && projectBackendCommand == null) {
+      applySnapshot(localFirmwareState);
+    }
+  }
+
   static void validateProjectSettings(Map<String, dynamic> data) {
     for (final key in [
       'compactWatchSummaryFraction',
@@ -324,6 +345,7 @@ extension TakeALookControllerProject on TakeALookController {
     plotHistory.clear();
     _clearFrozenPlot();
     state.acquisition.rawRecording = {};
+    sourceLocationRequest = null;
     applySnapshot({
       ...settings,
       'elapsedSeconds': 0,

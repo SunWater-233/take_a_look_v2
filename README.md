@@ -62,14 +62,16 @@ flutter run -d windows
 | --- | --- |
 | `Ctrl+S` / `Ctrl+O` | 保存 / 打开工程 |
 | `Ctrl+0` | 重置界面缩放 |
-| `Ctrl+F` / `Ctrl+W` | 搜索文件 / 关闭当前源码标签 |
+| `Ctrl+F` | 搜索变量、文件和源码内容，变量定义优先 |
+| `Ctrl+P` | 按名称或路径搜索可编辑的文本文件 |
+| `Ctrl+W` | 关闭当前源码标签 |
 | `F12`、`Ctrl+Click` | 跳到定义 |
 | `Alt+F12` / `Shift+F12` | 预览定义 / 查看引用 |
 | `Alt+←` / `Alt+→` | 源码位置后退 / 前进 |
 | `Ctrl+A` | 全选被监视的变量 |
 | `Ctrl+Z` / `Ctrl+Y` | 撤销 / 重做变量删除 |
 
-`Ctrl+F`、`Ctrl+W` 在源码调试器可见时生效；macOS 上用 Command 代替 Ctrl。
+`Ctrl+F`、`Ctrl+P`、`Ctrl+W` 在源码调试器可见时生效，macOS 上用 Command 代替 Ctrl。按 Enter 或单击搜索结果可打开文件或跳转到对应行。
 
 ## 开发
 

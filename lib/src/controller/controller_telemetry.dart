@@ -144,7 +144,7 @@ extension TakeALookControllerTelemetry on TakeALookController {
                     '（$modeLabel）'
               : '';
           _appendLog(
-            '采样性能：目标 ${sampleRateHz.toStringAsFixed(0)} Hz，'
+            '采样性能：目标 $sampleRateLabel，'
             '$deliveredLabel，'
             '样本 $sampleCount，变量 $watchCount，'
             '读块 $blockCount，字节 $byteCount$memoryTiming$ceiling。',

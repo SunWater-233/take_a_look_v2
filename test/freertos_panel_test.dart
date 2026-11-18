@@ -138,6 +138,49 @@ void main() {
     await tester.pump();
   });
 
+  testWidgets('custom FreeRTOS refresh rate survives reopening the dialog', (
+    tester,
+  ) async {
+    final controller = TakeALookController(backendCommand: (_, _) async {});
+    addTearDown(controller.dispose);
+    controller.setPresentationActive(false);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTalTheme(),
+        home: Scaffold(body: FreeRtosPanel(controller: controller)),
+      ),
+    );
+
+    Future<void> openSettings() async {
+      await tester.tap(find.byTooltip('FreeRTOS 显示设置'));
+      await tester.pumpAndSettle();
+    }
+
+    await openSettings();
+    final rate = find.byKey(const ValueKey('compact-dropdown-2 Hz'));
+    await tester.tap(rate);
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(rate);
+    await tester.pumpAndSettle();
+    final editor = find.byWidgetPredicate(
+      (widget) => widget is TextField && widget.autofocus,
+    );
+    await tester.enterText(editor, '2.75');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('保存设置'));
+    await tester.pumpAndSettle();
+    expect(controller.freeRtosSettings['rateHz'], 2.75);
+
+    await openSettings();
+    expect(
+      find.byKey(const ValueKey('compact-dropdown-2.75 Hz')),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+  });
+
   test(
     'snapshot data and layout settings synchronize, only settings persist',
     () {

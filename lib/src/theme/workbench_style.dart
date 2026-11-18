@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import 'tokens.dart';
 
+export '../models/frequency.dart' show formatReadRate;
+
 abstract final class WorkbenchColors {
   static const background = TalColors.background;
   static const surface = TalColors.surface;
@@ -26,7 +28,3 @@ const workbenchMuted = TextStyle(
   fontSize: 12,
   color: WorkbenchColors.muted,
 );
-
-String formatReadRate(double value) => value >= 1000
-    ? '${(value / 1000).toStringAsFixed(value % 1000 == 0 ? 0 : 1)} kHz'
-    : '${value.toStringAsFixed(value % 1 == 0 ? 0 : 1)} Hz';

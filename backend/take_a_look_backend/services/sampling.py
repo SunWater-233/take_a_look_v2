@@ -6,7 +6,6 @@ from typing import Any
 
 from take_a_look_backend.models import WatchedVariable, json_value
 from take_a_look_backend.backends.ember_transport import EmberError
-from take_a_look_backend.backends.target_backend import backend_capabilities, backend_rtt_binding
 from take_a_look_backend.protocol import EventName, ProtocolError
 from take_a_look_backend.services.sampling_clock import advance_deadline, wait_until
 
@@ -69,7 +68,7 @@ class SamplingServiceMixin:
                             next_monitor_at = self._poll_monitors_locked(now)
                         deadlines.append(next_monitor_at)
                     memory_enabled = (active and bool(self._capture_symbols_locked()) and
-                            backend_capabilities(self._memory).memory_sampling and
+                            self._memory.capabilities.memory_sampling and
                             not (rtt_enabled and rtt_protocol == "plus" and self._plus_rtt.is_started))
                     if not memory_enabled or self._pipeline.backpressure:
                         self._stop_memory_sampling_locked()
@@ -161,7 +160,7 @@ class SamplingServiceMixin:
         memory = []
         pushed: list[tuple[WatchedVariable, tuple[object, int]]] = []
         next_at = now + 2.0
-        can_read_memory = (backend_capabilities(self._memory).memory_sampling
+        can_read_memory = (self._memory.capabilities.memory_sampling
                            or self._debug.execution_state == "halted")
         plus = self._rtt_enabled and self._rtt_protocol == "plus"
         for watch in self._watches.values():
@@ -196,7 +195,7 @@ class SamplingServiceMixin:
         return self._capture_symbols
 
     def _read_memory_locked(self, rtt_enabled: bool, rtt_protocol: str) -> dict[str, object]:
-        if not backend_capabilities(self._memory).memory_sampling:
+        if not self._memory.capabilities.memory_sampling:
             return {}
         if rtt_enabled and rtt_protocol == "plus" and self._plus_rtt.is_started:
             return {}
@@ -209,7 +208,7 @@ class SamplingServiceMixin:
 
     def _read_rtt_locked(self, elapsed: float, now: float) -> list[tuple[float, dict[str, object]]]:
         backend: Any = self._normal_rtt if self._rtt_protocol == "normal" else self._plus_rtt
-        binding = backend_rtt_binding(self._memory)
+        binding = self._memory.rtt_binding
         target = binding.target
         if not backend.is_started:
             if now < self._next_rtt_retry_at:
@@ -339,15 +338,10 @@ class SamplingServiceMixin:
 
     def _reset_capture_timing_locked(self) -> None:
         for backend in (self._normal_rtt, self._plus_rtt):
-            discard = getattr(backend, "discard_available", None)
-            if backend.is_started and discard is not None:
-                discard()
-            reset = getattr(backend, "reset_timing", None)
-            if reset is not None:
-                reset()
+            if backend.is_started:
+                backend.discard_available()
+            backend.reset_timing()
 
     def _configure_rtt_timebases_locked(self) -> None:
         for backend in (self._normal_rtt, self._plus_rtt):
-            configure = getattr(backend, "set_nominal_rate_hz", None)
-            if configure is not None:
-                configure(self._rtt_sample_rate_hz)
+            backend.set_nominal_rate_hz(self._rtt_sample_rate_hz)

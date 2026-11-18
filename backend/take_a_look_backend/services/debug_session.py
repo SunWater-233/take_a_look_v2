@@ -5,7 +5,7 @@ around these operations, so sampling, downloads and debug control stay ordered.
 """
 from __future__ import annotations
 
-from take_a_look_backend.backends.target_backend import TargetBackend, backend_capabilities
+from take_a_look_backend.backends.target_backend import TargetBackend
 from take_a_look_backend.services.debug_info import DebugInfoIndex
 
 
@@ -48,7 +48,7 @@ class DebugSession:
         return True
 
     def continue_or_step(self, target: TargetBackend, *, resume: bool) -> None:
-        if backend_capabilities(target).manages_breakpoint_step:
+        if target.capabilities.manages_breakpoint_step:
             if resume:
                 target.resume()
             else:

@@ -10,7 +10,7 @@ from take_a_look_backend.backends.ember_transport import EmberClient
 from take_a_look_backend.backends.gdb_mi import GdbTarget, normalize_host
 from take_a_look_backend.backends.gdb_rsp import GdbRspMemoryTarget
 from take_a_look_backend.backends.typed_memory import TypedMemoryBackend, _access_size, decode_symbol_value
-from take_a_look_backend.backends.target_backend import capabilities_for_connection
+from take_a_look_backend.backends.target_backend import RttBinding, capabilities_for_connection
 from take_a_look_backend.models import SampleFrame
 
 
@@ -82,7 +82,6 @@ class RemoteMemoryBackend(TypedMemoryBackend):
         self.options = {**REMOTE_DEFAULTS, **options}
         self.client: EmberClient | None = None
         self.ember: EmberTarget | None = None
-        self.rtt_target: Any | None = None
         self.capabilities = capabilities_for_connection(kind, self.options)
         if kind == "gdb" and self.options["gdbMode"] == "memory":
             self.MAX_COALESCED_GAP_BYTES = 128
@@ -107,8 +106,8 @@ class RemoteMemoryBackend(TypedMemoryBackend):
         return self.target is not None
 
     @property
-    def probe(self) -> None:
-        return None
+    def rtt_binding(self) -> RttBinding:
+        return RttBinding(self.ember, None)
 
     def connect(self, _config: Any = None) -> None:
         host = normalize_host(str(self.options["host"]))
@@ -151,7 +150,6 @@ class RemoteMemoryBackend(TypedMemoryBackend):
                                          latest=self.options["rttDelivery"] == "latest")
                 if self.client.protocol_version == 2:
                     self.MAX_COALESCED_READ_BYTES = 4096
-                self.rtt_target = self.ember
                 gdb = state.get("gdb") or {}
                 if self.kind == "ember":
                     if gdb.get("running"):
@@ -179,7 +177,7 @@ class RemoteMemoryBackend(TypedMemoryBackend):
         self._burst_unavailable.clear()
         target, self.target = self.target, None
         try:
-            if target is not None and (self.manages_breakpoint_step or isinstance(target, GdbRspMemoryTarget)):
+            if target is not None and self.capabilities.manages_breakpoint_step:
                 try:
                     target.close()
                 except (ConnectionError, RuntimeError, TimeoutError):
@@ -197,7 +195,6 @@ class RemoteMemoryBackend(TypedMemoryBackend):
                 self.client.close()
             self.client = None
             self.ember = None
-            self.rtt_target = None
             self._clear_read_plans()
 
     def stop_sampling(self):

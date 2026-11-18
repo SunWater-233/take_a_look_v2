@@ -5,7 +5,6 @@ import math
 
 from ..models import SymbolInfo
 from ..protocol import EventName, ProtocolError
-from ..backends.target_backend import backend_capabilities
 from .freertos import ReadBudget
 
 
@@ -57,7 +56,7 @@ class FreeRtosServiceMixin:
             snapshot = self._freertos.unavailable('firmwareChanged', '固件已变化，请重新下载后读取内核。')
         elif not connected:
             snapshot = self._freertos.unavailable('disconnected', '连接已断开；保留最后一份快照。')
-        elif not backend_capabilities(self._memory).memory_sampling and self._debug.execution_state != 'halted':
+        elif not self._memory.capabilities.memory_sampling and self._debug.execution_state != 'halted':
             snapshot = self._freertos.unavailable('targetRunning', '当前连接需要暂停目标后读取内核快照。')
         else:
             try:

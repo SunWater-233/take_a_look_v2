@@ -174,11 +174,9 @@ extension TakeALookControllerPlot on TakeALookController {
         _dispatchRemote(ControllerCommand.configurePlotView, values)) {
       return;
     }
-    final retention = (values['plotRetentionSeconds'] as num?)?.toDouble();
-    if (retention != null && retention.isFinite && retention > 0) {
-      state.plot.retentionSeconds = retention.clamp(1, 120).toDouble();
-      _configurePlotRetention();
-    }
+    _updatePlotRetention(
+      retentionSeconds: (values['plotRetentionSeconds'] as num?)?.toDouble(),
+    );
     if (values.containsKey('plotHighlightedWatchKey')) {
       final key = values['plotHighlightedWatchKey'] as String?;
       state.plot.highlightedWatchKey = key != null && _watchByKey(key) != null

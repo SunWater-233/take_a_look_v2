@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -21,6 +22,7 @@ import '../models/symbol_hierarchy.dart';
 import '../models/connection_capabilities.dart';
 import '../models/source_tools.dart';
 import '../models/freertos.dart';
+import '../models/frequency.dart';
 import '../protocol/commands.dart';
 import '../protocol/events.dart';
 import '../telemetry/telemetry_store.dart';
@@ -208,18 +210,11 @@ class TakeALookController extends ChangeNotifier {
     }
   }
 
-  set sampleRateHz(double value) {
-    if (!value.isFinite || value <= 0) return;
-    state.acquisition.sampleRateHz = value;
-    _configurePlotRetention();
-  }
+  set sampleRateHz(double value) => _updatePlotRetention(sampleRate: value);
 
   double get rttSampleRateHz => state.acquisition.rttSampleRateHz;
-  set rttSampleRateHz(double value) {
-    if (!value.isFinite || value <= 0) return;
-    state.acquisition.rttSampleRateHz = value;
-    _configurePlotRetention();
-  }
+  set rttSampleRateHz(double value) =>
+      _updatePlotRetention(rttSampleRate: value);
 
   String get displayRefreshMode => state.acquisition.displayRefreshMode;
   set displayRefreshMode(String value) =>
@@ -229,16 +224,10 @@ class TakeALookController extends ChangeNotifier {
   bool get samplingPaused => state.acquisition.samplingPaused;
   set samplingPaused(bool value) => state.acquisition.samplingPaused = value;
   bool get rttEnabled => state.acquisition.rttEnabled;
-  set rttEnabled(bool value) {
-    state.acquisition.rttEnabled = value;
-    _configurePlotRetention();
-  }
+  set rttEnabled(bool value) => _updatePlotRetention(rttEnabled: value);
 
   String get rttProtocol => state.acquisition.rttProtocol;
-  set rttProtocol(String value) {
-    state.acquisition.rttProtocol = value;
-    _configurePlotRetention();
-  }
+  set rttProtocol(String value) => _updatePlotRetention(rttProtocol: value);
 
   Map<String, dynamic> get performanceStats =>
       state.acquisition.performanceStats;
@@ -341,6 +330,46 @@ class TakeALookController extends ChangeNotifier {
       return recent;
     }
     return history ?? recent;
+  }
+
+  void _updatePlotRetention({
+    double? sampleRate,
+    double? rttSampleRate,
+    bool? rttEnabled,
+    String? rttProtocol,
+    double? retentionSeconds,
+  }) {
+    final previous = (
+      sampleRateHz,
+      rttSampleRateHz,
+      this.rttEnabled,
+      this.rttProtocol,
+      plotRetentionSeconds,
+    );
+    final acquisition = state.acquisition;
+    if (sampleRate != null && sampleRate.isFinite && sampleRate > 0) {
+      acquisition.sampleRateHz = sampleRate;
+    }
+    if (rttSampleRate != null && rttSampleRate.isFinite && rttSampleRate > 0) {
+      acquisition.rttSampleRateHz = rttSampleRate;
+    }
+    acquisition.rttEnabled = rttEnabled ?? acquisition.rttEnabled;
+    acquisition.rttProtocol = rttProtocol ?? acquisition.rttProtocol;
+    if (retentionSeconds != null &&
+        retentionSeconds.isFinite &&
+        retentionSeconds > 0) {
+      state.plot.retentionSeconds = retentionSeconds.clamp(1, 120).toDouble();
+    }
+    if (previous !=
+        (
+          sampleRateHz,
+          rttSampleRateHz,
+          this.rttEnabled,
+          this.rttProtocol,
+          plotRetentionSeconds,
+        )) {
+      _configurePlotRetention();
+    }
   }
 
   void _configurePlotRetention() {

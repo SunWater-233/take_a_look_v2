@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../controller/controller.dart';
+import '../models/frequency.dart' show parseFrequencyHz;
 import '../models/models.dart';
 import '../theme/theme.dart';
 import 'target_chip_dialog.dart';
@@ -108,6 +109,10 @@ class ConnectionPanel extends StatelessWidget {
                     '24 MHz',
                   ],
                   label: (value) => value,
+                  editor: const TalDropdownEditor(
+                    parse: _parseSwdClock,
+                    errorMessage: '请输入 1 kHz～100 MHz 的频率，如 2.5 MHz。',
+                  ),
                   onChanged: controller.setSwdClock,
                 ),
               ),
@@ -123,6 +128,12 @@ class ConnectionPanel extends StatelessWidget {
       ),
     );
   }
+}
+
+String? _parseSwdClock(String text) {
+  final rateHz = parseFrequencyHz(text);
+  if (rateHz == null || rateHz < 1000 || rateHz > 100000000) return null;
+  return formatReadRate(rateHz, useMegahertz: true);
 }
 
 class _RemoteConnectionFields extends StatelessWidget {

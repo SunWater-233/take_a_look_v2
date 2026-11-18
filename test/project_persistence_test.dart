@@ -162,13 +162,11 @@ void main() {
       ..loadDemoSymbols();
     addTearDown(controller.dispose);
     final settings = controller.projectSettings();
-    settings['watches'] = [
-      {'key': 'missing-symbol'},
-    ];
+    settings['sampleRateHz'] = 0;
     expect(
       () => ProjectDocument.fromJson({
         'format': 'take-a-look-project',
-        'version': 1,
+        'version': 2,
         'settings': settings,
         'layout': const WorkspaceLayoutSnapshot(
           groups: [],
@@ -179,6 +177,25 @@ void main() {
     );
     expect(controller.symbols, hasLength(demoSymbols.length));
     expect(controller.watches, isEmpty);
+  });
+
+  test('validated project settings are isolated from later mutations', () {
+    final controller = TakeALookController(backendCommand: (_, _) async {});
+    addTearDown(controller.dispose);
+    final settings = controller.projectSettings();
+    final document = ProjectDocument.fromJson(
+      ProjectDocument(
+        settings: settings,
+        layout: const WorkspaceLayoutSnapshot(groups: [], uiScale: 1),
+      ).toJson(),
+    );
+
+    settings['sampleRateHz'] = 0;
+    (settings['sourceProject'] as Map)['buildCommand'] = 'other command';
+    expect(document.settings['sampleRateHz'], 50);
+    final project = document.settings['sourceProject'] as Map;
+    expect(project['buildCommand'], isNot('other command'));
+    expect(() => project['buildCommand'] = 'invalid', throwsUnsupportedError);
   });
 
   testWidgets(

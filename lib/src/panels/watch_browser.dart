@@ -1190,8 +1190,9 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
           child: TalDropdown<double>(
             key: const ValueKey('watch-default-monitor-rate'),
             value: controller.monitorRateHz,
-            values: const [.5, 1, 2, 5, 10],
+            values: monitorRatePresets,
             label: formatReadRate,
+            editor: monitorRateEditor,
             onChanged: controller.setMonitorRate,
           ),
         ),

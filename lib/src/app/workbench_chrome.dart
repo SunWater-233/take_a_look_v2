@@ -125,20 +125,9 @@ class WorkbenchToolbar extends StatelessWidget {
                       width: 112,
                       child: TalDropdown<double>(
                         value: controller.sampleRateHz,
-                        values: {
-                          ...[
-                            50.0,
-                            100.0,
-                            200.0,
-                            500.0,
-                            1000.0,
-                            2000.0,
-                            5000.0,
-                            7000.0,
-                          ],
-                          controller.sampleRateHz,
-                        }.toList()..sort(),
+                        values: captureRatePresets,
                         label: formatReadRate,
+                        editor: captureRateEditor,
                         onChanged: controller.setSampleRate,
                       ),
                     ),

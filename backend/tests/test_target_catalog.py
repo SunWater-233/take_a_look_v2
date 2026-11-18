@@ -19,6 +19,7 @@ from take_a_look_backend.protocol import EventName, ProtocolError, RpcMethod
 from take_a_look_backend.service import BackendService
 from take_a_look_backend.services.target_catalog import TargetCatalog, builtin_targets
 from take_a_look_backend.stdio import StdioServer
+from test_service import _FakeMemory
 
 
 def make_pack(directory: Path, version="1.0.0", *, name="User_DFP", part="nrf52840", core="Cortex-M4", ram="0x10000", extra="") -> Path:
@@ -427,21 +428,14 @@ def test_builtin_catalog_is_independent_of_previous_dynamic_targets():
     assert all(item["packId"] == "" for item in builtin_targets())
 
 
-class Memory:
-    target = None
-    probe = None
-    config = None
+class Memory(_FakeMemory):
     fail_connect = False
     connections = 0
     def connect(self, config):
         self.connections += 1
         if self.fail_connect:
             raise RuntimeError("probe unavailable")
-        self.config = config
-    def disconnect(self):
-        self.config = None
-    def debug_state(self):
-        return "running"
+        super().connect(config)
 
 
 def test_rpc_selection_reconnects_and_restarting_backend(tmp_path):
@@ -455,23 +449,23 @@ def test_rpc_selection_reconnects_and_restarting_backend(tmp_path):
         pack_id = service.handle(RpcMethod.IMPORT_TARGET_PACK, {"previewId": preview["previewId"]})["packId"]
         service.handle(RpcMethod.SELECT_TARGET, {"name": "nrf52840", "packId": pack_id})
         service.handle(RpcMethod.CONNECT, {})
-        assert memory.config.target == "nrf52840"
-        assert Path(memory.config.pack_path).name == f"{pack_id}.pack"
+        assert memory.connected.target == "nrf52840"
+        assert Path(memory.connected.pack_path).name == f"{pack_id}.pack"
         with pytest.raises(ProtocolError, match="pack_in_use"):
             service.handle(RpcMethod.REMOVE_TARGET_PACK, {"packId": pack_id})
         service.handle(RpcMethod.SET_SAMPLING_PAUSED, {"paused": True})
         result = service.handle(RpcMethod.SELECT_TARGET, {"name": "auto"})
         assert result["state"]["connectionStatus"] == "connected"
         assert result["state"]["samplingPaused"] is True
-        assert memory.config.target is None
-        assert memory.config.pack_path is None
+        assert memory.connected.target is None
+        assert memory.connected.pack_path is None
         assert memory.connections == 2
         service.handle(RpcMethod.SELECT_TARGET, {"name": "auto"})
         assert memory.connections == 2  # Reselecting does not interrupt acquisition.
         service.handle(RpcMethod.SELECT_TARGET, {"name": "nrf52840", "packId": pack_id})
-        assert memory.config.target == "nrf52840"
+        assert memory.connected.target == "nrf52840"
         service.handle(RpcMethod.SET_CONFIG, {"targetName": "auto"})
-        assert memory.config.target is None
+        assert memory.connected.target is None
         assert service.state_snapshot()["samplingPaused"] is True
         service.handle(RpcMethod.SELECT_TARGET, {"name": "nrf52840", "packId": pack_id})
         assert any(name is EventName.STATE and value.get("targetPackId") == pack_id for name, value in events)
@@ -496,7 +490,7 @@ def test_invalid_selection_keeps_live_connection_and_failed_reconnect_is_retryab
         with pytest.raises(ProtocolError, match="unknown_target"):
             service.handle(RpcMethod.SELECT_TARGET, {"name": "nonexistent-chip"})
         assert memory.connections == 1
-        assert memory.config is not None
+        assert memory.connected is not None
         assert service.state_snapshot()["connectionStatus"] == "connected"
         memory.fail_connect = True
         with pytest.raises(ProtocolError, match="connect_failed"):
@@ -506,7 +500,7 @@ def test_invalid_selection_keeps_live_connection_and_failed_reconnect_is_retryab
         assert state["targetName"] == "nrf52840"
         memory.fail_connect = False
         service.handle(RpcMethod.CONNECT, {})
-        assert memory.config.target == "nrf52840"
+        assert memory.connected.target == "nrf52840"
     finally:
         service.close()
 
@@ -539,7 +533,7 @@ def test_switch_waits_for_an_inflight_connection(tmp_path):
             connecting.result(timeout=3)
             result = switching.result(timeout=3)
         assert memory.connections == 2
-        assert memory.config.target == "nrf52840"
+        assert memory.connected.target == "nrf52840"
         assert result["state"]["connectionStatus"] == "connected"
     finally:
         release.set()

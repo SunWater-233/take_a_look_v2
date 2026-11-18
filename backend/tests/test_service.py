@@ -5,10 +5,13 @@ import tempfile
 import threading
 import time
 import unittest
+from collections.abc import Callable
 from unittest.mock import patch
 from pathlib import Path
 
 from take_a_look_backend.backends.pyocd_memory import PyOcdConnectionConfig
+from take_a_look_backend.backends.target_backend import RttBinding, TargetCapabilities
+from take_a_look_backend.backends.typed_memory import encode_symbol_value
 from take_a_look_backend.models import SymbolInfo, WatchedVariable
 from take_a_look_backend.protocol import EventName, ProtocolError, RpcMethod
 from take_a_look_backend.service import BackendService
@@ -16,16 +19,27 @@ from take_a_look_backend.services.debug_info import DebugInfoIndex, SourceLocati
 
 
 class _FakeMemory:
+    capabilities = TargetCapabilities()
+
     def __init__(self) -> None:
         self.target = object()
         self.probe = object()
         self.last_read_metrics = {"block_count": 0, "byte_count": 0}
+        self.last_connect_timings: dict[str, float] = {}
         self.connected: PyOcdConnectionConfig | None = None
         self.values: dict[str, object] = {}
         self.reset_calls: list[bool] = []
         self.execution_state = "running"
         self.breakpoints: set[int] = set()
         self.registers = {"pc": 0x08000100, "sp": 0x20001000, "lr": 0x08000081}
+
+    @property
+    def is_connected(self) -> bool:
+        return self.connected is not None
+
+    @property
+    def rtt_binding(self) -> RttBinding:
+        return RttBinding(self.target, self.probe)
 
     def connect(self, config: PyOcdConnectionConfig) -> None:
         self.connected = config
@@ -46,6 +60,14 @@ class _FakeMemory:
         parsed = int(value, 0)
         self.values[symbol.key] = parsed
         return parsed
+
+    def write_symbols(self, writes: list[tuple[SymbolInfo, str]]) -> dict[str, object]:
+        for symbol, value in writes:
+            encode_symbol_value(symbol, value)
+        return {symbol.key: self.write_symbol(symbol, value) for symbol, value in writes}
+
+    def program_firmware(self, path: str, progress: Callable[[float], None]) -> None:
+        raise AssertionError("Unexpected firmware download")
 
     def reset(self, halt: bool = False) -> None:
         self.reset_calls.append(halt)
@@ -81,6 +103,15 @@ class _FakeRtt:
     def stop(self) -> None:
         self.is_started = False
 
+    def reset_timing(self) -> None:
+        pass
+
+    def discard_available(self) -> None:
+        pass
+
+    def set_nominal_rate_hz(self, rate_hz: float) -> None:
+        pass
+
 
 class BackendServiceTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -95,7 +126,7 @@ class BackendServiceTests(unittest.TestCase):
         self.service = BackendService(
             self._event,
             recording_directory=Path(self.recording_directory.name),
-            memory_backend=self.memory,  # type: ignore[arg-type]
+            memory_backend=self.memory,
             normal_rtt_backend=_FakeRtt(),  # type: ignore[arg-type]
             plus_rtt_backend=_FakeRtt(),  # type: ignore[arg-type]
             symbol_loader=lambda _path, **_kwargs: list(self.symbols),
@@ -389,6 +420,31 @@ class BackendServiceTests(unittest.TestCase):
         self.assertTrue(paused["samplingPaused"])
         self.assertNotIn("symbols", paused)
         self.assertNotIn("watches", paused)
+
+    def test_invalid_config_preserves_settings_and_the_next_connection_clock(self) -> None:
+        self.service.handle(RpcMethod.SET_CONFIG, {"swdClock": "2.5 MHz"})
+        previous = self.service.state_snapshot()
+        for params in (
+            {"swdClock": "999 Hz"},
+            {"targetName": "nrf52840", "probeType": "J-Link", "swdClock": "8 MHz",
+             "sampleRateHz": 250, "monitorRateHz": 2, "rttSampleRateHz": 0},
+        ):
+            with self.subTest(params=params):
+                with self.assertRaisesRegex(ProtocolError, "invalid_request"):
+                    self.service.handle(RpcMethod.SET_CONFIG, params)
+                self.assertEqual(self.service.state_snapshot(), previous)
+
+        self.service.handle(RpcMethod.CONNECT, {})
+        assert self.memory.connected is not None
+        self.assertEqual(self.memory.connected.frequency_hz, 2_500_000)
+
+    def test_invalid_rtt_config_preserves_settings(self) -> None:
+        previous = self.service.state_snapshot()
+        for invalid in ({"rateHz": 0}, {"rateHz": 500, "controlBlockAddress": "invalid"}):
+            with self.subTest(invalid=invalid):
+                with self.assertRaisesRegex(ProtocolError, "invalid_request"):
+                    self.service.handle(RpcMethod.SET_RTT, {"enabled": True, "protocol": "plus", **invalid})
+                self.assertEqual(self.service.state_snapshot(), previous)
 
     def test_source_breakpoints_and_run_control_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

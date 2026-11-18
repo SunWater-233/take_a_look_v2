@@ -1,6 +1,7 @@
 """Watch-tree reconciliation through both declarations and real ARM ELF rebuilds."""
 import shutil
 import subprocess
+from dataclasses import replace
 
 import pytest
 
@@ -105,12 +106,13 @@ def test_missing_watch_keeps_recording_and_settings_without_accessing_old_memory
         service._poll_monitors_locked(100)
         service._remember_values_locked({old.key: 99})
         assert missing.value != 99 and memory.values == {}
-        memory.supports_running_memory = False
+        capabilities = memory.capabilities
+        memory.capabilities = replace(capabilities, memory_sampling=False)
         memory.execution_state = 'halted'
         service._refresh_debug_state_locked(force=True)
         assert memory.values == {}
         memory.execution_state = 'running'
-        memory.supports_running_memory = True
+        memory.capabilities = capabilities
         for method, params in [
             (RpcMethod.READ_WATCH, {'key': old.key}),
             (RpcMethod.WRITE_WATCH, {'key': old.key, 'value': '1'}),

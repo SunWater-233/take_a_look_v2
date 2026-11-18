@@ -30,8 +30,9 @@ class ProjectDocument {
     if (data['format'] != 'take-a-look-project' || data['version'] != 2) {
       throw const FormatException('不支持的 Take A Look 项目格式。');
     }
-    final settings = Map<String, dynamic>.from(data['settings'] as Map);
-    TakeALookControllerProject.validateProjectSettings(settings);
+    final settings = ValidatedProjectSettings(
+      Map<String, dynamic>.from(data['settings'] as Map),
+    );
     final layout = WorkspaceLayoutSnapshot.fromJson(
       Map<String, dynamic>.from(data['layout'] as Map),
     );

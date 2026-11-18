@@ -192,7 +192,7 @@ def test_v2_bootstrap_never_sends_the_secret_over_tcp(fixture_server):
         assert backend.client.protocol_version == 2
         assert backend.read_symbol(SymbolInfo("value", 0, 4, "uint32_t", ".data")) == 0x03020100
         backend.client.call("rtt_start", {})
-        normal.start(backend.rtt_target)
+        normal.start(backend.rtt_binding.target)
         frames = []
         deadline = time.monotonic() + 1
         while not frames and time.monotonic() < deadline:

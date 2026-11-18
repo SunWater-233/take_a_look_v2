@@ -1,11 +1,7 @@
 import pytest
 
 from take_a_look_backend.backends.remote_backend import RemoteMemoryBackend
-from take_a_look_backend.backends.target_backend import (
-    backend_capabilities,
-    backend_rtt_binding,
-    capabilities_for_connection,
-)
+from take_a_look_backend.backends.target_backend import capabilities_for_connection
 from take_a_look_backend.backends.typed_memory import TypedMemoryBackend
 from take_a_look_backend.models import SymbolInfo
 from take_a_look_backend.protocol import ProtocolError
@@ -23,7 +19,7 @@ def test_connection_capabilities_preserve_the_wire_contract(kind, polling, write
         "rtt": rtt, "firmwareDownload": flash, "targetControl": True,
     }
     if kind != "local":
-        assert backend_capabilities(RemoteMemoryBackend(kind, {})).to_json() == capabilities_for_connection(kind).to_json()
+        assert RemoteMemoryBackend(kind, {}).capabilities == capabilities_for_connection(kind)
 
 
 def test_shared_memory_layer_coalesces_reads_and_verifies_a_write_without_pyocd():
@@ -50,7 +46,7 @@ def test_shared_memory_layer_coalesces_reads_and_verifies_a_write_without_pyocd(
     assert values[symbols[0].key] == int.from_bytes(bytes(range(4, 8)), "little")
     assert backend.write_symbol(symbols[0], "0x12345678") == 0x12345678
     assert backend.target.reads[-1] == (4, 4)
-    assert backend_rtt_binding(backend).target is backend.target
+    assert backend.rtt_binding.target is backend.target
 
 
 def test_remote_backend_cannot_enter_the_local_flash_programmer():

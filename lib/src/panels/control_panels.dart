@@ -83,10 +83,9 @@ class HeaderPanel extends StatelessWidget {
   Widget _ratePicker() {
     return TalDropdown<double>(
       value: controller.sampleRateHz,
-      values: const [50, 100, 200, 500, 1000, 2000, 5000, 7000],
-      label: (value) => value >= 1000
-          ? '${(value / 1000).toStringAsFixed(0)} kHz'
-          : '${value.toStringAsFixed(0)} Hz',
+      values: captureRatePresets,
+      label: formatReadRate,
+      editor: captureRateEditor,
       onChanged: controller.setSampleRate,
     );
   }
@@ -214,8 +213,9 @@ class SamplingPanel extends StatelessWidget {
                     width: 96,
                     child: TalDropdown<double>(
                       value: controller.sampleRateHz,
-                      values: const [50, 100, 200, 500, 1000, 2000, 5000, 7000],
-                      label: _sampleRateText,
+                      values: captureRatePresets,
+                      label: formatReadRate,
+                      editor: captureRateEditor,
                       onChanged: controller.setSampleRate,
                     ),
                   ),
@@ -237,17 +237,9 @@ class SamplingPanel extends StatelessWidget {
                       width: 112,
                       child: TalDropdown<double>(
                         value: controller.rttSampleRateHz,
-                        values: const [
-                          50,
-                          100,
-                          200,
-                          500,
-                          1000,
-                          2000,
-                          5000,
-                          7000,
-                        ],
-                        label: _sampleRateText,
+                        values: captureRatePresets,
+                        label: formatReadRate,
+                        editor: captureRateEditor,
                         onChanged: controller.setRttSampleRate,
                       ),
                     ),
@@ -260,8 +252,4 @@ class SamplingPanel extends StatelessWidget {
       ),
     );
   }
-
-  static String _sampleRateText(double value) => value >= 1000
-      ? '${(value / 1000).toStringAsFixed(0)} kHz'
-      : '${value.toStringAsFixed(0)} Hz';
 }

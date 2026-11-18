@@ -12,6 +12,8 @@ import '../models/models.dart' show ConnectionStatus;
 import '../theme/theme.dart';
 import '../workspace/panel_types.dart';
 
+final _refreshRateEditor = frequencyEditor(range: (min: 1, max: 5));
+
 /// The production FreeRTOS inspector. Sample data lives only in ui_test/.
 class FreeRtosPanel extends StatefulWidget {
   const FreeRtosPanel({
@@ -1320,7 +1322,7 @@ class _FreeRtosPanelState extends State<FreeRtosPanel> {
   }
 
   Future<void> _showSettings() async {
-    var rate = (settings['rateHz'] as num? ?? 2).toInt();
+    var rate = (settings['rateHz'] as num? ?? 2).toDouble();
     final tick = TextEditingController(
       text: settings['tickHz']?.toString() ?? '',
     );
@@ -1342,16 +1344,12 @@ class _FreeRtosPanelState extends State<FreeRtosPanel> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     const Text('状态刷新频率', style: workbenchMuted),
-                    DropdownButton<int>(
+                    TalDropdown<double>(
                       value: rate,
-                      items: [
-                        for (final value in [1, 2, 3, 4, 5])
-                          DropdownMenuItem(
-                            value: value,
-                            child: Text('$value Hz'),
-                          ),
-                      ],
-                      onChanged: (value) => update(() => rate = value!),
+                      values: const [1, 2, 3, 4, 5],
+                      label: formatReadRate,
+                      editor: _refreshRateEditor,
+                      onChanged: (value) => update(() => rate = value),
                     ),
                     const SizedBox(height: 14),
                     TextField(

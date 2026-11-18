@@ -7,6 +7,7 @@ import '../models/models.dart';
 /// Owns mutation and retention rules for high-frequency watch samples.
 class TelemetryStore {
   static const double defaultRetentionSeconds = 60;
+  static const double _preallocationRateHz = 7000;
   double retentionSeconds = defaultRetentionSeconds;
   double sampleRateHz = 50;
   double rttSampleRateHz = 1000;
@@ -19,7 +20,11 @@ class TelemetryStore {
         (rttEnabled && rttProtocol == 'plus');
     watch.samples.configureRetention(
       seconds: retentionSeconds,
-      rateHz: useRtt ? rttSampleRateHz : sampleRateHz,
+      // For higher custom rates the buffer grows as samples actually arrive.
+      rateHz: math.min(
+        useRtt ? rttSampleRateHz : sampleRateHz,
+        _preallocationRateHz,
+      ),
     );
   }
 

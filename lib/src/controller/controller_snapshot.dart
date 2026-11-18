@@ -235,11 +235,17 @@ extension TakeALookControllerSnapshot on TakeALookController {
     if (data['firmware'] case final Map firmware) {
       state.firmware = Map<String, dynamic>.from(firmware);
     }
-    sampleRateHz = (data['sampleRateHz'] as num?)?.toDouble() ?? sampleRateHz;
+    _updatePlotRetention(
+      sampleRate: (data['sampleRateHz'] as num?)?.toDouble(),
+      rttSampleRate: (data['rttSampleRateHz'] as num?)?.toDouble(),
+      rttEnabled: data.containsKey('rttEnabled')
+          ? data['rttEnabled'] == true
+          : null,
+      rttProtocol: data['rttProtocol'] as String?,
+      retentionSeconds: (data['plotRetentionSeconds'] as num?)?.toDouble(),
+    );
     monitorRateHz =
         (data['monitorRateHz'] as num?)?.toDouble() ?? monitorRateHz;
-    rttSampleRateHz =
-        (data['rttSampleRateHz'] as num?)?.toDouble() ?? rttSampleRateHz;
     final nextDisplayRefreshMode = data['displayRefreshMode'] as String?;
     if (const {
       'standard',
@@ -262,10 +268,6 @@ extension TakeALookControllerSnapshot on TakeALookController {
     if (data.containsKey('plottingPaused')) {
       plottingPaused = data['plottingPaused'] == true;
     }
-    if (data.containsKey('rttEnabled')) {
-      rttEnabled = data['rttEnabled'] == true;
-    }
-    rttProtocol = data['rttProtocol'] as String? ?? rttProtocol;
     if (data.containsKey('rttEnabled') || data.containsKey('rttProtocol')) {
       _scheduleWatchMonitorSync();
     }
@@ -275,11 +277,6 @@ extension TakeALookControllerSnapshot on TakeALookController {
     plotVisibleWindowSeconds =
         (data['plotVisibleWindowSeconds'] as num?)?.toDouble() ??
         plotVisibleWindowSeconds;
-    final retention = (data['plotRetentionSeconds'] as num?)?.toDouble();
-    if (retention != null && retention.isFinite && retention > 0) {
-      state.plot.retentionSeconds = retention.clamp(1, 120).toDouble();
-      _configurePlotRetention();
-    }
     if (data['rawRecording'] is Map) {
       state.acquisition.rawRecording = Map<String, dynamic>.from(
         data['rawRecording'] as Map,

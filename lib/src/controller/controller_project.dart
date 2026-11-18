@@ -1,5 +1,27 @@
 part of 'controller.dart';
 
+/// An immutable copy of settings that have passed project validation.
+final class ValidatedProjectSettings
+    extends UnmodifiableMapView<String, dynamic> {
+  factory ValidatedProjectSettings(Map<String, dynamic> data) {
+    final settings = ValidatedProjectSettings._({
+      for (final entry in data.entries) entry.key: _freeze(entry.value),
+    });
+    TakeALookControllerProject.validateProjectSettings(settings);
+    return settings;
+  }
+
+  ValidatedProjectSettings._(super.map);
+
+  static Object? _freeze(Object? value) => switch (value) {
+    Map() => Map.unmodifiable({
+      for (final entry in value.entries) entry.key: _freeze(entry.value),
+    }),
+    List() => List.unmodifiable(value.map(_freeze)),
+    _ => value,
+  };
+}
+
 extension TakeALookControllerProject on TakeALookController {
   Map<String, dynamic> projectSettings() {
     final data = _encodeSnapshot(
@@ -179,7 +201,7 @@ extension TakeALookControllerProject on TakeALookController {
   }
 
   Future<void> restoreProjectSettings(Map<String, dynamic> data) async {
-    validateProjectSettings(data);
+    if (data is! ValidatedProjectSettings) validateProjectSettings(data);
     if (_restoringProject || sourceTask.running || isSymbolLoading) {
       throw const FormatException('请等待当前项目或文件任务完成，再打开项目。');
     }

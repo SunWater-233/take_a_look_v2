@@ -199,7 +199,7 @@ def test_rtt_sparse_channel_decode_and_partial_down_writes():
         backend.connect()
         normal = JScopeRttBackend()
         try:
-            symbols = normal.start(backend.rtt_target)
+            symbols = normal.start(backend.rtt_binding.target)
             assert normal.channel_index == 3
             assert normal.transport_name == "EmberMobile v1 RTT"
             assert normal.read_frames(0)[0][1][symbols[0].key] == 2.5
@@ -225,7 +225,7 @@ def test_rtt_plus_remote_configuration_and_sample():
         plus = JScopeRttPlusBackend()
         symbol = SymbolInfo("speed", 0x20000000, 4, "float", ".data")
         try:
-            plus.start(backend.rtt_target, None, None, [WatchedVariable(symbol, "")])
+            plus.start(backend.rtt_binding.target, None, None, [WatchedVariable(symbol, "")])
             assert phone.down == struct.pack("<QI", symbol.address, symbol.size) + bytes(12)
             assert plus.read_frames(0)[0][1][symbol.key] == 4.5
         finally:
@@ -241,7 +241,7 @@ def test_shared_rtt_is_not_stopped_and_overflow_is_reported():
         backend.connect()
         normal = JScopeRttBackend()
         try:
-            normal.start(backend.rtt_target)
+            normal.start(backend.rtt_binding.target)
             phone.dropped = 100
             with pytest.raises(RuntimeError, match="丢失 100"):
                 normal.read_frames(0)

@@ -1,4 +1,6 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:take_a_look_v2/src/app/workbench_chrome.dart';
 import 'package:take_a_look_v2/src/app/workbench_feedback.dart';
@@ -9,6 +11,90 @@ import 'package:take_a_look_v2/src/protocol/events.dart';
 import 'package:take_a_look_v2/src/theme/theme.dart';
 
 void main() {
+  testWidgets('toolbar capture dropdown edits custom rates and keeps presets', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1000, 600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final rates = <double>[];
+    late final TakeALookController controller;
+    controller = TakeALookController(
+      backendCommand: (command, arguments) async {
+        if (command == ControllerCommand.setSampleRate) {
+          rates.add(arguments as double);
+          controller.applySnapshot({'sampleRateHz': arguments});
+        }
+      },
+    );
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTalTheme(),
+        home: Scaffold(body: WorkbenchToolbar(controller: controller)),
+      ),
+    );
+
+    Finder rate(String label) =>
+        find.byKey(ValueKey('compact-dropdown-$label'));
+    Future<void> click(Offset target) =>
+        tester.tapAt(target, kind: PointerDeviceKind.mouse);
+    Future<void> doubleClick(Offset target) async {
+      await click(target);
+      await tester.pump(const Duration(milliseconds: 50));
+      await click(target);
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> submit(Finder field, String text) async {
+      await tester.enterText(field, text);
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+    }
+
+    final initial = tester.getCenter(rate('50 Hz'));
+    await click(initial);
+    await tester.pump(kDoubleTapTimeout);
+    await tester.pumpAndSettle();
+    final preset = find.byKey(const ValueKey('dropdown-item-100 Hz'));
+    expect(preset, findsOneWidget);
+
+    await doubleClick(initial);
+    expect(preset, findsNothing);
+    final editor = find.byType(TextField);
+    expect(editor, findsOneWidget);
+    expect(tester.widget<TextField>(editor).controller!.selection.end, 5);
+
+    await submit(editor, '0 Hz');
+    expect(editor, findsOneWidget);
+    expect(find.text(captureRateEditor.errorMessage), findsOneWidget);
+    expect(rates, isEmpty);
+
+    await submit(editor, '1.001 kHz');
+    expect(editor, findsNothing);
+    expect(controller.sampleRateHz, 1001);
+    expect(rates, [1001]);
+
+    final custom = tester.getCenter(rate('1.001 kHz'));
+    await doubleClick(custom);
+    await tester.enterText(editor, '250');
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(editor, findsNothing);
+    expect(rates, [1001]);
+
+    await click(custom);
+    await tester.pump(kDoubleTapTimeout);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('dropdown-selected-1.001 kHz')),
+      findsOneWidget,
+    );
+    await tester.tap(preset);
+    await tester.pumpAndSettle();
+    expect(controller.sampleRateHz, 100);
+    expect(rates, [1001, 100]);
+  });
+
   for (final mode in TalInputMode.values) {
     testWidgets(
       '$mode probe loss stops capture and updates connection feedback',

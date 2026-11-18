@@ -1105,13 +1105,11 @@ class _WatchRowState extends State<_WatchRow> {
                     ? const Text('设备推送', style: talMuted)
                     : TalDropdown<double>(
                         value: watch.monitorRateHz ?? 0,
-                        values: {
-                          ...[0.0, 0.5, 1.0, 2.0, 5.0, 10.0],
-                          if (watch.monitorRateHz != null) watch.monitorRateHz!,
-                        }.toList()..sort(),
+                        values: const [0, ...monitorRatePresets],
                         label: (rate) => rate == 0
                             ? '默认 ${formatReadRate(widget.controller.monitorRateHz)}'
                             : formatReadRate(rate),
+                        editor: watchMonitorRateEditor,
                         onChanged: (rate) =>
                             widget.controller.setWatchMonitorRate(
                               watch.symbol.key,

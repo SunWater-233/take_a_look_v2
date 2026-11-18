@@ -68,25 +68,3 @@ class TargetBackend(Protocol):
     def remove_breakpoint(self, address: int) -> None: ...
     def read_core_registers(self) -> dict[str, int]: ...
     def program_firmware(self, path: str, progress: Callable[[float], None]) -> None: ...
-
-
-def backend_capabilities(backend: TargetBackend) -> TargetCapabilities:
-    capabilities = getattr(backend, "capabilities", None)
-    if isinstance(capabilities, TargetCapabilities):
-        return capabilities
-    # Preserve the existing injected-backend contract for callers and test fakes.
-    return TargetCapabilities(
-        memory_sampling=getattr(backend, "supports_running_memory", True),
-        memory_write=getattr(backend, "supports_memory_write", True),
-        manages_breakpoint_step=getattr(backend, "manages_breakpoint_step", False),
-    )
-
-
-def backend_rtt_binding(backend: TargetBackend) -> RttBinding:
-    binding = getattr(backend, "rtt_binding", None)
-    if isinstance(binding, RttBinding):
-        return binding
-    return RttBinding(
-        getattr(backend, "rtt_target", getattr(backend, "target", None)),
-        getattr(backend, "probe", None),
-    )

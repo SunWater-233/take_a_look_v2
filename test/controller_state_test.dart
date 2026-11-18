@@ -103,6 +103,30 @@ void main() {
     target.dispose();
   });
 
+  test('a snapshot updates retention once using the final RTT settings', () {
+    final controller = TakeALookController(backendCommand: (_, _) async {});
+    addTearDown(controller.dispose);
+    controller.loadDemoSymbols();
+    controller.toggleSymbol(demoSymbols.first.key);
+    controller.addSelectedToWatch();
+    final samples = controller.watches.single.samples;
+    final revision = samples.revision;
+
+    controller.applySnapshot({
+      'sampleRateHz': 100,
+      'rttSampleRateHz': 200,
+      'rttEnabled': true,
+      'rttProtocol': 'plus',
+      'plotRetentionSeconds': 2,
+    });
+    expect(samples.capacity, 401);
+    expect(samples.revision, revision + 1);
+
+    controller.applySnapshot({'elapsedSeconds': 1});
+    controller.applySnapshot({'sampleRateHz': 100, 'rttSampleRateHz': 200});
+    expect(samples.revision, revision + 1);
+  });
+
   test('source root and executable lines are synchronized in snapshots', () {
     const sourcePath = 'C:/build/src/main.c';
     final source = TakeALookController()..setSourceRoot('D:/firmware');

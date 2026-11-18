@@ -35,23 +35,7 @@ class TypedMemoryBackend:
 
     @property
     def rtt_binding(self) -> RttBinding:
-        return RttBinding(getattr(self, "rtt_target", self.target), self.probe)
-
-    @property
-    def supports_running_memory(self) -> bool:
-        return self.capabilities.memory_sampling
-
-    @property
-    def supports_memory_write(self) -> bool:
-        return self.capabilities.memory_write
-
-    @property
-    def supports_rtt(self) -> bool:
-        return self.capabilities.rtt
-
-    @property
-    def manages_breakpoint_step(self) -> bool:
-        return self.capabilities.manages_breakpoint_step
+        return RttBinding(self.target, self.probe)
 
     def _require_target(self) -> Any:
         if self.target is None:

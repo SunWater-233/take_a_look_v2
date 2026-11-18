@@ -8,7 +8,7 @@ from enum import Enum
 from pathlib import Path
 
 from take_a_look_backend.backends.j_scope_rtt import JScopeRttBackend
-from take_a_look_backend.backends.target_backend import TargetBackend, backend_capabilities, capabilities_for_connection
+from take_a_look_backend.backends.target_backend import TargetBackend, capabilities_for_connection
 from take_a_look_backend.backends.pyocd_memory import PyOcdConnectionConfig, PyOcdMemoryBackend
 from take_a_look_backend.backends.rtt_plus import JScopeRttPlusBackend
 from take_a_look_backend.backends.remote_backend import CONNECTION_KINDS, REMOTE_DEFAULTS, RemoteMemoryBackend
@@ -69,8 +69,8 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
         monotonic_clock: Callable[[], float] | None = None,
     ) -> None:
         self._emit_event = event_sink
-        self._memory: TargetBackend = memory_backend or PyOcdMemoryBackend()
-        self._local_memory = self._memory
+        self._local_memory = PyOcdMemoryBackend() if memory_backend is None else memory_backend
+        self._memory: TargetBackend = self._local_memory
         self._remote_backend_factory = remote_backend_factory
         self._rtt_sessions = RttSessionManager()
         self._normal_rtt = normal_rtt_backend or JScopeRttBackend(self._rtt_sessions)
@@ -101,6 +101,7 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
         self._online_packs = OnlinePacks(self._targets, self._publish_target_state)
         self._target_name = str(self._targets.selected["name"])
         self._swd_clock = "4 MHz"
+        self._swd_frequency_hz = _parse_frequency_hz(self._swd_clock)
         self._serial_number = ""
         self._connection_kind = "local"
         self._remote_config = dict(REMOTE_DEFAULTS)
@@ -434,7 +435,7 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
                             self._remote_backend_factory(self._connection_kind, self._remote_config))
             config = PyOcdConnectionConfig(
                 target=_target_override(self._target_name),
-                frequency_hz=_parse_frequency_hz(self._swd_clock),
+                frequency_hz=self._swd_frequency_hz,
                 unique_id=self._serial_number.strip() or None,
                 probe_filter=_probe_filter(self._probe_type),
                 pack_path=self._targets.connection_pack() if self._connection_kind == "local" else None,
@@ -634,7 +635,7 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
             return
         if self._reconcile_acquisition_clock_locked():
             self._emit(EventName.STATE, self._sampling_clock_state())
-        if self._debug.execution_state == "halted" and not backend_capabilities(self._memory).memory_sampling:
+        if self._debug.execution_state == "halted" and not self._memory.capabilities.memory_sampling:
             symbols = [watch.symbol for watch in self._watches.values()
                        if not watch.symbol.missing and not watch.symbol.is_rtt and watch.mode != "manual"
                        and (watch.mode != "monitor" or watch.monitor_enabled)]
@@ -726,7 +727,7 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
             self._latest_rtt_values = {key: value for key, value in self._latest_rtt_values.items() if key in new_watches}
             self._monitor_schedule_revision += 1
             if (self._connection_status == "connected" and self._debug.execution_state == "halted"
-                    and not backend_capabilities(self._memory).memory_sampling):
+                    and not self._memory.capabilities.memory_sampling):
                 self._refresh_debug_state_locked(force=True)
             if self._rtt_protocol == "plus" and membership_changed:
                 self._stop_rtt_locked()
@@ -773,7 +774,7 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
                 raise ProtocolError("unknown_watch", "Watch does not exist.", key)
             if not watch.symbol.is_writable:
                 raise ProtocolError("readonly_symbol", "This symbol is read-only.", watch.symbol.name)
-            if not backend_capabilities(self._memory).memory_write:
+            if not self._memory.capabilities.memory_write:
                 raise ProtocolError("unsupported_operation", "EmberMobile 私有协议不支持内存写入，请使用 GDB。")
             if self._connection_status != "connected":
                 raise ProtocolError("not_connected", "Connect a debug probe before writing variables.")
@@ -795,7 +796,7 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
             self._require_current_firmware_locked()
             if self._connection_status != "connected":
                 raise ProtocolError("not_connected", "Connect a debug probe before writing variables.")
-            if not backend_capabilities(self._memory).memory_write:
+            if not self._memory.capabilities.memory_write:
                 raise ProtocolError("unsupported_operation", "当前连接不支持内存写入。")
             watches, writes, keys = [], [], set()
             for entry in raw:
@@ -813,16 +814,7 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
                 watches.append(watch)
                 writes.append((watch.symbol, value))
             try:
-                writer = getattr(self._memory, "write_symbols", None)
-                if callable(writer):
-                    values = writer(writes)
-                else:
-                    # Preserve the injected target adapter contract.
-                    from take_a_look_backend.backends.typed_memory import encode_symbol_value
-                    for symbol, value in writes:
-                        encode_symbol_value(symbol, value)
-                    values = {symbol.key: self._memory.write_symbol(symbol, value)
-                              for symbol, value in writes}
+                values = self._memory.write_symbols(writes)
                 if set(values) != keys:
                     raise RuntimeError("批量回读未返回全部变量。")
                 stamp = time.time_ns() // 1_000_000
@@ -846,7 +838,7 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
                 raise ProtocolError("symbol_missing", "新固件中不存在此变量，已停止读取。", watch.symbol.name)
             if self._connection_status != "connected":
                 raise ProtocolError("not_connected", "请先连接调试探针。")
-            can_read_memory = (backend_capabilities(self._memory).memory_sampling
+            can_read_memory = (self._memory.capabilities.memory_sampling
                                or self._debug.execution_state == "halted")
             if watch.symbol.is_rtt or (not can_read_memory and self._rtt_enabled and self._rtt_protocol == "plus"):
                 latest = self._latest_rtt_values.get(key)
@@ -854,7 +846,7 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
                     raise ProtocolError("no_data", "尚未收到此 RTT 变量的数据。")
                 self._publish_watch_values_locked({key: latest[0]}, updated_at_ms=latest[1])
             else:
-                if not backend_capabilities(self._memory).memory_sampling and self._debug.execution_state != "halted":
+                if not can_read_memory:
                     raise ProtocolError("target_running", "当前 GDB 连接需要暂停目标后读取内存。")
                 try:
                     self._publish_watch_values_locked(self._memory.read_symbols([watch.symbol]))
@@ -891,21 +883,24 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
         enabled = params.get("enabled")
         if not isinstance(enabled, bool):
             raise ProtocolError("invalid_request", "enabled must be a boolean.")
-        protocol = params.get("protocol", self._rtt_protocol)
-        if protocol not in {"normal", "plus"}:
-            raise ProtocolError("invalid_request", "RTT protocol must be normal or plus.")
         with self._lock:
+            protocol = params.get("protocol", self._rtt_protocol)
+            if protocol not in ("normal", "plus"):
+                raise ProtocolError("invalid_request", "RTT protocol must be normal or plus.")
             if enabled:
                 self._require_current_firmware_locked()
             if enabled and self._connection_kind == "gdb":
                 raise ProtocolError("unsupported_operation", "独立 GDB 连接不提供 RTT，请使用 EmberMobile + GDB。")
+            rate = _positive_number(params["rateHz"], "rateHz") if "rateHz" in params else None
+            address = (_optional_address(params["controlBlockAddress"])
+                       if "controlBlockAddress" in params else self._rtt_control_block_address)
+
             self._rtt_enabled = enabled
             self._rtt_protocol = str(protocol)
-            if "rateHz" in params:
-                self._rtt_sample_rate_hz = _positive_number(params["rateHz"], "rateHz")
+            self._rtt_control_block_address = address
+            if rate is not None:
+                self._rtt_sample_rate_hz = rate
                 self._configure_rtt_timebases_locked()
-            if "controlBlockAddress" in params:
-                self._rtt_control_block_address = _optional_address(params["controlBlockAddress"])
             self._stop_rtt_locked()
             state = self._runtime_state_locked()
         self._emit(EventName.STATE, state)
@@ -983,32 +978,40 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
         merged = {**self._remote_config, **remote}
         if self._connection_status != "disconnected" and (kind != self._connection_kind or merged != self._remote_config):
             raise ProtocolError("already_connected", "请先断开连接，再修改远程连接设置。")
+
+        probe_type = _required_string(params, "probeType") if "probeType" in params else self._probe_type
+        name = _required_string(params, "targetName") if "targetName" in params else self._target_name
+        swd_clock, swd_frequency_hz = self._swd_clock, self._swd_frequency_hz
+        if "swdClock" in params:
+            swd_clock = _required_string(params, "swdClock")
+            swd_frequency_hz = _parse_frequency_hz(swd_clock)
+        serial = _required_string(params, "serialNumber") if "serialNumber" in params else self._serial_number
+        sample_rate = (_positive_number(params["sampleRateHz"], "sampleRateHz")
+                       if "sampleRateHz" in params else self._sample_rate_hz)
+        monitor_rate = _monitor_frequency(params["monitorRateHz"]) if "monitorRateHz" in params else None
+        rtt_rate = (_positive_number(params["rttSampleRateHz"], "rttSampleRateHz")
+                    if "rttSampleRateHz" in params else None)
+
+        if name != self._target_name:
+            self._targets.select(name, legacy=True)
+            name = str(self._targets.selected["name"])
         self._connection_kind = kind
         self._remote_config = merged
         if kind == "gdb":
             self._rtt_enabled = False
-        if "probeType" in params:
-            self._probe_type = _required_string(params, "probeType")
-        if "targetName" in params:
-            name = _required_string(params, "targetName")
-            if name != self._target_name:
-                self._targets.select(name, legacy=True)
-                self._target_name = str(self._targets.selected["name"])
-        if "swdClock" in params:
-            self._swd_clock = _required_string(params, "swdClock")
-            _parse_frequency_hz(self._swd_clock)
-        if "serialNumber" in params:
-            self._serial_number = _required_string(params, "serialNumber")
-        if "sampleRateHz" in params:
-            self._sample_rate_hz = _positive_number(params["sampleRateHz"], "sampleRateHz")
-        if "monitorRateHz" in params:
-            self._monitor_rate_hz = _monitor_frequency(params["monitorRateHz"])
+        self._probe_type = probe_type
+        self._target_name = name
+        self._swd_clock, self._swd_frequency_hz = swd_clock, swd_frequency_hz
+        self._serial_number = serial
+        self._sample_rate_hz = sample_rate
+        if monitor_rate is not None:
+            self._monitor_rate_hz = monitor_rate
             self._monitor_schedule_revision += 1
             for watch in self._watches.values():
                 if watch.monitor_rate_hz is None:
                     watch.next_monitor_at = 0.0
-        if "rttSampleRateHz" in params:
-            self._rtt_sample_rate_hz = _positive_number(params["rttSampleRateHz"], "rttSampleRateHz")
+        if rtt_rate is not None:
+            self._rtt_sample_rate_hz = rtt_rate
             self._configure_rtt_timebases_locked()
 
     @staticmethod

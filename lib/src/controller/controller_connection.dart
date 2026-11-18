@@ -23,12 +23,7 @@ extension TakeALookControllerConnection on TakeALookController {
     ConnectionStatus.connected => '断开探针',
   };
 
-  String get sampleRateLabel {
-    if (sampleRateHz >= 1000) {
-      return '${(sampleRateHz / 1000).toStringAsFixed(sampleRateHz % 1000 == 0 ? 0 : 1)} kHz';
-    }
-    return '${sampleRateHz.toStringAsFixed(0)} Hz';
-  }
+  String get sampleRateLabel => formatReadRate(sampleRateHz);
 
   String get displayRefreshLabel => switch (displayRefreshMode) {
     'standard' => '标准模式（60 Hz）',

@@ -93,6 +93,8 @@ void main() {
       controller.sourceProject.buildCommand = 'make debug';
       controller.sourceProject.sourceRoot = directory.path;
       controller.debugState.requestedBreakpoints['main.c'] = {12, 24};
+      controller.debugState.breakpointSettings.disabled['main.c'] = {24};
+      controller.debugState.breakpointSettings.paused = true;
       controller.configurePlotView({
         'plotShowGrid': false,
         'plotVisibleWindowSeconds': 30,
@@ -183,6 +185,8 @@ void main() {
       expect(controller.compactWatchSummaryFraction, .4);
       expect(controller.sourceProject.buildCommand, 'make release');
       expect(controller.debugState.requestedBreakpoints['main.c'], {12, 24});
+      expect(controller.debugState.breakpointSettings.disabled['main.c'], {24});
+      expect(controller.debugState.breakpointSettings.paused, isFalse);
       expect(controller.sampleRateHz, 500);
       expect(controller.plotShowGrid, isFalse);
       expect(controller.uiScale, 1.25);

@@ -139,9 +139,25 @@ Future<JsonObject> executeControllerCommand(
       );
     case ControllerCommand.setBreakpoints:
       final values = Map<String, Object?>.from(arguments! as Map);
-      final path = values['path'] as String;
-      final requested = (values['lines'] as List).cast<int>().toSet();
-      controller.setBreakpoints(path, requested);
+      if (values['action'] case final String action) {
+        final updated = await controller.editBreakpoints(
+          BreakpointAction.values.byName(action),
+          path: values['path'] as String?,
+          line: values['line'] as int?,
+          value: values['value'] as bool?,
+          undoId: values['undoId'] as int?,
+        );
+        if (!updated) {
+          throw StateError(
+            controller.breakpointEditDisabledReason ?? '无法更新断点。',
+          );
+        }
+      } else {
+        await controller.setBreakpoints(
+          values['path'] as String,
+          (values['lines'] as List).cast<int>(),
+        );
+      }
     case ControllerCommand.debugControl:
       switch (arguments) {
         case 'halt':

@@ -190,6 +190,7 @@ class BackendClient {
         ControllerCommand.startSourceTask,
         ControllerCommand.cancelSourceTask,
         ControllerCommand.writeWatch,
+        ControllerCommand.setBreakpoints,
       }.contains(command)) {
         rethrow;
       }

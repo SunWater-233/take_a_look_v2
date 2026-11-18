@@ -191,10 +191,9 @@ class ControllerSnapshotCodec {
         for (final breakpoint in source.state.debug.resolvedBreakpoints)
           breakpoint.toJson(),
       ],
-      'requestedBreakpoints': {
-        for (final entry in source.state.debug.requestedBreakpoints.entries)
-          entry.key: entry.value.toList()..sort(),
-      },
+      ...source.state.debug.breakpointSettings.toJson(),
+      'breakpointRevision': source.state.debug.breakpointRevision,
+      'breakpointUndoId': source.state.debug.breakpointUndoId,
       'registers': source.state.debug.registers,
       'stoppedLocation': source.state.debug.programCounter == null
           ? null

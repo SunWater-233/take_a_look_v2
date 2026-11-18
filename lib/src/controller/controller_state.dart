@@ -92,7 +92,11 @@ class DebugState {
   final List<SourceDefinition> sourceDefinitions = <SourceDefinition>[];
   bool hasSourceDefinitionIndex = false;
   final Map<String, Set<int>> executableLines = <String, Set<int>>{};
-  final Map<String, Set<int>> requestedBreakpoints = <String, Set<int>>{};
+  BreakpointSettings breakpointSettings = BreakpointSettings();
+  Map<String, Set<int>> get requestedBreakpoints =>
+      breakpointSettings.requested;
+  int breakpointRevision = 0;
+  int breakpointUndoId = 0;
   final List<DebugBreakpoint> resolvedBreakpoints = <DebugBreakpoint>[];
   final Map<String, int> registers = <String, int>{};
   String? currentSource;

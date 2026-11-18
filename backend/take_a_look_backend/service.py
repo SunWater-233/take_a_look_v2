@@ -536,19 +536,32 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
             }
 
     def _set_breakpoints(self, params: Mapping[str, object]) -> dict[str, object]:
-        path = _required_string(params, "path")
-        raw_lines = params.get("lines")
-        if not isinstance(raw_lines, list) or any(
-            isinstance(line, bool) or not isinstance(line, int) or line <= 0 for line in raw_lines
-        ):
-            raise ProtocolError("invalid_request", "lines must contain positive integers.")
+        replace = "requestedBreakpoints" in params
+        if replace:
+            requested = _breakpoint_line_map(params["requestedBreakpoints"])
+            disabled = _breakpoint_line_map(params.get("disabledBreakpoints", {}))
+            paused = params.get("breakpointsPaused", False)
+            if not isinstance(paused, bool):
+                raise ProtocolError("invalid_request", "breakpointsPaused must be a boolean.")
+        else:
+            path = _required_string(params, "path")
+            requested = _breakpoint_line_map({path: params.get("lines")})
         with self._lock:
-            self._debug.set_breakpoints(path, raw_lines, self._memory,
-                                        connected=self._connection_status == "connected" and not self._firmware.get("requiresDownload"))
-            if self._firmware.get("requiresDownload"):
-                self._debug.mark_breakpoints_pending(message="固件已变化，请重新下载后应用断点。")
+            connected = self._connection_status == "connected"
+            pending = ("固件已变化，请重新下载后应用断点。"
+                       if self._firmware.get("requiresDownload") else None)
+            try:
+                if replace:
+                    self._debug.replace_breakpoints(requested, disabled, paused, self._memory,
+                                                    connected=connected, pending_message=pending)
+                else:
+                    self._debug.set_breakpoints(path, requested[path], self._memory,
+                                                connected=connected, pending_message=pending)
+            except Exception as error:
+                self._emit(EventName.DEBUG, self._debug.snapshot())
+                raise ProtocolError("breakpoint_update_failed", "无法更新目标上的断点。", str(error)) from error
             payload = self._debug.snapshot()
-        self._emit(EventName.DEBUG, payload)
+            self._emit(EventName.DEBUG, payload)
         return {"debug": payload}
 
     def _debug_control(self, params: Mapping[str, object]) -> dict[str, object]:
@@ -1059,6 +1072,16 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
     def _emit(self, name: EventName, params: object) -> None:
         if not self._closed:
             self._emit_event(name, params)
+
+
+def _breakpoint_line_map(value: object) -> dict[str, set[int]]:
+    if not isinstance(value, dict) or any(
+        not isinstance(path, str) or not path.strip() or not isinstance(lines, list)
+        or any(type(line) is not int or line <= 0 for line in lines)
+        for path, lines in value.items()
+    ):
+        raise ProtocolError("invalid_request", "Breakpoints must map source paths to positive line numbers.")
+    return {path: set(lines) for path, lines in value.items()}
 
 
 def _required_string(values: Mapping[str, object], name: str) -> str:

@@ -71,10 +71,7 @@ extension TakeALookControllerProject on TakeALookController {
           entry.key: List<String>.of(entry.value),
       },
       'expandedSymbolTreeNodes': _expandedSymbolTreeNodes.toList(),
-      'requestedBreakpoints': {
-        for (final entry in debugState.requestedBreakpoints.entries)
-          entry.key: entry.value.toList()..sort(),
-      },
+      ...debugState.breakpointSettings.toJson(includePause: false),
     };
   }
 
@@ -188,10 +185,10 @@ extension TakeALookControllerProject on TakeALookController {
           data['compactWatchSelection'] is! String) {
         throw const FormatException('项目变量选择无效。');
       }
-      for (final entry
-          in (data['requestedBreakpoints'] as Map? ?? {}).entries) {
-        if (entry.key is! String ||
-            (entry.value as List).cast<int>().any((line) => line <= 0)) {
+      final breakpoints = BreakpointSettings.fromJson(data);
+      for (final entry in breakpoints.disabled.entries) {
+        if (breakpoints.requested[entry.key]?.containsAll(entry.value) !=
+            true) {
           throw const FormatException('项目断点无效。');
         }
       }
@@ -202,7 +199,10 @@ extension TakeALookControllerProject on TakeALookController {
 
   Future<void> restoreProjectSettings(Map<String, dynamic> data) async {
     if (data is! ValidatedProjectSettings) validateProjectSettings(data);
-    if (_restoringProject || sourceTask.running || isSymbolLoading) {
+    if (_restoringProject ||
+        sourceTask.running ||
+        isSymbolLoading ||
+        _breakpointEditPending) {
       throw const FormatException('请等待当前项目或文件任务完成，再打开项目。');
     }
     _restoringProject = true;
@@ -351,17 +351,10 @@ extension TakeALookControllerProject on TakeALookController {
     _expandedSymbolTreeNodes
       ..clear()
       ..addAll((data['expandedSymbolTreeNodes'] as List? ?? []).cast<String>());
-    debugState.requestedBreakpoints.clear();
-    for (final entry in (data['requestedBreakpoints'] as Map? ?? {}).entries) {
-      final lines = (entry.value as List).cast<int>().toSet();
-      debugState.requestedBreakpoints[entry.key as String] = lines;
-      if (sender != null) {
-        await sender(ControllerCommand.setBreakpoints, {
-          'path': entry.key,
-          'lines': lines.toList(),
-        });
-      }
-    }
+    final breakpoints = BreakpointSettings.fromJson(data)..paused = false;
+    await _commitBreakpointSettings(breakpoints, sender);
+    _removedBreakpoints = null;
+    debugState.breakpointUndoId = 0;
     _emitState([signals.watches, signals.symbols, signals.debug]);
   }
 }

@@ -50,7 +50,10 @@ void main() {
       final stepIn = find.byKey(const ValueKey('debug-stepIn'));
       final stepOver = find.byKey(const ValueKey('debug-stepOver'));
       final stepOut = find.byKey(const ValueKey('debug-stepOut'));
-      final outline = find.byType(WorkbenchToolbarOutline);
+      final outline = find.ancestor(
+        of: stepIn,
+        matching: find.byType(WorkbenchToolbarOutline),
+      );
       final sourceToolbar = find.byKey(const ValueKey('source-toolbar'));
       expect(
         tester.getTopLeft(outline).dx,
@@ -311,6 +314,108 @@ void main() {
     },
   );
 
+  testWidgets(
+    'breakpoint filters share the toolbar and clear applies to all files',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1100, 650));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final path = File('test/fixtures/debug_source.c').absolute.path;
+      const other = 'drivers/can_rx.c';
+      final controller = TakeALookController()..setPresentationActive(false);
+      controller.applyDebugState({
+        'executionState': 'halted',
+        'sourceFiles': [path, other],
+        'executableLines': {
+          path: [4, 5],
+          other: [67],
+        },
+        'stoppedLocation': {'path': path, 'line': 4, 'address': 0x08000100},
+        'requestedBreakpoints': {
+          path: [4],
+          other: [67],
+        },
+        'disabledBreakpoints': {
+          other: [67],
+        },
+        'breakpoints': [
+          {'path': path, 'requestedLine': 4, 'actualLine': 5, 'verified': true},
+        ],
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildTalTheme(),
+          home: Scaffold(
+            body: buildWorkspacePanelBody(
+              WorkspacePanelId.sourceDebug,
+              controller,
+            ),
+          ),
+        ),
+      );
+      final manager = find.byKey(const ValueKey('breakpoint-manager'));
+      await tester.tap(manager);
+      await tester.pump();
+      final toolbar = tester.getRect(
+        find.byKey(const ValueKey('source-breakpoint-toolbar')),
+      );
+      final dock = tester.getRect(
+        find.byKey(const ValueKey('source-breakpoint-dock')),
+      );
+      final all = find.byKey(const ValueKey('breakpoint-scope-all'));
+      final current = find.byKey(const ValueKey('breakpoint-scope-file'));
+      final clear = find.byKey(const ValueKey('clear-all-breakpoints'));
+      expect(toolbar.left, closeTo(dock.left, 1));
+      expect(toolbar.bottom, dock.top);
+      expect(
+        tester.getRect(all).center.dy,
+        closeTo(tester.getRect(clear).center.dy, 1),
+      );
+      expect(
+        tester.getRect(current).right,
+        lessThanOrEqualTo(tester.getRect(clear).left),
+      );
+      expect(find.text('can_rx.c'), findsOneWidget);
+      await tester.tap(current);
+      await tester.pump();
+      expect(find.text('can_rx.c'), findsNothing);
+
+      await tester.tap(find.text('4 → 5'));
+      final revealed = find.byKey(const ValueKey('revealed-breakpoint-line'));
+      for (var i = 0; i < 10 && revealed.evaluate().isEmpty; i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        await tester.pump();
+      }
+      expect(revealed, findsOneWidget);
+      expect(
+        tester.getTopLeft(revealed).dy,
+        tester.getTopLeft(find.byKey(const ValueKey('breakpoint-5'))).dy,
+      );
+      expect(controller.debugState.currentLine, 4);
+
+      await tester.tap(find.byKey(const ValueKey('pause-all-breakpoints')));
+      await tester.pump();
+      expect(controller.debugState.breakpointSettings.paused, isTrue);
+      expect(controller.debugState.breakpointSettings.disabled[other], {67});
+      await tester.tap(clear);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(controller.debugState.requestedBreakpoints, isEmpty);
+      expect(find.text('已清除 2 个断点'), findsOneWidget);
+      await tester.tap(find.text('撤销'));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(controller.debugState.requestedBreakpoints, {
+        path: {4},
+        other: {67},
+      });
+      expect(controller.debugState.breakpointSettings.disabled[other], {67});
+      expect(controller.debugState.breakpointSettings.paused, isTrue);
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+    },
+  );
+
   testWidgets('source files wait for selection and resolve the source root', (
     tester,
   ) async {
@@ -404,6 +509,9 @@ void main() {
   });
 
   testWidgets('source files open as closable scrollable tabs', (tester) async {
+    const desktopSize = Size(720, 600);
+    await tester.binding.setSurfaceSize(desktopSize);
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     const sourcePaths = <String>[
       'C:/firmware/src/main.c',
       'C:/firmware/src/bravo_motor_controller_source.c',
@@ -430,7 +538,7 @@ void main() {
         theme: buildTalTheme(),
         home: Scaffold(
           body: SizedBox(
-            width: 720,
+            width: double.infinity,
             height: 500,
             child: buildWorkspacePanel(
               WorkspacePanelId.sourceDebug,
@@ -442,6 +550,31 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 250));
 
+    final scrollArea = find.byKey(const ValueKey('source-tabs-scroll-area'));
+    final buildButton = find.byKey(const ValueKey('source-build'));
+    double gapBeforeBuild() =>
+        tester.getTopLeft(buildButton).dx - tester.getTopRight(scrollArea).dx;
+    double fadeOpacity(String edge) => tester
+        .widget<AnimatedOpacity>(find.byKey(ValueKey('source-tabs-$edge-fade')))
+        .opacity;
+    Future<void> scrollTabs(double delta) async {
+      await tester.sendEventToBinding(
+        PointerScrollEvent(
+          position: tester.getCenter(scrollArea),
+          scrollDelta: Offset(0, delta),
+        ),
+      );
+      await tester.pump();
+    }
+
+    Future<void> resize(Size size) async {
+      await tester.binding.setSurfaceSize(size);
+      await tester.pump();
+      await tester.pump();
+    }
+
+    expect(fadeOpacity('left'), 0);
+    expect(fadeOpacity('right'), 0);
     Future<void> openFile(String path) async {
       controller.openSourceFile(path);
       await tester.pump(const Duration(milliseconds: 250));
@@ -492,44 +625,35 @@ void main() {
     // Reopening an existing file activates its existing tab instead of adding
     // a duplicate, and brings the beginning of the overflowing strip back.
     await openFile(sourcePaths.first);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
     expect(find.byKey(ValueKey('source-tab-${sourcePaths.first}')), findsOne);
-    final fade = tester.widget<AnimatedOpacity>(
-      find.byKey(const ValueKey('source-tabs-right-fade')),
-    );
-    expect(fade.opacity, 1);
+    expect(gapBeforeBuild(), 8);
+    expect(fadeOpacity('left'), 0);
+    expect(fadeOpacity('right'), 1);
 
-    final scrollArea = find.byKey(const ValueKey('source-tabs-scroll-area'));
-    final scrollPosition = tester.getCenter(scrollArea);
-    await tester.sendEventToBinding(
-      PointerScrollEvent(
-        position: scrollPosition,
-        scrollDelta: const Offset(0, 2000),
-      ),
-    );
-    await tester.pump();
-    expect(
-      tester
-          .widget<AnimatedOpacity>(
-            find.byKey(const ValueKey('source-tabs-right-fade')),
-          )
-          .opacity,
-      0,
-    );
-    await tester.sendEventToBinding(
-      PointerScrollEvent(
-        position: scrollPosition,
-        scrollDelta: const Offset(0, -2000),
-      ),
-    );
-    await tester.pump();
-    expect(
-      tester
-          .widget<AnimatedOpacity>(
-            find.byKey(const ValueKey('source-tabs-right-fade')),
-          )
-          .opacity,
-      1,
-    );
+    await scrollTabs(80);
+    expect(fadeOpacity('left'), 1);
+    expect(fadeOpacity('right'), 1);
+
+    await scrollTabs(2000);
+    expect(gapBeforeBuild(), 8);
+    expect(fadeOpacity('left'), 1);
+    expect(fadeOpacity('right'), 0);
+
+    await scrollTabs(-2000);
+    expect(fadeOpacity('left'), 0);
+    expect(fadeOpacity('right'), 1);
+
+    await resize(const Size(420, 600));
+    expect(gapBeforeBuild(), 8);
+
+    await resize(const Size(1800, 600));
+    expect(fadeOpacity('left'), 0);
+    expect(fadeOpacity('right'), 0);
+
+    await resize(desktopSize);
+    expect(fadeOpacity('right'), 1);
 
     final closeButton = tester.widget<TalIconButton>(
       find.byKey(ValueKey('source-tab-close-${sourcePaths.first}')),

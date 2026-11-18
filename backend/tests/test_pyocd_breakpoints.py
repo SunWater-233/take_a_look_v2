@@ -153,6 +153,19 @@ def test_running_breakpoint_rpc_programs_fpb_and_reports_stop(pyocd_backend, tmp
         assert result["debug"]["breakpoints"][0]["verified"]
         assert harness.ap.memory[0xE0002008] == 0x08000109
 
+        settings = {"requestedBreakpoints": {path: [12]}, "disabledBreakpoints": {}}
+        harness.target.halt.reset_mock()
+        harness.target.resume.reset_mock()
+        paused = service.handle(RpcMethod.SET_BREAKPOINTS, {**settings, "breakpointsPaused": True})["debug"]
+        assert paused["breakpoints"][0]["status"] == "paused"
+        assert paused["executionState"] == "running"
+        assert harness.ap.memory[0xE0002008] == 0
+        resumed = service.handle(RpcMethod.SET_BREAKPOINTS, {**settings, "breakpointsPaused": False})["debug"]
+        assert resumed["breakpoints"][0]["verified"]
+        assert harness.ap.memory[0xE0002008] == 0x08000109
+        harness.target.halt.assert_not_called()
+        harness.target.resume.assert_not_called()
+
         # Model the core stopping at the programmed comparator, then use the
         # same poll path as the sampling worker to publish the source location.
         with service._lock:
@@ -162,7 +175,8 @@ def test_running_breakpoint_rpc_programs_fpb_and_reports_stop(pyocd_backend, tmp
                    if name == EventName.DEBUG and payload["executionState"] == "halted"]
         assert stopped[-1]["stoppedLocation"] == {"path": path, "line": 12, "address": 0x08000108}
 
-        service.handle(RpcMethod.SET_BREAKPOINTS, {"path": path, "lines": []})
+        cleared = service.handle(RpcMethod.SET_BREAKPOINTS, {"requestedBreakpoints": {}})["debug"]
+        assert cleared["breakpoints"] == []
         assert harness.ap.memory[0xE0002008] == 0
     finally:
         service.close()

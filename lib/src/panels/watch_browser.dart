@@ -103,54 +103,236 @@ class _WatchScrollHintsState extends State<_WatchScrollHints> {
   }
 
   @override
-  Widget build(
+  Widget build(BuildContext context) =>
+      NotificationListener<ScrollMetricsNotification>(
+        onNotification: (notification) {
+          if (notification.depth == 0) _update(notification.metrics);
+          return false;
+        },
+        child: NotificationListener<ScrollNotification>(
+          onNotification: (notification) {
+            if (notification.depth == 0) _update(notification.metrics);
+            return false;
+          },
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              return Stack(
+                fit: StackFit.expand,
+                children: [
+                  widget.child,
+                  if (_above && widget.section != _WatchBrowserSection.members)
+                    _watchScrollHint(
+                      widget.section,
+                      constraints.maxHeight,
+                      top: true,
+                    ),
+                  if (_below)
+                    _watchScrollHint(
+                      widget.section,
+                      constraints.maxHeight,
+                      top: false,
+                    ),
+                ],
+              );
+            },
+          ),
+        ),
+      );
+}
+
+Widget _watchScrollHint(
+  _WatchBrowserSection section,
+  double viewportHeight, {
+  required bool top,
+  double topInset = 0,
+  Color edge = TalColors.surface,
+}) {
+  final clear = edge.withValues(alpha: 0);
+  return Positioned(
+    key: ValueKey('watch-${section.name}-overflow-${top ? 'top' : 'bottom'}'),
+    left: 0,
+    right: 0,
+    top: top ? topInset : null,
+    bottom: top ? null : 0,
+    height: math.min(24, viewportHeight * .3),
+    child: IgnorePointer(
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: top ? [edge, clear] : [clear, edge],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+const _watchMemberColumnHeight = 28.0;
+
+class _WatchMembersClipper extends CustomClipper<Rect> {
+  const _WatchMembersClipper(this.top);
+
+  final double top;
+
+  @override
+  Rect getClip(Size size) => Rect.fromLTRB(0, top, size.width, size.height);
+
+  @override
+  Rect getApproximateClipRect(Size size) => getClip(size);
+
+  @override
+  bool shouldReclip(_WatchMembersClipper oldClipper) => oldClipper.top != top;
+}
+
+class _WatchMembersList extends ListView {
+  _WatchMembersList({
+    required super.key,
+    required super.controller,
+    required super.children,
+    required this.rows,
+    required this.rowHeight,
+    required this.stickyRow,
+  }) : super(primary: false, padding: EdgeInsets.zero);
+
+  final List<_WatchBrowserEntry> rows;
+  final double rowHeight;
+  final Widget Function(_WatchBrowserEntry row, VoidCallback reveal) stickyRow;
+
+  @override
+  Widget buildViewport(
     BuildContext context,
-  ) => NotificationListener<ScrollMetricsNotification>(
-    onNotification: (notification) {
-      if (notification.depth == 0) _update(notification.metrics);
-      return false;
-    },
-    child: NotificationListener<ScrollNotification>(
-      onNotification: (notification) {
-        if (notification.depth == 0) _update(notification.metrics);
-        return false;
-      },
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          const edge = TalColors.surface;
-          final clear = edge.withValues(alpha: 0);
-          return Stack(
-            fit: StackFit.expand,
-            children: [
-              widget.child,
-              for (final top in [if (_above) true, if (_below) false])
-                Positioned(
-                  key: ValueKey(
-                    'watch-${widget.section.name}-overflow-${top ? 'top' : 'bottom'}',
-                  ),
-                  left: 0,
-                  right: 0,
-                  top: top ? 0 : null,
-                  bottom: top ? null : 0,
-                  height: math.min(24, constraints.maxHeight * .3),
-                  child: IgnorePointer(
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: top ? [edge, clear] : [clear, edge],
+    ViewportOffset offset,
+    AxisDirection axisDirection,
+    List<Widget> slivers,
+  ) {
+    final viewport = super.buildViewport(
+      context,
+      offset,
+      axisDirection,
+      slivers,
+    );
+    final parents = List<int>.filled(rows.length, -1);
+    final ends = List<int>.filled(rows.length, rows.length);
+    final ancestors = <int>[];
+    for (final (index, row) in rows.indexed) {
+      while (ancestors.length > row.depth) {
+        ends[ancestors.removeLast()] = index;
+      }
+      parents[index] = ancestors.lastOrNull ?? -1;
+      ancestors.add(index);
+    }
+
+    // Keep the headers inside the Scrollable so wheel and touch input over a
+    // header still scrolls the member list.
+    return LayoutBuilder(
+      builder: (context, constraints) => ListenableBuilder(
+        listenable: offset,
+        child: viewport,
+        builder: (context, child) {
+          final height = constraints.maxHeight;
+          final maxScroll = math.max(
+            0.0,
+            _watchMemberColumnHeight + rows.length * rowHeight - height,
+          );
+          final pixels = offset.hasPixels ? offset.pixels : 0.0;
+          final scroll = pixels.clamp(0.0, maxScroll);
+          final headers = <Widget>[];
+          var stickyHeight = 0.0;
+          // Leave room for at least one member row on short viewports.
+          for (var depth = 0; (depth + 2) * rowHeight <= height; depth++) {
+            final slot = depth * rowHeight;
+            final leading = scroll + slot - _watchMemberColumnHeight;
+            var index = (leading / rowHeight).floor();
+            if (index < 0 || index >= rows.length) break;
+            while (rows[index].depth > depth) {
+              index = parents[index];
+            }
+            final start = index * rowHeight;
+            final end = ends[index] * rowHeight;
+            if (rows[index].depth != depth ||
+                ends[index] == index + 1 ||
+                start >= leading) {
+              break;
+            }
+
+            // As the subtree ends, the next row pushes this header up behind
+            // the preceding ancestor (or out of the viewport at depth zero).
+            final visibleHeight = math.min(rowHeight, end - leading);
+            final revealOffset = _watchMemberColumnHeight + start - slot;
+            final row = rows[index];
+            stickyHeight += visibleHeight;
+            headers.add(
+              SizedBox(
+                key: ValueKey('watch-sticky-${row.key}'),
+                height: visibleHeight,
+                child: ClipRect(
+                  child: OverflowBox(
+                    alignment: Alignment.bottomCenter,
+                    minHeight: rowHeight,
+                    maxHeight: rowHeight,
+                    child: Semantics(
+                      tagForChildren: RenderViewport.useTwoPaneSemantics,
+                      child: Semantics(
+                        tagForChildren: RenderViewport.excludeFromScrolling,
+                        child: Material(
+                          type: MaterialType.transparency,
+                          child: stickyRow(
+                            row,
+                            () => offset.jumpTo(revealOffset),
+                          ),
                         ),
                       ),
                     ),
                   ),
                 ),
+              ),
+            );
+            if (visibleHeight < rowHeight) break;
+          }
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              // Clip the scrolling rows themselves so they can't bleed through
+              // the sticky surface at a fractional viewport edge.
+              ClipRect(
+                clipBehavior: headers.isEmpty ? Clip.none : Clip.hardEdge,
+                clipper: _WatchMembersClipper(stickyHeight),
+                child: child,
+              ),
+              if (headers.isNotEmpty)
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: stickyHeight,
+                  // A single opaque surface covers the list at every seam,
+                  // including when scaling places row edges on fractional pixels.
+                  child: Material(
+                    color: TalColors.surface,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: headers,
+                    ),
+                  ),
+                ),
+              if (scroll > .5)
+                _watchScrollHint(
+                  _WatchBrowserSection.members,
+                  height - stickyHeight,
+                  top: true,
+                  topInset: stickyHeight,
+                  edge: headers.isEmpty
+                      ? TalColors.surface
+                      : Colors.black.withValues(alpha: .45),
+                ),
             ],
           );
         },
       ),
-    ),
-  );
+    );
+  }
 }
 
 class CompactWatchPanel extends StatefulWidget {
@@ -779,10 +961,18 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
     ),
   );
 
-  Widget _row(_WatchBrowserEntry entry, bool wide, double valueWidth) {
+  Widget _row(
+    _WatchBrowserEntry entry,
+    bool wide,
+    double valueWidth, {
+    VoidCallback? revealSticky,
+  }) {
     BuildContext? rowContext;
     final node = entry.node, watch = node?.watch;
-    final selected = watch != null && _selectedKeys.contains(entry.key);
+    final selected =
+        revealSticky == null &&
+        watch != null &&
+        _selectedKeys.contains(entry.key);
     final ui = TalUiTheme.of(context);
     final height = ui.targetExtent(32);
     final expanded =
@@ -809,6 +999,10 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
           } else {
             _select(entry.key, section: entry.section);
             _panelFocus.requestFocus();
+          }
+          if (revealSticky != null) {
+            revealSticky();
+            return;
           }
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (context.mounted) {
@@ -1001,7 +1195,9 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
     );
     if (watch == null) return content;
     return WatchRowAnchor(
-      key: ValueKey('${entry.section.rowPrefix}-watch-${entry.key}'),
+      key: revealSticky == null
+          ? ValueKey('${entry.section.rowPrefix}-watch-${entry.key}')
+          : null,
       controller: controller,
       watchKey: entry.key,
       child: _dragSource(
@@ -1171,35 +1367,6 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
       ),
     );
   }
-
-  Widget _toolbar() => Padding(
-    padding: const EdgeInsets.fromLTRB(9, 5, 5, 5),
-    child: Row(
-      children: [
-        const Flexible(
-          child: Text(
-            '监视默认',
-            style: workbenchMuted,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-        const SizedBox(width: 7),
-        SizedBox(
-          width: TalUiTheme.of(context).touchOptimized ? 110 : 96,
-          child: TalDropdown<double>(
-            key: const ValueKey('watch-default-monitor-rate'),
-            value: controller.monitorRateHz,
-            values: monitorRatePresets,
-            label: formatReadRate,
-            editor: monitorRateEditor,
-            onChanged: controller.setMonitorRate,
-          ),
-        ),
-        const Spacer(),
-      ],
-    ),
-  );
 
   Widget _sectionPane({
     required _WatchBrowserSection section,
@@ -1699,23 +1866,59 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
                     ),
               members: _sectionPane(
                 section: _WatchBrowserSection.members,
-                header: _sectionHeader(
-                  _WatchBrowserSection.members,
-                  _search.text.trim().isEmpty ? '正在监视' : '搜索结果',
-                  icon: Icons.monitor_heart_outlined,
-                  count: rows.where((row) => row.depth == 0).length,
+                header: Row(
+                  children: [
+                    Expanded(
+                      child: _sectionHeader(
+                        _WatchBrowserSection.members,
+                        _search.text.trim().isEmpty ? '正在监视' : '搜索结果',
+                        icon: Icons.monitor_heart_outlined,
+                        count: rows.where((row) => row.depth == 0).length,
+                      ),
+                    ),
+                    SizedBox(
+                      width: math.min(
+                        ui.touchOptimized ? 110.0 : 96.0,
+                        listWidth / 2,
+                      ),
+                      height: ui.targetExtent(24),
+                      child: Semantics(
+                        label: '默认监视频率',
+                        child: TalDropdown<double>(
+                          key: const ValueKey('watch-default-monitor-rate'),
+                          value: controller.monitorRateHz,
+                          values: monitorRatePresets,
+                          label: formatReadRate,
+                          editor: monitorRateEditor,
+                          onChanged: controller.setMonitorRate,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                  ],
                 ),
-                list: ListView(
+                list: _WatchMembersList(
                   controller: _scroll,
                   key: const ValueKey('compact-watch-list'),
-                  primary: false,
+                  rows: membersExpanded ? rows : const [],
+                  rowHeight: ui.targetExtent(32),
+                  stickyRow: (row, reveal) =>
+                      _row(row, wide, valueWidth, revealSticky: reveal),
                   children: [
                     if (membersExpanded) ...[
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 2, 5, 2),
+                      Container(
+                        height: _watchMemberColumnHeight,
+                        padding: const EdgeInsets.fromLTRB(27, 2, 5, 2),
                         child: Row(
                           children: [
-                            const Spacer(),
+                            const Expanded(
+                              child: Text(
+                                '名称',
+                                style: workbenchMuted,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
                             Tooltip(
                               message: '左右拖动调整当前值列宽',
                               child: MouseRegion(
@@ -1821,10 +2024,9 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
               color: TalColors.surface,
               child: Column(
                 children: [
-                  if (constraints.maxHeight > 130) _toolbar(),
                   if (constraints.maxHeight > 210)
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(10, 2, 10, 8),
+                      padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
                       child: SizedBox(
                         height: ui.controlHeight,
                         child: TextField(

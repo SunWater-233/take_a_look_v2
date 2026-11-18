@@ -116,6 +116,8 @@ class _SourceToolbar extends StatelessWidget {
           ],
         );
         final debugControls = buildDebugControls();
+        const tabGap = SizedBox(width: 8);
+        final tabsAndActions = [Expanded(child: sourceTabs), tabGap, actions];
         return Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -136,21 +138,10 @@ class _SourceToolbar extends StatelessWidget {
                           scrollDirection: Axis.horizontal,
                           child: debugControls,
                         ),
-                        Row(
-                          children: [
-                            Expanded(child: sourceTabs),
-                            actions,
-                          ],
-                        ),
+                        Row(children: tabsAndActions),
                       ],
                     )
-                  : Row(
-                      children: [
-                        debugControls,
-                        Expanded(child: sourceTabs),
-                        actions,
-                      ],
-                    ),
+                  : Row(children: [debugControls, tabGap, ...tabsAndActions]),
             ),
           ],
         );

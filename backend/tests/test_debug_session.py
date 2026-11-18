@@ -69,6 +69,46 @@ def _source_session():
     return debug, target
 
 
+def test_global_pause_reconnect_and_clear_respect_per_line_settings():
+    debug, target = _source_session()
+    requested = {'main.c': {10, 11}, 'motor.c': {20}}
+    disabled = {'main.c': {11}}
+    debug.execution_state = 'running'
+    debug.replace_breakpoints(requested, disabled, False, target, connected=True)
+    assert [item['status'] for item in debug.resolved_breakpoints] == ['installed', 'disabled', 'installed']
+    assert [call.args[0] for call in target.set_breakpoint.call_args_list] == [_CALL, _CALLEE]
+
+    debug.replace_breakpoints(requested, disabled, True, target, connected=True)
+    assert [item['status'] for item in debug.resolved_breakpoints] == ['paused', 'disabled', 'paused']
+    assert [call.args[0] for call in target.remove_breakpoint.call_args_list] == [_CALL, _CALLEE]
+    assert debug.snapshot()['executionState'] == 'running'
+
+    target.reset_mock()
+    debug.mark_breakpoints_pending()
+    debug.apply_breakpoints(target, connected=True)
+    target.set_breakpoint.assert_not_called()
+    debug.replace_breakpoints(requested, disabled, False, target, connected=True)
+    assert [call.args[0] for call in target.set_breakpoint.call_args_list] == [_CALL, _CALLEE]
+    debug.replace_breakpoints({}, {}, False, target, connected=True)
+    assert debug.snapshot()['requestedBreakpoints'] == {}
+    assert debug.snapshot()['disabledBreakpoints'] == {}
+
+
+def test_failed_bulk_removal_restores_previously_removed_addresses():
+    debug, target = _source_session()
+    debug.replace_breakpoints({'main.c': {10, 11}}, {}, False, target, connected=True)
+    target.reset_mock()
+    target.remove_breakpoint.side_effect = [None, RuntimeError('probe refused')]
+
+    with pytest.raises(RuntimeError, match='probe refused'):
+        debug.replace_breakpoints({}, {}, False, target, connected=True)
+
+    assert debug.snapshot()['requestedBreakpoints'] == {'main.c': [10, 11]}
+    assert all(item['verified'] for item in debug.resolved_breakpoints)
+    assert [call.args[0] for call in target.set_breakpoint.call_args_list] == [_CALL, _RETURN]
+    assert debug.breakpoint_revision == 1
+
+
 def test_source_step_in_enters_a_called_function():
     debug, target = _source_session()
     target.read_debug_memory.side_effect = [b'\x00\xf0', b'\x00\xf8']

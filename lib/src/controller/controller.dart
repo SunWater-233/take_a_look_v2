@@ -158,6 +158,9 @@ class TakeALookController extends ChangeNotifier {
   final Set<String> _freeRtosViews = {};
   bool _freeRtosConfigPending = false;
   bool _sourceStepPending = false;
+  bool _breakpointEditPending = false;
+  int _nextBreakpointUndoId = 0;
+  BreakpointSettings? _removedBreakpoints;
   Set<String>? _lastMonitorEnabledKeys;
   ({String path, int line})? sourceLocationRequest;
   int _analysisDataRevision = 0;

@@ -29,6 +29,7 @@ import 'firmware_notice.dart';
 import 'source_file_drag_data.dart';
 
 part 'source_build_tools.dart';
+part 'source_breakpoints.dart';
 part 'source_navigation.dart';
 part 'source_peek_actions.dart';
 part 'workbench_output.dart';
@@ -79,9 +80,16 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
   Set<int> _requestedLines = const {};
   Set<int> _executableLines = const {};
   Map<int, DebugBreakpoint> _lineBreakpoints = const {};
+  Set<int> _disabledBreakpointLines = const {};
+  bool _breakpointDockOpen = false;
+  String? _breakpointUnavailableReason;
+  bool _breakpointsCurrentFile = false;
+  final Set<String> _collapsedBreakpointFiles = {};
+  ({String path, int line})? _selectedBreakpoint;
+  ({String path, int line})? _breakpointLocation;
   String? _loadError;
   int _loadGeneration = 0;
-  bool _canScrollTabsRight = false;
+  var _tabOverflow = (left: false, right: false);
   bool _draggingFiles = false;
   bool _searchVisible = false;
   bool _searching = false;
@@ -123,6 +131,8 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     controller.symbolChanges.addListener(_handleDebugChange);
     controller.sourceWorkspaceChanges.addListener(_handleSourceWorkspaceChange);
     controller.sourceToolsChanges.addListener(_handleFirmwareTask);
+    controller.sourceToolsChanges.addListener(_handleBreakpointAvailability);
+    controller.connectionChanges.addListener(_handleBreakpointAvailability);
     if (!widget.readOnlyPreview && widget.visible) {
       controller.setSourceViewVisible(_sourceViewId, true);
     }
@@ -159,6 +169,12 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     oldWidget.controller.debugChanges.removeListener(_handleDebugChange);
     oldWidget.controller.symbolChanges.removeListener(_handleDebugChange);
     oldWidget.controller.sourceToolsChanges.removeListener(_handleFirmwareTask);
+    oldWidget.controller.sourceToolsChanges.removeListener(
+      _handleBreakpointAvailability,
+    );
+    oldWidget.controller.connectionChanges.removeListener(
+      _handleBreakpointAvailability,
+    );
     oldWidget.controller.sourceWorkspaceChanges.removeListener(
       _handleSourceWorkspaceChange,
     );
@@ -166,6 +182,8 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     controller.debugChanges.addListener(_handleDebugChange);
     controller.symbolChanges.addListener(_handleDebugChange);
     controller.sourceToolsChanges.addListener(_handleFirmwareTask);
+    controller.sourceToolsChanges.addListener(_handleBreakpointAvailability);
+    controller.connectionChanges.addListener(_handleBreakpointAvailability);
     controller.sourceWorkspaceChanges.addListener(_handleSourceWorkspaceChange);
     if (!widget.readOnlyPreview && widget.visible) {
       controller.setSourceViewVisible(_sourceViewId, true);
@@ -193,6 +211,9 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     _observedCurrentLine = null;
     _observedStopRevision = -1;
     _observedFirmwareRevision = -1;
+    _selectedBreakpoint = null;
+    _breakpointLocation = null;
+    _collapsedBreakpointFiles.clear();
     _restoreSourceWorkspace();
     _handleDebugChange();
   }
@@ -204,6 +225,8 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     controller.debugChanges.removeListener(_handleDebugChange);
     controller.symbolChanges.removeListener(_handleDebugChange);
     controller.sourceToolsChanges.removeListener(_handleFirmwareTask);
+    controller.sourceToolsChanges.removeListener(_handleBreakpointAvailability);
+    controller.connectionChanges.removeListener(_handleBreakpointAvailability);
     controller.sourceWorkspaceChanges.removeListener(
       _handleSourceWorkspaceChange,
     );
@@ -260,12 +283,12 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
       _restorePanelFocus();
     } else {
       setState(() {});
-      _scheduleTabOverflowUpdate();
     }
   }
 
   void _handleDebugChange() {
     if (!mounted) return;
+    _breakpointUnavailableReason = controller.breakpointEditDisabledReason;
     final sourceRootChanged =
         _observedSourceRoot != controller.sourceProject.sourceRoot;
     final firmwareRevision =
@@ -306,7 +329,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
       unawaited(_loadSource(nextPath));
     } else {
       setState(() {});
-      _scrollToCurrentLine();
+      if (locationChanged) _scrollToCurrentLine();
     }
     if ((sourceRootChanged || sourceFilesChanged || firmwareChanged) &&
         _searchVisible &&
@@ -329,6 +352,13 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     if (_selectedPath != null) unawaited(_loadSource(_selectedPath));
     if (_searchVisible && _searchController.text.isNotEmpty) {
       _queueSearch(_searchController.text, immediate: true);
+    }
+  }
+
+  void _handleBreakpointAvailability() {
+    final reason = controller.breakpointEditDisabledReason;
+    if (mounted && reason != _breakpointUnavailableReason) {
+      setState(() => _breakpointUnavailableReason = reason);
     }
   }
 
@@ -427,10 +457,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     if (_searchVisible && _searchController.text.isNotEmpty) {
       _queueSearch(_searchController.text, immediate: true);
     }
-    if (!wasSelected) {
-      _scheduleTabOverflowUpdate();
-      return;
-    }
+    if (!wasSelected) return;
     final nextPath = controller.sourceWorkspace.selectedPath;
     unawaited(_loadSource(nextPath));
   }
@@ -563,19 +590,19 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
           ),
         );
       }
-      _updateTabOverflow();
     });
-  }
-
-  void _scheduleTabOverflowUpdate() {
-    WidgetsBinding.instance.addPostFrameCallback((_) => _updateTabOverflow());
   }
 
   void _updateTabOverflow() {
     if (!mounted || !_tabController.hasClients) return;
-    final canScrollRight = _tabController.position.extentAfter > 1;
-    if (canScrollRight == _canScrollTabsRight) return;
-    setState(() => _canScrollTabsRight = canScrollRight);
+    final position = _tabController.position;
+    if (!position.hasContentDimensions) return;
+    final overflow = (
+      left: position.extentBefore > 1,
+      right: position.extentAfter > 1,
+    );
+    if (overflow == _tabOverflow) return;
+    setState(() => _tabOverflow = overflow);
   }
 
   void _handleTabPointerSignal(PointerSignalEvent event) {
@@ -1160,13 +1187,11 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
                         buildDebugControls: _buildDebugControls,
                         sourceTabs: _buildSourceTabs(),
                       ),
-                      if (_selectedPath != null && !widget.readOnlyPreview)
-                        _buildSourceStepToolbar(),
-                      if (_searchVisible) ...[
-                        _buildSearchArea(),
-                        const Divider(height: 1, color: TalColors.borderSoft),
-                      ],
-                      Expanded(child: _buildBody()),
+                      if (!widget.readOnlyPreview)
+                        _buildSourceActionRow(constraints.maxWidth),
+                      Expanded(
+                        child: _buildSourceContent(constraints.maxWidth),
+                      ),
                       _buildRegisterStrip(),
                       if (!widget.externalOutput)
                         _SourceTaskOutput(
@@ -1493,58 +1518,75 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
 
   Widget _buildSourceTabs() {
     final files = _sourceFiles;
-    _scheduleTabOverflowUpdate();
+    final clear = TalColors.surface.withValues(alpha: 0);
     return SizedBox(
       height: TalUiTheme.of(context).targetExtent(32),
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: Listener(
-              key: const ValueKey('source-tabs-scroll-area'),
-              onPointerSignal: _handleTabPointerSignal,
-              child: SingleChildScrollView(
-                controller: _tabController,
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    if (_openPaths.isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                        child: Center(
-                          child: Text(
-                            files.isEmpty ? 'ELF 中没有源码调试信息' : '按 Ctrl+F 查找源码文件',
-                            style: talMuted.copyWith(fontSize: 12),
+      child: LayoutBuilder(
+        builder: (context, constraints) => Stack(
+          fit: StackFit.expand,
+          children: [
+            NotificationListener<ScrollMetricsNotification>(
+              onNotification: (_) {
+                _updateTabOverflow();
+                return false;
+              },
+              child: Listener(
+                key: const ValueKey('source-tabs-scroll-area'),
+                onPointerSignal: _handleTabPointerSignal,
+                child: SingleChildScrollView(
+                  controller: _tabController,
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      if (_openPaths.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                          child: Center(
+                            child: Text(
+                              files.isEmpty
+                                  ? 'ELF 中没有源码调试信息'
+                                  : '按 Ctrl+F 查找源码文件',
+                              style: talMuted.copyWith(fontSize: 12),
+                            ),
                           ),
-                        ),
-                      )
-                    else
-                      for (final path in _openPaths) _buildSourceTab(path),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          Positioned(
-            top: 0,
-            right: 0,
-            bottom: 0,
-            child: IgnorePointer(
-              child: AnimatedOpacity(
-                key: const ValueKey('source-tabs-right-fade'),
-                opacity: _canScrollTabsRight ? 1 : 0,
-                duration: const Duration(milliseconds: 120),
-                child: Container(
-                  width: 54,
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [Colors.transparent, TalColors.surface],
-                    ),
+                        )
+                      else
+                        for (final path in _openPaths) _buildSourceTab(path),
+                    ],
                   ),
                 ),
               ),
             ),
-          ),
-        ],
+            for (final left in [true, false])
+              Positioned(
+                top: 0,
+                bottom: 0,
+                left: left ? 0 : null,
+                right: left ? null : 0,
+                width: math.min(54.0, constraints.maxWidth * .25),
+                child: IgnorePointer(
+                  child: AnimatedOpacity(
+                    key: ValueKey(
+                      'source-tabs-${left ? 'left' : 'right'}-fade',
+                    ),
+                    opacity: (left ? _tabOverflow.left : _tabOverflow.right)
+                        ? 1
+                        : 0,
+                    duration: const Duration(milliseconds: 120),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: left
+                              ? [TalColors.surface, clear]
+                              : [clear, TalColors.surface],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -1700,6 +1742,14 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
             .expand((entry) => entry.value)
             .toSet();
         _executableLines = controller.executableLinesFor(path);
+        _disabledBreakpointLines = controller
+            .debugState
+            .breakpointSettings
+            .disabled
+            .entries
+            .where((entry) => controller.sourcePathsMatch(entry.key, path))
+            .expand((entry) => entry.value)
+            .toSet();
         _lineBreakpoints = {};
         for (final item in controller.debugState.resolvedBreakpoints) {
           if (controller.sourcePathsMatch(item.path, path)) {
@@ -1768,13 +1818,25 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     final breakpoint = _lineBreakpoints[lineNumber];
     final hasBreakpoint = _requestedLines.contains(lineNumber);
     final canSetBreakpoint = _executableLines.contains(lineNumber);
+    final canEditBreakpoint =
+        !widget.readOnlyPreview &&
+        controller.breakpointEditDisabledReason == null &&
+        (canSetBreakpoint || hasBreakpoint);
     final isCurrent =
         controller.debugState.currentLine == lineNumber &&
         controller.debugState.currentSource != null &&
         controller.sourcePathsMatch(controller.debugState.currentSource!, path);
     final isSearchResult = _revealedSearchLine == lineNumber;
+    final isBreakpointLocation =
+        isSearchResult &&
+        _breakpointLocation?.line == lineNumber &&
+        controller.sourcePathsMatch(_breakpointLocation!.path, path);
+    final status = _breakpointStatus(
+      breakpoint,
+      enabled: !_disabledBreakpointLines.contains(lineNumber),
+    );
     return ColoredBox(
-      color: isCurrent
+      color: isCurrent || isBreakpointLocation
           ? TalColors.selection
           : isSearchResult
           ? TalColors.amber.withValues(alpha: 0.16)
@@ -1783,20 +1845,36 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
         children: [
           SizedBox(
             width: 30,
-            child: Center(
-              child: isCurrent
-                  ? const Icon(
-                      Icons.arrow_right,
-                      size: 18,
-                      color: TalColors.accent,
-                    )
-                  : const SizedBox.shrink(),
+            height: _lineHeight,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                if (isCurrent)
+                  const Icon(
+                    Icons.arrow_right,
+                    size: 18,
+                    color: TalColors.accent,
+                  ),
+                if (isBreakpointLocation)
+                  const Positioned(
+                    key: ValueKey('revealed-breakpoint-line'),
+                    left: 0,
+                    top: 0,
+                    bottom: 0,
+                    width: 2,
+                    child: ColoredBox(color: TalColors.accent),
+                  ),
+              ],
             ),
           ),
           InkWell(
             key: ValueKey('breakpoint-$lineNumber'),
-            onTap: canSetBreakpoint
-                ? () => controller.toggleBreakpoint(path, lineNumber)
+            onTap: canEditBreakpoint
+                ? () => unawaited(
+                    hasBreakpoint
+                        ? _removeBreakpoints(path: path, line: lineNumber)
+                        : controller.toggleBreakpoint(path, lineNumber),
+                  )
                 : null,
             child: Container(
               key: ValueKey('executable-line-$lineNumber'),
@@ -1814,16 +1892,8 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
                           ? Tooltip(
                               message:
                                   breakpoint?.message ??
-                                  (breakpoint?.verified == true
-                                      ? '断点已设置'
-                                      : '等待设置断点'),
-                              child: Icon(
-                                Icons.circle,
-                                size: 11,
-                                color: breakpoint?.verified == true
-                                    ? TalColors.error
-                                    : TalColors.amber,
-                              ),
+                                  _breakpointStatusLabel(status),
+                              child: status.marker(),
                             )
                           : const SizedBox.shrink(),
                     ),

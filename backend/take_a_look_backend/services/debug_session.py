@@ -21,22 +21,55 @@ class DebugSession:
     def __init__(self) -> None:
         self.info = DebugInfoIndex()
         self.requested_breakpoints: dict[str, set[int]] = {}
+        self.disabled_breakpoints: dict[str, set[int]] = {}
+        self.breakpoints_paused = False
+        self.breakpoint_revision = 0
         self.resolved_breakpoints: list[dict[str, object]] = []
         self.execution_state = "unavailable"
         self.stopped_location: dict[str, object] | None = None
         self.registers: dict[str, int] = {}
 
-    def set_breakpoints(self, path: str, lines: list[int], target: TargetBackend, *, connected: bool) -> None:
-        canonical_path = self.info.canonical_source_path(path) or path
-        canonical_key = canonical_path.replace("\\", "/").rstrip("/").casefold()
-        # DWARF paths and source-root mappings can identify the same file.
-        for existing_path in list(self.requested_breakpoints):
-            existing = self.info.canonical_source_path(existing_path) or existing_path
-            if existing.replace("\\", "/").rstrip("/").casefold() == canonical_key:
-                del self.requested_breakpoints[existing_path]
+    def _breakpoint_path(self, path: str) -> str:
+        return self.info.canonical_source_path(path) or path
+
+    def _breakpoint_path_key(self, path: str) -> str:
+        return self._breakpoint_path(path).replace("\\", "/").rstrip("/").casefold()
+
+    def set_breakpoints(self, path: str, lines: set[int], target: TargetBackend, *,
+                        connected: bool, pending_message: str | None = None) -> None:
+        key = self._breakpoint_path_key(path)
+        requested = {name: values for name, values in self.requested_breakpoints.items()
+                     if self._breakpoint_path_key(name) != key}
         if lines:
-            self.requested_breakpoints[canonical_path] = set(lines)
-        self.apply_breakpoints(target, connected=connected)
+            requested[path] = lines
+        self.replace_breakpoints(requested, self.disabled_breakpoints, self.breakpoints_paused, target,
+                                 connected=connected, pending_message=pending_message)
+
+    def replace_breakpoints(self, requested: dict[str, set[int]], disabled: dict[str, set[int]],
+                            paused: bool, target: TargetBackend, *, connected: bool,
+                            pending_message: str | None = None) -> None:
+        paths: dict[str, str] = {}
+        normalized: dict[str, set[int]] = {}
+        for path, lines in requested.items():
+            if lines:
+                canonical = paths.setdefault(self._breakpoint_path_key(path), self._breakpoint_path(path))
+                normalized.setdefault(canonical, set()).update(lines)
+        disabled_normalized: dict[str, set[int]] = {}
+        for path, lines in disabled.items():
+            canonical = paths.get(self._breakpoint_path_key(path))
+            if canonical is not None and (matching := normalized[canonical] & lines):
+                disabled_normalized.setdefault(canonical, set()).update(matching)
+
+        previous = self.requested_breakpoints, self.disabled_breakpoints, self.breakpoints_paused
+        self.requested_breakpoints, self.disabled_breakpoints, self.breakpoints_paused = normalized, disabled_normalized, paused
+        try:
+            self.apply_breakpoints(target, connected=connected, pending_message=pending_message)
+        except Exception:
+            self.requested_breakpoints, self.disabled_breakpoints, self.breakpoints_paused = previous
+            # Reinstall any addresses already removed before the probe rejected a removal.
+            self.apply_breakpoints(target, connected=connected, pending_message=pending_message)
+            raise
+        self.breakpoint_revision += 1
 
     def refresh(self, target: TargetBackend, *, force: bool) -> bool:
         next_state = target.debug_state()
@@ -87,10 +120,14 @@ class DebugSession:
         try:
             target.step()
         finally:
-            restored = target.set_breakpoint(address)
-            if not restored:
-                current_breakpoint["verified"] = False
-                current_breakpoint["message"] = "跨过断点后无法重新设置该断点。"
+            restored = False
+            try:
+                restored = target.set_breakpoint(address)
+            finally:
+                if not restored:
+                    for item in self.resolved_breakpoints:
+                        if item.get("address") == address and item["verified"]:
+                            item.update(verified=False, status="failed", message="跨过断点后无法重新设置该断点。")
         if resume:
             target.resume()
 
@@ -197,7 +234,11 @@ class DebugSession:
             "executionState": self.execution_state,
             "sourceFiles": self.info.source_files,
             "executableLines": self.info.executable_lines,
-            "breakpoints": list(self.resolved_breakpoints),
+            "breakpoints": [dict(item) for item in self.resolved_breakpoints],
+            "requestedBreakpoints": {path: sorted(lines) for path, lines in self.requested_breakpoints.items()},
+            "disabledBreakpoints": {path: sorted(lines) for path, lines in self.disabled_breakpoints.items()},
+            "breakpointsPaused": self.breakpoints_paused,
+            "breakpointRevision": self.breakpoint_revision,
             "registers": dict(self.registers),
             "stoppedLocation": self.stopped_location,
             "sourceStepAvailable": can_step and self.info.resolve_step_location(pc) is not None,
@@ -208,32 +249,19 @@ class DebugSession:
 
     def remove_breakpoints(self, target: TargetBackend, *, connected: bool) -> None:
         if connected:
-            for item in self.resolved_breakpoints:
-                if item.get("verified") is True and isinstance(item.get("address"), int):
-                    try:
-                        target.remove_breakpoint(item["address"])
-                    except Exception:
-                        pass
+            for address in {item["address"] for item in self.resolved_breakpoints if item["verified"]}:
+                try:
+                    target.remove_breakpoint(address)
+                except Exception:
+                    pass
         self.resolved_breakpoints = []
 
 
     def mark_breakpoints_pending(self, *, message="连接调试探针后设置断点。") -> None:
-        self.resolved_breakpoints = [
-            {
-                "path": path,
-                "requestedLine": line,
-                "actualLine": line,
-                "verified": False,
-                "message": message,
-            }
-            for path, lines in self.requested_breakpoints.items()
-            for line in sorted(lines)
-        ]
+        self.resolved_breakpoints = self._resolve_breakpoints(message)
 
-
-    def apply_breakpoints(self, target: TargetBackend, *, connected: bool) -> None:
-        self.remove_breakpoints(target, connected=connected)
-        resolved: list[dict[str, object]] = []
+    def _resolve_breakpoints(self, pending_message: str | None) -> list[dict[str, object]]:
+        resolved = []
         for path, lines in self.requested_breakpoints.items():
             for requested_line in sorted(lines):
                 location = self.info.resolve_breakpoint(path, requested_line)
@@ -243,21 +271,55 @@ class DebugSession:
                     "actualLine": location.line if location is not None else requested_line,
                     "verified": False,
                 }
-                if location is None:
-                    item["message"] = "该行没有可执行指令，不能设置断点。"
-                else:
-                    item["path"] = location.path
+                if location is not None:
                     item["address"] = location.address
-                    if not connected:
-                        item["message"] = "连接调试探针后设置断点。"
-                    else:
-                        try:
-                            item["verified"] = target.set_breakpoint(location.address)
-                            if not item["verified"]:
-                                item["message"] = "目标拒绝了断点，可能已用完硬件断点资源。"
-                        except Exception as error:
-                            item["message"] = str(error)
+                if requested_line in self.disabled_breakpoints.get(path, ()):
+                    item["status"] = "disabled"
+                elif self.breakpoints_paused:
+                    item["status"] = "paused"
+                elif pending_message is not None:
+                    item.update(status="pending", message=pending_message)
+                elif location is None:
+                    item.update(status="failed", message="该行没有可执行指令，不能设置断点。")
+                else:
+                    item["status"] = "pending"
                 resolved.append(item)
+        return resolved
+
+    def apply_breakpoints(self, target: TargetBackend, *, connected: bool,
+                          pending_message: str | None = None) -> None:
+        if not connected:
+            self.mark_breakpoints_pending(message=pending_message or "连接调试探针后设置断点。")
+            return
+        if not target.capabilities.target_control:
+            pending_message = pending_message or "当前连接不支持断点调试。"
+        resolved = self._resolve_breakpoints(pending_message)
+        wanted = {item["address"] for item in resolved
+                  if item["status"] == "pending" and "message" not in item}
+        installed = {item["address"] for item in self.resolved_breakpoints if item["verified"]}
+        for address in sorted(installed - wanted):
+            for previous in self.resolved_breakpoints:
+                if previous.get("address") == address and previous["verified"]:
+                    previous.update(verified=False, status="pending")
+            # A failed probe write can leave this address in an unknown state.
+            # The rollback re-applies it along with any completed removals.
+            target.remove_breakpoint(address)
+
+        results = dict.fromkeys(installed & wanted, None)
+        for item in resolved:
+            address = item.get("address")
+            if item["status"] != "pending" or "message" in item:
+                continue
+            if address not in results:
+                try:
+                    results[address] = (None if target.set_breakpoint(address) else
+                                        "目标拒绝了断点，可能已用完硬件断点资源。")
+                except Exception as error:
+                    results[address] = str(error) or "设置断点失败。"
+            if (message := results[address]) is None:
+                item.update(verified=True, status="installed")
+            else:
+                item.update(status="failed", message=message)
         self.resolved_breakpoints = resolved
 
 

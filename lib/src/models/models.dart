@@ -5,50 +5,13 @@ import '../telemetry/sample_buffer.dart';
 
 export 'symbol_load_progress.dart';
 export 'source_definition.dart';
+export 'debug_breakpoints.dart';
 
 enum ConnectionStatus { disconnected, connecting, connected }
 
 enum DebugExecutionState { unavailable, running, halted, unknown }
 
 enum SourceStep { stepIn, stepOver, stepOut }
-
-class DebugBreakpoint {
-  const DebugBreakpoint({
-    required this.path,
-    required this.requestedLine,
-    required this.actualLine,
-    required this.verified,
-    this.address,
-    this.message,
-  });
-
-  final String path;
-  final int requestedLine;
-  final int actualLine;
-  final bool verified;
-  final int? address;
-  final String? message;
-
-  factory DebugBreakpoint.fromJson(Map<String, dynamic> json) {
-    return DebugBreakpoint(
-      path: json['path'] as String,
-      requestedLine: json['requestedLine'] as int,
-      actualLine: json['actualLine'] as int? ?? json['requestedLine'] as int,
-      verified: json['verified'] == true,
-      address: json['address'] as int?,
-      message: json['message'] as String?,
-    );
-  }
-
-  Map<String, Object?> toJson() => {
-    'path': path,
-    'requestedLine': requestedLine,
-    'actualLine': actualLine,
-    'verified': verified,
-    if (address != null) 'address': address,
-    if (message != null) 'message': message,
-  };
-}
 
 typedef SymbolIdentity = (String dataSource, String source, String name);
 

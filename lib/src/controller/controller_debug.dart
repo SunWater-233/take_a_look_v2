@@ -27,34 +27,168 @@ extension TakeALookControllerDebug on TakeALookController {
     }
   }
 
-  void toggleBreakpoint(String path, int line) {
-    if (line <= 0) return;
-    final executableLines = executableLinesFor(path);
-    if (!executableLines.contains(line)) return;
-    final matchingRequest = debugState.requestedBreakpoints.entries
-        .where((entry) => sourcePathsMatch(entry.key, path))
-        .firstOrNull;
-    final requestPath = matchingRequest?.key ?? path;
-    final lines = <int>{...matchingRequest?.value ?? const <int>{}};
-    if (!lines.add(line)) lines.remove(line);
-    setBreakpoints(requestPath, lines);
+  String? get breakpointEditDisabledReason {
+    if (_breakpointEditPending) return '正在更新断点';
+    if (isProjectRestoring) return '正在打开工程';
+    if (sourceTask.blocksProbe) return '请等待固件下载完成';
+    return null;
   }
 
-  void setBreakpoints(String path, Iterable<int> requestedLines) {
-    final executableLines = executableLinesFor(path);
-    final lines = requestedLines
-        .where((line) => line > 0 && executableLines.contains(line))
-        .toSet();
-    if (lines.isEmpty) {
-      debugState.requestedBreakpoints.remove(path);
-    } else {
-      debugState.requestedBreakpoints[path] = lines;
+  Future<bool> toggleBreakpoint(String path, int line) =>
+      editBreakpoints(BreakpointAction.toggle, path: path, line: line);
+
+  Future<bool> editBreakpoints(
+    BreakpointAction action, {
+    String? path,
+    int? line,
+    bool? value,
+    int? undoId,
+  }) async {
+    if (breakpointEditDisabledReason != null) return false;
+    try {
+      if (_isDetachedRemote) {
+        _breakpointEditPending = true;
+        _emitState([signals.debug]);
+        try {
+          await remoteCommand!(ControllerCommand.setBreakpoints, {
+            'action': action.name,
+            'path': ?path,
+            'line': ?line,
+            'value': ?value,
+            'undoId': ?undoId,
+          });
+          return true;
+        } finally {
+          _breakpointEditPending = false;
+          if (!_disposed) _emitState([signals.debug]);
+        }
+      }
+
+      final settings = debugState.breakpointSettings.copy();
+      BreakpointSettings? removed;
+      switch (action) {
+        case BreakpointAction.clear:
+          if (settings.requested.isEmpty) return false;
+          removed = settings.copy();
+          settings.requested.clear();
+          settings.disabled.clear();
+        case BreakpointAction.setPaused:
+          if (value == null || value == settings.paused) return false;
+          settings.paused = value;
+        case BreakpointAction.undo:
+          final removal = _removedBreakpoints;
+          if (removal == null || undoId != debugState.breakpointUndoId) {
+            return false;
+          }
+          for (final entry in removal.requested.entries) {
+            final file = _breakpointRequestPath(settings, entry.key);
+            final lines = settings.requested.putIfAbsent(file, () => {});
+            final restoredDisabled = entry.value
+                .difference(lines)
+                .intersection(removal.disabled[entry.key] ?? const {});
+            lines.addAll(entry.value);
+            if (restoredDisabled.isNotEmpty) {
+              settings.disabled
+                  .putIfAbsent(file, () => {})
+                  .addAll(restoredDisabled);
+            }
+          }
+        case BreakpointAction.toggle:
+        case BreakpointAction.remove:
+        case BreakpointAction.setEnabled:
+          if (path == null || line == null || line <= 0) return false;
+          final file = _breakpointRequestPath(settings, path);
+          final lines = settings.requested[file];
+          final disabled = settings.disabled[file];
+          final exists = lines?.contains(line) ?? false;
+          if (action == BreakpointAction.setEnabled) {
+            if (!exists || value == null) return false;
+            if (value) {
+              disabled?.remove(line);
+            } else {
+              settings.disabled.putIfAbsent(file, () => {}).add(line);
+            }
+          } else if (exists) {
+            removed = BreakpointSettings(
+              requested: {
+                file: {line},
+              },
+              disabled: {
+                if (disabled?.contains(line) ?? false) file: {line},
+              },
+            );
+            lines!.remove(line);
+            disabled?.remove(line);
+          } else if (action == BreakpointAction.toggle &&
+              executableLinesFor(path).contains(line)) {
+            settings.requested.putIfAbsent(file, () => {}).add(line);
+          } else {
+            return false;
+          }
+      }
+      await _commitBreakpointSettings(settings, backendCommand);
+      if (_disposed) return false;
+      if (removed != null || action == BreakpointAction.undo) {
+        _removedBreakpoints = removed;
+        debugState.breakpointUndoId = removed == null
+            ? 0
+            : ++_nextBreakpointUndoId;
+        _emitState([signals.debug]);
+      }
+      return true;
+    } on Object catch (error) {
+      if (!_disposed) {
+        applyBackendEvent(BackendEventType.error, {
+          'code': 'breakpoint_update_failed',
+          'message': '无法更新断点。',
+          'details': error.toString(),
+        });
+      }
+      return false;
     }
+  }
+
+  String _breakpointRequestPath(BreakpointSettings settings, String path) =>
+      settings.requested.keys
+          .where((file) => sourcePathsMatch(file, path))
+          .firstOrNull ??
+      canonicalSourcePath(path);
+
+  Future<void> setBreakpoints(String path, Iterable<int> requestedLines) async {
+    if (breakpointEditDisabledReason != null) return;
+    final settings = debugState.breakpointSettings.copy();
+    final file = _breakpointRequestPath(settings, path);
+    final lines = requestedLines
+        .where(executableLinesFor(path).contains)
+        .toSet();
+    settings.requested[file] = lines;
+    settings.disabled[file]?.retainAll(lines);
+    await _commitBreakpointSettings(settings, backendCommand);
+  }
+
+  Future<void> _commitBreakpointSettings(
+    BreakpointSettings settings,
+    BackendCommand? sender,
+  ) async {
+    if (sender == null) {
+      debugState.breakpointSettings = settings.copy();
+      debugState.resolvedBreakpoints.clear();
+      _emitState([signals.debug]);
+      return;
+    }
+    final previousRevision = debugState.breakpointRevision;
+    _breakpointEditPending = true;
     _emitState([signals.debug]);
-    _dispatchCommand(ControllerCommand.setBreakpoints, {
-      'path': path,
-      'lines': lines.toList()..sort(),
-    });
+    try {
+      await sender(ControllerCommand.setBreakpoints, settings.toJson());
+      if (!_disposed && debugState.breakpointRevision == previousRevision) {
+        debugState.breakpointSettings = settings.copy();
+        debugState.resolvedBreakpoints.clear();
+      }
+    } finally {
+      _breakpointEditPending = false;
+      if (!_disposed) _emitState([signals.debug]);
+    }
   }
 
   void haltTarget() => _dispatchCommand(ControllerCommand.debugControl, 'halt');
@@ -177,34 +311,10 @@ extension TakeALookControllerDebug on TakeALookController {
               ),
         );
     }
-    if (data['breakpoints'] case final List rawBreakpoints) {
-      debugState.resolvedBreakpoints
-        ..clear()
-        ..addAll(
-          rawBreakpoints.whereType<Map>().map(
-            (raw) => DebugBreakpoint.fromJson(Map<String, dynamic>.from(raw)),
-          ),
-        );
-      debugState.requestedBreakpoints.clear();
-      for (final breakpoint in debugState.resolvedBreakpoints) {
-        debugState.requestedBreakpoints
-            .putIfAbsent(breakpoint.path, () => <int>{})
-            .add(breakpoint.requestedLine);
-      }
-    }
-    if (data['requestedBreakpoints'] case final Map rawRequested) {
-      debugState.requestedBreakpoints
-        ..clear()
-        ..addEntries(
-          rawRequested.entries
-              .where((entry) => entry.key is String && entry.value is List)
-              .map(
-                (entry) => MapEntry(
-                  entry.key as String,
-                  (entry.value as List).whereType<int>().toSet(),
-                ),
-              ),
-        );
+    final breakpointRevision = data['breakpointRevision'] as int?;
+    if (breakpointRevision == null ||
+        breakpointRevision >= debugState.breakpointRevision) {
+      _applyBreakpointState(data);
     }
     if (data['registers'] case final Map rawRegisters) {
       debugState.registers
@@ -239,5 +349,34 @@ extension TakeALookControllerDebug on TakeALookController {
       debugState.stopRevision++;
     }
     if (emit) _emitState([signals.debug]);
+  }
+
+  void _applyBreakpointState(Map<String, dynamic> data) {
+    if (data['breakpointRevision'] case final int revision) {
+      debugState.breakpointRevision = revision;
+    }
+    if (data['breakpointUndoId'] case final int undoId) {
+      debugState.breakpointUndoId = undoId;
+    }
+    if (data['breakpoints'] case final List rawBreakpoints) {
+      debugState.resolvedBreakpoints
+        ..clear()
+        ..addAll(
+          rawBreakpoints.whereType<Map>().map(
+            (raw) => DebugBreakpoint.fromJson(Map<String, dynamic>.from(raw)),
+          ),
+        );
+    }
+    if (data['requestedBreakpoints'] is Map) {
+      debugState.breakpointSettings = BreakpointSettings.fromJson(data);
+    } else if (data['breakpoints'] is List) {
+      final settings = BreakpointSettings();
+      for (final breakpoint in debugState.resolvedBreakpoints) {
+        settings.requested
+            .putIfAbsent(breakpoint.path, () => {})
+            .add(breakpoint.requestedLine);
+      }
+      debugState.breakpointSettings = settings;
+    }
   }
 }

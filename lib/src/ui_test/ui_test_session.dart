@@ -363,7 +363,11 @@ void motor_control_tick(void)
         }
         _debug(action == 'resume' ? 'running' : 'halted');
       case BackendMethod.setBreakpoints:
-        _debug(controller.debugState.executionState.name);
+        _debug(
+          controller.debugState.executionState.name,
+          breakpoints: BreakpointSettings.fromJson(call!.params),
+          breakpointRevision: controller.debugState.breakpointRevision + 1,
+        );
       case BackendMethod.exportCsv:
         try {
           final count = await recording.exportCsv(
@@ -381,15 +385,24 @@ void motor_control_tick(void)
     if (!_disposed) controller.signals.stateSync.emit();
   }
 
-  void _debug(String execution) {
-    final breakpoints = [
-      for (final entry in controller.debugState.requestedBreakpoints.entries)
+  void _debug(
+    String execution, {
+    BreakpointSettings? breakpoints,
+    int? breakpointRevision,
+  }) {
+    final settings = breakpoints ?? controller.debugState.breakpointSettings;
+    final connected = controller.connectionStatus == ConnectionStatus.connected;
+    final resolved = [
+      for (final entry in settings.requested.entries)
         for (final line in entry.value)
           {
             'path': entry.key,
             'requestedLine': line,
             'actualLine': line,
-            'verified': true,
+            'verified':
+                connected &&
+                !settings.paused &&
+                settings.disabled[entry.key]?.contains(line) != true,
             'address': 0x08000100 + line * 2,
           },
     ];
@@ -399,7 +412,10 @@ void motor_control_tick(void)
       'executableLines': {
         sourcePath: [10, 11, 12, 13],
       },
-      'breakpoints': breakpoints,
+      'breakpoints': resolved,
+      ...settings.toJson(),
+      'breakpointRevision':
+          breakpointRevision ?? controller.debugState.breakpointRevision,
       'registers': execution == 'halted'
           ? {
               'r0': 1000,

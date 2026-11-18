@@ -6,6 +6,8 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:take_a_look_v2/src/app/app.dart' show TalUiScaleViewport;
+import 'package:take_a_look_v2/src/chart/inspection_anchor.dart';
 import 'package:take_a_look_v2/src/controller/controller.dart';
 import 'package:take_a_look_v2/src/models/models.dart';
 import 'package:take_a_look_v2/src/panels/panels.dart';
@@ -13,8 +15,13 @@ import 'package:take_a_look_v2/src/protocol/commands.dart';
 import 'package:take_a_look_v2/src/theme/theme.dart';
 import 'package:take_a_look_v2/src/workspace/panel_types.dart';
 
-TakeALookController structureFixture() {
-  final c = TakeALookController(backendCommand: (_, _) async {});
+TakeALookController structureFixture({
+  BackendCommand? backendCommand,
+  Iterable<(String, String)> additionalDefinitions = const [],
+}) {
+  final c = TakeALookController(
+    backendCommand: backendCommand ?? (_, _) async {},
+  );
   final definitions = <(String, String)>[
     ('motor', 'struct MotorState'),
     ('motor.speed', 'float'),
@@ -26,6 +33,7 @@ TakeALookController structureFixture() {
     ('motor.pid.ki', 'float'),
     ('motor.samples', 'float[256]'),
     for (var i = 0; i < 256; i++) ('motor.samples[$i]', 'float'),
+    ...additionalDefinitions,
   ];
   c.applySnapshot({
     'symbols': [
@@ -51,19 +59,23 @@ Future<void> mount(
   double width = 430,
   TalInputMode inputMode = TalInputMode.mouseKeyboard,
   double height = 850,
+  double scale = 1,
 }) async {
-  await tester.binding.setSurfaceSize(Size(width, height));
+  await tester.binding.setSurfaceSize(Size(width * scale, height * scale));
   await tester.pumpWidget(
     MaterialApp(
       theme: buildTalTheme(inputMode: inputMode),
       home: Scaffold(
         body: RepaintBoundary(
           key: const ValueKey('browser-preview'),
-          child: buildWorkspacePanelBody(
-            WorkspacePanelId.watch,
-            c,
-            workbench: true,
-            adaptiveWorkbench: true,
+          child: TalUiScaleViewport(
+            scale: scale,
+            child: buildWorkspacePanelBody(
+              WorkspacePanelId.watch,
+              c,
+              workbench: true,
+              adaptiveWorkbench: true,
+            ),
           ),
         ),
       ),
@@ -74,6 +86,57 @@ Future<void> mount(
 
 void main() {
   for (final mode in TalInputMode.values) {
+    testWidgets('$mode members header aligns the name and monitor rate', (
+      tester,
+    ) async {
+      late final TakeALookController c;
+      c = structureFixture(
+        backendCommand: (command, arguments) async {
+          if (command == ControllerCommand.setMonitorRate) {
+            c.applySnapshot({'monitorRateHz': arguments});
+          }
+        },
+      );
+      addTearDown(c.dispose);
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await mount(tester, c, width: 320, inputMode: mode);
+
+      final rate = find.descendant(
+        of: find.byKey(const ValueKey('watch-members-pane')),
+        matching: find.byKey(const ValueKey('watch-default-monitor-rate')),
+      );
+      final section = find.text('正在监视');
+      final name = find.text('名称');
+      final variable = find.descendant(
+        of: find.byKey(const ValueKey('compact-watch-motor')),
+        matching: find.text('motor'),
+      );
+      expect(tester.getCenter(rate).dy, tester.getCenter(section).dy);
+      expect(
+        tester.getTopLeft(rate).dx,
+        greaterThan(tester.getTopRight(section).dx),
+      );
+      expect(tester.getTopLeft(name).dx, tester.getTopLeft(variable).dx);
+      expect(
+        tester.getBottomLeft(name).dy,
+        lessThan(tester.getTopLeft(variable).dy),
+      );
+
+      final kind = mode == TalInputMode.touch
+          ? PointerDeviceKind.touch
+          : PointerDeviceKind.mouse;
+      await tester.tap(rate, kind: kind);
+      await tester.pump(kDoubleTapTimeout);
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('dropdown-item-5 Hz')),
+        kind: kind,
+      );
+      await tester.pumpAndSettle();
+      expect(c.monitorRateHz, 5);
+      expect(variable.hitTestable(), findsOneWidget);
+    });
+
     testWidgets('$mode section splitter resizes independent scroll areas', (
       tester,
     ) async {
@@ -115,6 +178,182 @@ void main() {
       expect(upperScroll.offset, upperOffset);
       expect(c.watches.where((w) => w.samplingEnabled), hasLength(12));
       expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('$mode member scrolling pins only the current ancestor chain', (
+      tester,
+    ) async {
+      final c = structureFixture(
+        additionalDefinitions: [
+          ('other', 'struct Other'),
+          for (var i = 0; i < 24; i++) ('other.member$i', 'float'),
+        ],
+      );
+      addTearDown(c.dispose);
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      c.selectSymbols(['other']);
+      c.addSelectedToWatch(mode: WatchReadMode.monitor);
+      c.compactExpandedWatches.addAll([
+        'motor.current',
+        'motor.samples',
+        'motor.samples:range:0',
+        'motor.samples:range:1',
+      ]);
+      c.compactWatchSelection = 'motor.current';
+      const scale = 1.25;
+      await mount(tester, c, height: 620, inputMode: mode, scale: scale);
+
+      Finder sticky(String key) => find.byKey(ValueKey('watch-sticky-$key'));
+      final list = find.byKey(const ValueKey('compact-watch-list'));
+      final scroll = tester.widget<ListView>(list).controller!;
+      final root = find.byKey(const ValueKey('compact-watch-motor'));
+      final top = tester.getTopLeft(list).dy;
+      final rowHeight = tester.getSize(root).height;
+      final firstRowOffset = (tester.getTopLeft(root).dy - top) / scale;
+      Future<void> scrollRows(double count) async {
+        scroll.jumpTo(firstRowOffset + count * rowHeight);
+        await tester.pumpAndSettle();
+      }
+
+      expect(sticky('motor'), findsNothing);
+      await scrollRows(2.5);
+      expect(tester.getTopLeft(sticky('motor')).dy, closeTo(top, .01));
+      expect(
+        tester.getTopLeft(sticky('motor.current')).dy,
+        closeTo(top + rowHeight * scale, .01),
+      );
+      expect(sticky('motor.pid'), findsNothing);
+
+      final fade = find.byKey(const ValueKey('watch-members-overflow-top'));
+      final firstHeaderRect = tester.getRect(sticky('motor'));
+      final headerRect = tester.getRect(sticky('motor.current'));
+      final fadeRect = tester.getRect(fade);
+      expect(fadeRect.top, closeTo(headerRect.bottom, .01));
+      final boundary = tester.renderObject<RenderRepaintBoundary>(
+        find.byKey(const ValueKey('browser-preview')),
+      );
+      expect(watchRowCenterInChart(c, 'motor.current.d', boundary), isNull);
+      Future<void> checkPixels(
+        void Function(Color Function(double, double) pixel) check,
+      ) async {
+        await tester.runAsync(() async {
+          final image = await boundary.toImage();
+          try {
+            final bytes = (await image.toByteData(
+              format: ui.ImageByteFormat.rawRgba,
+            ))!;
+            check((x, y) {
+              final p = boundary.globalToLocal(Offset(x, y));
+              final index = (p.dy.floor() * image.width + p.dx.floor()) * 4;
+              return Color.fromARGB(
+                bytes.getUint8(index + 3),
+                bytes.getUint8(index),
+                bytes.getUint8(index + 1),
+                bytes.getUint8(index + 2),
+              );
+            });
+          } finally {
+            image.dispose();
+          }
+        });
+      }
+
+      await checkPixels((pixel) {
+        final left = headerRect.left;
+        expect(pixel(left + 1, headerRect.center.dy), TalColors.surface);
+        expect(pixel(left + 8, headerRect.center.dy), TalColors.surface);
+        for (var x = left + 8; x < firstHeaderRect.center.dx; x++) {
+          expect(pixel(x, firstHeaderRect.top), TalColors.surface);
+        }
+        for (var x = left + 8; x < headerRect.right - 8; x += 2) {
+          expect(pixel(x, headerRect.top), TalColors.surface);
+        }
+        expect(
+          pixel(left + 8, fadeRect.top + 2).r,
+          lessThan(TalColors.surface.r),
+        );
+        expect(pixel(left + 8, fadeRect.bottom + 2), TalColors.surface);
+      });
+
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: firstHeaderRect.center);
+      await tester.pumpAndSettle();
+      await checkPixels((pixel) {
+        expect(
+          pixel(firstHeaderRect.left + 8, firstHeaderRect.center.dy),
+          TalColors.hover,
+        );
+        expect(
+          pixel(headerRect.left + 8, headerRect.center.dy),
+          TalColors.surface,
+        );
+      });
+      await mouse.removePointer();
+      await tester.pumpAndSettle();
+
+      await scrollRows(9);
+      expect(sticky('motor.current'), findsNothing);
+      expect(
+        tester.getTopLeft(sticky('motor.samples:range:0')).dy,
+        closeTo(top + 2 * rowHeight * scale, .01),
+      );
+      final before = scroll.offset;
+      if (mode == TalInputMode.touch) {
+        await tester.timedDrag(
+          sticky('motor'),
+          Offset(0, -2 * rowHeight),
+          const Duration(milliseconds: 220),
+        );
+      } else {
+        await tester.sendEventToBinding(
+          PointerScrollEvent(
+            position: tester.getCenter(sticky('motor')),
+            scrollDelta: Offset(0, rowHeight),
+          ),
+        );
+      }
+      await tester.pumpAndSettle();
+      expect(scroll.offset, greaterThan(before));
+
+      // The second range starts at row 40, which pushes the first range up.
+      await scrollRows(37.5);
+      expect(
+        tester.getSize(sticky('motor.samples:range:0')).height,
+        closeTo(rowHeight / 2, .01),
+      );
+      expect(
+        tester.getTopLeft(fade).dy,
+        closeTo(tester.getBottomLeft(sticky('motor.samples:range:0')).dy, .01),
+      );
+      await scrollRows(38.5);
+      expect(sticky('motor.samples:range:0'), findsNothing);
+      expect(sticky('motor.samples:range:1'), findsOneWidget);
+
+      await tester.tap(sticky('motor.samples'));
+      await tester.pumpAndSettle();
+      expect(c.compactExpandedWatches, isNot(contains('motor.samples')));
+      expect(sticky('motor.samples'), findsNothing);
+      expect(
+        find.byKey(const ValueKey('compact-watch-motor.samples')).hitTestable(),
+        findsOneWidget,
+      );
+
+      scroll.jumpTo(scroll.position.maxScrollExtent);
+      await tester.pumpAndSettle();
+      expect(sticky('motor'), findsNothing);
+      expect(tester.getTopLeft(sticky('other')).dy, closeTo(top, .01));
+      await tester.enterText(
+        find.byKey(const ValueKey('watch-member-search')),
+        'other.member22',
+      );
+      await tester.pumpAndSettle();
+      expect(sticky('other'), findsNothing);
+      expect(
+        find
+            .byKey(const ValueKey('compact-watch-other.member22'))
+            .hitTestable(),
+        findsOneWidget,
+      );
     });
 
     testWidgets('$mode section splitter clamps and survives panel resize', (

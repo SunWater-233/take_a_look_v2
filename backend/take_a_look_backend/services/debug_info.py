@@ -88,8 +88,7 @@ class DebugInfoIndex:
         key = self._resolve_path_key(path)
         if key is None:
             return None
-        lines = self._lines_by_path[key]
-        addresses = lines.get(requested_line)
+        addresses = self._lines_by_path.get(key, {}).get(requested_line)
         if not addresses:
             return None
         return SourceLocation(

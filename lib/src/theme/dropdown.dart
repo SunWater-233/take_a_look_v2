@@ -554,7 +554,8 @@ class _DropdownInputState<T> extends State<_DropdownInput<T>> {
               style: talBody,
               textAlignVertical: TextAlignVertical.center,
               decoration: InputDecoration(
-                isDense: true,
+                // Let the outline fill the dropdown's fixed height.
+                isDense: false,
                 filled: true,
                 fillColor: TalColors.input,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 9),

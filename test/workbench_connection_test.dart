@@ -51,7 +51,8 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    final initial = tester.getCenter(rate('50 Hz'));
+    final initialBounds = tester.getRect(rate('50 Hz'));
+    final initial = initialBounds.center;
     await click(initial);
     await tester.pump(kDoubleTapTimeout);
     await tester.pumpAndSettle();
@@ -62,6 +63,13 @@ void main() {
     expect(preset, findsNothing);
     final editor = find.byType(TextField);
     expect(editor, findsOneWidget);
+    final editableText = find.descendant(
+      of: editor,
+      matching: find.byType(EditableText),
+    );
+    final outline = InputDecorator.containerOf(tester.element(editableText))!;
+    expect(outline.localToGlobal(Offset.zero) & outline.size, initialBounds);
+    expect(tester.getCenter(editableText).dy, closeTo(initial.dy, 1));
     expect(tester.widget<TextField>(editor).controller!.selection.end, 5);
 
     await submit(editor, '0 Hz');

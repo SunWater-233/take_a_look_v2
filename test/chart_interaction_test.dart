@@ -6,10 +6,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:take_a_look_v2/src/chart/cartesian_renderer.dart';
 import 'package:take_a_look_v2/src/chart/chart.dart';
 import 'package:take_a_look_v2/src/controller/controller.dart';
+import 'package:take_a_look_v2/src/panels/plot_log_panels.dart';
 import 'package:take_a_look_v2/src/theme/theme.dart';
 
 void main() {
-  Future<TakeALookController> pumpChart(WidgetTester tester) async {
+  final rangeMenu = find.byKey(const ValueKey('plot-range-menu'));
+
+  Future<TakeALookController> pumpChart(
+    WidgetTester tester, {
+    bool withToolbar = false,
+    double width = 720,
+  }) async {
     final controller = TakeALookController()..loadDemoSymbols();
     controller.selectSymbols([demoSymbols.first.key]);
     controller.addSelectedToWatch();
@@ -33,9 +40,11 @@ void main() {
         theme: buildTalTheme(),
         home: Scaffold(
           body: SizedBox(
-            width: 720,
+            width: width,
             height: 480,
-            child: TelemetryChart(controller: controller),
+            child: withToolbar
+                ? PlotPanel(controller: controller)
+                : TelemetryChart(controller: controller),
           ),
         ),
       ),
@@ -320,7 +329,7 @@ void main() {
     );
   }
 
-  testWidgets('mouse right click uses the compact PyQtGraph-style menu', (
+  testWidgets('desktop range panel applies both axes and holds live drafts', (
     tester,
   ) async {
     final controller = await pumpChart(tester);
@@ -335,17 +344,18 @@ void main() {
     );
     await rightClick.moveBy(const Offset(1, 1));
     await tester.pump();
-    expect(find.text('View All'), findsNothing);
+    expect(rangeMenu, findsNothing);
     expect(controller.followLatest, isTrue);
     expect(controller.plotAutoY, isTrue);
     await rightClick.up();
     await tester.pumpAndSettle();
     expect(timeDilation, 0.6);
-    expect(find.text('View All'), findsOneWidget);
-    expect(find.text('X Axis'), findsOneWidget);
-    expect(find.text('Y Axis'), findsOneWidget);
-    expect(find.text('Mouse Mode'), findsOneWidget);
-    expect(find.text('显示全部'), findsNothing);
+    expect(rangeMenu, findsOneWidget);
+    expect(tester.getSize(rangeMenu).width, 304);
+    expect(find.text('X'), findsOneWidget);
+    expect(find.text('适配全部'), findsOneWidget);
+    expect(find.text('自动适配'), findsOneWidget);
+    expect(find.text('轴与鼠标设置'), findsOneWidget);
     final menuAnchor = tester.widget<MenuAnchor>(
       find.byKey(const ValueKey('desktop-plot-menu-anchor')),
     );
@@ -355,52 +365,122 @@ void main() {
       (menuShape! as RoundedRectangleBorder).borderRadius,
       BorderRadius.circular(8),
     );
-    expect(
-      tester
-          .widget<SubmenuButton>(
-            find.byKey(const ValueKey('desktop-plot-x-axis')),
-          )
-          .animated,
-      isTrue,
-    );
-
-    final rootAxisRect = tester.getRect(
-      find.byKey(const ValueKey('desktop-plot-x-axis')),
-    );
-    await tester.tap(find.text('X Axis'));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('desktop-x-axis-panel')), findsOneWidget);
-    final submenuRect = tester.getRect(
-      find.byKey(const ValueKey('desktop-x-axis-panel')),
-    );
-    expect(submenuRect.left, greaterThanOrEqualTo(rootAxisRect.right - 1));
-    expect(find.text('Y Axis'), findsOneWidget);
-    expect(find.text('Manual'), findsOneWidget);
-    expect(find.text('Auto'), findsOneWidget);
-    expect(find.text('Invert Axis'), findsOneWidget);
-    expect(find.text('Mouse Enabled'), findsOneWidget);
-    expect(find.text('Link Axis:'), findsOneWidget);
-
-    await tester.tap(find.text('Manual'));
+    final xMin = find.byKey(const ValueKey('plot-range-x-min'));
+    final xMax = find.byKey(const ValueKey('plot-range-x-max'));
+    final yMin = find.byKey(const ValueKey('plot-range-y-min'));
+    final yMax = find.byKey(const ValueKey('plot-range-y-max'));
+    await tester.enterText(xMin, '2');
+    controller.applyTelemetrySnapshot({'elapsedSeconds': 22});
     await tester.pump();
-    expect(controller.followLatest, isFalse);
-    await tester.enterText(
-      find.byKey(const ValueKey('desktop-x-minimum')),
-      '2',
-    );
-    await tester.enterText(
-      find.byKey(const ValueKey('desktop-x-maximum')),
-      '8',
-    );
+    expect(tester.widget<TextField>(xMin).controller!.text, '2');
+    expect(controller.followLatest, isTrue);
+    await tester.enterText(xMax, '8');
+    await tester.enterText(yMin, '-2');
+    await tester.enterText(yMax, '-3');
+    await tester.tap(find.text('应用'));
+    await tester.pump();
+    expect(controller.followLatest, isTrue);
+    expect(controller.plotAutoY, isTrue);
+    expect(find.text('请输入有效范围，最大值必须大于最小值。'), findsOneWidget);
+    await tester.enterText(yMax, '3');
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
-
     expect(controller.followLatest, isFalse);
     expect(controller.plotVisibleWindowSeconds, 6);
     expect(controller.plotWindowEndSeconds, 8);
+    expect(controller.plotAutoY, isFalse);
+    expect(controller.plotYMin, -2);
+    expect(controller.plotYMax, 3);
+    await tester.tap(find.text('适配全部'));
+    await tester.pumpAndSettle();
+    expect(controller.plotAutoY, isTrue);
     await tester.tapAt(tester.getTopRight(interaction) + const Offset(-20, 20));
     await tester.pumpAndSettle();
     expect(timeDilation, 1);
+    controller.dispose();
+  });
+
+  testWidgets(
+    'record overview pans, resizes and seeks without changing Y mode',
+    (tester) async {
+      final controller = await pumpChart(tester, withToolbar: true);
+      final overview = find.byKey(const ValueKey('plot-overview'));
+      final rect = tester.getRect(overview).deflate(1);
+      Offset at(double seconds) =>
+          Offset(rect.left + rect.width * seconds / 20, rect.center.dy);
+
+      expect(find.text('导出 CSV'), findsOneWidget);
+      expect(find.text('暂停绘图'), findsOneWidget);
+      expect(find.text('停止跟随'), findsOneWidget);
+      expect(find.text('变量实时趋势'), findsNothing);
+
+      final pan = await tester.startGesture(
+        at(14),
+        kind: PointerDeviceKind.mouse,
+      );
+      await pan.moveTo(at(10));
+      await pan.up();
+      await tester.pump();
+      expect(telemetryTimeWindow(controller).start, closeTo(4, 1e-8));
+      expect(telemetryTimeWindow(controller).end, closeTo(16, 1e-8));
+      expect(controller.followLatest, isFalse);
+      expect(controller.plotAutoY, isTrue);
+
+      final trim = await tester.startGesture(
+        at(16),
+        kind: PointerDeviceKind.mouse,
+      );
+      await trim.moveTo(at(14));
+      await trim.up();
+      await tester.pump();
+      expect(telemetryTimeWindow(controller).start, closeTo(4, 1e-8));
+      expect(telemetryTimeWindow(controller).end, closeTo(14, 1e-8));
+
+      await tester.tapAt(at(1), kind: PointerDeviceKind.mouse);
+      await tester.pump();
+      expect(telemetryTimeWindow(controller).start, closeTo(0, 1e-8));
+      expect(telemetryTimeWindow(controller).end, closeTo(10, 1e-8));
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(rangeMenu, findsOneWidget);
+      final range = tester.getRect(rangeMenu);
+      final xMin = find.byKey(const ValueKey('plot-range-x-min'));
+      expect(tester.getRect(xMin).left, greaterThan(range.left));
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(rangeMenu, findsNothing);
+      controller.dispose();
+    },
+  );
+
+  testWidgets('plot toolbar and range panel fit a narrow window', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 480);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final controller = await pumpChart(tester, withToolbar: true, width: 320);
+    final overview = find.byKey(const ValueKey('plot-overview'));
+    final action = find.text('导出 CSV');
+    expect(
+      tester.getBottomLeft(action).dy,
+      lessThan(tester.getTopLeft(overview).dy),
+    );
+    final rightClick = await tester.startGesture(
+      tester.getCenter(overview),
+      kind: PointerDeviceKind.mouse,
+      buttons: kSecondaryMouseButton,
+    );
+    await rightClick.up();
+    await tester.pumpAndSettle();
+    expect(rangeMenu, findsOneWidget);
+    expect(tester.getRect(rangeMenu).right, lessThanOrEqualTo(320));
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
     controller.dispose();
   });
 
@@ -463,7 +543,7 @@ void main() {
               mappingFor(after).mapY(anchorY),
               closeTo(localStart.dy, 1e-8),
             );
-            expect(find.text('View All'), findsNothing);
+            expect(rangeMenu, findsNothing);
           }
           expect(controller.followLatest, isFalse);
           expect(controller.plotAutoY, isFalse);
@@ -476,7 +556,7 @@ void main() {
           expect(restored.xMax, closeTo(before.xMax, 1e-9));
           expect(restored.yMin, closeTo(before.yMin, 1e-9));
           expect(restored.yMax, closeTo(before.yMax, 1e-9));
-          expect(find.text('View All'), findsNothing);
+          expect(rangeMenu, findsNothing);
           controller.dispose();
         },
       );
@@ -634,7 +714,7 @@ void main() {
           expect(after.yMin, before.yMin);
           expect(after.yMax, before.yMax);
         }
-        expect(find.text('View All'), findsNothing);
+        expect(rangeMenu, findsNothing);
         controller.dispose();
       },
     );
@@ -656,7 +736,7 @@ void main() {
     await drag.moveBy(const Offset(30, -30));
     await drag.cancel();
     await tester.pumpAndSettle();
-    expect(find.text('View All'), findsNothing);
+    expect(rangeMenu, findsNothing);
 
     final beforePan = telemetryViewport(controller, size);
     final pan = await tester.startGesture(
@@ -671,7 +751,7 @@ void main() {
     expect(afterPan.ySpan, closeTo(beforePan.ySpan, 1e-9));
     expect(afterPan.xMin, lessThan(beforePan.xMin));
     expect(afterPan.yMin, greaterThan(beforePan.yMin));
-    expect(find.text('View All'), findsNothing);
+    expect(rangeMenu, findsNothing);
     controller.dispose();
   });
 
@@ -957,15 +1037,13 @@ void main() {
     expect(find.text('跟随最新'), findsOneWidget);
     expect(find.text('X 轴详细设置…'), findsOneWidget);
     expect(find.text('Y 轴详细设置…'), findsOneWidget);
-    expect(find.text('View All'), findsNothing);
+    expect(rangeMenu, findsNothing);
 
     await touch.up();
     controller.dispose();
   });
 
-  testWidgets('desktop one-button mode performs rectangle zoom', (
-    tester,
-  ) async {
+  testWidgets('desktop rectangle mode performs rectangle zoom', (tester) async {
     final controller = await pumpChart(tester);
     final interaction = find.byKey(
       const ValueKey('telemetry-chart-interaction'),
@@ -978,9 +1056,15 @@ void main() {
     );
     await rightClick.up();
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Mouse Mode'));
+    await tester.tap(find.text('轴与鼠标设置'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('1 Button'));
+    await tester.tap(find.byKey(const ValueKey('compact-dropdown-平移')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('dropdown-item-框选缩放')));
+    await tester.pumpAndSettle();
+    expect(rangeMenu, findsOneWidget);
+    expect(find.byKey(const ValueKey('compact-dropdown-框选缩放')), findsOneWidget);
+    await tester.tapAt(tester.getTopLeft(interaction) + const Offset(22, 22));
     await tester.pumpAndSettle();
 
     final before = telemetryViewport(controller, tester.getSize(interaction));
@@ -1012,7 +1096,7 @@ void main() {
     );
     expect(afterRightDrag.xSpan, lessThan(after.xSpan));
     expect(afterRightDrag.ySpan, lessThan(after.ySpan));
-    expect(find.text('View All'), findsNothing);
+    expect(rangeMenu, findsNothing);
 
     final middleDrag = await tester.startGesture(
       center,
@@ -1049,7 +1133,7 @@ void main() {
     );
     await rightClick.up();
     await tester.pumpAndSettle();
-    expect(find.text('View All'), findsOneWidget);
+    expect(rangeMenu, findsOneWidget);
 
     final dismissClick = await tester.startGesture(
       chartRect.topRight + const Offset(-20, 20),
@@ -1058,7 +1142,7 @@ void main() {
     await dismissClick.up();
     await tester.pumpAndSettle();
 
-    expect(find.text('View All'), findsNothing);
+    expect(rangeMenu, findsNothing);
     expect(timeDilation, 1);
     controller.dispose();
   });

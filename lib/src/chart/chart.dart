@@ -7,10 +7,10 @@ import 'package:flutter/material.dart';
 
 import 'axis_settings.dart';
 import 'cartesian_renderer.dart';
-import 'desktop_axis_menu.dart';
 import 'hover.dart';
 import 'inspection_anchor.dart';
 import 'painter.dart';
+import 'plot_range_menu.dart';
 import 'selection_painter.dart';
 import 'trackpad.dart';
 import 'viewport.dart';
@@ -26,10 +26,10 @@ class TelemetryChart extends StatefulWidget {
   final TakeALookController controller;
 
   @override
-  State<TelemetryChart> createState() => _TelemetryChartState();
+  TelemetryChartState createState() => TelemetryChartState();
 }
 
-class _TelemetryChartState extends State<TelemetryChart> {
+class TelemetryChartState extends State<TelemetryChart> {
   final MenuController _desktopMenuController = MenuController();
   final ValueNotifier<Offset?> _hoverPosition = ValueNotifier(null);
   final TelemetryHoverTracker _hoverTracker = TelemetryHoverTracker();
@@ -55,6 +55,7 @@ class _TelemetryChartState extends State<TelemetryChart> {
   Size _size = Size.zero;
   PointerDeviceKind _lastPointerKind = PointerDeviceKind.mouse;
   _DesktopMouseMode _desktopMouseMode = _DesktopMouseMode.pan;
+  bool _focusRangeInput = false;
   TalMenuAnimationLease? _menuAnimationLease;
 
   TakeALookController get controller => widget.controller;
@@ -98,11 +99,25 @@ class _TelemetryChartState extends State<TelemetryChart> {
         return MenuAnchor(
           key: const ValueKey('desktop-plot-menu-anchor'),
           controller: _desktopMenuController,
-          style: Theme.of(context).menuTheme.style,
+          style: Theme.of(context).menuTheme.style?.copyWith(
+            padding: const WidgetStatePropertyAll(EdgeInsets.zero),
+          ),
           consumeOutsideTap: true,
           animated: true,
           onAnimationStatusChanged: _handleDesktopMenuAnimationStatus,
-          menuChildren: _buildDesktopMenu(),
+          menuChildren: [
+            PlotRangeMenu(
+              controller: controller,
+              viewport: () => telemetryViewport(controller, _size),
+              autofocus: _focusRangeInput,
+              rectangleZoom: _desktopMouseMode == _DesktopMouseMode.rect,
+              onRectangleZoomChanged: (rectangle) => setState(() {
+                _desktopMouseMode = rectangle
+                    ? _DesktopMouseMode.rect
+                    : _DesktopMouseMode.pan;
+              }),
+            ),
+          ],
           child: MouseRegion(
             onEnter: (event) => _updateTrackpadCapture(event.localPosition),
             onHover: (event) {
@@ -291,8 +306,23 @@ class _TelemetryChartState extends State<TelemetryChart> {
     });
   }
 
-  void _openDesktopMenu(Offset position) {
+  void openRangeMenu(Offset? globalPosition) {
+    final box = context.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) return;
+    final local = globalPosition == null
+        ? const Offset(12, 6)
+        : box.globalToLocal(globalPosition);
+    _openDesktopMenu(
+      Offset(local.dx, math.max(0, local.dy)),
+      focusInput: globalPosition == null,
+    );
+  }
+
+  void _openDesktopMenu(Offset position, {bool focusInput = false}) {
     _setTrackpadCapture(false);
+    if (_focusRangeInput != focusInput) {
+      setState(() => _focusRangeInput = focusInput);
+    }
     if (!_desktopMenuController.isOpen && _menuAnimationLease == null) {
       _menuAnimationLease = beginTalMenuAnimation();
     }
@@ -740,78 +770,6 @@ class _TelemetryChartState extends State<TelemetryChart> {
       invertX: controller.plotInvertX,
       invertY: controller.plotInvertY,
     );
-  }
-
-  List<Widget> _buildDesktopMenu() {
-    return [
-      MenuItemButton(
-        key: const ValueKey('desktop-plot-view-all'),
-        onPressed: controller.showAllPlotSamples,
-        child: const Text('View All'),
-      ),
-      SubmenuButton(
-        key: const ValueKey('desktop-plot-x-axis'),
-        menuStyle: desktopAxisSubmenuStyle,
-        animated: true,
-        menuChildren: [
-          DesktopAxisMenu(
-            key: const ValueKey('desktop-plot-x-axis-controls'),
-            controller: controller,
-            xAxis: true,
-            onChanged: _refreshDesktopMenu,
-          ),
-        ],
-        child: const Text('X Axis'),
-      ),
-      SubmenuButton(
-        key: const ValueKey('desktop-plot-y-axis'),
-        menuStyle: desktopAxisSubmenuStyle,
-        animated: true,
-        menuChildren: [
-          DesktopAxisMenu(
-            key: const ValueKey('desktop-plot-y-axis-controls'),
-            controller: controller,
-            xAxis: false,
-            onChanged: _refreshDesktopMenu,
-          ),
-        ],
-        child: const Text('Y Axis'),
-      ),
-      SubmenuButton(
-        key: const ValueKey('desktop-plot-mouse-mode'),
-        menuStyle: Theme.of(
-          context,
-        ).menuTheme.style?.copyWith(alignment: AlignmentDirectional.topEnd),
-        animated: true,
-        menuChildren: [
-          RadioMenuButton<_DesktopMouseMode>(
-            key: const ValueKey('desktop-mouse-mode-pan'),
-            value: _DesktopMouseMode.pan,
-            groupValue: _desktopMouseMode,
-            onChanged: (value) {
-              if (value == null) return;
-              setState(() => _desktopMouseMode = value);
-            },
-            child: const Text('3 Button'),
-          ),
-          RadioMenuButton<_DesktopMouseMode>(
-            key: const ValueKey('desktop-mouse-mode-rect'),
-            value: _DesktopMouseMode.rect,
-            groupValue: _desktopMouseMode,
-            onChanged: (value) {
-              if (value == null) return;
-              setState(() => _desktopMouseMode = value);
-            },
-            child: const Text('1 Button'),
-          ),
-        ],
-        child: const Text('Mouse Mode'),
-      ),
-    ];
-  }
-
-  void _refreshDesktopMenu() {
-    if (mounted) setState(() {});
   }
 
   Future<void> _showTouchContextMenu(Offset globalPosition) async {

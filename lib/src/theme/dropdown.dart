@@ -275,7 +275,7 @@ class _TalDropdownState<T> extends State<TalDropdown<T>>
     final menuWidth = math.min(anchor.size.width, overlay.size.width - 16);
     final horizontalShift = (overlay.size.width - 8 - topLeft.dx - menuWidth)
         .clamp(-menuWidth, 0.0);
-    return Stack(
+    final menu = Stack(
       children: [
         Positioned.fill(
           child: GestureDetector(
@@ -350,6 +350,11 @@ class _TalDropdownState<T> extends State<TalDropdown<T>>
         ),
       ],
     );
+    final parentMenu = MenuController.maybeOf(context);
+    // Keep the anchor menu open while the user picks a dropdown option.
+    return parentMenu?.isOpen == true
+        ? TapRegion(groupId: parentMenu, child: menu)
+        : menu;
   }
 
   KeyEventResult _handleMenuKey(FocusNode node, KeyEvent event) {

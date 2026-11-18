@@ -7,9 +7,9 @@ import '../telemetry/sample_buffer.dart';
 
 Rect telemetryPlotRect(Size size) => Rect.fromLTRB(
   52,
-  48,
+  18,
   math.max(54, size.width - 10),
-  math.max(50, size.height - 46),
+  math.max(20, size.height - 46),
 );
 
 class TelemetryViewport {
@@ -31,16 +31,22 @@ class TelemetryViewport {
   double get ySpan => math.max(1e-9, yMax - yMin);
 }
 
-TelemetryViewport telemetryViewport(TakeALookController controller, Size size) {
-  final plot = telemetryPlotRect(size);
-  controller.preparePlotHistory(pixelWidth: plot.width);
-  final plotted = controller.watches.where((item) => item.plotted);
+({double start, double end}) telemetryTimeWindow(
+  TakeALookController controller,
+) {
   var xMax = controller.plotWindowEndSeconds;
   final window = math.max(0.2, controller.plotVisibleWindowSeconds);
   var xMin = xMax - window;
   if (!controller.plotTimeOverscroll) xMin = math.max(0.0, xMin);
   if (xMax <= xMin) xMax = xMin + window;
+  return (start: xMin, end: xMax);
+}
 
+TelemetryViewport telemetryViewport(TakeALookController controller, Size size) {
+  final plot = telemetryPlotRect(size);
+  controller.preparePlotHistory(pixelWidth: plot.width);
+  final plotted = controller.watches.where((item) => item.plotted);
+  final (start: xMin, end: xMax) = telemetryTimeWindow(controller);
   var yMin = controller.plotAutoY
       ? double.infinity
       : controller.plotYMin ?? double.infinity;

@@ -1,75 +1,161 @@
-import 'dart:math' as math;
-
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../chart/chart.dart';
+import '../chart/plot_overview.dart';
 import '../controller/controller.dart';
 import '../models/models.dart';
 import '../theme/theme.dart';
 
-class PlotPanel extends StatelessWidget {
+class PlotPanel extends StatefulWidget {
   const PlotPanel({super.key, required this.controller});
 
   final TakeALookController controller;
 
   @override
+  State<PlotPanel> createState() => _PlotPanelState();
+}
+
+class _PlotPanelState extends State<PlotPanel> {
+  final _chart = GlobalKey<TelemetryChartState>();
+  TakeALookController get controller => widget.controller;
+
+  @override
   Widget build(BuildContext context) {
+    final touch = TalUiTheme.of(context).touchOptimized;
+    final overview = Padding(
+      padding: const EdgeInsets.fromLTRB(12, 6, 10, 6),
+      child: SizedBox(
+        height: touch ? 44 : 30,
+        child: PlotOverview(
+          controller: controller,
+          onOpenRange: (position) =>
+              _chart.currentState?.openRangeMenu(position),
+        ),
+      ),
+    );
     return Column(
       children: [
-        AnimatedBuilder(
-          animation: Listenable.merge([
-            controller.watchChanges,
-            controller.samplingChanges,
-            controller.plotControlChanges,
-          ]),
-          builder: (context, _) => Container(
-            height: 52,
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            decoration: const BoxDecoration(
-              color: TalColors.surface,
-              border: Border(bottom: BorderSide(color: TalColors.border)),
+        ColoredBox(
+          color: TalColors.background,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final stacked = constraints.maxWidth < 410;
+              final actions = _PlotToolbar(
+                controller: controller,
+                stacked: stacked,
+                touch: touch,
+              );
+              if (stacked) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [actions, overview],
+                );
+              }
+              return Row(
+                children: [
+                  Expanded(child: overview),
+                  actions,
+                ],
+              );
+            },
+          ),
+        ),
+        Expanded(
+          child: TelemetryChart(key: _chart, controller: controller),
+        ),
+      ],
+    );
+  }
+}
+
+class _PlotToolbar extends StatelessWidget {
+  const _PlotToolbar({
+    required this.controller,
+    required this.stacked,
+    required this.touch,
+  });
+
+  final TakeALookController controller;
+  final bool stacked;
+  final bool touch;
+
+  ButtonStyle _style({bool active = false}) => ButtonStyle(
+    padding: WidgetStatePropertyAll(
+      EdgeInsets.symmetric(horizontal: stacked ? 6 : 8),
+    ),
+    minimumSize: WidgetStatePropertyAll(Size(0, touch ? 44 : 29)),
+    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    visualDensity: VisualDensity.standard,
+    backgroundColor: active
+        ? const WidgetStatePropertyAll(TalColors.selection)
+        : null,
+    foregroundColor: active
+        ? const WidgetStatePropertyAll(TalColors.amber)
+        : null,
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: WorkbenchColors.border,
+        borderRadius: BorderRadius.only(
+          bottomLeft: Radius.circular(stacked ? 0 : 11),
+        ),
+      ),
+      child: Padding(
+        padding: EdgeInsets.only(left: stacked ? 0 : 1, bottom: 1),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: WorkbenchColors.surface,
+            borderRadius: BorderRadius.only(
+              bottomLeft: Radius.circular(stacked ? 0 : 10),
             ),
-            child: LayoutBuilder(
-              builder: (context, constraints) => SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: SizedBox(
-                  width: math.max(606, constraints.maxWidth),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          controller.watches.isEmpty
-                              ? '从符号列表加入变量并勾选绘制后显示曲线'
-                              : '${controller.watches.where((item) => item.plotted).length} 条曲线 · ${controller.sampleRateLabel}',
-                          style: talMuted,
-                        ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerRight,
+              child: AnimatedBuilder(
+                animation: controller.plotControlChanges,
+                builder: (context, _) => Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TalButton(
+                      style: _style(),
+                      onPressed: controller.exportCsv,
+                      child: const Text('导出 CSV'),
+                    ),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 6),
+                      child: SizedBox(
+                        width: 1,
+                        height: 16,
+                        child: ColoredBox(color: TalColors.border),
                       ),
-                      TalButton(
-                        onPressed: controller.togglePlotting,
-                        child: Text(
-                          controller.plottingPaused ? '继续绘图' : '暂停绘图',
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      TalButton(
-                        onPressed: controller.toggleFollowLatest,
-                        child: Text(controller.followLatest ? '停止跟随' : '跟随最新'),
-                      ),
-                      const SizedBox(width: 8),
-                      TalButton(
-                        onPressed: controller.exportCsv,
-                        child: const Text('导出原始CSV'),
-                      ),
-                    ],
-                  ),
+                    ),
+                    TalButton(
+                      variant: TalButtonVariant.text,
+                      style: _style(active: controller.followLatest),
+                      onPressed: controller.toggleFollowLatest,
+                      child: Text(controller.followLatest ? '停止跟随' : '跟随最新'),
+                    ),
+                    const SizedBox(width: 3),
+                    TalButton(
+                      variant: TalButtonVariant.text,
+                      style: _style(active: controller.plottingPaused),
+                      onPressed: controller.togglePlotting,
+                      child: Text(controller.plottingPaused ? '继续绘图' : '暂停绘图'),
+                    ),
+                  ],
                 ),
               ),
             ),
           ),
         ),
-        Expanded(child: TelemetryChart(controller: controller)),
-      ],
+      ),
     );
   }
 }

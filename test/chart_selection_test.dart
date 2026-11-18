@@ -465,7 +465,7 @@ void main() {
           expect(controller.plotHighlightedWatchKey, 'selected');
           expectRowSelected(tester, 'selected', true);
           expectRowSelected(tester, 'other', false);
-          expect(find.text('View All'), findsNothing);
+          expect(find.byKey(const ValueKey('plot-range-menu')), findsNothing);
 
           final cancel = await tester.startGesture(
             start,

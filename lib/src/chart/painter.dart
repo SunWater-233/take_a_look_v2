@@ -51,7 +51,6 @@ class TelemetryPainter extends CustomPainter {
     renderer.drawBackground();
     if (viewport.plot.width <= 1 || viewport.plot.height <= 1) return;
     renderer.drawGrid(visible: controller.plotShowGrid);
-    renderer.drawTitle('变量实时趋势');
 
     final plotted = telemetryPlotSeries(controller, viewport);
     final pointer = hoverPosition?.value;

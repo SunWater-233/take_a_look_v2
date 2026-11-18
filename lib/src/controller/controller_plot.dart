@@ -248,13 +248,7 @@ extension TakeALookControllerPlot on TakeALookController {
     ]);
   }
 
-  void showAllPlotSamples() {
-    if (_isDetachedRemote &&
-        _dispatchRemote(ControllerCommand.showAllPlotSamples)) {
-      return;
-    }
-    if (followLatest) _freezePlotViewportIfNeeded();
-    followLatest = false;
+  ({double start, double end})? get plotRecordedTimeRange {
     var first = double.infinity;
     var last = -double.infinity;
     if (rawRecording['historyPath'] is String) {
@@ -269,6 +263,7 @@ extension TakeALookControllerPlot on TakeALookController {
           last = math.max(last, samples.last.dx);
         } else {
           for (final point in samples) {
+            if (!point.dx.isFinite) continue;
             first = math.min(first, point.dx);
             last = math.max(last, point.dx);
           }
@@ -287,11 +282,21 @@ extension TakeALookControllerPlot on TakeALookController {
         );
       }
     }
-    if (!first.isFinite || !last.isFinite) {
-      first = 0;
-      last = math.max(0.2, elapsedSeconds);
+    if (!first.isFinite || !last.isFinite) return null;
+    return (start: math.max(0, first), end: last);
+  }
+
+  void showAllPlotSamples() {
+    if (_isDetachedRemote &&
+        _dispatchRemote(ControllerCommand.showAllPlotSamples)) {
+      return;
     }
-    plotVisibleWindowSeconds = math.max(0.2, last - math.max(0, first));
+    if (followLatest) _freezePlotViewportIfNeeded();
+    followLatest = false;
+    final (start: first, end: last) =
+        plotRecordedTimeRange ??
+        (start: 0.0, end: math.max(0.2, elapsedSeconds));
+    plotVisibleWindowSeconds = math.max(0.2, last - first);
     _frozenPlotEndSeconds = math.max(last, plotVisibleWindowSeconds);
     state.plot.timeOverscroll = false;
     plotAutoY = true;

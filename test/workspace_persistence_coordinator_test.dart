@@ -24,7 +24,8 @@ WorkspaceLayoutSnapshot _layout(String id) => WorkspaceLayoutSnapshot(
 );
 
 class _Repository extends WorkspaceLayoutRepository {
-  _Repository({this.onSave, this.onLoad}) : super(File('unused-layout.json'));
+  _Repository({File? file, this.onSave, this.onLoad})
+    : super(file ?? File('unused-layout.json'));
 
   final Future<void> Function(WorkspaceLayoutSnapshot)? onSave;
   final Future<WorkspaceLayoutSnapshot?> Function()? onLoad;
@@ -117,7 +118,10 @@ void main() {
     final file = File('${directory.path}/restored.talproj');
     await document.write(file);
     final startup = Completer<WorkspaceLayoutSnapshot?>();
-    final repository = _Repository(onLoad: () => startup.future);
+    final repository = _Repository(
+      file: File('${directory.path}/layout.json'),
+      onLoad: () => startup.future,
+    );
     final persistence = WorkspacePersistence(
       layoutRepository: () => repository,
     );

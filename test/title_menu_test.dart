@@ -264,6 +264,12 @@ void main() {
     expect(find.text('打开项目'), findsOneWidget);
     expect(find.text('保存项目'), findsOneWidget);
     expect(find.text('项目另存为'), findsOneWidget);
+    await tester.tap(find.text('最近打开工程'));
+    await tester.pumpAndSettle();
+    final emptyHistory = find.widgetWithText(MenuItemButton, '暂无最近打开的工程');
+    expect(tester.widget<MenuItemButton>(emptyHistory).onPressed, isNull);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
 

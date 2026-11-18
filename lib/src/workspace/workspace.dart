@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
@@ -90,6 +91,8 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
   );
 
   String? get projectPath => _persistence.projectPath;
+  ValueListenable<List<String>> get recentProjects =>
+      _persistence.recentProjects;
 
   bool get usesWorkbenchLayout => _layout.usesWorkbenchLayout;
   bool get resourceDocked => _session.groups.any(
@@ -1064,10 +1067,12 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
     }
   }
 
-  Future<void> openProject() async {
+  Future<void> openProject({String? path}) async {
     try {
-      final path = await _persistence.openProject(
-        pickPath: widget.projectOpenPathPicker ?? pickProjectOpenPath,
+      final openedPath = await _persistence.openProject(
+        pickPath: path == null
+            ? widget.projectOpenPathPicker ?? pickProjectOpenPath
+            : () async => path,
         isActive: () => mounted,
         apply: (document) async {
           await widget.controller.restoreProjectSettings(document.settings);
@@ -1082,9 +1087,9 @@ class DockingWorkspaceState extends State<DockingWorkspace> {
           return true;
         },
       );
-      if (!mounted || path == null) return;
+      if (!mounted || openedPath == null) return;
       _scheduleLayoutSave();
-      widget.controller.report('已打开项目：$path');
+      widget.controller.report('已打开项目：$openedPath');
     } catch (error) {
       if (mounted) {
         widget.controller.applyBackendEvent(BackendEventType.error, {

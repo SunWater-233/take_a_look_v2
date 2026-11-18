@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path/path.dart' as p;
 import 'package:window_manager/window_manager.dart';
 
 import '../controller/controller.dart';
@@ -406,6 +407,7 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
               Future.value(),
         ),
       ),
+      Builder(builder: _buildRecentProjectsMenu),
       const _MenuDivider(),
       _menuItem(label: '打开 ELF / AXF', onPressed: state?.chooseFirmwareFile),
       _menuItem(
@@ -430,6 +432,44 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
         onPressed: widget.recordingStorage?.openDirectory,
       ),
     ];
+  }
+
+  Widget _buildRecentProjectsMenu(BuildContext context) {
+    final workspace = widget.workspaceKey?.currentState;
+    final recentProjects = workspace?.recentProjects;
+    return ListenableBuilder(
+      listenable: Listenable.merge([recentProjects]),
+      builder: (context, _) {
+        final paths = recentProjects?.value ?? const <String>[];
+        return SubmenuButton(
+          menuStyle: Theme.of(
+            context,
+          ).menuTheme.style?.copyWith(alignment: AlignmentDirectional.topEnd),
+          animated: true,
+          menuChildren: [
+            if (paths.isEmpty) _menuItem(label: '暂无最近打开的工程', onPressed: null),
+            for (final path in paths)
+              MenuItemButton(
+                onPressed: () => unawaited(
+                  widget.workspaceKey?.currentState?.openProject(path: path) ??
+                      Future<void>.value(),
+                ),
+                child: Tooltip(
+                  message: path,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 320),
+                    child: Text(
+                      p.basename(path),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+          child: const Text('最近打开工程'),
+        );
+      },
+    );
   }
 
   void _stepUiScale(int direction) {

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
 import 'package:take_a_look_v2/src/app/app.dart';
 import 'package:take_a_look_v2/src/controller/controller.dart';
 import 'package:take_a_look_v2/src/models/models.dart';
@@ -19,7 +20,8 @@ void main() {
     'project round trip restores variables, drafts, settings and layout after restart',
     (tester) async {
       final directory = Directory.systemTemp.createTempSync('tal_project_');
-      final file = File('${directory.path}/work.talproj');
+      final file = File(p.join(directory.path, 'work.talproj'));
+      final alternate = File(p.join(directory.path, 'alternate.talproj'));
       var controller = (await tester.runAsync(
         () async => TakeALookController(),
       ))!..loadDemoSymbols();
@@ -32,6 +34,8 @@ void main() {
         await tester.binding.setSurfaceSize(null);
       });
       var picks = 0;
+      var openPicks = 0;
+      var openPath = file.path;
       Future<void> mount() async {
         await tester.binding.setSurfaceSize(const Size(1400, 1000));
         await tester.pumpWidget(
@@ -45,7 +49,10 @@ void main() {
                 picks++;
                 return file.path;
               },
-              projectOpenPathPicker: () async => file.path,
+              projectOpenPathPicker: () async {
+                openPicks++;
+                return openPath;
+              },
             ),
           ),
         );
@@ -57,6 +64,17 @@ void main() {
 
       DockingWorkspaceState workspace() =>
           tester.state(find.byType(DockingWorkspace));
+
+      Future<void> waitForIo(bool Function() ready) async {
+        for (var attempt = 0; attempt < 100 && !ready(); attempt++) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 10)),
+          );
+          await tester.pump();
+        }
+        expect(ready(), isTrue);
+      }
+
       await mount();
       expect(controller.monitorRateHz, 10);
       controller.selectSymbols(demoSymbols.take(3).map((s) => s.key));
@@ -100,23 +118,12 @@ void main() {
       await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
       await tester.sendKeyEvent(LogicalKeyboardKey.keyS);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
-      for (
-        var attempt = 0;
-        attempt < 100 &&
+      await waitForIo(
+        () =>
             controller.logs
-                    .where((e) => e.message.startsWith('项目已保存：'))
-                    .length <
-                2;
-        attempt++
-      ) {
-        await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 10)),
-        );
-        await tester.pump();
-      }
-      expect(
-        controller.logs.where((e) => e.message.startsWith('项目已保存：')),
-        hasLength(2),
+                .where((e) => e.message.startsWith('项目已保存：'))
+                .length ==
+            2,
       );
       expect(picks, 1);
       expect(
@@ -125,14 +132,46 @@ void main() {
         ))!.settings['sourceProject'],
         containsPair('buildCommand', 'make release'),
       );
+      await tester.runAsync(() async {
+        await file.copy(alternate.path);
+        await workspace().openProject();
+        openPath = alternate.path;
+        await workspace().openProject();
+      });
+      expect(openPicks, 2);
+
       await tester.pumpWidget(const SizedBox.shrink());
       await sync.dispose();
       controller.dispose();
       controller = (await tester.runAsync(() async => TakeALookController()))!;
       sync = MainWindowSync(controller);
       await mount();
-      await tester.runAsync(workspace().openProject);
+
+      Future<void> openHistory() async {
+        await tester.tap(find.text('文件'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('最近打开工程'));
+        await tester.pumpAndSettle();
+      }
+
+      await openHistory();
+      final workItem = find.text('work.talproj');
+      final alternateItem = find.text('alternate.talproj');
+      await waitForIo(() => workItem.evaluate().isNotEmpty);
       await tester.pumpAndSettle();
+      expect(find.byTooltip(file.path), findsOneWidget);
+      expect(
+        tester.getTopLeft(alternateItem).dy,
+        lessThan(tester.getTopLeft(workItem).dy),
+      );
+      await tester.tap(workItem);
+      final openedMessage = '已打开项目：${file.path}';
+      await waitForIo(
+        () => controller.logs.any((entry) => entry.message == openedMessage),
+      );
+      await tester.pumpAndSettle();
+      expect(openPicks, 2);
+      expect(workspace().projectPath, file.path);
       expect(controller.watches.map((w) => w.symbol.key), order);
       expect(controller.watches.last.readMode, WatchReadMode.monitor);
       expect(controller.watches.last.monitorRateHz, 5);
@@ -151,6 +190,12 @@ void main() {
       expect(workspace().outputDocked, isFalse);
       expect(workspace().projectLayout().toJson(), layout);
       expect(controller.watches.every((w) => w.samples.isEmpty), isTrue);
+      await openHistory();
+      expect(workItem, findsOneWidget);
+      expect(
+        tester.getTopLeft(workItem).dy,
+        lessThan(tester.getTopLeft(alternateItem).dy),
+      );
       expect(tester.takeException(), isNull);
     },
   );

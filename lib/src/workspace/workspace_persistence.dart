@@ -1,5 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+
+import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as p;
 
 import 'project_document.dart';
 import 'workspace_layout.dart';
@@ -9,7 +13,11 @@ import 'workspace_layout.dart';
 class WorkspacePersistence {
   WorkspacePersistence({required this.layoutRepository});
 
+  static const _recentProjectLimit = 10;
+
   final WorkspaceLayoutRepository Function() layoutRepository;
+  final _recentProjects = ValueNotifier<List<String>>(const []);
+  Future<void>? _recentProjectsLoad;
   Timer? _saveTimer;
   Future<void> _writeQueue = Future<void>.value();
   int _restoreRevision = 0;
@@ -20,6 +28,62 @@ class WorkspacePersistence {
   String? get projectPath => _projectPath;
   void restoreProjectPath(String? path) => _projectPath = path;
   bool get hasPendingSave => _saveTimer?.isActive == true;
+
+  ValueListenable<List<String>> get recentProjects {
+    unawaited(_initializeRecentProjects());
+    return _recentProjects;
+  }
+
+  File get _recentProjectsFile =>
+      File(p.join(layoutRepository().file.parent.path, 'recent-projects.json'));
+
+  Future<void> _initializeRecentProjects() =>
+      _recentProjectsLoad ??= _loadRecentProjects();
+
+  Future<void> _loadRecentProjects() async {
+    try {
+      final file = _recentProjectsFile;
+      if (!await file.exists()) return;
+      final data = jsonDecode(await file.readAsString());
+      if (_disposed || data is! List) return;
+      _recentProjects.value = List.unmodifiable(
+        data.whereType<String>().where(p.isAbsolute).take(_recentProjectLimit),
+      );
+    } on FileSystemException {
+      // The history is optional when the settings directory is inaccessible.
+    } on FormatException {
+      // A damaged history can be replaced after the next successful open.
+    }
+  }
+
+  Future<void> _recordRecentProject(String path) async {
+    await _initializeRecentProjects();
+    if (_disposed) return;
+    final absolutePath = p.normalize(p.absolute(path));
+    final paths = List<String>.unmodifiable(
+      [
+        absolutePath,
+        ..._recentProjects.value.where(
+          (entry) => !p.equals(entry, absolutePath),
+        ),
+      ].take(_recentProjectLimit),
+    );
+    _recentProjects.value = paths;
+
+    final file = _recentProjectsFile;
+    final temporary = File('${file.path}.$pid.tmp');
+    try {
+      await file.parent.create(recursive: true);
+      try {
+        await temporary.writeAsString(jsonEncode(paths), flush: true);
+        await temporary.rename(file.path);
+      } finally {
+        if (await temporary.exists()) await temporary.delete();
+      }
+    } on FileSystemException {
+      // Keep the current session's history available even if the write fails.
+    }
+  }
 
   void scheduleLayoutSave(Future<void> Function() save) {
     if (_disposed) return;
@@ -92,7 +156,8 @@ class WorkspacePersistence {
       _restoreRevision++;
       if (!await apply(document) || !_active(isActive)) return null;
       _projectPath = path;
-      return path;
+      await _recordRecentProject(path);
+      return _active(isActive) ? path : null;
     } finally {
       _projectBusy = false;
     }
@@ -104,5 +169,6 @@ class WorkspacePersistence {
     _disposed = true;
     _restoreRevision++;
     cancelPendingSave();
+    _recentProjects.dispose();
   }
 }

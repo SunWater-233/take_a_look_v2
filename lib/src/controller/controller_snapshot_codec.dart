@@ -174,6 +174,8 @@ class ControllerSnapshotCodec {
     SnapshotField.debug => {
       'stopRevision': source.state.debug.stopRevision,
       'executionState': source.state.debug.executionState.name,
+      'sourceStepAvailable': source.state.debug.sourceStepAvailable,
+      'stepOutAvailable': source.state.debug.stepOutAvailable,
       'sourceFiles': source.state.debug.sourceFiles,
       'sourceDefinitions': !source.state.debug.hasSourceDefinitionIndex
           ? null

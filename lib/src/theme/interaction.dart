@@ -26,6 +26,7 @@ class TalUiTheme extends ThemeExtension<TalUiTheme> {
       ? controlHeight
       : compactExtent;
   double get controlHeight => touchOptimized ? 48 : 32;
+  double get panelToolbarHeight => controlHeight + 16;
   double get iconButtonSize => touchOptimized ? 48 : 32;
   double get compactIconButtonSize => touchOptimized ? 48 : 22;
   double get menuItemHeight => controlHeight;

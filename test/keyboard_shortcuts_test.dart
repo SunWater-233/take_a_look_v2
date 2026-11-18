@@ -132,7 +132,7 @@ void main() {
   );
 
   testWidgets(
-    'source shortcuts survive tab switches, cleared focus and popup dismissal',
+    'source shortcuts survive tab switches, cleared focus and dialog dismissal',
     (tester) async {
       controller.applyDebugState({
         'sourceFiles': ['Z:/firmware/main.c'],
@@ -158,12 +158,15 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pump();
 
-      await tester.tap(find.byKey(const ValueKey('source-file-menu')));
+      await tester.tap(find.byKey(const ValueKey('source-project-settings')));
       await tester.pumpAndSettle();
+      final projectRoot = find.byKey(const ValueKey('source-project-root'));
+      expect(projectRoot, findsOneWidget);
       await command(tester, LogicalKeyboardKey.keyF);
       expect(search, findsNothing);
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
+      expect(projectRoot, findsNothing);
       await command(tester, LogicalKeyboardKey.keyF);
       expect(search, findsOneWidget);
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);

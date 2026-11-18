@@ -1,9 +1,17 @@
 part of 'source_debug_panel.dart';
 
-class _SourceBuildToolbar extends StatelessWidget {
-  const _SourceBuildToolbar({required this.controller, required this.compact});
+class _SourceToolbar extends StatelessWidget {
+  const _SourceToolbar({
+    required this.controller,
+    required this.compact,
+    required this.buildDebugControls,
+    required this.sourceTabs,
+  });
+
   final TakeALookController controller;
   final bool compact;
+  final Widget Function() buildDebugControls;
+  final Widget sourceTabs;
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -24,7 +32,10 @@ class _SourceBuildToolbar extends StatelessWidget {
         final firmwarePath = controller.firmwarePath;
         final canDownload =
             supportsDownload && connected && firmwarePath.isNotEmpty;
-        final iconsOnly = compact || constraints.maxWidth < 440;
+        final ui = TalUiTheme.of(context);
+        final narrow = constraints.maxWidth < (ui.touchOptimized ? 540 : 460);
+        final iconsOnly =
+            compact || constraints.maxWidth < (ui.touchOptimized ? 740 : 640);
         Future<void> settings() => showDialog<void>(
           context: context,
           builder: (_) => SourceProjectDialog(controller: controller),
@@ -104,71 +115,39 @@ class _SourceBuildToolbar extends StatelessWidget {
             ),
           ],
         );
-        final projectButton = Tooltip(
-          message: project.sourceRoot.isEmpty
-              ? '设置工程源码根目录'
-              : project.sourceRoot,
-          child: InkWell(
-            onTap: task.running ? null : settings,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 3),
-              child: Row(
-                children: [
-                  const Icon(
-                    Icons.folder_open,
-                    size: 17,
-                    color: TalColors.muted,
-                  ),
-                  const SizedBox(width: 7),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          project.sourceRoot.isEmpty
-                              ? '设置工程'
-                              : _basename(project.sourceRoot),
-                          style: talStrong,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        if (!compact && project.sourceRoot.isNotEmpty)
-                          Text(
-                            project.sourceRoot,
-                            style: talMuted.copyWith(fontSize: 11),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
+        final debugControls = buildDebugControls();
         return Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             FirmwareNotice(controller: controller),
             Container(
+              key: const ValueKey('source-toolbar'),
+              constraints: BoxConstraints(minHeight: ui.panelToolbarHeight),
               decoration: const BoxDecoration(
                 border: Border(bottom: BorderSide(color: TalColors.borderSoft)),
               ),
-              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-              child: !iconsOnly && constraints.maxWidth < 620
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 6),
+              child: narrow
                   ? Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        projectButton,
-                        Align(alignment: Alignment.centerRight, child: actions),
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: debugControls,
+                        ),
+                        Row(
+                          children: [
+                            Expanded(child: sourceTabs),
+                            actions,
+                          ],
+                        ),
                       ],
                     )
                   : Row(
                       children: [
-                        Expanded(child: projectButton),
+                        debugControls,
+                        Expanded(child: sourceTabs),
                         actions,
                       ],
                     ),

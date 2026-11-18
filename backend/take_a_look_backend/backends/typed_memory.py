@@ -142,10 +142,16 @@ class TypedMemoryBackend:
         return str(getattr(state, "name", state)).lower()
 
     def read_core_registers(self) -> dict[str, int]:
-        target = self._require_target()
-        names = ["r0", "r1", "r2", "r3", "r12", "sp", "lr", "pc", "xpsr"]
-        values = target.read_core_registers_raw(names)
+        return self.read_debug_registers(["r0", "r1", "r2", "r3", "r12", "sp", "lr", "pc", "xpsr"])
+
+    def read_debug_registers(self, names: list[str]) -> dict[str, int]:
+        values = self._require_target().read_core_registers_raw(names)
         return {name: int(value) for name, value in zip(names, values)}
+
+    def read_debug_memory(self, address: int, size: int) -> bytes:
+        data = self._read_block(address, size)
+        _check_read_size(data, size)
+        return data
 
     def _clear_read_plans(self) -> None:
         self._read_plan_signature = None

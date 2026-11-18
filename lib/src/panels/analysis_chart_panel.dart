@@ -205,7 +205,7 @@ class _AnalysisChartPanelState extends State<AnalysisChartPanel> {
 
   Widget _buildToolbar() {
     return Container(
-      height: TalUiTheme.of(context).controlHeight + 16,
+      height: TalUiTheme.of(context).panelToolbarHeight,
       padding: const EdgeInsets.symmetric(horizontal: 10),
       decoration: const BoxDecoration(
         color: TalColors.surface,

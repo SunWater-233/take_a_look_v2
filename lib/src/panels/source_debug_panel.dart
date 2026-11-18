@@ -1154,16 +1154,18 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
                   builder: (context, constraints) => Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      _SourceBuildToolbar(
+                      _SourceToolbar(
                         controller: controller,
                         compact: constraints.maxHeight < 260,
+                        buildDebugControls: _buildDebugControls,
+                        sourceTabs: _buildSourceTabs(),
                       ),
-                      AnimatedBuilder(
-                        animation: controller.sourceToolsChanges,
-                        builder: (context, _) => _buildToolbar(),
-                      ),
-                      if (_searchVisible) _buildSearchArea(),
-                      const Divider(height: 1, color: TalColors.borderSoft),
+                      if (_selectedPath != null && !widget.readOnlyPreview)
+                        _buildSourceStepToolbar(),
+                      if (_searchVisible) ...[
+                        _buildSearchArea(),
+                        const Divider(height: 1, color: TalColors.borderSoft),
+                      ],
                       Expanded(child: _buildBody()),
                       _buildRegisterStrip(),
                       if (!widget.externalOutput)
@@ -1387,228 +1389,159 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     );
   }
 
-  Widget _buildToolbar() {
+  Widget _buildDebugControls() {
     final state = controller.debugState.executionState;
     final connected =
         controller.connectionStatus == ConnectionStatus.connected &&
-        !controller.sourceTask.blocksProbe;
+        !controller.sourceTask.blocksProbe &&
+        !controller.sourceStepPending;
     final isRunning = state == DebugExecutionState.running;
-    final debugControls = <Widget>[
-      const SizedBox(width: 8),
-      _DebugToolbarButton(
-        key: const ValueKey('debug-run-control'),
-        tooltip: isRunning ? '暂停目标' : '继续运行',
-        icon: isRunning ? Icons.pause : Icons.play_arrow,
-        onPressed: !connected
-            ? null
-            : switch (state) {
-                DebugExecutionState.running => controller.haltTarget,
-                DebugExecutionState.halted => controller.resumeTarget,
-                _ =>
-                  controller.isGdbMemoryMode ? controller.resumeTarget : null,
-              },
-      ),
-      _DebugToolbarButton(
-        key: const ValueKey('debug-step'),
-        tooltip: '单条指令步进',
-        icon: Icons.skip_next,
-        onPressed:
-            connected &&
-                controller.supportsTargetControl &&
-                state == DebugExecutionState.halted
-            ? controller.stepTarget
-            : null,
-      ),
-      const SizedBox(width: 8),
-      _DebugStateBadge(state: state),
-      const SizedBox(width: 12),
-    ];
-    final navigationControls = <Widget>[
-      _DebugToolbarButton(
-        key: const ValueKey('source-navigation-back'),
-        tooltip: '返回上一位置 (Alt+←)',
-        icon: Icons.arrow_back,
-        onPressed: !_navigation.canGoBack
-            ? null
-            : () => _navigateHistory(back: true),
-      ),
-      _DebugToolbarButton(
-        key: const ValueKey('source-navigation-forward'),
-        tooltip: '前往下一位置 (Alt+→)',
-        icon: Icons.arrow_forward,
-        onPressed: !_navigation.canGoForward
-            ? null
-            : () => _navigateHistory(back: false),
-      ),
-    ];
-    final rootPicker = _DebugToolbarButton(
-      key: const ValueKey('source-root-picker'),
-      tooltip: controller.sourceProject.sourceRoot.isEmpty
-          ? '设置工程源码根目录'
-          : '工程源码根目录：${controller.sourceProject.sourceRoot}',
-      icon: controller.sourceProject.sourceRoot.isEmpty
-          ? Icons.folder_open_outlined
-          : Icons.folder_special_outlined,
-      onPressed: controller.sourceTask.running
-          ? null
-          : controller.chooseSourceRoot,
-    );
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final theme = TalUiTheme.of(context);
-        final debugHeight = theme.targetExtent(42);
-        final navigationHeight = theme.targetExtent(36);
-        if (constraints.maxWidth >= 480) {
-          return SizedBox(
-            height: debugHeight,
-            child: Row(
-              children: [
-                ...debugControls,
-                ...navigationControls,
-                Expanded(child: _buildSourceTabs()),
-                rootPicker,
-                const SizedBox(width: 8),
-              ],
-            ),
-          );
-        }
-        return SizedBox(
-          height: debugHeight + navigationHeight,
-          child: Column(
-            children: [
-              SizedBox(
-                height: debugHeight,
-                child: Row(
-                  children: [
-                    ...debugControls,
-                    const Spacer(),
-                    rootPicker,
-                    const SizedBox(width: 8),
-                  ],
-                ),
-              ),
-              SizedBox(
-                height: navigationHeight,
-                child: Row(
-                  children: [
-                    ...navigationControls,
-                    Expanded(child: _buildSourceTabs()),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        );
-      },
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _DebugToolbarButton(
+          key: const ValueKey('debug-run-control'),
+          tooltip: isRunning ? '暂停目标' : '继续运行',
+          icon: isRunning ? Icons.pause : Icons.play_arrow,
+          onPressed: !connected
+              ? null
+              : switch (state) {
+                  DebugExecutionState.running => controller.haltTarget,
+                  DebugExecutionState.halted => controller.resumeTarget,
+                  _ =>
+                    controller.isGdbMemoryMode ? controller.resumeTarget : null,
+                },
+        ),
+        _DebugToolbarButton(
+          key: const ValueKey('debug-step'),
+          tooltip: '单条指令步进',
+          icon: Icons.skip_next,
+          onPressed:
+              connected &&
+                  controller.supportsTargetControl &&
+                  state == DebugExecutionState.halted
+              ? controller.stepTarget
+              : null,
+        ),
+        const SizedBox(width: 8),
+        _DebugStateBadge(state: state),
+        const SizedBox(width: 12),
+        _DebugToolbarButton(
+          key: const ValueKey('source-navigation-back'),
+          tooltip: '返回上一位置 (Alt+←)',
+          icon: Icons.arrow_back,
+          onPressed: !_navigation.canGoBack
+              ? null
+              : () => _navigateHistory(back: true),
+        ),
+        _DebugToolbarButton(
+          key: const ValueKey('source-navigation-forward'),
+          tooltip: '前往下一位置 (Alt+→)',
+          icon: Icons.arrow_forward,
+          onPressed: !_navigation.canGoForward
+              ? null
+              : () => _navigateHistory(back: false),
+        ),
+      ],
     );
   }
+
+  Widget _buildSourceStepToolbar() => AnimatedBuilder(
+    animation: Listenable.merge([
+      controller.connectionChanges,
+      controller.sourceToolsChanges,
+      controller.debugChanges,
+      controller.symbolChanges,
+    ]),
+    builder: (context, _) => Align(
+      alignment: AlignmentDirectional.centerStart,
+      child: WorkbenchToolbarOutline(
+        attachment: WorkbenchToolbarAttachment.start,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 7),
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: AlignmentDirectional.centerStart,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final (step, label, icon) in const [
+                  (SourceStep.stepIn, '单步进入', Icons.arrow_downward),
+                  (SourceStep.stepOver, '单步越过', Icons.redo),
+                  (SourceStep.stepOut, '单步跳出', Icons.arrow_upward),
+                ])
+                  _DebugToolbarButton(
+                    key: ValueKey('debug-${step.name}'),
+                    tooltip: switch (controller.sourceStepDisabledReason(
+                      step,
+                    )) {
+                      final reason? => '$label · $reason',
+                      null => label,
+                    },
+                    icon: icon,
+                    onPressed: controller.sourceStepDisabledReason(step) == null
+                        ? () => unawaited(controller.stepSource(step))
+                        : null,
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
 
   Widget _buildSourceTabs() {
     final files = _sourceFiles;
     _scheduleTabOverflowUpdate();
     return SizedBox(
       height: TalUiTheme.of(context).targetExtent(32),
-      child: Row(
+      child: Stack(
         children: [
-          Expanded(
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: Listener(
-                    key: const ValueKey('source-tabs-scroll-area'),
-                    onPointerSignal: _handleTabPointerSignal,
-                    child: SingleChildScrollView(
-                      controller: _tabController,
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: [
-                          if (_openPaths.isEmpty)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                              ),
-                              child: Center(
-                                child: Text(
-                                  files.isEmpty
-                                      ? 'ELF 中没有源码调试信息'
-                                      : '从右侧列表打开源码文件',
-                                  style: talMuted.copyWith(fontSize: 12),
-                                ),
-                              ),
-                            )
-                          else
-                            for (final path in _openPaths)
-                              _buildSourceTab(path),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                Positioned(
-                  top: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: IgnorePointer(
-                    child: AnimatedOpacity(
-                      key: const ValueKey('source-tabs-right-fade'),
-                      opacity: _canScrollTabsRight ? 1 : 0,
-                      duration: const Duration(milliseconds: 120),
-                      child: Container(
-                        width: 54,
-                        decoration: const BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [Colors.transparent, TalColors.surface],
+          Positioned.fill(
+            child: Listener(
+              key: const ValueKey('source-tabs-scroll-area'),
+              onPointerSignal: _handleTabPointerSignal,
+              child: SingleChildScrollView(
+                controller: _tabController,
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    if (_openPaths.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        child: Center(
+                          child: Text(
+                            files.isEmpty ? 'ELF 中没有源码调试信息' : '按 Ctrl+F 查找源码文件',
+                            style: talMuted.copyWith(fontSize: 12),
                           ),
                         ),
-                      ),
-                    ),
-                  ),
+                      )
+                    else
+                      for (final path in _openPaths) _buildSourceTab(path),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
-          const SizedBox(width: 4),
-          PopupMenuButton<String>(
-            key: const ValueKey('source-file-menu'),
-            tooltip: '打开源码标签',
-            enabled: files.isNotEmpty,
-            onSelected: _openSource,
-            itemBuilder: (context) => [
-              for (final path in files)
-                PopupMenuItem<String>(
-                  key: ValueKey('source-file-option-$path'),
-                  value: path,
-                  child: Tooltip(
-                    message: path,
-                    child: Row(
-                      children: [
-                        Icon(
-                          _openPaths.any(
-                                (openPath) =>
-                                    controller.sourcePathsMatch(openPath, path),
-                              )
-                              ? Icons.check
-                              : Icons.description_outlined,
-                          size: 15,
-                          color: TalColors.muted,
-                        ),
-                        const SizedBox(width: 8),
-                        Flexible(
-                          child: Text(
-                            _basename(path),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
+          Positioned(
+            top: 0,
+            right: 0,
+            bottom: 0,
+            child: IgnorePointer(
+              child: AnimatedOpacity(
+                key: const ValueKey('source-tabs-right-fade'),
+                opacity: _canScrollTabsRight ? 1 : 0,
+                duration: const Duration(milliseconds: 120),
+                child: Container(
+                  width: 54,
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [Colors.transparent, TalColors.surface],
                     ),
                   ),
                 ),
-            ],
-            child: SizedBox(
-              width: TalUiTheme.of(context).targetExtent(28),
-              height: TalUiTheme.of(context).targetExtent(28),
-              child: const Icon(Icons.add, size: 17, color: TalColors.muted),
+              ),
             ),
           ),
         ],
@@ -1631,7 +1564,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
           child: Container(
             key: selected ? ValueKey('source-tab-active-$path') : null,
             constraints: const BoxConstraints(minWidth: 92, maxWidth: 230),
-            height: TalUiTheme.of(context).panelTabHeight,
+            height: TalUiTheme.of(context).controlHeight,
             padding: const EdgeInsets.only(left: 9, right: 3),
             decoration: BoxDecoration(
               border: Border(
@@ -1743,7 +1676,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
         icon: hasSourceFiles ? Icons.code : Icons.code_off,
         title: hasSourceFiles ? '选择要查看的源码' : '没有可显示的源码',
         detail: hasSourceFiles
-            ? '点击右上角 + 或按 Ctrl+F 查找并打开源码文件。'
+            ? '按 Ctrl+F 查找并打开源码文件。'
             : '请加载带 DWARF 调试信息的 ELF / AXF 文件',
         actions: _buildSourceSetupActions(),
       );

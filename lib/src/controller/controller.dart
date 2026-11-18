@@ -157,6 +157,7 @@ class TakeALookController extends ChangeNotifier {
   final Map<String, Set<String>?> _pendingRemoteMonitorScopes = {};
   final Set<String> _freeRtosViews = {};
   bool _freeRtosConfigPending = false;
+  bool _sourceStepPending = false;
   Set<String>? _lastMonitorEnabledKeys;
   ({String path, int line})? sourceLocationRequest;
   int _analysisDataRevision = 0;

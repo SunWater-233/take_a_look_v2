@@ -21,7 +21,7 @@ from take_a_look_backend.services.acquisition_clock import AcquisitionClock
 from take_a_look_backend.services.sample_pipeline import SamplePipeline
 from take_a_look_backend.services.recording import RawRecording, export_recording_csv
 from take_a_look_backend.services.debug_info import DebugInfoIndex, load_debug_info_from_elf
-from take_a_look_backend.services.debug_session import DebugSession
+from take_a_look_backend.services.debug_session import DebugSession, SOURCE_STEP_ACTIONS
 from take_a_look_backend.services.symbols import load_symbols_from_elf
 from take_a_look_backend.services.source_project import default_config, project_snapshot
 from take_a_look_backend.services.firmware import FirmwareImage, FirmwareServiceMixin
@@ -553,8 +553,9 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
 
     def _debug_control(self, params: Mapping[str, object]) -> dict[str, object]:
         action = _required_string(params, "action")
-        if action not in {"halt", "resume", "step"}:
-            raise ProtocolError("invalid_request", "action must be halt, resume, or step.")
+        source_step = action in SOURCE_STEP_ACTIONS
+        if not source_step and action not in {"halt", "resume", "step"}:
+            raise ProtocolError("invalid_request", "Unknown debug action.")
         with self._lock:
             if self._connection_status != "connected":
                 raise ProtocolError("not_connected", "Connect a debug probe before controlling the target.")
@@ -563,12 +564,23 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
             try:
                 if action == "halt":
                     self._memory.halt()
+                elif source_step:
+                    if not self._memory.capabilities.target_control:
+                        raise RuntimeError("当前连接不支持源码步进。")
+                    self._stop_memory_sampling_locked()
+                    self._debug.step_source(self._memory, action)
                 elif action == "resume":
                     self._debug.continue_or_step(self._memory, resume=True)
                 else:
                     self._debug.continue_or_step(self._memory, resume=False)
                 self._refresh_debug_state_locked(force=True)
             except Exception as error:
+                if source_step and not self._handle_connection_failure_locked(error):
+                    # A failed step may already have executed instructions or halted on the way.
+                    try:
+                        self._refresh_debug_state_locked(force=True)
+                    except Exception as refresh_error:
+                        self._handle_connection_failure_locked(refresh_error)
                 raise ProtocolError("debug_control_failed", "Unable to control the target.", str(error)) from error
             payload = self._debug.snapshot()
         return {"debug": payload}

@@ -97,61 +97,47 @@ class _PlotToolbar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: WorkbenchColors.border,
-        borderRadius: BorderRadius.only(
-          bottomLeft: Radius.circular(stacked ? 0 : 11),
-        ),
-      ),
+    return WorkbenchToolbarOutline(
+      attachment: stacked
+          ? WorkbenchToolbarAttachment.stretch
+          : WorkbenchToolbarAttachment.end,
       child: Padding(
-        padding: EdgeInsets.only(left: stacked ? 0 : 1, bottom: 1),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: WorkbenchColors.surface,
-            borderRadius: BorderRadius.only(
-              bottomLeft: Radius.circular(stacked ? 0 : 10),
-            ),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerRight,
-              child: AnimatedBuilder(
-                animation: controller.plotControlChanges,
-                builder: (context, _) => Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TalButton(
-                      style: _style(),
-                      onPressed: controller.exportCsv,
-                      child: const Text('导出 CSV'),
-                    ),
-                    const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 6),
-                      child: SizedBox(
-                        width: 1,
-                        height: 16,
-                        child: ColoredBox(color: TalColors.border),
-                      ),
-                    ),
-                    TalButton(
-                      variant: TalButtonVariant.text,
-                      style: _style(active: controller.followLatest),
-                      onPressed: controller.toggleFollowLatest,
-                      child: Text(controller.followLatest ? '停止跟随' : '跟随最新'),
-                    ),
-                    const SizedBox(width: 3),
-                    TalButton(
-                      variant: TalButtonVariant.text,
-                      style: _style(active: controller.plottingPaused),
-                      onPressed: controller.togglePlotting,
-                      child: Text(controller.plottingPaused ? '继续绘图' : '暂停绘图'),
-                    ),
-                  ],
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerRight,
+          child: AnimatedBuilder(
+            animation: controller.plotControlChanges,
+            builder: (context, _) => Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TalButton(
+                  style: _style(),
+                  onPressed: controller.exportCsv,
+                  child: const Text('导出 CSV'),
                 ),
-              ),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 6),
+                  child: SizedBox(
+                    width: 1,
+                    height: 16,
+                    child: ColoredBox(color: TalColors.border),
+                  ),
+                ),
+                TalButton(
+                  variant: TalButtonVariant.text,
+                  style: _style(active: controller.followLatest),
+                  onPressed: controller.toggleFollowLatest,
+                  child: Text(controller.followLatest ? '停止跟随' : '跟随最新'),
+                ),
+                const SizedBox(width: 3),
+                TalButton(
+                  variant: TalButtonVariant.text,
+                  style: _style(active: controller.plottingPaused),
+                  onPressed: controller.togglePlotting,
+                  child: Text(controller.plottingPaused ? '继续绘图' : '暂停绘图'),
+                ),
+              ],
             ),
           ),
         ),

@@ -18,6 +18,53 @@ abstract final class WorkbenchColors {
   static const success = TalColors.success;
 }
 
+enum WorkbenchToolbarAttachment { start, end, stretch }
+
+class WorkbenchToolbarOutline extends StatelessWidget {
+  const WorkbenchToolbarOutline({
+    required this.attachment,
+    required this.child,
+    super.key,
+  });
+
+  final WorkbenchToolbarAttachment attachment;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    BorderRadiusDirectional radius(double value) => switch (attachment) {
+      WorkbenchToolbarAttachment.start => BorderRadiusDirectional.only(
+        bottomEnd: Radius.circular(value),
+      ),
+      WorkbenchToolbarAttachment.end => BorderRadiusDirectional.only(
+        bottomStart: Radius.circular(value),
+      ),
+      WorkbenchToolbarAttachment.stretch => BorderRadiusDirectional.zero,
+    };
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: WorkbenchColors.border,
+        borderRadius: radius(11),
+      ),
+      child: Padding(
+        padding: EdgeInsetsDirectional.only(
+          start: attachment == WorkbenchToolbarAttachment.end ? 1 : 0,
+          end: attachment == WorkbenchToolbarAttachment.start ? 1 : 0,
+          bottom: 1,
+        ),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: WorkbenchColors.surface,
+            borderRadius: radius(10),
+          ),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
 const workbenchBody = TextStyle(
   fontFamily: 'MiSans',
   fontSize: 13,

@@ -86,6 +86,8 @@ class SourceWorkspaceState {
 
 class DebugState {
   DebugExecutionState executionState = DebugExecutionState.unavailable;
+  bool sourceStepAvailable = false;
+  bool stepOutAvailable = false;
   final List<String> sourceFiles = <String>[];
   final List<SourceDefinition> sourceDefinitions = <SourceDefinition>[];
   bool hasSourceDefinitionIndex = false;

@@ -64,6 +64,36 @@ extension TakeALookControllerDebug on TakeALookController {
 
   void stepTarget() => _dispatchCommand(ControllerCommand.debugControl, 'step');
 
+  bool get sourceStepPending => _sourceStepPending;
+
+  String? sourceStepDisabledReason(SourceStep step) {
+    if (_sourceStepPending) return '正在执行源码步进';
+    if (connectionStatus != ConnectionStatus.connected) return '请先连接调试目标';
+    if (!supportsTargetControl) return '当前连接不支持源码步进';
+    if (sourceTask.blocksProbe) return '请等待固件下载完成';
+    if (firmwareRequiresDownload) return '固件已变化，请先重新下载';
+    if (debugState.executionState != DebugExecutionState.halted) {
+      return '请先暂停目标';
+    }
+    if (step == SourceStep.stepOut) {
+      return debugState.stepOutAvailable ? null : '当前停止位置没有可用的调用帧信息';
+    }
+    return debugState.sourceStepAvailable ? null : '当前停止位置没有可用的源码行信息';
+  }
+
+  Future<void> stepSource(SourceStep step) async {
+    final send = backendCommand ?? remoteCommand;
+    if (send == null || sourceStepDisabledReason(step) != null) return;
+    _sourceStepPending = true;
+    _emitState([signals.debug]);
+    try {
+      await send(ControllerCommand.debugControl, step.name);
+    } finally {
+      _sourceStepPending = false;
+      if (!_disposed) _emitState([signals.debug]);
+    }
+  }
+
   Set<int> executableLinesFor(String path) {
     final normalized = path.replaceAll('\\', '/').toLowerCase();
     for (final entry in debugState.executableLines.entries) {
@@ -109,6 +139,8 @@ extension TakeALookControllerDebug on TakeALookController {
       (candidate) => candidate.name == execution,
       orElse: () => DebugExecutionState.unknown,
     );
+    debugState.sourceStepAvailable = data['sourceStepAvailable'] == true;
+    debugState.stepOutAvailable = data['stepOutAvailable'] == true;
     if (data['sourceFiles'] case final List rawFiles) {
       debugState.sourceFiles
         ..clear()

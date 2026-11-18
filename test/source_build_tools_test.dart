@@ -26,7 +26,7 @@ void main() {
     controller.applySnapshot({'connectionStatus': 'connected'});
     await tester.pumpWidget(_projectSettingsHarness(controller));
     final download = find.byKey(const ValueKey('source-download'));
-    expect(tester.widget<TalButton>(download).onPressed, isNull);
+    expect(tester.widget<TalIconButton>(download).onPressed, isNull);
 
     controller.applyBackendEvent(BackendEventType.state, {
       'sourceProject': {'firmwarePath': '${Directory.current.path}/motor.elf'},
@@ -36,16 +36,16 @@ void main() {
     await tester.pump();
     expect(controller.sourceProject.sourceRoot, isEmpty);
     expect(controller.sourceProject.firmwarePath, endsWith('motor.elf'));
-    expect(tester.widget<TalButton>(download).onPressed, isNotNull);
+    expect(tester.widget<TalIconButton>(download).onPressed, isNotNull);
     expect(
       tester
-          .widget<TalButton>(find.byKey(const ValueKey('source-build')))
+          .widget<TalIconButton>(find.byKey(const ValueKey('source-build')))
           .onPressed,
       isNull,
     );
     expect(
       tester
-          .widget<TalButton>(
+          .widget<TalIconButton>(
             find.byKey(const ValueKey('source-build-download')),
           )
           .onPressed,
@@ -61,13 +61,13 @@ void main() {
       'sourceTask': {'id': 'flash', 'status': 'running', 'phase': 'download'},
     });
     await tester.pump();
-    expect(tester.widget<TalButton>(download).onPressed, isNull);
+    expect(tester.widget<TalIconButton>(download).onPressed, isNull);
     controller.applySnapshot({
       'sourceTask': {'id': 'flash', 'status': 'succeeded'},
       'connectionStatus': 'disconnected',
     });
     await tester.pump();
-    expect(tester.widget<TalButton>(download).onPressed, isNull);
+    expect(tester.widget<TalIconButton>(download).onPressed, isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
@@ -253,6 +253,7 @@ void main() {
     });
     await tester.pumpWidget(
       MaterialApp(
+        theme: buildTalTheme(),
         home: Scaffold(
           body: buildWorkspacePanelBody(
             WorkspacePanelId.sourceDebug,
@@ -261,7 +262,23 @@ void main() {
         ),
       ),
     );
-    await tester.tap(find.byKey(const ValueKey('source-build')));
+    final build = find.byKey(const ValueKey('source-build'));
+    final toolbar = find.byKey(const ValueKey('source-toolbar'));
+    final ui = TalUiTheme.of(tester.element(toolbar));
+    expect(tester.getSize(toolbar).height, ui.panelToolbarHeight);
+    final toolbarY = tester.getCenter(build).dy;
+    for (final key in [
+      'debug-step',
+      'source-navigation-back',
+      'source-tabs-scroll-area',
+      'source-project-settings',
+    ]) {
+      expect(tester.getCenter(find.byKey(ValueKey(key))).dy, toolbarY);
+    }
+    expect(find.text('设置工程'), findsNothing);
+    expect(find.byKey(const ValueKey('source-file-menu')), findsNothing);
+    expect(find.byKey(const ValueKey('source-root-picker')), findsNothing);
+    await tester.tap(build);
     await tester.pump();
     expect(commands, contains(ControllerCommand.startSourceTask));
     await tester.tap(find.byKey(const ValueKey('source-project-settings')));

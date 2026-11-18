@@ -7,6 +7,10 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePath
 
+from elftools.elf.constants import SH_FLAGS
+
+from take_a_look_backend.services.source_stepping import SourceStepInfo
+
 
 @dataclass(frozen=True)
 class SourceLocation:
@@ -38,7 +42,9 @@ class DebugInfoIndex:
     def __init__(
         self, locations: list[SourceLocation] | None = None,
         definitions: list[SourceDefinition] | None = None,
+        *, source_steps: SourceStepInfo | None = None,
     ) -> None:
+        self.source_steps = source_steps
         unique = {
             (_path_key(item.path), item.line, item.address): item
             for item in locations or []
@@ -102,6 +108,12 @@ class DebugInfoIndex:
         first_at_address = bisect.bisect_left(self._addresses, resolved_address)
         return self._locations[first_at_address]
 
+    def resolve_step_location(self, address: int) -> SourceLocation | None:
+        steps = self.source_steps
+        if steps is not None and address in steps.lines and address in steps.code:
+            return self.resolve_address(address)
+        return None
+
     def _resolve_path_key(self, path: str) -> str | None:
         key = _path_key(path)
         if key in self._lines_by_path:
@@ -118,6 +130,7 @@ def load_debug_info_from_elf(
 
     locations: list[SourceLocation] = []
     definitions: list[SourceDefinition] = []
+    line_ranges: list[tuple[int, int]] = []
     total = 0
     with (nullcontext(context) if context is not None else ElfLoadContext(path)) as loaded:
         elf = loaded.elf
@@ -151,12 +164,22 @@ def load_debug_info_from_elf(
                     continue
                 if definition is not None:
                     definitions.append(definition)
+            sequence_start = None
             for entry in entries:
                 state = entry.state
-                if state is None or state.end_sequence or state.line is None:
+                if state is None:
+                    continue
+                if state.end_sequence:
+                    if sequence_start is not None:
+                        line_ranges.append((sequence_start, int(state.address)))
+                    sequence_start = None
+                    continue
+                if not state.line:
                     continue
                 source_path = _source_path(line_program, int(state.file), compile_dir)
                 if source_path:
+                    if sequence_start is None:
+                        sequence_start = int(state.address)
                     locations.append(
                         SourceLocation(
                             path=source_path,
@@ -164,9 +187,14 @@ def load_debug_info_from_elf(
                             address=int(state.address),
                         )
                     )
+        source_steps = None
+        if line_ranges and elf['e_machine'] == 'EM_ARM' and elf.elfclass == 32 and elf.little_endian:
+            executable_ranges = [(section['sh_addr'], section['sh_addr'] + section['sh_size'])
+                                 for section in elf.iter_sections() if section['sh_flags'] & SH_FLAGS.SHF_EXECINSTR]
+            source_steps = SourceStepInfo(dwarf_info, line_ranges, executable_ranges)
     if progress is not None:
         progress("source", max(0, total - 1), total)
-    result = DebugInfoIndex(locations, definitions)
+    result = DebugInfoIndex(locations, definitions, source_steps=source_steps)
     if progress is not None:
         progress("source", total, total)
     return result

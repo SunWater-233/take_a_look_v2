@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/gestures.dart';
@@ -6,11 +7,112 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:take_a_look_v2/src/controller/controller.dart';
+import 'package:take_a_look_v2/src/protocol/commands.dart';
 import 'package:take_a_look_v2/src/workspace/panel_types.dart';
 import 'package:take_a_look_v2/src/panels/panels.dart';
 import 'package:take_a_look_v2/src/theme/theme.dart';
 
 void main() {
+  testWidgets(
+    'source step buttons dispatch each action and prevent repeated steps',
+    (tester) async {
+      const path = 'C:/firmware/src/main.c';
+      final calls = <Object?>[];
+      final pendingStep = Completer<void>();
+      final controller = TakeALookController(
+        backendCommand: (command, args) async {
+          if (command != ControllerCommand.debugControl) return;
+          calls.add(args);
+          if (args == 'stepIn') await pendingStep.future;
+        },
+      );
+      addTearDown(controller.dispose);
+      controller.setPresentationActive(false);
+      controller.openSourceFile(path);
+      final paused = {
+        'executionState': 'halted',
+        'sourceFiles': [path],
+        'sourceStepAvailable': true,
+        'stepOutAvailable': true,
+      };
+      controller.applyDebugState(paused);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildTalTheme(),
+          home: Scaffold(
+            body: buildWorkspacePanelBody(
+              WorkspacePanelId.sourceDebug,
+              controller,
+            ),
+          ),
+        ),
+      );
+      final stepIn = find.byKey(const ValueKey('debug-stepIn'));
+      final stepOver = find.byKey(const ValueKey('debug-stepOver'));
+      final stepOut = find.byKey(const ValueKey('debug-stepOut'));
+      final outline = find.byType(WorkbenchToolbarOutline);
+      final sourceToolbar = find.byKey(const ValueKey('source-toolbar'));
+      expect(
+        tester.getTopLeft(outline).dx,
+        tester.getTopLeft(sourceToolbar).dx,
+      );
+      expect(
+        tester.getSize(outline).width,
+        lessThan(tester.getSize(sourceToolbar).width),
+      );
+      final decoration =
+          tester
+                  .widget<DecoratedBox>(
+                    find
+                        .descendant(
+                          of: outline,
+                          matching: find.byType(DecoratedBox),
+                        )
+                        .first,
+                  )
+                  .decoration
+              as BoxDecoration;
+      expect(decoration.color, WorkbenchColors.border);
+      expect(
+        decoration.borderRadius,
+        const BorderRadiusDirectional.only(bottomEnd: Radius.circular(11)),
+      );
+      bool enabled(Finder button) =>
+          tester
+              .widget<TalIconButton>(
+                find.descendant(
+                  of: button,
+                  matching: find.byType(TalIconButton),
+                ),
+              )
+              .onPressed !=
+          null;
+      expect(enabled(stepIn), isFalse);
+
+      controller.applySnapshot({'connectionStatus': 'connected'});
+      controller.applyDebugState({...paused, 'stepOutAvailable': false});
+      await tester.pump();
+      expect(enabled(stepIn), isTrue);
+      expect(enabled(stepOut), isFalse);
+      await tester.tap(stepIn);
+      await tester.pump();
+      expect(enabled(stepOver), isFalse);
+      expect(calls, ['stepIn']);
+      pendingStep.complete();
+      await tester.pump();
+
+      controller.applyDebugState(paused);
+      await tester.pump();
+      await tester.tap(stepOver);
+      await tester.pump();
+      await tester.tap(stepOut);
+      await tester.pump();
+      expect(calls, ['stepIn', 'stepOver', 'stepOut']);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   testWidgets(
     'firmware refresh reloads cached source text and executable lines',
     (tester) async {
@@ -245,6 +347,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        theme: buildTalTheme(),
         home: Scaffold(
           body: SizedBox(
             width: 900,
@@ -272,11 +375,8 @@ void main() {
     expect(find.text('符号文件已打开'), findsOneWidget);
     expect(find.text('文件根目录已选择'), findsOneWidget);
 
-    await tester.tap(find.byKey(const ValueKey('source-file-menu')));
-    await tester.pumpAndSettle();
-    await tester.tap(
-      find.byKey(const ValueKey('source-file-option-$debugPath')),
-    );
+    await _searchSources(tester, 'mapped_source.c');
+    await tester.tap(find.byKey(const ValueKey('source-search-result-0')));
     for (
       var attempt = 0;
       attempt < 20 && sourceView.evaluate().isEmpty;
@@ -292,6 +392,7 @@ void main() {
     expect(find.textContaining('mapped_source'), findsWidgets);
     expect(controller.sourceProject.sourceRoot, sourceRoot.path);
 
+    await tester.pump(const Duration(milliseconds: 200));
     await tester.tap(find.byKey(const ValueKey('source-tab-close-$debugPath')));
     controller.selectSymbols(const []);
     await tester.pump();
@@ -304,7 +405,7 @@ void main() {
 
   testWidgets('source files open as closable scrollable tabs', (tester) async {
     const sourcePaths = <String>[
-      'C:/firmware/src/alpha_communication_transport_source.c',
+      'C:/firmware/src/main.c',
       'C:/firmware/src/bravo_motor_controller_source.c',
       'C:/firmware/src/charlie_attitude_estimator_source.c',
       'C:/firmware/src/delta_navigation_planner_source.c',
@@ -326,6 +427,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        theme: buildTalTheme(),
         home: Scaffold(
           body: SizedBox(
             width: 720,
@@ -340,17 +442,27 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 250));
 
-    Future<void> openFromMenu(String path) async {
-      final menu = tester.widget<PopupMenuButton<String>>(
-        find.byKey(const ValueKey('source-file-menu')),
-      );
-      menu.onSelected!(path);
+    Future<void> openFile(String path) async {
+      controller.openSourceFile(path);
       await tester.pump(const Duration(milliseconds: 250));
     }
 
-    expect(find.byKey(ValueKey('source-tab-${sourcePaths.first}')), findsOne);
+    final mainTab = find.byKey(ValueKey('source-tab-${sourcePaths.first}'));
+    final mainLabel = find.descendant(
+      of: mainTab,
+      matching: find.text('main.c'),
+    );
+    final mainClose = find.byKey(
+      ValueKey('source-tab-close-${sourcePaths.first}'),
+    );
+    final step = find.byKey(const ValueKey('debug-step'));
+    expect(tester.getSize(mainTab).height, tester.getSize(step).height);
+    expect(
+      tester.getRect(mainClose).left - tester.getRect(mainLabel).right,
+      closeTo(13, 0.01),
+    );
     for (final path in sourcePaths.skip(1)) {
-      await openFromMenu(path);
+      await openFile(path);
     }
     for (final path in sourcePaths) {
       expect(find.byKey(ValueKey('source-tab-$path')), findsOneWidget);
@@ -358,7 +470,7 @@ void main() {
 
     // Breakpoint refreshes at the same stopped location must not steal focus
     // from a source tab the user selected manually.
-    await openFromMenu(sourcePaths[1]);
+    await openFile(sourcePaths[1]);
     expect(
       find.byKey(ValueKey('source-tab-active-${sourcePaths[1]}')),
       findsOneWidget,
@@ -379,7 +491,7 @@ void main() {
 
     // Reopening an existing file activates its existing tab instead of adding
     // a duplicate, and brings the beginning of the overflowing strip back.
-    await openFromMenu(sourcePaths.first);
+    await openFile(sourcePaths.first);
     expect(find.byKey(ValueKey('source-tab-${sourcePaths.first}')), findsOne);
     final fade = tester.widget<AnimatedOpacity>(
       find.byKey(const ValueKey('source-tabs-right-fade')),
@@ -437,7 +549,7 @@ void main() {
       findsOneWidget,
     );
 
-    await openFromMenu(sourcePaths.first);
+    await openFile(sourcePaths.first);
     expect(find.byKey(ValueKey('source-tab-${sourcePaths.first}')), findsOne);
 
     // Closing must still work when a descendant such as the search field owns
@@ -470,7 +582,7 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('opening a file from the menu restores editor shortcut focus', (
+  testWidgets('opening a search result restores editor shortcut focus', (
     tester,
   ) async {
     const sourcePaths = <String>[
@@ -506,12 +618,8 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 250));
 
-    await tester.tap(find.byKey(const ValueKey('source-file-menu')));
-    await tester.pump(const Duration(milliseconds: 500));
-    final menu = tester.widget<PopupMenuButton<String>>(
-      find.byKey(const ValueKey('source-file-menu')),
-    );
-    menu.onSelected!(sourcePaths[1]);
+    await _searchSources(tester, 'bravo_source.c');
+    await tester.tap(find.byKey(const ValueKey('source-search-result-0')));
     await tester.pump(const Duration(milliseconds: 250));
     expect(
       find.byKey(ValueKey('source-tab-active-${sourcePaths[1]}')),
@@ -1188,9 +1296,8 @@ void main() {
         ),
       ),
     );
-    await tester.tap(find.byKey(const ValueKey('source-file-menu')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(ValueKey('source-file-option-$sourcePath')));
+    controller.openSourceFile(sourcePath);
+    await tester.pump();
     for (
       var attempt = 0;
       attempt < 20 && find.byKey(ValueKey('source-line-2')).evaluate().isEmpty;

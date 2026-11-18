@@ -150,6 +150,10 @@ Future<JsonObject> executeControllerCommand(
           controller.resumeTarget();
         case 'step':
           controller.stepTarget();
+        case 'stepIn' || 'stepOver' || 'stepOut':
+          await controller.stepSource(
+            SourceStep.values.byName(arguments as String),
+          );
       }
     case ControllerCommand.exportCsv:
       await controller.exportCsv();

@@ -10,6 +10,8 @@ enum ConnectionStatus { disconnected, connecting, connected }
 
 enum DebugExecutionState { unavailable, running, halted, unknown }
 
+enum SourceStep { stepIn, stepOver, stepOut }
+
 class DebugBreakpoint {
   const DebugBreakpoint({
     required this.path,

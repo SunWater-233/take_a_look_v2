@@ -95,6 +95,7 @@ Future<JsonObject> executeControllerCommand(
         yMin: (values['yMin'] as num?)?.toDouble(),
         yMax: (values['yMax'] as num?)?.toDouble(),
         preserveFollowLatest: values['preserveFollowLatest'] == true,
+        allowTimeOverscroll: values['allowTimeOverscroll'] == true,
       );
     case ControllerCommand.configurePlotView:
       controller.configurePlotView(

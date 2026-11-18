@@ -55,4 +55,38 @@ void main() {
       expect(preserveFlags, [true, null, true]);
     },
   );
+
+  test(
+    'detached trackpad pan preserves time ranges outside the data',
+    () async {
+      final main = TakeALookController(backendCommand: (_, _) async {});
+      late final TakeALookController detached;
+      detached = TakeALookController(
+        remoteCommand: (command, arguments) async {
+          detached.applySnapshot(await main.handleCommand(command, arguments));
+        },
+      );
+      addTearDown(main.dispose);
+      addTearDown(detached.dispose);
+      main.applyTelemetrySnapshot({'elapsedSeconds': 20});
+      detached.applySnapshot(main.snapshot());
+
+      detached.setPlotViewport(xMin: -3, xMax: 5, allowTimeOverscroll: true);
+      await Future<void>.delayed(Duration.zero);
+      expect(detached.followLatest, isFalse);
+      expect(detached.plotTimeOverscroll, isTrue);
+      expect(detached.plotWindowEndSeconds, 5);
+      expect(detached.plotVisibleWindowSeconds, 8);
+
+      detached.setPlotViewport(xMin: 16, xMax: 24, allowTimeOverscroll: true);
+      await Future<void>.delayed(Duration.zero);
+      expect(detached.plotTimeOverscroll, isTrue);
+      expect(detached.plotWindowEndSeconds, 24);
+
+      detached.toggleFollowLatest();
+      await Future<void>.delayed(Duration.zero);
+      expect(detached.plotTimeOverscroll, isFalse);
+      expect(detached.plotWindowEndSeconds, 20);
+    },
+  );
 }

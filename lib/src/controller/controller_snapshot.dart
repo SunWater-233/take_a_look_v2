@@ -485,6 +485,8 @@ extension TakeALookControllerSnapshot on TakeALookController {
       _frozenPlotEndSeconds = plottingPaused || !followLatest
           ? (data['plotWindowEndSeconds'] as num?)?.toDouble() ?? elapsedSeconds
           : null;
+      state.plot.timeOverscroll =
+          _frozenPlotEndSeconds != null && data['plotTimeOverscroll'] == true;
       if (plottingPaused) {
         if (!wasPlotFrozen || _frozenPlotSamples.isEmpty) {
           _capturePlotSamples();

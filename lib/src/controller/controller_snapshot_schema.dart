@@ -64,6 +64,7 @@ enum SnapshotField {
   plotInvertX({SnapshotDomain.plot}, persistInProject: true),
   plotInvertY({SnapshotDomain.plot}, persistInProject: true),
   plotWindowEndSeconds({SnapshotDomain.plot}),
+  plotTimeOverscroll({SnapshotDomain.plot}),
   uiScale({}, persistInProject: true, alwaysRevised: true),
   lastBackendError({SnapshotDomain.connection}),
   selectedSymbols({SnapshotDomain.symbols}, persistInProject: true),

@@ -520,6 +520,7 @@ class TakeALookController extends ChangeNotifier {
 
   void _clearFrozenPlot() {
     _frozenPlotEndSeconds = null;
+    state.plot.timeOverscroll = false;
     _frozenPlotSamples.clear();
   }
 

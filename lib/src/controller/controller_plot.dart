@@ -1,6 +1,8 @@
 part of 'controller.dart';
 
 extension TakeALookControllerPlot on TakeALookController {
+  bool get plotTimeOverscroll => state.plot.timeOverscroll;
+
   double get maximumPlotWindowSeconds => _watches.fold<double>(
     math.max(120, elapsedSeconds),
     (maximum, watch) => math.max(maximum, watch.archivedHistoryEndSeconds),
@@ -125,6 +127,7 @@ extension TakeALookControllerPlot on TakeALookController {
     double? yMin,
     double? yMax,
     bool preserveFollowLatest = false,
+    bool allowTimeOverscroll = false,
   }) {
     final arguments = <String, Object?>{
       'xMin': xMin,
@@ -132,23 +135,28 @@ extension TakeALookControllerPlot on TakeALookController {
       'yMin': ?yMin,
       'yMax': ?yMax,
       if (preserveFollowLatest) 'preserveFollowLatest': true,
+      if (allowTimeOverscroll) 'allowTimeOverscroll': true,
     };
     if (_isDetachedRemote &&
         _dispatchRemote(ControllerCommand.setPlotViewport, arguments)) {
       return;
     }
-    final normalizedXMin = math.max(0, math.min(xMin, xMax));
+    final keepFollowing = preserveFollowLatest && followLatest;
+    final overscroll = allowTimeOverscroll && !keepFollowing;
+    final orderedXMin = math.min(xMin, xMax);
+    final normalizedXMin = overscroll ? orderedXMin : math.max(0, orderedXMin);
     final normalizedXMax = math.max(
       normalizedXMin + 0.001,
       math.max(xMin, xMax),
     );
-    final keepFollowing = preserveFollowLatest && followLatest;
     final span =
         (keepFollowing ? (xMax - xMin).abs() : normalizedXMax - normalizedXMin)
             .clamp(0.2, maximumPlotWindowSeconds)
             .toDouble();
     final latest = math.max(elapsedSeconds, span);
-    final end = normalizedXMax.clamp(span, latest).toDouble();
+    final end = overscroll
+        ? normalizedXMax
+        : normalizedXMax.clamp(span, latest).toDouble();
     plotVisibleWindowSeconds = span;
     if (keepFollowing) {
       if (!plottingPaused) _clearFrozenPlot();
@@ -156,6 +164,7 @@ extension TakeALookControllerPlot on TakeALookController {
       if (followLatest) _freezePlotViewportIfNeeded();
       followLatest = false;
       _frozenPlotEndSeconds = end;
+      state.plot.timeOverscroll = overscroll && (end < span || end > latest);
     }
     if (yMin != null &&
         yMax != null &&
@@ -203,6 +212,7 @@ extension TakeALookControllerPlot on TakeALookController {
           .clamp(0.2, maximumPlotWindowSeconds)
           .toDouble();
       _frozenPlotEndSeconds = xMax;
+      state.plot.timeOverscroll = false;
     }
     if (values.containsKey('plotAutoY')) {
       plotAutoY = values['plotAutoY'] == true;
@@ -283,6 +293,7 @@ extension TakeALookControllerPlot on TakeALookController {
     }
     plotVisibleWindowSeconds = math.max(0.2, last - math.max(0, first));
     _frozenPlotEndSeconds = math.max(last, plotVisibleWindowSeconds);
+    state.plot.timeOverscroll = false;
     plotAutoY = true;
     plotYMin = null;
     plotYMax = null;
@@ -294,6 +305,7 @@ extension TakeALookControllerPlot on TakeALookController {
       return;
     }
     followLatest = true;
+    state.plot.timeOverscroll = false;
     plotVisibleWindowSeconds = 12;
     plotAutoY = true;
     plotYMin = null;

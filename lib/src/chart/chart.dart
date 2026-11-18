@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
@@ -10,6 +12,7 @@ import 'hover.dart';
 import 'inspection_anchor.dart';
 import 'painter.dart';
 import 'selection_painter.dart';
+import 'trackpad.dart';
 import 'viewport.dart';
 import '../controller/controller.dart';
 import '../theme/theme.dart';
@@ -41,6 +44,14 @@ class _TelemetryChartState extends State<TelemetryChart> {
   bool _rightZoomDragging = false;
   bool _pointerMoved = false;
   bool _horizontalPanStarted = false;
+  StreamSubscription<({String method, List<double>? values})>? _trackpadEvents;
+  bool _capturingTrackpad = false;
+  PlotTrackpadContactGesture? _trackpadContactGesture;
+  int? _trackpadPointer;
+  double? _pendingTrackpadPanX;
+  double _trackpadScale = 1;
+  PlotPinchAxes? _trackpadPinchAxes;
+  PlotPinchAxes? _nativePinchAxes;
   Size _size = Size.zero;
   PointerDeviceKind _lastPointerKind = PointerDeviceKind.mouse;
   _DesktopMouseMode _desktopMouseMode = _DesktopMouseMode.pan;
@@ -51,6 +62,11 @@ class _TelemetryChartState extends State<TelemetryChart> {
   @override
   void initState() {
     super.initState();
+    if (!kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.windows ||
+            defaultTargetPlatform == TargetPlatform.macOS)) {
+      _trackpadEvents = PlotTrackpad.events.listen(_handleNativeTrackpadEvent);
+    }
     _hoverPosition.addListener(_clearHoverTracker);
     WidgetsBinding.instance.addPostFrameCallback(_updateInspectionAnchor);
   }
@@ -88,14 +104,22 @@ class _TelemetryChartState extends State<TelemetryChart> {
           onAnimationStatusChanged: _handleDesktopMenuAnimationStatus,
           menuChildren: _buildDesktopMenu(),
           child: MouseRegion(
+            onEnter: (event) => _updateTrackpadCapture(event.localPosition),
             onHover: (event) {
               _rememberPointerKind(event.kind);
+              _updateTrackpadCapture(event.localPosition);
               _hoverPosition.value =
-                  _dragPointer == null && !_desktopMenuController.isOpen
+                  _dragPointer == null &&
+                      _trackpadPointer == null &&
+                      _trackpadContactGesture == null &&
+                      !_desktopMenuController.isOpen
                   ? event.localPosition
                   : null;
             },
-            onExit: (_) => _hoverPosition.value = null,
+            onExit: (_) {
+              _setTrackpadCapture(false);
+              _hoverPosition.value = null;
+            },
             cursor: _mouseCursor,
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
@@ -112,8 +136,18 @@ class _TelemetryChartState extends State<TelemetryChart> {
                 onPointerUp: _handlePointerUp,
                 onPointerCancel: (event) {
                   if (event.pointer == _dragPointer) _endDrag();
+                  if (event.pointer == _trackpadPointer) {
+                    _trackpadPointer = null;
+                  }
                 },
                 onPointerSignal: _handlePointerSignal,
+                onPointerPanZoomStart: _handleTrackpadStart,
+                onPointerPanZoomUpdate: _handleTrackpadUpdate,
+                onPointerPanZoomEnd: (event) {
+                  if (event.pointer == _trackpadPointer) {
+                    _trackpadPointer = null;
+                  }
+                },
                 child: RepaintBoundary(
                   child: CustomPaint(
                     painter: TelemetryPainter(
@@ -202,6 +236,8 @@ class _TelemetryChartState extends State<TelemetryChart> {
 
   @override
   void dispose() {
+    _setTrackpadCapture(false);
+    _trackpadEvents?.cancel();
     _hoverPosition.dispose();
     _inspectionAnchorY.dispose();
     _releaseMenuAnimation();
@@ -256,6 +292,7 @@ class _TelemetryChartState extends State<TelemetryChart> {
   }
 
   void _openDesktopMenu(Offset position) {
+    _setTrackpadCapture(false);
     if (!_desktopMenuController.isOpen && _menuAnimationLease == null) {
       _menuAnimationLease = beginTalMenuAnimation();
     }
@@ -303,7 +340,6 @@ class _TelemetryChartState extends State<TelemetryChart> {
       });
       return;
     }
-    final viewport = telemetryViewport(controller, _size);
     final delta = event.localPosition - previous;
     final panY =
         _panButton == kPrimaryMouseButton && controller.plotMouseYEnabled;
@@ -325,26 +361,40 @@ class _TelemetryChartState extends State<TelemetryChart> {
         }
       }
     }
+    _panPlot(Offset(horizontalDelta, panY ? delta.dy : 0));
+  }
+
+  void _panPlot(Offset delta, {bool allowTimeOverscroll = false}) {
+    if (delta == Offset.zero) return;
+    final plot = telemetryPlotRect(_size);
+    final viewport = telemetryViewport(controller, _size);
     var xMin = viewport.xMin;
     var xMax = viewport.xMax;
     var yMin = viewport.yMin;
     var yMax = viewport.yMax;
-    if (horizontalDelta != 0) {
+    if (delta.dx != 0) {
       final direction = controller.plotInvertX ? -1.0 : 1.0;
-      final shift = -horizontalDelta / plot.width * viewport.xSpan * direction;
+      final shift = -delta.dx / plot.width * viewport.xSpan * direction;
       xMin += shift;
       xMax += shift;
-      if (xMin < 0) {
-        xMax -= xMin;
-        xMin = 0;
-      }
-      final latest = math.max(controller.elapsedSeconds, viewport.xSpan);
-      if (xMax > latest) {
-        xMin -= xMax - latest;
-        xMax = latest;
+      if (!allowTimeOverscroll) {
+        var earliest = 0.0;
+        var latest = math.max(controller.elapsedSeconds, viewport.xSpan);
+        if (controller.plotTimeOverscroll) {
+          earliest = math.min(earliest, viewport.xMin);
+          latest = math.max(latest, viewport.xMax);
+        }
+        if (xMin < earliest) {
+          xMax += earliest - xMin;
+          xMin = earliest;
+        }
+        if (xMax > latest) {
+          xMin -= xMax - latest;
+          xMax = latest;
+        }
       }
     }
-    if (panY) {
+    if (delta.dy != 0) {
       final direction = controller.plotInvertY ? -1.0 : 1.0;
       final shift = delta.dy / plot.height * viewport.ySpan * direction;
       yMin += shift;
@@ -353,7 +403,7 @@ class _TelemetryChartState extends State<TelemetryChart> {
     final timeWindowChanged =
         (xMin - viewport.xMin).abs() > 1e-9 ||
         (xMax - viewport.xMax).abs() > 1e-9;
-    if (!timeWindowChanged && (!panY || delta.dy == 0)) {
+    if (!timeWindowChanged && delta.dy == 0) {
       return;
     }
     if (controller.followLatest && !timeWindowChanged) {
@@ -366,6 +416,9 @@ class _TelemetryChartState extends State<TelemetryChart> {
       yMin: controller.plotMouseYEnabled ? yMin : null,
       yMax: controller.plotMouseYEnabled ? yMax : null,
       preserveFollowLatest: !timeWindowChanged,
+      allowTimeOverscroll:
+          controller.plotTimeOverscroll ||
+          (allowTimeOverscroll && timeWindowChanged),
     );
   }
 
@@ -434,9 +487,121 @@ class _TelemetryChartState extends State<TelemetryChart> {
       return;
     }
     _zoomPlot(
+      viewport: telemetryViewport(controller, _size),
       anchorFraction: anchor,
       xScale: math.pow(1.02, -delta.dx).toDouble(),
       yScale: math.pow(1.02, delta.dy).toDouble(),
+    );
+  }
+
+  void _updateTrackpadCapture(Offset position) {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.windows) return;
+    _setTrackpadCapture(
+      !_desktopMenuController.isOpen &&
+          telemetryPlotRect(_size).contains(position),
+    );
+  }
+
+  void _setTrackpadCapture(bool enabled) {
+    if (_capturingTrackpad == enabled) return;
+    _capturingTrackpad = enabled;
+    if (!enabled) _trackpadContactGesture = null;
+    unawaited(PlotTrackpad.setCapture(enabled));
+  }
+
+  void _handleNativeTrackpadEvent(
+    ({String method, List<double>? values}) event,
+  ) {
+    final values = event.values;
+    if (event.method == 'direction') {
+      _nativePinchAxes = values != null && values.length == 2
+          ? PlotPinchAxes.fromSeparation(Offset(values[0], values[1]))
+          : null;
+      return;
+    }
+    if (event.method != 'contacts') return;
+    if (values == null || values.length != 6) {
+      _trackpadContactGesture = null;
+      return;
+    }
+    if (!_capturingTrackpad || _dragPointer != null) return;
+    final render = context.findRenderObject();
+    if (render is! RenderBox || !render.hasSize) return;
+    final position = render.globalToLocal(Offset(values[0], values[1]));
+    final contacts = (
+      center: Offset(values[2], values[3]),
+      separation: Offset(values[4], values[5]),
+    );
+    final gesture = _trackpadContactGesture;
+    if (gesture == null) {
+      if (telemetryPlotRect(_size).contains(position)) {
+        _trackpadContactGesture = PlotTrackpadContactGesture(contacts);
+        _pendingTrackpadPanX = 0;
+        _hoverPosition.value = null;
+      }
+      return;
+    }
+    final update = gesture.update(contacts);
+    if (update == null) return;
+    if (update.axes case final axes?) {
+      _zoomTrackpad(position, update.scale, axes);
+    } else {
+      _panTrackpad(update.pan, continuous: true);
+    }
+  }
+
+  void _handleTrackpadStart(PointerPanZoomStartEvent event) {
+    if (_desktopMenuController.isOpen ||
+        _dragPointer != null ||
+        !telemetryPlotRect(_size).contains(event.localPosition)) {
+      return;
+    }
+    _trackpadPointer = event.pointer;
+    _pendingTrackpadPanX = 0;
+    _trackpadScale = 1;
+    _trackpadPinchAxes = null;
+    _hoverPosition.value = null;
+  }
+
+  void _handleTrackpadUpdate(PointerPanZoomUpdateEvent event) {
+    if (event.pointer != _trackpadPointer ||
+        _trackpadContactGesture != null ||
+        _dragPointer != null ||
+        _desktopMenuController.isOpen ||
+        !event.scale.isFinite ||
+        event.scale <= 0) {
+      return;
+    }
+    final scale = event.scale / _trackpadScale;
+    _trackpadScale = event.scale;
+    if (scale != 1) {
+      final axes = _trackpadPinchAxes ??=
+          _nativePinchAxes ?? PlotPinchAxes.both;
+      _zoomTrackpad(event.localPosition, scale, axes);
+    } else if (_trackpadPinchAxes == null) {
+      _panTrackpad(event.localPanDelta, continuous: true);
+    }
+  }
+
+  void _panTrackpad(Offset pan, {bool continuous = false}) {
+    var dx = controller.plotMouseXEnabled ? pan.dx : 0.0;
+    if (_pendingTrackpadPanX case final pending?
+        when continuous && controller.plotMouseXEnabled) {
+      dx += pending;
+      // Keep small sideways drift from stopping live follow on a vertical pan.
+      _pendingTrackpadPanX = dx.abs() <= 3 ? dx : null;
+      if (_pendingTrackpadPanX != null) dx = 0;
+    }
+    final delta = Offset(dx, controller.plotMouseYEnabled ? pan.dy : 0);
+    _panPlot(delta, allowTimeOverscroll: true);
+  }
+
+  void _zoomTrackpad(Offset position, double scale, PlotPinchAxes axes) {
+    if (scale == 1 || !scale.isFinite || scale <= 0) return;
+    _zoomAt(
+      position,
+      xScale: axes == PlotPinchAxes.y ? null : 1 / scale,
+      yScale: axes == PlotPinchAxes.x ? null : 1 / scale,
     );
   }
 
@@ -446,25 +611,48 @@ class _TelemetryChartState extends State<TelemetryChart> {
         (!controller.plotMouseXEnabled && !controller.plotMouseYEnabled)) {
       return;
     }
+    final trackpadScroll = event.kind == PointerDeviceKind.trackpad;
+    final scroll = event.scrollDelta;
+    // Windows drivers can report a horizontal touchpad scroll as a mouse wheel.
+    if (trackpadScroll || scroll.dx.abs() > scroll.dy.abs()) {
+      if (_trackpadContactGesture != null || _desktopMenuController.isOpen) {
+        return;
+      }
+      final pan = trackpadScroll ? -scroll : Offset(-scroll.dx, 0);
+      GestureBinding.instance.pointerSignalResolver.register(
+        event,
+        (_) => _panTrackpad(pan),
+      );
+      return;
+    }
+    if (event.scrollDelta.dy == 0) return;
+    final scale = event.scrollDelta.dy > 0 ? 1.15 : 1 / 1.15;
+    _zoomAt(event.localPosition, xScale: scale, yScale: scale);
+  }
+
+  void _zoomAt(Offset position, {double? xScale, double? yScale}) {
     final viewport = telemetryViewport(controller, _size);
     final mapping = _mappingFor(viewport);
-    final scale = event.scrollDelta.dy > 0 ? 1.15 : 1 / 1.15;
     _zoomPlot(
+      viewport: viewport,
       anchorFraction: Offset(
-        mapping.xFractionAt(event.localPosition.dx),
-        mapping.yFractionAt(event.localPosition.dy),
+        mapping.xFractionAt(position.dx),
+        mapping.yFractionAt(position.dy),
       ),
-      xScale: scale,
-      yScale: scale,
+      xScale: xScale,
+      yScale: yScale,
     );
   }
 
   void _zoomPlot({
+    required TelemetryViewport viewport,
     required Offset anchorFraction,
-    required double xScale,
-    required double yScale,
+    required double? xScale,
+    required double? yScale,
   }) {
-    final viewport = telemetryViewport(controller, _size);
+    final zoomX = xScale != null && controller.plotMouseXEnabled;
+    final zoomY = yScale != null && controller.plotMouseYEnabled;
+    if (!zoomX && !zoomY) return;
     final following = controller.followLatest;
     // Use the configured duration even before the first full window is sampled.
     final currentXSpan = following
@@ -474,7 +662,7 @@ class _TelemetryChartState extends State<TelemetryChart> {
     var xMax = viewport.xMax;
     var yMin = viewport.yMin;
     var yMax = viewport.yMax;
-    if (controller.plotMouseXEnabled) {
+    if (zoomX) {
       final span = (currentXSpan * xScale)
           .clamp(0.2, controller.maximumPlotWindowSeconds)
           .toDouble();
@@ -485,30 +673,35 @@ class _TelemetryChartState extends State<TelemetryChart> {
         final anchor = viewport.xMin + viewport.xSpan * fraction;
         xMin = anchor - span * fraction;
         xMax = xMin + span;
-        if (xMin < 0) {
-          xMax -= xMin;
-          xMin = 0;
-        }
-        final latest = math.max(controller.elapsedSeconds, span);
-        if (xMax > latest) {
-          xMin -= xMax - latest;
-          xMax = latest;
+        if (!controller.plotTimeOverscroll) {
+          if (xMin < 0) {
+            xMax -= xMin;
+            xMin = 0;
+          }
+          final latest = math.max(controller.elapsedSeconds, span);
+          if (xMax > latest) {
+            xMin -= xMax - latest;
+            xMax = latest;
+          }
         }
       }
     }
-    if (controller.plotMouseYEnabled) {
+    if (zoomY) {
       final fraction = anchorFraction.dy;
       final anchor = viewport.yMin + viewport.ySpan * fraction;
       final span = math.max(1e-9, viewport.ySpan * yScale);
       yMin = anchor - span * fraction;
       yMax = yMin + span;
     }
+    // Hold the displayed Y range during a horizontal zoom, even if auto-Y
+    // would otherwise rescale it when the visible samples change.
     controller.setPlotViewport(
       xMin: xMin,
       xMax: math.max(xMin + 0.001, xMax),
       yMin: controller.plotMouseYEnabled ? yMin : null,
       yMax: controller.plotMouseYEnabled ? yMax : null,
       preserveFollowLatest: true,
+      allowTimeOverscroll: controller.plotTimeOverscroll,
     );
   }
 
@@ -533,6 +726,7 @@ class _TelemetryChartState extends State<TelemetryChart> {
       yMin: controller.plotMouseYEnabled ? yMin : null,
       yMax: controller.plotMouseYEnabled ? yMax : null,
       preserveFollowLatest: true,
+      allowTimeOverscroll: controller.plotTimeOverscroll,
     );
   }
 

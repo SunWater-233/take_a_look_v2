@@ -37,7 +37,8 @@ TelemetryViewport telemetryViewport(TakeALookController controller, Size size) {
   final plotted = controller.watches.where((item) => item.plotted);
   var xMax = controller.plotWindowEndSeconds;
   final window = math.max(0.2, controller.plotVisibleWindowSeconds);
-  var xMin = math.max(0.0, xMax - window);
+  var xMin = xMax - window;
+  if (!controller.plotTimeOverscroll) xMin = math.max(0.0, xMin);
   if (xMax <= xMin) xMax = xMin + window;
 
   var yMin = controller.plotAutoY

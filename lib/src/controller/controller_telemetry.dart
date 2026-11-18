@@ -213,6 +213,7 @@ extension TakeALookControllerTelemetry on TakeALookController {
     bool preserveMissing = false,
   }) {
     final previousEnd = plotWindowEndSeconds;
+    final previousOverscroll = plotTimeOverscroll;
     state.acquisition.preserveMissingHistory = preserveMissing;
     if (advanceEpoch) state.acquisition.samplingEpoch++;
     plotHistory.clear();
@@ -234,6 +235,7 @@ extension TakeALookControllerTelemetry on TakeALookController {
       }
     }
     _frozenPlotSamples.clear();
+    state.plot.timeOverscroll = false;
     if (plottingPaused || !followLatest) _frozenPlotEndSeconds = 0;
     if (preserveMissing &&
         retained.any(
@@ -244,6 +246,7 @@ extension TakeALookControllerTelemetry on TakeALookController {
         )) {
       followLatest = false;
       _frozenPlotEndSeconds = previousEnd;
+      state.plot.timeOverscroll = previousOverscroll;
     }
   }
 }

@@ -1,6 +1,7 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart' show timeDilation;
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:take_a_look_v2/src/chart/cartesian_renderer.dart';
 import 'package:take_a_look_v2/src/chart/chart.dart';
@@ -699,6 +700,245 @@ void main() {
     expect(telemetryViewport(controller, size).xMax, 22);
     controller.dispose();
   });
+
+  Future<void> sendTrackpadEvent(
+    WidgetTester tester,
+    String method,
+    List<double>? values,
+  ) async {
+    await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+      'take_a_look/plot_trackpad',
+      const StandardMethodCodec().encodeMethodCall(MethodCall(method, values)),
+      null,
+    );
+  }
+
+  testWidgets('horizontal wheel signals pan past the live edge and back', (
+    tester,
+  ) async {
+    final controller = await pumpChart(tester);
+    try {
+      final chart = find.byKey(const ValueKey('telemetry-chart-interaction'));
+      final position = tester.getCenter(chart);
+      final size = tester.getSize(chart);
+      final before = telemetryViewport(controller, size);
+
+      Future<void> scroll(double dx) => tester.sendEventToBinding(
+        PointerScrollEvent(
+          kind: PointerDeviceKind.mouse,
+          position: position,
+          scrollDelta: Offset(dx, 0),
+        ),
+      );
+
+      await scroll(48);
+      final moved = telemetryViewport(controller, size);
+      expect(controller.followLatest, isFalse);
+      expect(
+        moved.xMax,
+        closeTo(before.xMax + 48 / before.plot.width * before.xSpan, 1e-9),
+      );
+      expect(moved.xSpan, closeTo(before.xSpan, 1e-9));
+      expect(moved.yMin, before.yMin);
+      expect(moved.yMax, before.yMax);
+
+      await scroll(-48);
+      final restored = telemetryViewport(controller, size);
+      expect(restored.xMin, closeTo(before.xMin, 1e-9));
+      expect(restored.xMax, closeTo(before.xMax, 1e-9));
+      controller.configurePlotView({'plotMouseXEnabled': false});
+      await scroll(48);
+      expect(telemetryViewport(controller, size).xMax, restored.xMax);
+    } finally {
+      controller.dispose();
+    }
+  });
+
+  testWidgets('trackpad pans before the first sample without snapping back', (
+    tester,
+  ) async {
+    final controller = await pumpChart(tester);
+    try {
+      controller.applyTelemetrySnapshot({'elapsedSeconds': 1});
+      final chart = find.byKey(const ValueKey('telemetry-chart-interaction'));
+      final position = tester.getCenter(chart);
+      final size = tester.getSize(chart);
+      final before = telemetryViewport(controller, size);
+      final gesture = await tester.createGesture(
+        kind: PointerDeviceKind.trackpad,
+      );
+      await gesture.panZoomStart(position);
+      await gesture.panZoomUpdate(position, pan: const Offset(2, 20));
+      expect(controller.followLatest, isTrue);
+      expect(telemetryViewport(controller, size).xMax, before.xMax);
+      await gesture.panZoomUpdate(position, pan: const Offset(60, 20));
+      final moved = telemetryViewport(controller, size);
+      expect(controller.followLatest, isFalse);
+      expect(moved.xMin, lessThan(0));
+      expect(moved.xSpan, closeTo(before.xSpan, 1e-9));
+
+      await gesture.panZoomUpdate(position, pan: const Offset(60, 40));
+      await gesture.panZoomEnd();
+      expect(telemetryViewport(controller, size).xMin, moved.xMin);
+      expect(telemetryViewport(controller, size).xMax, moved.xMax);
+
+      controller.toggleFollowLatest();
+      final following = telemetryViewport(controller, size);
+      expect(following.xMin, 0);
+      expect(following.xMax, 1);
+    } finally {
+      controller.dispose();
+    }
+  });
+
+  testWidgets('trackpad pan moves the plot with the fingers in both axes', (
+    tester,
+  ) async {
+    final controller = await pumpChart(tester);
+    controller.setPlotViewport(xMin: 4, xMax: 16, yMin: -2, yMax: 4);
+    final chart = find.byKey(const ValueKey('telemetry-chart-interaction'));
+    final size = tester.getSize(chart);
+    final before = telemetryViewport(controller, size);
+    final gesture = await tester.createGesture(
+      kind: PointerDeviceKind.trackpad,
+    );
+    await gesture.panZoomStart(tester.getCenter(chart));
+    await gesture.panZoomUpdate(
+      tester.getCenter(chart),
+      pan: const Offset(-30, 0),
+    );
+    await gesture.panZoomUpdate(
+      tester.getCenter(chart),
+      pan: const Offset(-30, 20),
+    );
+    final moved = telemetryViewport(controller, size);
+    expect(
+      moved.xMin,
+      closeTo(before.xMin + 30 / before.plot.width * before.xSpan, 1e-9),
+    );
+    expect(
+      moved.yMin,
+      closeTo(before.yMin + 20 / before.plot.height * before.ySpan, 1e-9),
+    );
+    await gesture.panZoomUpdate(tester.getCenter(chart), pan: Offset.zero);
+    await gesture.panZoomEnd();
+    final restored = telemetryViewport(controller, size);
+    expect(restored.xMin, closeTo(before.xMin, 1e-9));
+    expect(restored.yMin, closeTo(before.yMin, 1e-9));
+    controller.dispose();
+  });
+
+  testWidgets('Windows touchpad contact translation pans without zooming', (
+    tester,
+  ) async {
+    final controller = await pumpChart(tester);
+    final chart = find.byKey(const ValueKey('telemetry-chart-interaction'));
+    final position = tester.getCenter(chart);
+    final size = tester.getSize(chart);
+    final before = telemetryViewport(controller, size);
+    await tester.sendEventToBinding(PointerHoverEvent(position: position));
+
+    Future<void> frame(double x, double y, double span) => sendTrackpadEvent(
+      tester,
+      'contacts',
+      [position.dx, position.dy, x, y, span, 0],
+    );
+
+    await frame(200, 120, 40);
+    await frame(180, 120, 41);
+    await frame(180, 140, 43);
+    await sendTrackpadEvent(tester, 'contacts', null);
+    final after = telemetryViewport(controller, size);
+    expect(after.xMin, greaterThan(before.xMin));
+    expect(after.yMin, greaterThan(before.yMin));
+    expect(after.xSpan, closeTo(before.xSpan, 1e-9));
+    expect(after.ySpan, closeTo(before.ySpan, 1e-9));
+    controller.dispose();
+  }, variant: TargetPlatformVariant({TargetPlatform.windows}));
+
+  for (final (direction, zoomX, zoomY) in [
+    (const Offset(40, 4), true, false),
+    (const Offset(4, 40), false, true),
+    (const Offset(30, -30), true, true),
+  ]) {
+    testWidgets(
+      'Windows trackpad pinch scales the intended axes for $direction',
+      (tester) async {
+        final controller = await pumpChart(tester);
+        controller.configurePlotView({
+          'followLatest': false,
+          'xMin': 4.1,
+          'xMax': 16.1,
+        });
+        final chart = find.byKey(const ValueKey('telemetry-chart-interaction'));
+        final position = tester.getCenter(chart);
+        final size = tester.getSize(chart);
+        final before = telemetryViewport(controller, size);
+        await tester.sendEventToBinding(PointerHoverEvent(position: position));
+
+        Future<void> frame(Offset separation, {double drift = 0}) =>
+            sendTrackpadEvent(tester, 'contacts', [
+              position.dx,
+              position.dy,
+              200 + drift,
+              120,
+              separation.dx,
+              separation.dy,
+            ]);
+
+        await frame(direction);
+        await frame(direction * 1.25, drift: 2);
+        final enlarged = telemetryViewport(controller, size);
+        expect(
+          enlarged.xSpan,
+          closeTo(before.xSpan / (zoomX ? 1.25 : 1), 1e-9),
+        );
+        expect(
+          enlarged.ySpan,
+          closeTo(before.ySpan / (zoomY ? 1.25 : 1), 1e-9),
+        );
+        await frame(direction);
+        await sendTrackpadEvent(tester, 'contacts', null);
+        final restored = telemetryViewport(controller, size);
+        expect(restored.xMin, closeTo(before.xMin, 1e-9));
+        expect(restored.xMax, closeTo(before.xMax, 1e-9));
+        expect(restored.yMin, closeTo(before.yMin, 1e-9));
+        expect(restored.yMax, closeTo(before.yMax, 1e-9));
+        controller.dispose();
+      },
+      variant: TargetPlatformVariant({TargetPlatform.windows}),
+    );
+  }
+
+  testWidgets('Flutter pinch uses the native axis or falls back to both axes', (
+    tester,
+  ) async {
+    final controller = await pumpChart(tester);
+    final chart = find.byKey(const ValueKey('telemetry-chart-interaction'));
+    final position = tester.getCenter(chart);
+    final size = tester.getSize(chart);
+    final before = telemetryViewport(controller, size);
+    final gesture = await tester.createGesture(
+      kind: PointerDeviceKind.trackpad,
+    );
+    await sendTrackpadEvent(tester, 'direction', [0, 40]);
+    await gesture.panZoomStart(position);
+    await gesture.panZoomUpdate(position, scale: 1.5);
+    await gesture.panZoomEnd();
+    final vertical = telemetryViewport(controller, size);
+    expect(vertical.xSpan, before.xSpan);
+    expect(vertical.ySpan, closeTo(before.ySpan / 1.5, 1e-9));
+
+    await sendTrackpadEvent(tester, 'direction', null);
+    await gesture.panZoomStart(position);
+    await gesture.panZoomUpdate(position, scale: 0.75);
+    await gesture.panZoomEnd();
+    final uniform = telemetryViewport(controller, size);
+    expect(uniform.xSpan, closeTo(vertical.xSpan / 0.75, 1e-9));
+    expect(uniform.ySpan, closeTo(vertical.ySpan / 0.75, 1e-9));
+    expect(controller.followLatest, isTrue);
+    controller.dispose();
+  }, variant: TargetPlatformVariant({TargetPlatform.macOS}));
 
   testWidgets('touch long press keeps the touch-friendly menu', (tester) async {
     final controller = await pumpChart(tester);

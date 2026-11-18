@@ -126,6 +126,7 @@ class ControllerSnapshotCodec {
     SnapshotField.plotInvertX => source.state.plot.invertX,
     SnapshotField.plotInvertY => source.state.plot.invertY,
     SnapshotField.plotWindowEndSeconds => source.plotWindowEndSeconds,
+    SnapshotField.plotTimeOverscroll => source.state.plot.timeOverscroll,
     SnapshotField.uiScale => source.uiScale,
     SnapshotField.lastBackendError => source.state.connection.lastError,
     SnapshotField.selectedSymbols => source.selectedSymbols.toList(),

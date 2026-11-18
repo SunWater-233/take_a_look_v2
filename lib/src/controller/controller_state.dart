@@ -152,6 +152,7 @@ class PlotState {
   int watchSelectionRevision = 0;
   bool plottingPaused = false;
   bool followLatest = true;
+  bool timeOverscroll = false;
   double visibleWindowSeconds = 12;
   double retentionSeconds = 60;
   bool autoY = true;

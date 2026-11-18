@@ -4,16 +4,158 @@
 #include <flutter/plugin_registrar_windows.h>
 #include <flutter/standard_method_codec.h>
 #include <windows.h>
+#include <commctrl.h>
+#include <directmanipulation.h>
 
+#include <array>
 #include <memory>
 #include <optional>
 
 namespace {
 
+class PlotTrackpad {
+ public:
+  explicit PlotTrackpad(flutter::PluginRegistrarWindows* registrar)
+      : channel_(registrar->messenger(), "take_a_look/plot_trackpad",
+                 &flutter::StandardMethodCodec::GetInstance()) {
+    channel_.SetMethodCallHandler(
+        [this, registrar](const auto& call, auto result) {
+          const auto* enabled = std::get_if<bool>(call.arguments());
+          if (call.method_name() != "setCapture" || enabled == nullptr) {
+            result->NotImplemented();
+            return;
+          }
+          SetCapture(registrar->GetView()->GetNativeWindow(), *enabled);
+          result->Success();
+        });
+  }
+
+  ~PlotTrackpad() {
+    SetCapture(nullptr, false);
+    channel_.SetMethodCallHandler(nullptr);
+  }
+
+ private:
+  using RegisterTouchpad = BOOL(WINAPI*)(HWND, BOOL);
+  using ReadTouchpadFrame = BOOL(WINAPI*)(UINT32, UINT32*, POINTER_TOUCH_INFO*);
+
+  static FARPROC TouchpadFunction(const char* name, WORD ordinal) {
+    const HMODULE user32 = GetModuleHandleW(L"user32.dll");
+    const auto function = GetProcAddress(user32, name);
+    return function ? function
+                    : GetProcAddress(user32, MAKEINTRESOURCEA(ordinal));
+  }
+
+  void SetCapture(HWND view, bool enabled) {
+    if ((window_ != nullptr) == enabled) return;
+    // Resolve at runtime so older Windows versions retain Flutter's gestures.
+    // These APIs are also published as ordinal-only exports by User32.
+    static const auto register_touchpad = reinterpret_cast<RegisterTouchpad>(
+        TouchpadFunction("RegisterTouchpadCapableWindow", 2689));
+    if (enabled) {
+      if (!read_frame_ || !register_touchpad ||
+          !SetWindowSubclass(view, WindowProc, 0,
+                             reinterpret_cast<DWORD_PTR>(this))) {
+        return;
+      }
+      if (!register_touchpad(view, TRUE)) {
+        RemoveWindowSubclass(view, WindowProc, 0);
+        return;
+      }
+      window_ = view;
+    } else {
+      register_touchpad(window_, FALSE);
+      RemoveWindowSubclass(window_, WindowProc, 0);
+      window_ = nullptr;
+      last_frame_.reset();
+    }
+  }
+
+  static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam,
+                                     LPARAM lparam, UINT_PTR, DWORD_PTR data) {
+    auto* self = reinterpret_cast<PlotTrackpad*>(data);
+    switch (message) {
+      case WM_POINTERDOWN:
+      case WM_POINTERUPDATE:
+      case WM_POINTERUP:
+      case WM_POINTERLEAVE:
+      case WM_POINTERCAPTURECHANGED:
+      case DM_POINTERHITTEST: {
+        const UINT32 pointer = GET_POINTERID_WPARAM(wparam);
+        POINTER_INPUT_TYPE type;
+        if (!GetPointerType(pointer, &type) || type != PT_TOUCHPAD) break;
+        // With raw contacts enabled, keep Flutter's Direct Manipulation from
+        // interpreting the same gesture a second time.
+        if (message == WM_POINTERDOWN || message == WM_POINTERUPDATE) {
+          self->SendFrame(window, pointer);
+        } else if (message != DM_POINTERHITTEST) {
+          self->EndGesture();
+        }
+        return 0;
+      }
+      case WM_NCDESTROY:
+        RemoveWindowSubclass(window, WindowProc, 0);
+        self->window_ = nullptr;
+        self->last_frame_.reset();
+        break;
+    }
+    return DefSubclassProc(window, message, wparam, lparam);
+  }
+
+  void SendFrame(HWND window, UINT32 pointer) {
+    std::array<POINTER_TOUCH_INFO, 2> contacts{};
+    UINT32 count = static_cast<UINT32>(contacts.size());
+    if (!read_frame_(pointer, &count, contacts.data()) ||
+        count != contacts.size()) {
+      EndGesture();
+      return;
+    }
+    const auto& first = contacts[0].pointerInfo;
+    const auto& second = contacts[1].pointerInfo;
+    if (!(first.pointerFlags & POINTER_FLAG_INCONTACT) ||
+        !(second.pointerFlags & POINTER_FLAG_INCONTACT)) {
+      EndGesture();
+      return;
+    }
+    if (last_frame_ == first.frameId) return;
+    last_frame_ = first.frameId;
+
+    POINT cursor = first.ptPixelLocation;
+    ScreenToClient(window, &cursor);
+    const double pixel_ratio = GetDpiForWindow(window) / 96.0;
+    // HIMETRIC is 0.01 mm. Convert physical motion to 96-DPI logical pixels.
+    constexpr double kHimetricToLogical = 96.0 / 2540.0;
+    const auto a = first.ptHimetricLocation;
+    const auto b = second.ptHimetricLocation;
+    using flutter::EncodableValue;
+    channel_.InvokeMethod(
+        "contacts", std::make_unique<EncodableValue>(flutter::EncodableList{
+                        EncodableValue(cursor.x / pixel_ratio),
+                        EncodableValue(cursor.y / pixel_ratio),
+                        EncodableValue((a.x + b.x) * 0.5 * kHimetricToLogical),
+                        EncodableValue((a.y + b.y) * 0.5 * kHimetricToLogical),
+                        EncodableValue((b.x - a.x) * kHimetricToLogical),
+                        EncodableValue((b.y - a.y) * kHimetricToLogical),
+                    }));
+  }
+
+  void EndGesture() {
+    if (!last_frame_) return;
+    last_frame_.reset();
+    channel_.InvokeMethod("contacts", nullptr);
+  }
+
+  const ReadTouchpadFrame read_frame_ = reinterpret_cast<ReadTouchpadFrame>(
+      TouchpadFunction("GetPointerFrameTouchpadInfo", 2693));
+  flutter::MethodChannel<flutter::EncodableValue> channel_;
+  HWND window_ = nullptr;
+  std::optional<UINT32> last_frame_;
+};
+
 class TalDragPreviewPlugin : public flutter::Plugin {
  public:
   explicit TalDragPreviewPlugin(flutter::PluginRegistrarWindows* registrar)
-      : registrar_(registrar) {
+      : registrar_(registrar), trackpad_(registrar) {
     window_proc_id_ = registrar_->RegisterTopLevelWindowProcDelegate(
         [this](HWND hwnd, UINT message, WPARAM wparam,
                LPARAM lparam) -> std::optional<LRESULT> {
@@ -101,6 +243,7 @@ class TalDragPreviewPlugin : public flutter::Plugin {
   }
 
   flutter::PluginRegistrarWindows* registrar_;
+  PlotTrackpad trackpad_;
   int window_proc_id_ = -1;
 };
 

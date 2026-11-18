@@ -197,9 +197,12 @@ extension TakeALookControllerWatches on TakeALookController {
         .where((watch) => removedKeys.contains(watch.symbol.key))
         .map((watch) => watch.symbol)
         .toList();
+    final independent = _watchRegistry.standaloneRoots;
     for (final root in roots) {
       removedKeys.addAll(
-        _symbolHierarchy.descendantsOf(root).map((symbol) => symbol.key),
+        _symbolHierarchy
+            .descendantsOf(root, excludeSubtrees: independent)
+            .map((symbol) => symbol.key),
       );
     }
     if (!_watchRegistry.remove(
@@ -401,6 +404,31 @@ extension TakeALookControllerWatches on TakeALookController {
     if (watch == null || watch.pinned == value) return;
     watch.pinned = value;
     _scheduleWatchMonitorSync();
+    _emitState([signals.watches]);
+  }
+
+  bool canSetWatchStandalone(String key) {
+    final watch = _watchByKey(key);
+    return watch != null &&
+        (watch.standalone ||
+            SymbolHierarchy(
+                  _watches.map((watch) => watch.symbol),
+                ).parentOf(watch.symbol) !=
+                null);
+  }
+
+  void setWatchStandalone(String key, bool value) {
+    final watch = _watchByKey(key);
+    if (watch == null || watch.standalone == value) return;
+    if (value && !canSetWatchStandalone(key)) return;
+    if (_isDetachedRemote &&
+        _dispatchRemote(ControllerCommand.setWatchStandalone, {
+          'key': key,
+          'value': value,
+        })) {
+      return;
+    }
+    watch.standalone = value;
     _emitState([signals.watches]);
   }
 

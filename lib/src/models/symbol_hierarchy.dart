@@ -46,10 +46,21 @@ class SymbolHierarchy {
 
   SymbolItem? resolve(SymbolItem symbol) => _declarations[symbol.identity];
 
-  Iterable<SymbolItem> descendantsOf(SymbolItem root) =>
-      resolve(root)?.key == root.key
-      ? _descendants[root.identity] ?? const []
-      : const [];
+  Iterable<SymbolItem> descendantsOf(
+    SymbolItem root, {
+    Set<SymbolIdentity> excludeSubtrees = const {},
+  }) {
+    if (resolve(root)?.key != root.key) return const [];
+    final members = _descendants[root.identity] ?? const [];
+    if (excludeSubtrees.isEmpty) return members;
+    return members.where(
+      (member) =>
+          !excludeSubtrees.contains(member.identity) &&
+          !symbolAncestors(member)
+              .takeWhile((identity) => identity != root.identity)
+              .any(excludeSubtrees.contains),
+    );
+  }
 
   SymbolItem? parentOf(SymbolItem symbol) {
     for (final ancestor in symbolAncestors(symbol)) {

@@ -226,6 +226,59 @@ void main() {
     },
   );
 
+  test(
+    'standalone watches survive removal of their parent and a reload',
+    () async {
+      final c = fixture();
+      const key = 'motor.current';
+      final member = c.watches.firstWhere((watch) => watch.symbol.key == key);
+      final detached = TakeALookController(
+        remoteCommand: (command, args) async => c.handleCommand(command, args),
+      )..applySnapshot(c.stateSnapshot());
+      addTearDown(detached.dispose);
+      detached.setWatchStandalone(key, true);
+      await Future<void>.delayed(Duration.zero);
+      expect(member.standalone, isTrue);
+      detached.applySnapshot(c.stateSnapshot());
+      expect(
+        detached.watches
+            .firstWhere((watch) => watch.symbol.key == key)
+            .standalone,
+        isTrue,
+      );
+      expect(
+        buildWatchTree(
+          c.watches,
+        ).first.children.map((node) => node.watch.symbol.key),
+        contains(key),
+      );
+
+      c.removeWatch('motor');
+      expect(keys(c), [key, '$key.q', 'other:8', 'other:9', 'other']);
+      expect(c.watches.first, same(member));
+      final reloaded = TakeALookController();
+      addTearDown(reloaded.dispose);
+      await reloaded.restoreProjectSettings(c.projectSettings());
+      expect(keys(reloaded), keys(c));
+      expect(reloaded.watches.first.standalone, isTrue);
+
+      final snapshot = c.stateSnapshot();
+      c.applySnapshot({
+        'symbols': [
+          for (final symbol in snapshot['symbols'] as List)
+            {...symbol as Map, 'key': 'new:${symbol['key']}'},
+        ],
+        'watches': [
+          for (final watch in snapshot['watches'] as List)
+            {...watch as Map, 'key': 'new:${watch['key']}'}
+              ..remove('standalone'),
+        ],
+      });
+      expect(keys(c), keys(reloaded).map((key) => 'new:$key'));
+      expect(c.watches.first.standalone, isTrue);
+    },
+  );
+
   testWidgets(
     'detached windows route subtree deletion and member restoration',
     (tester) async {

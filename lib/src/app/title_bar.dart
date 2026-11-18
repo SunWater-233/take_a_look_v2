@@ -384,7 +384,6 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
   }
 
   List<Widget> _buildFileMenu() {
-    final state = widget.controller;
     return [
       _menuItem(
         label: '打开项目',
@@ -409,26 +408,8 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
       ),
       Builder(builder: _buildRecentProjectsMenu),
       const _MenuDivider(),
-      _menuItem(label: '打开 ELF / AXF', onPressed: state?.chooseFirmwareFile),
       _menuItem(
-        label: '工程设置',
-        onPressed: state == null
-            ? null
-            : () => showWorkbenchProjectSettings(context, state),
-      ),
-      const _MenuDivider(),
-      _menuItem(
-        label: '数据分析',
-        onPressed: () => unawaited(
-          widget.workspaceKey?.currentState?.activateWorkbenchView(
-                WorkspacePanelId.analysis,
-              ) ??
-              Future.value(),
-        ),
-      ),
-      _menuItem(label: '导出原始采样 CSV', onPressed: state?.exportCsv),
-      _menuItem(
-        label: '打开录制目录',
+        label: '打开录制缓存目录',
         onPressed: widget.recordingStorage?.openDirectory,
       ),
     ];
@@ -456,13 +437,7 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
                 ),
                 child: Tooltip(
                   message: path,
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 320),
-                    child: Text(
-                      p.basename(path),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
+                  child: _RecentProjectName(p.basename(path)),
                 ),
               ),
           ],
@@ -516,6 +491,52 @@ class _TalWindowTitleBarState extends State<TalWindowTitleBar> {
           unawaited(workspace.togglePanelVisibility(panel));
         }
     }
+  }
+}
+
+class _RecentProjectName extends StatelessWidget {
+  const _RecentProjectName(this.name);
+
+  static const _maxWidth = 240.0;
+  static const _overflowFade = LinearGradient(
+    colors: [Colors.white, Colors.transparent],
+    stops: [0.85, 1],
+  );
+
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    final defaultStyle = DefaultTextStyle.of(context).style;
+    final style = MediaQuery.boldTextOf(context)
+        ? defaultStyle.copyWith(fontWeight: FontWeight.bold)
+        : defaultStyle;
+    final painter = TextPainter(
+      text: TextSpan(text: name, style: style),
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+      locale: Localizations.maybeLocaleOf(context),
+      maxLines: 1,
+    )..layout();
+    final overflows = painter.width > _maxWidth || painter.didExceedMaxLines;
+    painter.dispose();
+
+    final label = Text(
+      name,
+      maxLines: 1,
+      softWrap: false,
+      overflow: TextOverflow.clip,
+    );
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: _maxWidth),
+      child: overflows
+          ? ShaderMask(
+              shaderCallback: _overflowFade.createShader,
+              blendMode: BlendMode.dstIn,
+              child: label,
+            )
+          : label,
+    );
   }
 }
 

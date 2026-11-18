@@ -970,6 +970,65 @@ void main() {
     },
   );
 
+  testWidgets('a nested watch can also be monitored at the top level', (
+    tester,
+  ) async {
+    final c = structureFixture();
+    addTearDown(c.dispose);
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    c.setWatchReadMode('motor.speed', WatchReadMode.capture);
+    c.toggleWatchPlot('motor.speed', true);
+    await mount(tester, c);
+
+    Finder row(String key) => find.byKey(ValueKey('compact-watch-$key'));
+    final motor = row('motor');
+    final member = row('motor.current');
+    final standalone = row('standalone:13:motor.current:motor.current');
+    final standaloneLeaf = row('standalone:13:motor.current:motor.current.q');
+    Future<void> choose(Finder target, String action) async {
+      await tester.tap(target, buttons: kSecondaryMouseButton);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(action));
+      await tester.pumpAndSettle();
+    }
+
+    final original = c.watches.toList();
+    await choose(member, '单独添加到监视');
+    expect(standalone.hitTestable(), findsOneWidget);
+    expect(standaloneLeaf.hitTestable(), findsOneWidget);
+    expect(member.hitTestable(), findsOneWidget);
+    expect(row('motor.current.q'), findsNothing);
+    expect(
+      tester.getTopLeft(standalone).dy,
+      lessThan(tester.getTopLeft(motor).dy),
+    );
+    expect(c.watches, orderedEquals(original));
+    expect(
+      c.watches
+          .firstWhere((watch) => watch.symbol.key == 'motor.speed')
+          .plotted,
+      isTrue,
+    );
+
+    await tester.tap(motor);
+    await tester.pumpAndSettle();
+    expect(member, findsNothing);
+    expect(standaloneLeaf.hitTestable(), findsOneWidget);
+    await choose(standalone, '取消单独监视');
+    expect(standalone, findsNothing);
+    expect(member, findsNothing);
+
+    await tester.tap(motor);
+    await tester.pumpAndSettle();
+    expect(member.hitTestable(), findsOneWidget);
+    await choose(row('motor.speed'), '单独添加到监视');
+    expect(
+      row('standalone:11:motor.speed:motor.speed').hitTestable(),
+      findsOneWidget,
+    );
+    expect(c.watches, orderedEquals(original));
+  });
+
   testWidgets('production rendering fits sidebar, focus view and touch', (
     tester,
   ) async {

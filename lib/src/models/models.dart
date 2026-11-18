@@ -143,6 +143,7 @@ class WatchItem {
       readMode = value ? WatchReadMode.capture : WatchReadMode.monitor;
   bool plotted = false;
   bool pinned = false;
+  bool standalone = false;
   bool displayHex = false;
   double value = 0;
   String? valueIssue;
@@ -158,6 +159,7 @@ class WatchItem {
         ..updatedAtMs = updatedAtMs
         ..plotted = plotted
         ..pinned = pinned
+        ..standalone = standalone
         ..displayHex = displayHex
         ..value = value
         ..valueIssue = valueIssue;

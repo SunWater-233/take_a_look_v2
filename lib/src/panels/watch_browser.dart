@@ -14,6 +14,9 @@ enum _WatchBrowserSection {
   String get actionPrefix => this == members ? '' : '$name-';
 }
 
+String _standaloneRowKey(String root, String key) =>
+    'standalone:${root.length}:$root:$key';
+
 class _WatchBrowserEntry {
   const _WatchBrowserEntry({
     required this.key,
@@ -22,12 +25,16 @@ class _WatchBrowserEntry {
     this.node,
     this.members = const [],
     this.section = _WatchBrowserSection.members,
+    this.standaloneRoot,
   });
   final String key, label;
   final int depth;
   final WatchTreeNode? node;
   final List<WatchTreeNode> members;
   final _WatchBrowserSection section;
+  final String? standaloneRoot;
+  String get rowKey =>
+      standaloneRoot == null ? key : _standaloneRowKey(standaloneRoot!, key);
   bool get expandable => members.isNotEmpty;
 }
 
@@ -265,7 +272,7 @@ class _WatchMembersList extends ListView {
             stickyHeight += visibleHeight;
             headers.add(
               SizedBox(
-                key: ValueKey('watch-sticky-${row.key}'),
+                key: ValueKey('watch-sticky-${row.rowKey}'),
                 height: visibleHeight,
                 child: ClipRect(
                   child: OverflowBox(
@@ -365,11 +372,10 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
   PointerDeviceKind? _dragKind;
   final Set<String> _selectedKeys = {};
   final Set<_WatchBrowserSection> _collapsedSections = {};
-  List<(String, _WatchBrowserSection)> _selectionOrder = [];
-  String? _selectionAnchor;
-  _WatchBrowserSection _selectionAnchorSection = _WatchBrowserSection.members;
+  List<(String, _WatchBrowserSection, String)> _selectionOrder = [];
+  (String, _WatchBrowserSection, String)? _selectionAnchor;
+  String? _standaloneToReveal;
   bool _selectionInitialized = false;
-  Set<String> get _rangeExpansions => controller.compactExpandedWatches;
   int _plotRevision = -1;
   double? _valueColumnWidth;
   TakeALookController get controller => widget.controller;
@@ -389,6 +395,7 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
       _selectedKeys.clear();
       _collapsedSections.clear();
       _selectionAnchor = null;
+      _standaloneToReveal = null;
       _selectionInitialized = false;
     }
   }
@@ -404,18 +411,15 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
     super.dispose();
   }
 
-  void _select(
-    String key, {
-    bool preserveSelection = false,
-    _WatchBrowserSection section = _WatchBrowserSection.members,
-  }) {
+  void _selectRow(_WatchBrowserEntry entry, {bool preserveSelection = false}) {
+    final key = entry.key;
     final keyboard = HardwareKeyboard.instance;
     final additive = keyboard.isControlPressed || keyboard.isMetaPressed;
-    final index = _selectionOrder.indexOf((key, section));
-    final anchor = _selectionOrder.indexOf((
-      _selectionAnchor ?? '',
-      _selectionAnchorSection,
-    ));
+    final row = (key, entry.section, entry.rowKey);
+    final index = _selectionOrder.indexOf(row);
+    final anchor = _selectionAnchor == null
+        ? -1
+        : _selectionOrder.indexOf(_selectionAnchor!);
     setState(() {
       if (preserveSelection && _selectedKeys.contains(key)) {
         // Opening a menu on a selected row keeps the entire selection.
@@ -431,14 +435,12 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
         );
       } else if (!preserveSelection && additive) {
         if (!_selectedKeys.add(key)) _selectedKeys.remove(key);
-        _selectionAnchor = key;
-        _selectionAnchorSection = section;
+        _selectionAnchor = row;
       } else {
         _selectedKeys
           ..clear()
           ..add(key);
-        _selectionAnchor = key;
-        _selectionAnchorSection = section;
+        _selectionAnchor = row;
       }
       controller.compactWatchSelection = _selectedKeys.contains(key)
           ? key
@@ -453,16 +455,14 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
       _selectedKeys
         ..clear()
         ..addAll(keys);
-      _selectionAnchor = _selectionOrder.firstOrNull?.$1;
-      _selectionAnchorSection =
-          _selectionOrder.firstOrNull?.$2 ?? _WatchBrowserSection.members;
-      controller.compactWatchSelection ??= _selectionAnchor;
+      _selectionAnchor = _selectionOrder.firstOrNull;
+      controller.compactWatchSelection ??= _selectionAnchor?.$1;
     });
     _panelFocus.requestFocus();
   }
 
   void _toggle(_WatchBrowserEntry entry) {
-    if (entry.node != null) _select(entry.key, section: entry.section);
+    if (entry.node != null) _selectRow(entry);
     if (entry.node != null &&
         (HardwareKeyboard.instance.isShiftPressed ||
             HardwareKeyboard.instance.isControlPressed ||
@@ -471,10 +471,8 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
       return;
     }
     setState(() {
-      final expanded = entry.node == null
-          ? _rangeExpansions
-          : controller.compactExpandedWatches;
-      if (!expanded.add(entry.key)) expanded.remove(entry.key);
+      final expanded = controller.compactExpandedWatches;
+      if (!expanded.add(entry.rowKey)) expanded.remove(entry.rowKey);
     });
     _panelFocus.requestFocus();
   }
@@ -515,7 +513,7 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
     final keys = controller.watches.map((w) => w.symbol.key).toSet();
     final lostSelection = _selectedKeys.any((key) => !keys.contains(key));
     _selectedKeys.removeWhere((key) => !keys.contains(key));
-    if (!keys.contains(_selectionAnchor)) _selectionAnchor = null;
+    if (!keys.contains(_selectionAnchor?.$1)) _selectionAnchor = null;
     if (!keys.contains(controller.compactWatchSelection) &&
         (controller.compactWatchSelection != null ||
             !_selectionInitialized ||
@@ -529,8 +527,7 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
       _selectedKeys
         ..clear()
         ..add(selected);
-      _selectionAnchor = selected;
-      _selectionAnchorSection = _WatchBrowserSection.members;
+      _selectionAnchor = (selected, _WatchBrowserSection.members, selected);
     }
     _selectionInitialized = true;
     if (_plotRevision == controller.plotWatchSelectionRevision) return;
@@ -541,15 +538,16 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
     _selectedKeys
       ..clear()
       ..add(key);
-    _selectionAnchor = key;
-    _selectionAnchorSection = _WatchBrowserSection.members;
+    _selectionAnchor = (key, _WatchBrowserSection.members, key);
     // A curve selection reveals its source, including an array's range group.
     bool reveal(WatchTreeNode node) {
       if (node.watch.symbol.key == key) return true;
       for (var i = 0; i < node.children.length; i++) {
         if (reveal(node.children[i])) {
           controller.compactExpandedWatches.add(node.watch.symbol.key);
-          _rangeExpansions.add('${node.watch.symbol.key}:range:${i ~/ 32}');
+          controller.compactExpandedWatches.add(
+            '${node.watch.symbol.key}:range:${i ~/ 32}',
+          );
           return true;
         }
       }
@@ -561,8 +559,12 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
     }
   }
 
-  List<_WatchBrowserEntry> _rows(List<WatchTreeNode> roots) {
+  List<_WatchBrowserEntry> _rows(
+    List<WatchTreeNode> roots,
+    List<WatchTreeNode> standalone,
+  ) {
     final query = _search.text.trim().toLowerCase();
+    final expanded = controller.compactExpandedWatches;
     final matches = <String, bool>{};
     bool match(WatchTreeNode n) => matches.putIfAbsent(
       n.watch.symbol.key,
@@ -571,22 +573,21 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
           n.children.any(match),
     );
     final rows = <_WatchBrowserEntry>[];
-    void visit(WatchTreeNode n, int depth) {
+    void visit(WatchTreeNode n, int depth, String? standaloneRoot) {
       if (query.isNotEmpty && !match(n)) return;
-      rows.add(
-        _WatchBrowserEntry(
-          key: n.watch.symbol.key,
-          label: n.label,
-          depth: depth,
-          node: n,
-          members: n.children,
-        ),
+      final entry = _WatchBrowserEntry(
+        key: n.watch.symbol.key,
+        label: depth == 0 && standaloneRoot != null
+            ? splitSymbolPath(n.watch.symbol.name).last
+            : n.label,
+        depth: depth,
+        node: n,
+        members: n.children,
+        standaloneRoot: standaloneRoot,
       );
+      rows.add(entry);
       if (n.children.isEmpty ||
-          (query.isEmpty &&
-              !controller.compactExpandedWatches.contains(
-                n.watch.symbol.key,
-              ))) {
+          (query.isEmpty && !expanded.contains(entry.rowKey))) {
         return;
       }
       final grouped =
@@ -595,7 +596,7 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
           n.children.every((child) => child.label.startsWith('['));
       if (!grouped) {
         for (final child in n.children) {
-          visit(child, depth + 1);
+          visit(child, depth + 1, standaloneRoot);
         }
         return;
       }
@@ -605,47 +606,70 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
           math.min(start + 32, n.children.length),
         );
         final key = '${n.watch.symbol.key}:range:${start ~/ 32}';
-        rows.add(
-          _WatchBrowserEntry(
-            key: key,
-            label: '${members.first.label}…${members.last.label}',
-            depth: depth + 1,
-            members: members,
-          ),
+        final range = _WatchBrowserEntry(
+          key: key,
+          label: '${members.first.label}…${members.last.label}',
+          depth: depth + 1,
+          members: members,
+          standaloneRoot: standaloneRoot,
         );
-        if (_rangeExpansions.contains(key)) {
+        rows.add(range);
+        if (expanded.contains(range.rowKey)) {
           for (final child in members) {
-            visit(child, depth + 2);
+            visit(child, depth + 2, standaloneRoot);
           }
         }
       }
     }
 
+    for (final root in standalone) {
+      visit(root, 0, root.watch.symbol.key);
+    }
     for (final root in roots) {
-      visit(root, 0);
+      // The standalone row already represents a branch without a watched parent.
+      if (!root.watch.standalone) visit(root, 0, null);
     }
     return rows;
   }
 
-  Future<void> _adjustColor(WatchItem watch) async {
-    _select(watch.symbol.key, preserveSelection: true);
+  void _revealStandalone(List<_WatchBrowserEntry> rows, double rowHeight) {
+    final key = _standaloneToReveal;
+    if (key == null) return;
+    final index = rows.indexWhere(
+      (row) => row.standaloneRoot == key && row.depth == 0,
+    );
+    if (index < 0) return;
+    _standaloneToReveal = null;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scroll.hasClients) return;
+      final position = _scroll.position;
+      final top = index == 0
+          ? 0.0
+          : _watchMemberColumnHeight + index * rowHeight;
+      _scroll.jumpTo(
+        top.clamp(position.minScrollExtent, position.maxScrollExtent),
+      );
+    });
+  }
+
+  Future<void> _adjustColor(_WatchBrowserEntry entry) async {
+    _selectRow(entry, preserveSelection: true);
     final keys = _selectedKeys.toList();
     _panelFocus.requestFocus();
     final color = await showTalDialog<Color>(
       context: context,
-      builder: (_) => WatchColorDialog(initialColor: watch.color),
+      builder: (_) => WatchColorDialog(initialColor: entry.node!.watch.color),
     );
     if (mounted && color != null) {
       controller.setWatchColors(keys, color);
     }
   }
 
-  Future<void> _menu(
-    WatchItem watch,
-    Offset position, {
-    _WatchBrowserSection section = _WatchBrowserSection.members,
-  }) async {
-    _select(watch.symbol.key, preserveSelection: true, section: section);
+  Future<void> _menu(_WatchBrowserEntry entry, Offset position) async {
+    final watch = entry.node!.watch;
+    final addStandalone = !watch.standalone;
+    final touch = TalUiTheme.of(context).touchOptimized;
+    _selectRow(entry, preserveSelection: true);
     final keys = _selectedKeys.toList();
     final hexWatches = controller.watchesForHexDisplay(keys);
     final allHex =
@@ -674,6 +698,15 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
         overlay.size,
       ),
       items: [
+        if (controller.canSetWatchStandalone(entry.key))
+          _watchPopupItem(
+            touchOptimized: touch,
+            value: 'standalone',
+            icon: addStandalone
+                ? Icons.add_box_outlined
+                : Icons.remove_circle_outline,
+            label: addStandalone ? '单独添加到监视' : '取消单独监视',
+          ),
         _watchPopupItem(
           touchOptimized: TalUiTheme.of(context).touchOptimized,
           value: 'pin',
@@ -744,6 +777,15 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
     );
     if (!mounted) return;
     switch (action) {
+      case 'standalone':
+        _standaloneToReveal = addStandalone ? entry.key : null;
+        _collapsedSections.remove(_WatchBrowserSection.members);
+        if (addStandalone && entry.expandable) {
+          controller.compactExpandedWatches.add(
+            _standaloneRowKey(entry.key, entry.key),
+          );
+        }
+        controller.setWatchStandalone(entry.key, addStandalone);
       case 'pin':
         final pinned = !watch.pinned;
         for (final key in keys) {
@@ -767,7 +809,7 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
       case 'redo':
         controller.redoWatchDeletion();
       case 'color':
-        await _adjustColor(watch);
+        await _adjustColor(entry);
     }
   }
 
@@ -935,7 +977,7 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
         _finishRowDrag();
         // A stationary touch hold keeps the existing context menu action.
         if (showMenu && mounted) {
-          _menu(entry.node!.watch, origin, section: entry.section);
+          _menu(entry, origin);
         }
       },
       feedback: Material(
@@ -977,9 +1019,7 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
     final height = ui.targetExtent(32);
     final expanded =
         _search.text.trim().isNotEmpty ||
-        (node == null
-            ? _rangeExpansions.contains(entry.key)
-            : controller.compactExpandedWatches.contains(entry.key));
+        controller.compactExpandedWatches.contains(entry.rowKey);
     final content = LayoutBuilder(
       builder: (context, constraints) {
         final showPin = !ui.touchOptimized || constraints.maxWidth >= 280;
@@ -997,7 +1037,7 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
           if (entry.expandable) {
             _toggle(entry);
           } else {
-            _select(entry.key, section: entry.section);
+            _selectRow(entry);
             _panelFocus.requestFocus();
           }
           if (revealSticky != null) {
@@ -1021,7 +1061,13 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
           onTap: activate,
           onSecondaryTapUp: watch == null
               ? null
-              : (d) => _menu(watch, d.globalPosition, section: entry.section),
+              : (d) => _menu(entry, d.globalPosition),
+          onLongPress: watch == null || entry.standaloneRoot == null
+              ? null
+              : () {
+                  final box = context.findRenderObject()! as RenderBox;
+                  _menu(entry, box.localToGlobal(box.size.center(Offset.zero)));
+                },
           child: Container(
             height: height,
             padding: const EdgeInsets.only(right: 5),
@@ -1057,11 +1103,11 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
                           triggerMode: TooltipTriggerMode.manual,
                           child: GestureDetector(
                             key: ValueKey(
-                              'compact-watch-color-${entry.section.actionPrefix}${entry.key}',
+                              'compact-watch-color-${entry.section.actionPrefix}${entry.rowKey}',
                             ),
                             behavior: HitTestBehavior.opaque,
                             onTap: activate,
-                            onDoubleTap: () => _adjustColor(watch),
+                            onDoubleTap: () => _adjustColor(entry),
                             child: Align(
                               alignment: Alignment.centerRight,
                               child: Padding(
@@ -1071,7 +1117,7 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
                                   height: height - 12,
                                   child: DecoratedBox(
                                     key: ValueKey(
-                                      'compact-watch-color-bar-${entry.section.actionPrefix}${entry.key}',
+                                      'compact-watch-color-bar-${entry.section.actionPrefix}${entry.rowKey}',
                                     ),
                                     decoration: BoxDecoration(
                                       color: watch.color,
@@ -1129,11 +1175,13 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
                         )
                       : _WatchValueCell(
                           key: ValueKey(
-                            '${entry.section.rowPrefix}-watch-cell-${entry.key}',
+                            '${entry.section.rowPrefix}-watch-cell-${entry.rowKey}',
                           ),
                           controller: controller,
                           watch: watch!,
-                          prefix: entry.section.rowPrefix,
+                          prefix: entry.standaloneRoot == null
+                              ? entry.section.rowPrefix
+                              : 'standalone-${entry.standaloneRoot}',
                           onSelect: activate,
                         ),
                 ),
@@ -1152,7 +1200,7 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
                       ui,
                       '固定',
                       watch!.pinned ? Icons.push_pin : Icons.push_pin_outlined,
-                      'watch-pin-${entry.section.actionPrefix}${entry.key}',
+                      'watch-pin-${entry.section.actionPrefix}${entry.rowKey}',
                       watch.pinned,
                       () => controller.setWatchPinned(entry.key, !watch.pinned),
                     ),
@@ -1160,7 +1208,7 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
                     ui,
                     watch!.samplingEnabled ? '移出采集' : '加入采集',
                     Icons.sensors,
-                    'compact-watch-capture-${entry.section.actionPrefix}${entry.key}',
+                    'compact-watch-capture-${entry.section.actionPrefix}${entry.rowKey}',
                     watch.samplingEnabled,
                     watch.symbol.missing
                         ? null
@@ -1178,7 +1226,7 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
                       watch.plotted
                           ? Icons.visibility_outlined
                           : Icons.visibility_off_outlined,
-                      'compact-watch-plot-${entry.section.actionPrefix}${entry.key}',
+                      'compact-watch-plot-${entry.section.actionPrefix}${entry.rowKey}',
                       watch.plotted,
                       () =>
                           controller.toggleWatchPlot(entry.key, !watch.plotted),
@@ -1194,13 +1242,17 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
       },
     );
     if (watch == null) return content;
-    return WatchRowAnchor(
+    Widget anchor(Widget child) => WatchRowAnchor(
       key: revealSticky == null
-          ? ValueKey('${entry.section.rowPrefix}-watch-${entry.key}')
+          ? ValueKey('${entry.section.rowPrefix}-watch-${entry.rowKey}')
           : null,
       controller: controller,
       watchKey: entry.key,
-      child: _dragSource(
+      child: child,
+    );
+    if (entry.standaloneRoot != null) return anchor(content);
+    return anchor(
+      _dragSource(
         entry,
         DragTarget<_WatchBrowserDrag>(
           onWillAcceptWithDetails: (details) =>
@@ -1683,13 +1735,14 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
             for (final watch in root.watchesInDisplayOrder) watch.symbol.key,
         ];
         _syncSelection(roots);
-        final rows = _rows(roots);
         final selected = controller.watches
             .where((w) => w.symbol.key == controller.compactWatchSelection)
             .firstOrNull;
         final allNodes = <String, WatchTreeNode>{};
+        final standalone = <WatchTreeNode>[];
         void collect(WatchTreeNode node) {
           allNodes[node.watch.symbol.key] = node;
+          if (node.watch.standalone) standalone.add(node);
           for (final c in node.children) {
             collect(c);
           }
@@ -1698,6 +1751,7 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
         for (final root in roots) {
           collect(root);
         }
+        final rows = _rows(roots, standalone);
         final pinned = _ordered(
           controller.watches.where(
             (w) => w.pinned && allNodes[w.symbol.key]!.children.isEmpty,
@@ -1732,13 +1786,14 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
         );
         _selectionOrder = [
           if (pinnedExpanded)
-            for (final w in pinned) (w.symbol.key, _WatchBrowserSection.pinned),
+            for (final w in pinned)
+              (w.symbol.key, _WatchBrowserSection.pinned, w.symbol.key),
           if (captureExpanded)
             for (final w in captured)
-              (w.symbol.key, _WatchBrowserSection.capture),
+              (w.symbol.key, _WatchBrowserSection.capture, w.symbol.key),
           if (membersExpanded)
             for (final row in rows)
-              if (row.node != null) (row.key, _WatchBrowserSection.members),
+              if (row.node != null) (row.key, row.section, row.rowKey),
         ];
         final wide = constraints.maxWidth >= 760;
         final detailsExpanded = controller.compactWatchDetailsExpanded.value;
@@ -1754,6 +1809,7 @@ class _CompactWatchPanelState extends State<CompactWatchPanel> {
             selected.symbol.key,
         };
         final ui = TalUiTheme.of(context);
+        if (membersExpanded) _revealStandalone(rows, ui.targetExtent(32));
         final detailsWidth = detailsExpanded ? 310.0 : ui.iconButtonSize;
         final listWidth = constraints.maxWidth - (wide ? detailsWidth : 0);
         final showPin = !ui.touchOptimized || listWidth >= 280;

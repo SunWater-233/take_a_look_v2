@@ -20,6 +20,10 @@ class WatchRegistry {
 
   bool get canUndo => _deletions.isNotEmpty;
   bool get canRedo => _redos.isNotEmpty;
+  Set<SymbolIdentity> get standaloneRoots => {
+    for (final watch in watches)
+      if (watch.standalone) watch.symbol.identity,
+  };
 
   /// UI preferences follow declarations when a rebuild moves their addresses.
   /// Deleted branches also suppress children newly introduced by that rebuild.
@@ -29,11 +33,16 @@ class WatchRegistry {
   ) {
     clearHistory();
     final omitted = <String>{};
+    final independent = standaloneRoots;
     for (final key in removedKeys) {
       final symbol = replacements[key];
       if (symbol == null) continue;
       omitted.add(symbol.key);
-      omitted.addAll(hierarchy.descendantsOf(symbol).map((item) => item.key));
+      omitted.addAll(
+        hierarchy
+            .descendantsOf(symbol, excludeSubtrees: independent)
+            .map((item) => item.key),
+      );
     }
     final rebound = [
       for (final watch in watches)

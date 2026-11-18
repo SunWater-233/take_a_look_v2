@@ -235,6 +235,12 @@ Future<JsonObject> executeControllerCommand(
         values['key'] as String,
         values['value'] as bool,
       );
+    case ControllerCommand.setWatchStandalone:
+      final values = Map<String, Object?>.from(arguments! as Map);
+      controller.setWatchStandalone(
+        values['key'] as String,
+        values['value'] as bool,
+      );
     case ControllerCommand.setWatchHexDisplay:
       final values = Map<String, Object?>.from(arguments! as Map);
       controller.setWatchHexDisplay(

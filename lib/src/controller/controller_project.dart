@@ -155,6 +155,7 @@ extension TakeALookControllerProject on TakeALookController {
           watch['sampling'] is! bool ||
           watch['plotted'] is! bool ||
           (watch['pinned'] != null && watch['pinned'] is! bool) ||
+          (watch['standalone'] != null && watch['standalone'] is! bool) ||
           (watch['displayHex'] != null && watch['displayHex'] is! bool) ||
           !WatchReadMode.values.any((mode) => mode.name == watch['readMode']) ||
           (rate != null &&

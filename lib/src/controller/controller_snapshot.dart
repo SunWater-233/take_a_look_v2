@@ -391,6 +391,10 @@ extension TakeALookControllerSnapshot on TakeALookController {
                       item['pinned'] as bool? ??
                       previousWatches[symbol.key]?.pinned ??
                       false
+                  ..standalone =
+                      item['standalone'] as bool? ??
+                      previousWatches[symbol.key]?.standalone ??
+                      false
                   ..displayHex =
                       item['displayHex'] as bool? ??
                       previousWatches[symbol.key]?.displayHex ??

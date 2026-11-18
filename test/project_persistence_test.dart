@@ -21,7 +21,8 @@ void main() {
     (tester) async {
       final directory = Directory.systemTemp.createTempSync('tal_project_');
       final file = File(p.join(directory.path, 'work.talproj'));
-      final alternate = File(p.join(directory.path, 'alternate.talproj'));
+      const alternateName = 'alternate_project_with_a_long_filename.talproj';
+      final alternate = File(p.join(directory.path, alternateName));
       var controller = (await tester.runAsync(
         () async => TakeALookController(),
       ))!..loadDemoSymbols();
@@ -158,10 +159,21 @@ void main() {
 
       await openHistory();
       final workItem = find.text('work.talproj');
-      final alternateItem = find.text('alternate.talproj');
+      final alternateItem = find.text(alternateName);
       await waitForIo(() => workItem.evaluate().isNotEmpty);
       await tester.pumpAndSettle();
       expect(find.byTooltip(file.path), findsOneWidget);
+      expect(find.byTooltip(alternate.path), findsOneWidget);
+      expect(tester.getSize(alternateItem).width, 240);
+      final fade = find.ancestor(
+        of: alternateItem,
+        matching: find.byType(ShaderMask),
+      );
+      expect(tester.widget<ShaderMask>(fade).blendMode, BlendMode.dstIn);
+      expect(
+        find.ancestor(of: workItem, matching: find.byType(ShaderMask)),
+        findsNothing,
+      );
       expect(
         tester.getTopLeft(alternateItem).dy,
         lessThan(tester.getTopLeft(workItem).dy),

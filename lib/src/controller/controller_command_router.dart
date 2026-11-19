@@ -53,6 +53,8 @@ Future<JsonObject> executeControllerCommand(
       }
     case ControllerCommand.setSampleRate:
       controller.setSampleRate((arguments as num).toDouble());
+    case ControllerCommand.setMemoryOverclock:
+      controller.setMemoryOverclock(arguments == true);
     case ControllerCommand.setMonitorRate:
       controller.setMonitorRate((arguments as num).toDouble());
     case ControllerCommand.setDisplayRefreshMode:

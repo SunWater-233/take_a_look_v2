@@ -246,6 +246,10 @@ extension TakeALookControllerSnapshot on TakeALookController {
     );
     monitorRateHz =
         (data['monitorRateHz'] as num?)?.toDouble() ?? monitorRateHz;
+    state.acquisition.memoryOverclock =
+        data['memoryOverclock'] as bool? ?? memoryOverclock;
+    state.acquisition.memoryPipelineDepth =
+        data['memoryPipelineDepth'] as int? ?? memoryPipelineDepth;
     final nextDisplayRefreshMode = data['displayRefreshMode'] as String?;
     if (const {
       'standard',

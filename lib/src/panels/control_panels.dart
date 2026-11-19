@@ -173,14 +173,22 @@ class RunControlPanel extends StatelessWidget {
 }
 
 class SamplingPanel extends StatelessWidget {
-  const SamplingPanel({super.key, required this.controller});
+  const SamplingPanel({
+    super.key,
+    required this.controller,
+    this.showMemoryOverclock = false,
+  });
 
   final TakeALookController controller;
+  final bool showMemoryOverclock;
 
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: controller.samplingChanges,
+      animation: Listenable.merge([
+        controller.samplingChanges,
+        if (showMemoryOverclock) controller.connectionChanges,
+      ]),
       builder: (context, _) => SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
         child: Align(
@@ -246,10 +254,64 @@ class SamplingPanel extends StatelessWidget {
                   ],
                 ),
               ],
+              if (showMemoryOverclock) ...[
+                const SizedBox(height: 16),
+                const Divider(height: 1),
+                const SizedBox(height: 4),
+                _MemoryOverclockSetting(controller: controller),
+              ],
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+class _MemoryOverclockSetting extends StatelessWidget {
+  const _MemoryOverclockSetting({required this.controller});
+
+  final TakeALookController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final available =
+        controller.connectionKind == 'local' &&
+        (controller.connectionStatus != ConnectionStatus.connected ||
+            controller.memoryPipelineDepth > 0);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        CheckboxListTile(
+          key: const ValueKey('memory-overclock'),
+          value: available && controller.memoryOverclock,
+          onChanged: available
+              ? (value) => controller.setMemoryOverclock(value == true)
+              : null,
+          controlAffinity: ListTileControlAffinity.leading,
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          title: Text(
+            '超频模式',
+            style: available
+                ? talBody
+                : talBody.copyWith(color: TalColors.muted),
+          ),
+        ),
+        const Text(
+          '本地 CMSIS-DAP（HID 或 Bulk）可批量读取 RAM，并按探针能力同时排队最多 4 个读包。读取按设定采样率调度。',
+          style: talMuted,
+        ),
+        const SizedBox(height: 6),
+        Text(
+          '批内样本共用一个时间窗口，间隔可能不均匀。高负载时可能出现读取超时或调试响应变慢。',
+          style: talMuted.copyWith(color: TalColors.warning),
+        ),
+        if (!available) ...[
+          const SizedBox(height: 6),
+          const Text('超频模式仅适用于本地 CMSIS-DAP。', style: talMuted),
+        ],
+      ],
     );
   }
 }

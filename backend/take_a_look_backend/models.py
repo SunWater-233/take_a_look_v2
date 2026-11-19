@@ -13,6 +13,13 @@ class SampleFrame(tuple):
         frame.timing = timing
         return frame
 
+    @classmethod
+    def from_transaction(cls, values, *, start, end, sequence, index, repeat):
+        return cls(start, values, {
+            "quality": "transaction_window", "batchSequence": sequence,
+            "index": index, "repeat": repeat, "start": start, "end": end,
+        })
+
     def to_json(self):
         return {"elapsed": self[0], "values": self[1],
                 **({"timing": self.timing} if self.timing is not None else {})}

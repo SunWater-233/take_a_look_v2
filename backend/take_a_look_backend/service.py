@@ -107,6 +107,7 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
         self._remote_config = dict(REMOTE_DEFAULTS)
         self._ember_pairing = PairingManager()
         self._sample_rate_hz = 50.0
+        self._memory_overclock = False
         self._monitor_rate_hz = 10.0
         self._monitor_schedule_revision = 0
         self._latest_rtt_values: dict[str, tuple[object, int]] = {}
@@ -395,6 +396,9 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
             "gatewayProtocolVersion": getattr(getattr(self._memory, "client", None), "protocol_version", None),
             "connectionCapabilities": capabilities_for_connection(self._connection_kind, self._remote_config).to_json(),
             "sampleRateHz": self._sample_rate_hz,
+            "memoryOverclock": self._memory_overclock,
+            "memoryPipelineDepth": (getattr(self._memory, "memory_pipeline_depth", 0)
+                                    if self._connection_status == "connected" else 0),
             "monitorRateHz": self._monitor_rate_hz,
             "rttSampleRateHz": self._rtt_sample_rate_hz,
             "samplingPaused": self._sampling_paused,
@@ -1074,6 +1078,9 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
         serial = _required_string(params, "serialNumber") if "serialNumber" in params else self._serial_number
         sample_rate = (_positive_number(params["sampleRateHz"], "sampleRateHz")
                        if "sampleRateHz" in params else self._sample_rate_hz)
+        memory_overclock = params.get("memoryOverclock", self._memory_overclock)
+        if not isinstance(memory_overclock, bool):
+            raise ProtocolError("invalid_request", "memoryOverclock must be a boolean.")
         monitor_rate = _monitor_frequency(params["monitorRateHz"]) if "monitorRateHz" in params else None
         rtt_rate = (_positive_number(params["rttSampleRateHz"], "rttSampleRateHz")
                     if "rttSampleRateHz" in params else None)
@@ -1093,6 +1100,7 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
         self._swd_clock, self._swd_frequency_hz = swd_clock, swd_frequency_hz
         self._serial_number = serial
         self._sample_rate_hz = sample_rate
+        self._memory_overclock = memory_overclock
         if monitor_rate is not None:
             self._monitor_rate_hz = monitor_rate
             self._monitor_schedule_revision += 1

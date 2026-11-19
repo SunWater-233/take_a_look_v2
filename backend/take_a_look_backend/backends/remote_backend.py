@@ -66,10 +66,13 @@ def expand_burst_frames(symbols, sizes, burst_start, duration_us, data, repeat, 
         for symbol, size in zip(symbols, sizes):
             values[symbol.key] = decode_symbol_value(symbol, data[offset:offset + size])
             offset += size
-        timing = ({"quality": "transaction_window", "batchSequence": sequence,
-                   "index": index, "repeat": repeat, "start": burst_start,
-                   "end": burst_start + duration_us / 1e6} if repeat > 1 else None)
-        frames.append(SampleFrame(burst_start, values, timing))
+        if repeat > 1:
+            frames.append(SampleFrame.from_transaction(
+                values, start=burst_start, end=burst_start + duration_us / 1e6,
+                sequence=sequence, index=index, repeat=repeat,
+            ))
+        else:
+            frames.append(SampleFrame(burst_start, values))
     return frames
 
 

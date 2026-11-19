@@ -37,6 +37,8 @@ enum SnapshotField {
   firmware({SnapshotDomain.symbols, SnapshotDomain.debug}),
   symbolLoad({}),
   sampleRateHz({SnapshotDomain.sampling}),
+  memoryOverclock({SnapshotDomain.sampling}),
+  memoryPipelineDepth({SnapshotDomain.sampling}),
   monitorRateHz({SnapshotDomain.sampling}),
   rttSampleRateHz({SnapshotDomain.sampling}),
   displayRefreshMode({SnapshotDomain.plot}),

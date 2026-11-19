@@ -140,6 +140,8 @@ class AcquisitionState {
   bool preserveMissingHistory = false;
   Map<String, dynamic> rawRecording = <String, dynamic>{};
   double sampleRateHz = 50;
+  bool memoryOverclock = false;
+  int memoryPipelineDepth = 0;
   double monitorRateHz = 10;
   double rttSampleRateHz = 1000;
   String displayRefreshMode = 'standard';

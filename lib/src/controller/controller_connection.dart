@@ -93,6 +93,13 @@ extension TakeALookControllerConnection on TakeALookController {
     _emitState([signals.sampling, signals.logs]);
   }
 
+  void setMemoryOverclock(bool enabled) {
+    if (memoryOverclock == enabled) return;
+    if (_dispatchCommand(ControllerCommand.setMemoryOverclock, enabled)) return;
+    state.acquisition.memoryOverclock = enabled;
+    _emitState([signals.sampling]);
+  }
+
   void setDisplayRefreshMode(String mode) {
     if (!const {'standard', 'high', 'realtime'}.contains(mode)) {
       throw ArgumentError.value(mode, 'mode', '未知的绘图刷新率模式');

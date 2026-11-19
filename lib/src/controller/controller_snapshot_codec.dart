@@ -89,6 +89,9 @@ class ControllerSnapshotCodec {
     SnapshotField.firmware => Map<String, dynamic>.of(source.state.firmware),
     SnapshotField.symbolLoad => source.state.symbolLoad!.toJson(),
     SnapshotField.sampleRateHz => source.state.acquisition.sampleRateHz,
+    SnapshotField.memoryOverclock => source.state.acquisition.memoryOverclock,
+    SnapshotField.memoryPipelineDepth =>
+      source.state.acquisition.memoryPipelineDepth,
     SnapshotField.monitorRateHz => source.state.acquisition.monitorRateHz,
     SnapshotField.rttSampleRateHz => source.state.acquisition.rttSampleRateHz,
     SnapshotField.displayRefreshMode =>

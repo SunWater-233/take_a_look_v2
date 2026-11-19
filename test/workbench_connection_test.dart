@@ -6,11 +6,82 @@ import 'package:take_a_look_v2/src/app/workbench_chrome.dart';
 import 'package:take_a_look_v2/src/app/workbench_feedback.dart';
 import 'package:take_a_look_v2/src/controller/controller.dart';
 import 'package:take_a_look_v2/src/models/models.dart';
+import 'package:take_a_look_v2/src/panels/panels.dart';
 import 'package:take_a_look_v2/src/protocol/commands.dart';
 import 'package:take_a_look_v2/src/protocol/events.dart';
 import 'package:take_a_look_v2/src/theme/theme.dart';
 
 void main() {
+  testWidgets('capture settings show the overclock help and send the toggle', (
+    tester,
+  ) async {
+    final requests = <BackendCall>[];
+    late final TakeALookController controller;
+    controller = TakeALookController(
+      backendCommand: (command, arguments) async {
+        if (command == ControllerCommand.setMemoryOverclock) {
+          final call = BackendCommandMapper.translate(command, arguments, {})!;
+          requests.add(call);
+          controller.applySnapshot(call.params);
+        }
+      },
+    );
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTalTheme(),
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () =>
+                  showWorkbenchSamplingSettings(context, controller),
+              child: const Text('打开采集设置'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('打开采集设置'));
+    await tester.pumpAndSettle();
+
+    final tile = find.byKey(const ValueKey('memory-overclock'));
+    expect(tester.widget<CheckboxListTile>(tile).value, isFalse);
+    expect(find.textContaining('HID 或 Bulk'), findsOneWidget);
+    expect(find.textContaining('同时排队最多 4 个读包'), findsOneWidget);
+    expect(find.textContaining('设定采样率'), findsOneWidget);
+    expect(find.textContaining('间隔可能不均匀'), findsOneWidget);
+    expect(find.textContaining('读取超时'), findsOneWidget);
+
+    await tester.tap(find.text('超频模式'));
+    await tester.pumpAndSettle();
+    expect(requests.single.method, BackendMethod.setConfig);
+    expect(requests.single.params, {'memoryOverclock': true});
+    expect(tester.widget<CheckboxListTile>(tile).value, isTrue);
+
+    controller.applySnapshot({
+      'connectionStatus': 'connected',
+      'memoryPipelineDepth': 1,
+    });
+    await tester.pumpAndSettle();
+    expect(tester.widget<CheckboxListTile>(tile).onChanged, isNotNull);
+
+    controller.applySnapshot({'memoryPipelineDepth': 0});
+    await tester.pumpAndSettle();
+    expect(tester.widget<CheckboxListTile>(tile).onChanged, isNull);
+    expect(tester.widget<CheckboxListTile>(tile).value, isFalse);
+    expect(find.text('超频模式仅适用于本地 CMSIS-DAP。'), findsOneWidget);
+    await tester.tap(find.text('超频模式'));
+    expect(requests, hasLength(1));
+
+    controller.applySnapshot({'memoryPipelineDepth': 4});
+    await tester.pumpAndSettle();
+    expect(tester.widget<CheckboxListTile>(tile).value, isTrue);
+    await tester.tap(find.text('超频模式'));
+    await tester.pumpAndSettle();
+    expect(requests.last.params, {'memoryOverclock': false});
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('toolbar capture dropdown edits custom rates and keeps presets', (
     tester,
   ) async {

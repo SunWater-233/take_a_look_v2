@@ -155,7 +155,12 @@ Future<void> showWorkbenchSamplingSettings(
       height: 300,
       child: Column(
         children: [
-          Expanded(child: SamplingPanel(controller: controller)),
+          Expanded(
+            child: SamplingPanel(
+              controller: controller,
+              showMemoryOverclock: true,
+            ),
+          ),
           const Divider(height: 1),
           AnimatedBuilder(
             animation: controller.samplingChanges,

@@ -146,6 +146,10 @@ extension TakeALookControllerTelemetry on TakeALookController {
               (payload['memoryPhoneReadUs'] as num?)?.toInt() ?? 0;
           final samplingMode = payload['memorySamplingMode'] as String?;
           final modeLabel = samplingMode == 'full' ? '全速' : '定时';
+          final packets = payload['memoryPacketsInFlight'] as int? ?? 0;
+          final captureMode = samplingMode == 'pipeline'
+              ? '目标 $sampleRateLabel，超频（最多 $packets 包在途）'
+              : '目标 $sampleRateLabel';
           final burst = (payload['memoryBurst'] as num?)?.toInt() ?? 1;
           final burstTiming =
               payload['memoryTimeQuality'] == 'transaction_window';
@@ -157,7 +161,7 @@ extension TakeALookControllerTelemetry on TakeALookController {
                     '（$modeLabel）'
               : '';
           _appendLog(
-            '采样性能：目标 $sampleRateLabel，'
+            '采样性能：$captureMode，'
             '$deliveredLabel，'
             '样本 $sampleCount，变量 $watchCount，'
             '读块 $blockCount，字节 $byteCount$memoryTiming$ceiling。',

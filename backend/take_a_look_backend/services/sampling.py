@@ -32,6 +32,8 @@ class SamplingServiceMixin:
                 with self._lock:
                     connected = (self._connection_status == "connected" and not self._firmware_busy
                                  and not self._firmware.get("requiresDownload"))
+                    overclock = (connected and self._memory_overclock
+                                 and getattr(self._memory, "memory_pipeline_depth", 0) > 0)
                     if connected and now >= self._next_debug_poll_at:
                         self._poll_debug_state_locked()
                         # The phone services every probe request on one worker, so a
@@ -51,7 +53,7 @@ class SamplingServiceMixin:
                         self._emit(EventName.STATE, self._sampling_clock_state())
                     memory_period = 1.0 / self._sample_rate_hz
                     rtt_period = max(1.0 / self._rtt_sample_rate_hz, 0.002)
-                    periods = (memory_period, rtt_period)
+                    periods = (memory_period, rtt_period, overclock)
                     if previous_periods != periods:
                         next_memory_at = next_rtt_at = now
                         previous_periods = periods
@@ -74,8 +76,9 @@ class SamplingServiceMixin:
                         self._stop_memory_sampling_locked()
                     if connected and not self._pipeline.backpressure:
                         if memory_enabled:
+                            symbols = self._capture_symbols_locked()
                             push_read = getattr(self._memory, "read_sample_frames", None)
-                            frames = (push_read(self._capture_symbols_locked(), self._sample_rate_hz, elapsed)
+                            frames = (push_read(symbols, self._sample_rate_hz, elapsed)
                                       if push_read is not None else None)
                             if frames is not None:
                                 if frames:
@@ -83,13 +86,28 @@ class SamplingServiceMixin:
                                     self._queue_samples_locked(frames)
                                 # Drain in batches; acquisition is clocked on the phone.
                                 deadlines.append(time.perf_counter() + 0.002)
-                            elif now >= next_memory_at:
+                            else:
+                                if now >= next_memory_at:
+                                    read_burst = getattr(self._memory, "read_sample_burst", None)
+                                    burst = None
+                                    if read_burst is not None:
+                                        if overclock:
+                                            burst = read_burst(
+                                                symbols, self._sample_rate_hz, self._acquisition_clock.elapsed,
+                                                overclock=True, controls_idle=self._controls_idle.is_set,
+                                            )
+                                        if burst is None:
+                                            burst = read_burst(symbols, self._sample_rate_hz,
+                                                               self._acquisition_clock.elapsed)
+                                    if burst:
+                                        self._queue_memory_burst_locked(burst)
+                                        next_memory_at += (len(burst) - 1) * memory_period
+                                    else:
+                                        values = self._read_memory_locked(rtt_enabled, rtt_protocol)
+                                        if values:
+                                            self._queue_samples_locked([(elapsed, values)])
+                                    next_memory_at = advance_deadline(next_memory_at, time.perf_counter(), memory_period)
                                 precise = memory_period < 0.001
-                                values = self._read_memory_locked(rtt_enabled, rtt_protocol)
-                                if values:
-                                    self._queue_samples_locked([(elapsed, values)])
-                                next_memory_at = advance_deadline(next_memory_at, time.perf_counter(), memory_period)
-                            if frames is None:
                                 deadlines.append(next_memory_at)
                         # Drain push streams while capture is paused. Monitors use
                         # fresh cached values; old RTT frames must never be replayed.
@@ -268,6 +286,10 @@ class SamplingServiceMixin:
         if latest is not None:
             self._last_sample_seconds = max(self._last_sample_seconds, latest)
 
+    def _queue_memory_burst_locked(self, frames) -> None:
+        self._remember_values_locked(frames[-1][1])
+        self._queue_samples_locked(frames)
+
     def _flush_pending_samples_locked(self, *, wait: bool = True, block: bool | None = None) -> bool:
         return self._pipeline.flush(wait=wait, block=block)
 
@@ -299,8 +321,9 @@ class SamplingServiceMixin:
                 "memoryDroppedBatches": metrics.get("dropped_batches", 0),
                 "memorySkippedTicks": metrics.get("skipped_ticks", 0),
                 "memoryReadDurationUs": metrics.get("duration_us", 0),
-                "memorySamplingMode": getattr(self._memory, "sampling_mode", "timed"),
+                "memorySamplingMode": metrics.get("sampling_mode", getattr(self._memory, "sampling_mode", "timed")),
                 "memoryBurst": metrics.get("burst", 1),
+                "memoryPacketsInFlight": metrics.get("packets_in_flight", 0),
                 "memoryTimeQuality": metrics.get("time_quality", "phone_submission"),
                 "memoryPhoneReadUs": getattr(self._memory, "phone_read_us", 0),
                 "rttDroppedBytes": dropped,

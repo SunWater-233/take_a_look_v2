@@ -211,6 +211,8 @@ class TakeALookController extends ChangeNotifier {
       state.connection.lastError = value;
 
   double get sampleRateHz => state.acquisition.sampleRateHz;
+  bool get memoryOverclock => state.acquisition.memoryOverclock;
+  int get memoryPipelineDepth => state.acquisition.memoryPipelineDepth;
   double get monitorRateHz => state.acquisition.monitorRateHz;
   set monitorRateHz(double value) {
     if (value.isFinite && value >= 0.5 && value <= 10) {

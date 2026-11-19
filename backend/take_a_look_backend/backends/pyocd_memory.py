@@ -4,10 +4,12 @@ import threading
 import struct
 import zipfile
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from time import perf_counter
 from typing import Any
 
+from take_a_look_backend.models import SampleFrame, SymbolInfo
 from take_a_look_backend.protocol import ProtocolError
 from take_a_look_backend.backends.pyocd_compat import (
     close_pyocd_session, guard_dap_error_recovery, normalise_pack_svd,
@@ -22,6 +24,8 @@ from take_a_look_backend.backends.typed_memory import (
 
 
 _TARGET_REGISTRY_LOCK = threading.Lock()
+_MAX_PIPELINE_PACKETS = 4
+_PIPELINE_BATCH_SECONDS = 0.002
 
 
 @dataclass(frozen=True)
@@ -46,6 +50,7 @@ class PyOcdMemoryBackend(TypedMemoryBackend):
         self._presence = ProbePresenceMonitor()
         self.last_flash_stats: dict[str, int | float | str] | None = None
         self._config: PyOcdConnectionConfig | None = None
+        self._burst_sequence = 0
 
     @property
     def is_connected(self) -> bool:
@@ -139,6 +144,7 @@ class PyOcdMemoryBackend(TypedMemoryBackend):
         self.target = None
         self._presence.reset()
         self._clear_read_plans()
+        self._burst_sequence = 0
         try:
             if session is not None:
                 close_pyocd_session(session, probe_lost=probe_lost)
@@ -227,6 +233,142 @@ class PyOcdMemoryBackend(TypedMemoryBackend):
             return super()._read_block(address, size)
         except Error as error:
             raise _memory_read_error(address, size, error) from error
+
+    def _cmsis_dap_link(self) -> Any | None:
+        from pyocd.probe.cmsis_dap_probe import CMSISDAPProbe
+        from pyocd.probe.debug_probe import DebugProbe
+
+        probe = self.probe
+        if not isinstance(probe, CMSISDAPProbe) or probe.wire_protocol != DebugProbe.Protocol.SWD:
+            return None
+        link = probe._link  # pyOCD 0.46 keeps the deferred packet queue here.
+        return link if link._deferred_transfer else None
+
+    @property
+    def memory_pipeline_depth(self) -> int:
+        link = self._cmsis_dap_link()
+        return min(_MAX_PIPELINE_PACKETS, link._interface.get_packet_count()) if link else 0
+
+    def read_sample_burst(
+        self, symbols: tuple[SymbolInfo, ...], rate_hz: float, acquisition_time: Callable[[], float],
+        *, overclock: bool = False, controls_idle: Callable[[], bool] | None = None,
+    ) -> list[SampleFrame] | None:
+        """Batch running RAM reads using the driver's deferred DAP_Transfer."""
+        if not symbols or (not overclock and rate_hz < 4_000):
+            return None
+
+        from pyocd.core.exceptions import Error
+        from pyocd.coresight.ap import CSW_SIZE32, MEM_AP, MEM_AP_CSW, MEM_AP_DRW, MEM_AP_TAR
+        from pyocd.probe.pydapaccess.dap_access_api import DAPAccessIntf
+
+        link = self._cmsis_dap_link()
+        if link is None or (not overclock and not link._interface.is_bulk):
+            return None
+        depth = min(_MAX_PIPELINE_PACKETS, link._interface.get_packet_count()) if overclock else 1
+        if depth < 1:
+            return None
+
+        target = self._require_target()
+        ap = getattr(target.selected_core, "ap", None)
+        if not isinstance(ap, MEM_AP) or ap._accelerated_memory_interface is not None:
+            return None
+
+        plan = self._read_plan_for(symbols)
+        page_size = ap.auto_increment_page_size
+        total_bytes = 0
+        for block in plan:
+            region = target.memory_map.get_region_for_address(block.address)
+            if (block.address % 4 or block.size % 4
+                    or block.address % page_size + block.size > page_size
+                    or region is None or not region.is_ram
+                    or not region.contains_range(start=block.address, length=block.size)):
+                return None
+            total_bytes += block.size
+        words = total_bytes // 4
+        # DAP_Transfer carries a three-byte header and one TAR write per block.
+        # Reserve request space for both the SELECT and CSW setup writes.
+        repeat = min(8, (link._packet_size - 13) // (5 * len(plan) + words),
+                     (link._packet_size - 3) // total_bytes)
+        if overclock:
+            # The sampler spaces groups by the number of reads they contain.
+            # Bound each group to about 2 ms of the configured sample budget.
+            sample_budget = int(rate_hz * _PIPELINE_BATCH_SECONDS)
+            repeat = min(repeat, sample_budget // min(depth, 2))
+        if repeat < 2:
+            return None
+        if overclock:
+            depth = min(depth, sample_budget // repeat)
+
+        codecs = [struct.Struct(f"<{block.size // 4}I") for block in plan]
+        pending = deque()
+        completed = []
+        started = perf_counter()
+        block = plan[0]
+
+        ap.lock()
+        try:
+            if overclock:
+                # Finish any deferred writes from a previous user/RTT operation.
+                link.flush()
+            ap.write_reg(ap._reg_offset + MEM_AP_CSW, ap._csw | CSW_SIZE32)
+            for _ in range(depth):
+                if pending and controls_idle is not None and not controls_idle():
+                    break
+                reads = deque()
+                pending.append((acquisition_time(), reads))
+                for _ in range(repeat):
+                    for block in plan:
+                        ap.write_reg(ap._reg_offset + MEM_AP_TAR, block.address)
+                        read = ap.dp.read_ap_multiple(
+                            ap.address.address + ap._reg_offset + MEM_AP_DRW,
+                            block.size // 4, now=False,
+                        )
+                        reads.append((block, read))
+                if overclock:
+                    link._send_packet()
+            while pending:
+                start, reads = pending[0]
+                data = []
+                while reads:
+                    block, read = reads.popleft()
+                    data.append(read())
+                completed.append((start, acquisition_time(), data))
+                pending.popleft()
+        except (Error, DAPAccessIntf.Error) as error:
+            raise _memory_read_error(block.address, block.size, error) from error
+        finally:
+            # Every callback owns a DP SELECT lock. Finish outstanding replies
+            # before releasing the probe to pause, debug controls or monitoring.
+            try:
+                for _, reads in pending:
+                    for _, read in reads:
+                        try:
+                            read()
+                        except Exception:
+                            pass
+            finally:
+                ap.unlock()
+        duration = perf_counter() - started
+        frames = []
+        for start, end, data in completed:
+            self._burst_sequence += 1
+            words = iter(data)
+            for index in range(repeat):
+                values = {}
+                for block, codec in zip(plan, codecs, strict=True):
+                    block.decode(codec.pack(*next(words)), values)
+                frames.append(SampleFrame.from_transaction(
+                    values, start=start, end=end,
+                    sequence=self._burst_sequence, index=index, repeat=repeat,
+                ))
+        self.last_read_metrics = {
+            "symbol_count": len(symbols), "block_count": len(plan) * len(frames),
+            "byte_count": total_bytes * len(frames), "duration_us": round(duration * 1e6),
+            "burst": repeat, "time_quality": "transaction_window",
+            "sampling_mode": "pipeline" if overclock else "timed",
+            "packets_in_flight": depth,
+        }
+        return frames
 
     def _read_blocks(self, plan):
         from pyocd.core.exceptions import Error

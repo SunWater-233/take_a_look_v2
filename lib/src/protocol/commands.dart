@@ -16,6 +16,7 @@ enum ControllerCommand {
   toggleConnection,
   loadFirmware,
   setSampleRate,
+  setMemoryOverclock,
   setMonitorRate,
   setDisplayRefreshMode,
   setRttSampleRate,
@@ -202,6 +203,10 @@ class BackendCommandMapper {
       case ControllerCommand.setSampleRate:
         return BackendCall(BackendMethod.setConfig, {
           'sampleRateHz': arguments,
+        });
+      case ControllerCommand.setMemoryOverclock:
+        return BackendCall(BackendMethod.setConfig, {
+          'memoryOverclock': arguments,
         });
       case ControllerCommand.setMonitorRate:
         return BackendCall(BackendMethod.setConfig, {

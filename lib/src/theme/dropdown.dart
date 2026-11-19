@@ -131,102 +131,117 @@ class _TalDropdownState<T> extends State<TalDropdown<T>>
   Widget build(BuildContext context) {
     final ui = TalUiTheme.of(context);
     final editor = widget.editor;
+    final valueLabel = widget.label(widget.value);
+    final highlight = widget.highlightOnHover && hovered;
+    final label = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 9),
+      child: Text(
+        valueLabel,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: talBody,
+      ),
+    );
+    final arrow = Container(
+      width: _arrowWidth(ui),
+      height: double.infinity,
+      decoration: BoxDecoration(
+        border: widget.subtle
+            ? null
+            : const Border(left: BorderSide(color: TalColors.borderSoft)),
+      ),
+      child: const Icon(Icons.arrow_drop_down, size: 18, color: TalColors.text),
+    );
+    final arrowTrigger = editor == null
+        ? arrow
+        : _menuTrigger(ui, Tooltip(message: '展开选项', child: arrow));
+    final Widget anchor;
     if (_editing && editor != null) {
-      return _DropdownInput<T>(
-        initialText: (editor.text ?? widget.label)(widget.value),
+      anchor = _DropdownInput<T>(
+        initialText: editor.text?.call(widget.value) ?? valueLabel,
         editor: editor,
+        arrowTrigger: arrowTrigger,
         onSubmitted: (value) {
           _finishEditing();
           if (value != widget.value) widget.onChanged(value);
         },
         onCanceled: _finishEditing,
       );
-    }
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final highlight = widget.highlightOnHover && hovered;
-        final anchor = CompositedTransformTarget(
-          link: _layerLink,
-          child: Semantics(
-            button: true,
-            expanded: expanded,
-            child: MouseRegion(
-              onEnter: (_) {
-                if (mounted) setState(() => hovered = true);
-              },
-              onExit: (_) {
-                if (mounted) setState(() => hovered = false);
-              },
-              child: InkWell(
-                focusNode: _anchorFocus,
-                borderRadius: ui.controlRadius,
-                onTap: expanded ? () => unawaited(_close()) : _open,
-                onDoubleTap: editor == null ? null : _beginEditing,
-                child: Container(
-                  key: ValueKey<String>(
-                    'compact-dropdown-${widget.label(widget.value)}',
-                  ),
-                  height: ui.controlHeight,
-                  decoration: BoxDecoration(
-                    color: highlight
-                        ? TalColors.hover
-                        : widget.subtle
-                        ? Colors.transparent
-                        : TalColors.input,
-                    borderRadius: ui.controlRadius,
-                    border: widget.subtle
-                        ? null
-                        : const Border.fromBorderSide(talControlBorder),
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 9),
-                          child: Text(
-                            widget.label(widget.value),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: talBody,
-                          ),
+    } else {
+      final display = Container(
+        key: ValueKey<String>('compact-dropdown-$valueLabel'),
+        height: ui.controlHeight,
+        decoration: BoxDecoration(
+          color: highlight
+              ? TalColors.hover
+              : widget.subtle
+              ? Colors.transparent
+              : TalColors.input,
+          borderRadius: ui.controlRadius,
+          border: widget.subtle
+              ? null
+              : const Border.fromBorderSide(talControlBorder),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: editor == null
+                  ? label
+                  : Tooltip(
+                      message: '单击编辑',
+                      child: InkWell(
+                        borderRadius: ui.controlRadius,
+                        mouseCursor: SystemMouseCursors.text,
+                        onTap: _beginEditing,
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: label,
                         ),
                       ),
-                      Container(
-                        width: widget.subtle
-                            ? (ui.touchOptimized ? 32 : 24)
-                            : (ui.touchOptimized ? 44 : 30),
-                        height: double.infinity,
-                        decoration: BoxDecoration(
-                          color: highlight ? TalColors.hover : null,
-                          border: widget.subtle
-                              ? null
-                              : const Border(
-                                  left: BorderSide(color: TalColors.borderSoft),
-                                ),
-                        ),
-                        child: Icon(
-                          Icons.arrow_drop_down,
-                          size: 18,
-                          color: TalColors.text,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+                    ),
             ),
-          ),
-        );
-        return editor == null
-            ? anchor
-            : Tooltip(message: '双击输入自定义值', child: anchor);
-      },
+            arrowTrigger,
+          ],
+        ),
+      );
+      anchor = editor == null ? _menuTrigger(ui, display) : display;
+    }
+    return CompositedTransformTarget(
+      link: _layerLink,
+      child: MouseRegion(
+        onEnter: (_) {
+          if (mounted) setState(() => hovered = true);
+        },
+        onExit: (_) {
+          if (mounted) setState(() => hovered = false);
+        },
+        child: anchor,
+      ),
     );
   }
 
+  double _arrowWidth(TalUiTheme ui) => widget.subtle
+      ? (ui.touchOptimized ? 32 : 24)
+      : (ui.touchOptimized ? 44 : 30);
+
+  Widget _menuTrigger(TalUiTheme ui, Widget child) => Semantics(
+    button: true,
+    expanded: expanded,
+    child: InkWell(
+      focusNode: _anchorFocus,
+      borderRadius: ui.controlRadius,
+      onTap: expanded ? () => unawaited(_close()) : _open,
+      child: child,
+    ),
+  );
+
   void _beginEditing() {
-    if (widget.editor == null || _editing || expanded) return;
-    setState(() => _editing = true);
+    if (_editing || closing) return;
+    if (expanded) {
+      unawaited(_close(edit: true));
+    } else {
+      setState(() => _editing = true);
+    }
   }
 
   void _finishEditing({bool restoreFocus = true}) {
@@ -236,7 +251,7 @@ class _TalDropdownState<T> extends State<TalDropdown<T>>
   }
 
   void _open() {
-    if (!mounted || expanded || closing || _editing) return;
+    if (!mounted || expanded || closing) return;
     final values = _menuValues;
     _keyboardNavigation = false;
     _keyboardIndex = values
@@ -244,7 +259,10 @@ class _TalDropdownState<T> extends State<TalDropdown<T>>
         .clamp(0, math.max(0, values.length - 1));
     _overlayEntry = OverlayEntry(builder: _buildOverlay);
     Overlay.of(context).insert(_overlayEntry!);
-    setState(() => expanded = true);
+    setState(() {
+      _editing = false;
+      expanded = true;
+    });
     _animationController.forward(from: 0);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && expanded && !closing) _menuFocus.requestFocus();
@@ -287,14 +305,23 @@ class _TalDropdownState<T> extends State<TalDropdown<T>>
           CompositedTransformFollower(
             link: _layerLink,
             showWhenUnlinked: false,
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () => unawaited(_close()),
-              onDoubleTap: () async {
-                await _close();
-                if (mounted) _beginEditing();
-              },
-              child: SizedBox.fromSize(size: anchor.size),
+            child: SizedBox.fromSize(
+              size: anchor.size,
+              child: Padding(
+                padding: EdgeInsets.only(
+                  right:
+                      _arrowWidth(ui) +
+                      (widget.subtle ? 0 : talControlBorder.width),
+                ),
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.text,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    excludeFromSemantics: true,
+                    onTap: _beginEditing,
+                  ),
+                ),
+              ),
             ),
           ),
         CompositedTransformFollower(
@@ -456,21 +483,28 @@ class _TalDropdownState<T> extends State<TalDropdown<T>>
     );
   }
 
-  Future<void> _close({T? selectedValue}) async {
+  Future<void> _close({T? selectedValue, bool edit = false}) async {
     if (!mounted || !expanded || closing) return;
     closing = true;
-    try {
-      await _animationController.reverse().orCancel;
-    } on TickerCanceled {
-      return;
+    if (edit) {
+      _animationController.reset();
+    } else {
+      try {
+        await _animationController.reverse().orCancel;
+      } on TickerCanceled {
+        return;
+      }
     }
     if (!mounted) return;
     _overlayEntry?.remove();
     _overlayEntry?.dispose();
     _overlayEntry = null;
     closing = false;
-    setState(() => expanded = false);
-    _anchorFocus.requestFocus();
+    setState(() {
+      expanded = false;
+      _editing = edit;
+    });
+    if (!edit) _anchorFocus.requestFocus();
     if (selectedValue != null) widget.onChanged(selectedValue);
   }
 }
@@ -479,12 +513,14 @@ class _DropdownInput<T> extends StatefulWidget {
   const _DropdownInput({
     required this.initialText,
     required this.editor,
+    required this.arrowTrigger,
     required this.onSubmitted,
     required this.onCanceled,
   });
 
   final String initialText;
   final TalDropdownEditor<T> editor;
+  final Widget arrowTrigger;
   final ValueChanged<T> onSubmitted;
   final void Function({bool restoreFocus}) onCanceled;
 
@@ -564,6 +600,11 @@ class _DropdownInputState<T> extends State<_DropdownInput<T>> {
                 filled: true,
                 fillColor: TalColors.input,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 9),
+                suffixIcon: Padding(
+                  padding: const EdgeInsets.fromLTRB(0, 1, 1, 1),
+                  child: widget.arrowTrigger,
+                ),
+                suffixIconConstraints: const BoxConstraints(),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: ui.controlRadius,
                   borderSide: BorderSide(

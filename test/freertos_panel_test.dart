@@ -157,9 +157,7 @@ void main() {
     }
 
     await openSettings();
-    final rate = find.byKey(const ValueKey('compact-dropdown-2 Hz'));
-    await tester.tap(rate);
-    await tester.pump(const Duration(milliseconds: 50));
+    final rate = find.text('2 Hz');
     await tester.tap(rate);
     await tester.pumpAndSettle();
     final editor = find.byWidgetPredicate(

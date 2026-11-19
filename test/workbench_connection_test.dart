@@ -107,14 +107,14 @@ void main() {
 
     Finder rate(String label) =>
         find.byKey(ValueKey('compact-dropdown-$label'));
+    Finder arrow(Finder dropdown) => find.descendant(
+      of: dropdown,
+      matching: find.byIcon(Icons.arrow_drop_down),
+    );
+    Finder rateText(String label) =>
+        find.descendant(of: rate(label), matching: find.text(label));
     Future<void> click(Offset target) =>
         tester.tapAt(target, kind: PointerDeviceKind.mouse);
-    Future<void> doubleClick(Offset target) async {
-      await click(target);
-      await tester.pump(const Duration(milliseconds: 50));
-      await click(target);
-      await tester.pumpAndSettle();
-    }
 
     Future<void> submit(Finder field, String text) async {
       await tester.enterText(field, text);
@@ -122,25 +122,36 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    final initialBounds = tester.getRect(rate('50 Hz'));
-    final initial = initialBounds.center;
-    await click(initial);
-    await tester.pump(kDoubleTapTimeout);
-    await tester.pumpAndSettle();
+    final initial = rate('50 Hz');
+    final initialBounds = tester.getRect(initial);
     final preset = find.byKey(const ValueKey('dropdown-item-100 Hz'));
+    await click(Offset(initialBounds.right - 3, initialBounds.center.dy));
+    await tester.pump();
     expect(preset, findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(
+      tester
+          .getSize(find.byKey(const ValueKey('dropdown-menu-animation')))
+          .height,
+      greaterThan(0),
+    );
 
-    await doubleClick(initial);
+    await click(tester.getCenter(rateText('50 Hz')));
+    await tester.pump();
     expect(preset, findsNothing);
     final editor = find.byType(TextField);
     expect(editor, findsOneWidget);
+    expect(tester.widget<TextField>(editor).focusNode!.hasFocus, isTrue);
     final editableText = find.descendant(
       of: editor,
       matching: find.byType(EditableText),
     );
     final outline = InputDecorator.containerOf(tester.element(editableText))!;
     expect(outline.localToGlobal(Offset.zero) & outline.size, initialBounds);
-    expect(tester.getCenter(editableText).dy, closeTo(initial.dy, 1));
+    expect(
+      tester.getCenter(editableText).dy,
+      closeTo(initialBounds.center.dy, 1),
+    );
     expect(tester.widget<TextField>(editor).controller!.selection.end, 5);
 
     await submit(editor, '0 Hz');
@@ -153,21 +164,36 @@ void main() {
     expect(controller.sampleRateHz, 1001);
     expect(rates, [1001]);
 
-    final custom = tester.getCenter(rate('1.001 kHz'));
-    await doubleClick(custom);
+    final custom = rate('1.001 kHz');
+    await click(tester.getCenter(rateText('1.001 kHz')));
+    await tester.pump();
+    expect(editor, findsOneWidget);
+    expect(preset, findsNothing);
     await tester.enterText(editor, '250');
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
     expect(editor, findsNothing);
     expect(rates, [1001]);
 
-    await click(custom);
-    await tester.pump(kDoubleTapTimeout);
+    await click(tester.getCenter(rateText('1.001 kHz')));
+    await tester.pump();
+    await tester.enterText(editor, '250');
+    await click(tester.getCenter(arrow(editor)));
+    await tester.pump();
+    expect(editor, findsNothing);
+    expect(preset, findsOneWidget);
+    expect(rates, [1001]);
     await tester.pumpAndSettle();
     expect(
       find.byKey(const ValueKey('dropdown-selected-1.001 kHz')),
       findsOneWidget,
     );
+    await click(tester.getCenter(arrow(custom)));
+    await tester.pumpAndSettle();
+    expect(preset, findsNothing);
+    expect(editor, findsNothing);
+    await click(tester.getCenter(arrow(custom)));
+    await tester.pumpAndSettle();
     await tester.tap(preset);
     await tester.pumpAndSettle();
     expect(controller.sampleRateHz, 100);

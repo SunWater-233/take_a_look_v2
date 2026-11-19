@@ -125,16 +125,35 @@ void main() {
       final kind = mode == TalInputMode.touch
           ? PointerDeviceKind.touch
           : PointerDeviceKind.mouse;
-      await tester.tap(rate, kind: kind);
-      await tester.pump(kDoubleTapTimeout);
-      await tester.pumpAndSettle();
-      await tester.tap(
-        find.byKey(const ValueKey('dropdown-item-5 Hz')),
-        kind: kind,
+      final arrow = find.descendant(
+        of: rate,
+        matching: find.byIcon(Icons.arrow_drop_down),
       );
+      final preset = find.byKey(const ValueKey('dropdown-item-5 Hz'));
+      await tester.tap(arrow, kind: kind);
+      await tester.pump();
+      expect(preset, findsOneWidget);
+      await tester.pumpAndSettle();
+      await tester.tap(preset, kind: kind);
       await tester.pumpAndSettle();
       expect(c.monitorRateHz, 5);
       expect(variable.hitTestable(), findsOneWidget);
+
+      await tester.tap(
+        find.descendant(of: rate, matching: find.text('5 Hz')),
+        kind: kind,
+      );
+      await tester.pump();
+      final editor = find.descendant(
+        of: rate,
+        matching: find.byType(TextField),
+      );
+      expect(editor, findsOneWidget);
+      expect(preset, findsNothing);
+      await tester.enterText(editor, '7.5');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(c.monitorRateHz, 7.5);
     });
 
     testWidgets('$mode section splitter resizes independent scroll areas', (

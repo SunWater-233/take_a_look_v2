@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:desktop_multi_window/desktop_multi_window.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import 'panel_types.dart';
 import 'window_sync.dart';

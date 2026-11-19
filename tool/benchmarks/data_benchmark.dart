@@ -9,7 +9,7 @@ import 'dart:ui' as ui;
 import 'performance_audit.dart';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:take_a_look_v2/src/analysis/analysis.dart';
 import 'package:take_a_look_v2/src/analysis/analysis_fft.dart';
 import 'package:take_a_look_v2/src/analysis/analysis_worker.dart';

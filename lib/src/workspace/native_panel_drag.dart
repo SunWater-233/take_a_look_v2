@@ -3,7 +3,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:desktop_multi_window/desktop_multi_window.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:tal_drag_preview/tal_drag_preview.dart';
 

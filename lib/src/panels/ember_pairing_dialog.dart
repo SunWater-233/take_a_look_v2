@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import '../controller/controller.dart';
 import '../models/models.dart' show ConnectionStatus;
 import '../protocol/commands.dart';

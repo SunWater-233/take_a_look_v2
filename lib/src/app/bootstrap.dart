@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:tal_drag_preview/tal_drag_preview.dart';
 

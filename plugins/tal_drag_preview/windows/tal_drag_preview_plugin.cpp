@@ -31,8 +31,9 @@ class PlotTrackpad {
   }
 
   ~PlotTrackpad() {
+    // The engine has already detached its messenger when it deletes plugins.
+    // The engine disposes the channel handler as part of its own teardown.
     SetCapture(nullptr, false);
-    channel_.SetMethodCallHandler(nullptr);
   }
 
  private:
@@ -64,8 +65,8 @@ class PlotTrackpad {
       }
       window_ = view;
     } else {
-      register_touchpad(window_, FALSE);
       RemoveWindowSubclass(window_, WindowProc, 0);
+      register_touchpad(window_, FALSE);
       window_ = nullptr;
       last_frame_.reset();
     }

@@ -708,6 +708,7 @@ class _DetachedPanelWindowState extends State<DetachedPanelWindow> {
       WorkbenchFeedback(
         controller: widget.controller,
         showFirmwareChanges: false,
+        showConnectionWarnings: false,
         child: WorkspaceKeyboardShortcuts(
           onKeyEvent: (event) {
             if (WorkspaceShortcut.resetUiScale.matches(event)) {

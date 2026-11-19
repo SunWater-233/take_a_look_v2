@@ -275,10 +275,7 @@ class _MemoryOverclockSetting extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final available =
-        controller.connectionKind == 'local' &&
-        (controller.connectionStatus != ConnectionStatus.connected ||
-            controller.memoryPipelineDepth > 0);
+    final available = controller.canSetMemoryOverclock;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [

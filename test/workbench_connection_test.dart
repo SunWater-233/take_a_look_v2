@@ -175,6 +175,73 @@ void main() {
   });
 
   for (final mode in TalInputMode.values) {
+    testWidgets('$mode warns once when a probe cannot use enabled overclock', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(1000, 600));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final controller = TakeALookController();
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildTalTheme(inputMode: mode),
+          home: WorkbenchFeedback(
+            controller: controller,
+            child: const Scaffold(),
+          ),
+        ),
+      );
+
+      final popup = find.byKey(const ValueKey('tal-warning-popup'));
+      void applyState(Map<String, dynamic> state) {
+        controller.applyBackendEvent(BackendEventType.state, state);
+      }
+
+      applyState({'connectionStatus': 'connected', 'memoryPipelineDepth': 0});
+      await tester.pumpAndSettle();
+      expect(popup, findsNothing);
+
+      applyState({'connectionStatus': 'disconnected', 'memoryOverclock': true});
+      applyState({'connectionStatus': 'connecting'});
+      await tester.pumpAndSettle();
+      expect(popup, findsNothing);
+
+      applyState({'connectionStatus': 'connected', 'memoryPipelineDepth': 0});
+      await tester.pumpAndSettle();
+      expect(find.text('超频模式不可用'), findsOneWidget);
+      expect(popup, findsOneWidget);
+      final icon = tester.widget<Icon>(
+        find.descendant(
+          of: popup,
+          matching: find.byIcon(Icons.warning_amber_rounded),
+        ),
+      );
+      expect(icon.color, TalColors.amber);
+      final corner = tester.getBottomRight(popup);
+      expect(corner.dx, inInclusiveRange(900, 1000));
+      expect(corner.dy, inInclusiveRange(500, 600));
+
+      await tester.tap(find.byTooltip('关闭提示'));
+      await tester.pumpAndSettle();
+      applyState({'connectionStatus': 'connected', 'sampleRateHz': 5000});
+      await tester.pumpAndSettle();
+      expect(popup, findsNothing);
+
+      applyState({'connectionStatus': 'disconnected'});
+      applyState({'connectionStatus': 'connected', 'memoryPipelineDepth': 1});
+      await tester.pumpAndSettle();
+      expect(popup, findsNothing);
+
+      applyState({
+        'connectionStatus': 'disconnected',
+        'memoryPipelineDepth': 0,
+      });
+      applyState({'connectionStatus': 'connected'});
+      await tester.pumpAndSettle();
+      expect(popup, findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+
     testWidgets(
       '$mode probe loss stops capture and updates connection feedback',
       (tester) async {

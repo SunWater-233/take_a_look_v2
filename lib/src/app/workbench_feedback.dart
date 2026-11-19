@@ -18,6 +18,7 @@ class WorkbenchFeedback extends StatefulWidget {
     this.updates,
     this.onShowUpdates,
     this.showFirmwareChanges = true,
+    this.showConnectionWarnings = true,
     super.key,
   });
 
@@ -30,6 +31,7 @@ class WorkbenchFeedback extends StatefulWidget {
   final AppUpdateController? updates;
   final Future<void> Function()? onShowUpdates;
   final bool showFirmwareChanges;
+  final bool showConnectionWarnings;
 
   @override
   State<WorkbenchFeedback> createState() => _WorkbenchFeedbackState();
@@ -41,6 +43,7 @@ class _WorkbenchFeedbackState extends State<WorkbenchFeedback> {
   Map<String, dynamic>? _pendingError;
   WatchRefreshWarning? _lastWatchWarning;
   WatchRefreshWarning? _pendingWatchWarning;
+  bool _overclockWarningShown = false;
   SymbolLoadProgress? _pendingLoad;
   DialogRoute<void>? _loadRoute;
   ValueNotifier<SymbolLoadProgress>? _progress;
@@ -115,6 +118,7 @@ class _WorkbenchFeedbackState extends State<WorkbenchFeedback> {
     widget.updates?.addListener(_changed);
     widget.controller.symbolLoadChanges.addListener(_changed);
     widget.controller.connectionChanges.addListener(_changed);
+    widget.controller.samplingChanges.addListener(_changed);
     widget.controller.symbolChanges.addListener(_changed);
     widget.controller.sourceToolsChanges.addListener(_changed);
     widget.controller.watchChanges.addListener(_changed);
@@ -124,6 +128,7 @@ class _WorkbenchFeedbackState extends State<WorkbenchFeedback> {
   void _unlisten(TakeALookController controller) {
     controller.symbolLoadChanges.removeListener(_changed);
     controller.connectionChanges.removeListener(_changed);
+    controller.samplingChanges.removeListener(_changed);
     controller.symbolChanges.removeListener(_changed);
     controller.sourceToolsChanges.removeListener(_changed);
     controller.watchChanges.removeListener(_changed);
@@ -137,6 +142,9 @@ class _WorkbenchFeedbackState extends State<WorkbenchFeedback> {
       widget.updates?.addListener(_changed);
       _notifiedUpdate = null;
     }
+    if (oldWidget.showConnectionWarnings != widget.showConnectionWarnings) {
+      _changed();
+    }
     if (oldWidget.controller == widget.controller) return;
     _unlisten(oldWidget.controller);
     _closeProgress();
@@ -148,10 +156,20 @@ class _WorkbenchFeedbackState extends State<WorkbenchFeedback> {
     _pendingError = null;
     _lastWatchWarning = null;
     _pendingWatchWarning = null;
+    _overclockWarningShown = false;
     _listen();
   }
 
+  bool get _overclockUnavailable {
+    final controller = widget.controller;
+    return widget.showConnectionWarnings &&
+        controller.memoryOverclock &&
+        controller.connectionStatus == ConnectionStatus.connected &&
+        !controller.canSetMemoryOverclock;
+  }
+
   void _changed() {
+    if (!_overclockUnavailable) _overclockWarningShown = false;
     final warning = widget.controller.watchRefreshWarning;
     if (warning != null && !identical(warning, _lastWatchWarning)) {
       _lastWatchWarning = warning;
@@ -278,16 +296,15 @@ class _WorkbenchFeedbackState extends State<WorkbenchFeedback> {
       _showingError = false;
       if (mounted) {
         unawaited(_showFirmwareChange());
-        _showWatchWarning();
+        _showWarning();
         _showRecordingNotice();
         _showUpdateNotice();
       }
     }
   }
 
-  void _showWatchWarning() {
-    if (_pendingWatchWarning == null ||
-        _feedback.isShowingNotice ||
+  void _showWarning() {
+    if (_feedback.isShowingNotice ||
         _pendingError != null ||
         _loadRoute != null ||
         _firmwareRoute != null ||
@@ -295,13 +312,23 @@ class _WorkbenchFeedbackState extends State<WorkbenchFeedback> {
         widget.controller.sourceTask.running) {
       return;
     }
-    final warning = _pendingWatchWarning!;
-    _pendingWatchWarning = null;
+    final warning = _pendingWatchWarning;
+    if (warning != null) {
+      _pendingWatchWarning = null;
+      _feedback.showWarning(
+        context: context,
+        title: '监视变量发生变化',
+        message: warning.message,
+        details: warning.details,
+      );
+      return;
+    }
+    if (!_overclockUnavailable || _overclockWarningShown) return;
+    _overclockWarningShown = true;
     _feedback.showWarning(
       context: context,
-      title: '监视变量发生变化',
-      message: warning.message,
-      details: warning.details,
+      title: '超频模式不可用',
+      message: '当前探针不支持超频模式，本次连接将使用常规内存读取。',
     );
   }
 

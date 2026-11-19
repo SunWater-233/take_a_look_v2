@@ -21,14 +21,17 @@ class FirmwareWatcher:
         text = self._selected_path()
         try:
             stat = Path(text).stat() if text else None
-            signature = (text, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns) if stat else None
+            # An atomic replacement can preserve both the size and the timestamps.
+            signature = (
+                text, (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+            ) if stat else None
         except OSError:
             signature = (text, None)
         if signature != self._observed:
             self._observed = signature
             self._changed_at = now
             self._retry_at = 0.0
-        if (not signature or len(signature) != 4 or signature == self._handled
+        if (not signature or signature[1] is None or signature == self._handled
                 or now - self._changed_at < self._settle_seconds or now < self._retry_at):
             return
         if self._refresh(Path(text)):

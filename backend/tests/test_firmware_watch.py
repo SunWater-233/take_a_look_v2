@@ -1,3 +1,6 @@
+from types import SimpleNamespace
+from unittest.mock import patch
+
 from take_a_look_backend.services.firmware_watch import FirmwareWatcher
 
 
@@ -20,11 +23,21 @@ def test_debounces_continuous_writes_deletion_and_atomic_replacement(tmp_path):
     watcher.poll(5)
     watcher.poll(10)
     assert refreshed == [b'complete']
+    original_stat = path.stat()
     replacement = tmp_path / 'replacement.axf'
     replacement.write_bytes(b'replaced')
     replacement.replace(path)
-    watcher.poll(11)
-    watcher.poll(12)
+    replaced_stat = path.stat()
+    same_timestamps = SimpleNamespace(
+        st_dev=replaced_stat.st_dev,
+        st_ino=replaced_stat.st_ino,
+        st_size=replaced_stat.st_size,
+        st_mtime_ns=original_stat.st_mtime_ns,
+        st_ctime_ns=original_stat.st_ctime_ns,
+    )
+    with patch.object(type(path), 'stat', return_value=same_timestamps):
+        watcher.poll(11)
+        watcher.poll(12)
     assert refreshed == [b'complete', b'replaced']
 
 

@@ -232,8 +232,6 @@ class DebugSession:
         pc = self.registers.get('pc', 0) & ~1
         return {
             "executionState": self.execution_state,
-            "sourceFiles": self.info.source_files,
-            "executableLines": self.info.executable_lines,
             "breakpoints": [dict(item) for item in self.resolved_breakpoints],
             "requestedBreakpoints": {path: sorted(lines) for path, lines in self.requested_breakpoints.items()},
             "disabledBreakpoints": {path: sorted(lines) for path, lines in self.disabled_breakpoints.items()},
@@ -243,7 +241,11 @@ class DebugSession:
             "stoppedLocation": self.stopped_location,
             "sourceStepAvailable": can_step and self.info.resolve_step_location(pc) is not None,
             "stepOutAvailable": can_step and steps.frame_rules(pc) is not None,
-            **({"sourceDefinitions": self.info.source_definitions} if include_definitions else {}),
+            **({
+                "sourceFiles": self.info.source_files,
+                "executableLines": self.info.executable_lines,
+                "sourceDefinitions": self.info.source_definitions,
+            } if include_definitions else {}),
         }
 
 

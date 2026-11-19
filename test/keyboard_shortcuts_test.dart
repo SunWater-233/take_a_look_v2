@@ -307,7 +307,14 @@ void main() {
           ),
         ),
       );
-      await tester.tap(find.text('实时调参'));
+      final member = find.descendant(
+        of: find.byKey(const ValueKey('compact-watch-list')),
+        matching: find.text('id_ref'),
+      );
+      await tester.tapAt(
+        tester.getTopLeft(find.byKey(const ValueKey('panel-frame-watch'))) +
+            const Offset(40, 12),
+      );
       await tester.pump();
       FocusManager.instance.rootScope.requestFocus();
       await tester.pump();
@@ -316,12 +323,12 @@ void main() {
         LogicalKeyboardKey.keyQ,
         physicalKey: PhysicalKeyboardKey.keyA,
       );
-      await tester.tap(find.text('id_ref'), buttons: kSecondaryMouseButton);
+      await tester.tap(member, buttons: kSecondaryMouseButton);
       await tester.pumpAndSettle();
-      expect(find.text('移除所选变量（3）'), findsOneWidget);
+      expect(find.text('删除所选变量（3）'), findsOneWidget);
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('id_ref'));
+      await tester.tap(member);
       await tester.enterText(
         find.byKey(const ValueKey('outside-input')),
         'input text',
@@ -331,9 +338,9 @@ void main() {
         editor.selection,
         const TextSelection(baseOffset: 0, extentOffset: 10),
       );
-      await tester.tap(find.text('id_ref'), buttons: kSecondaryMouseButton);
+      await tester.tap(member, buttons: kSecondaryMouseButton);
       await tester.pumpAndSettle();
-      expect(find.text('移除所选变量（3）'), findsNothing);
+      expect(find.text('删除所选变量（3）'), findsNothing);
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );

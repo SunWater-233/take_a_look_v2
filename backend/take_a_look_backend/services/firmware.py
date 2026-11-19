@@ -17,7 +17,7 @@ from .debug_info import DebugInfoIndex, load_debug_info_from_elf
 from .elf_context import ElfLoadContext
 from .freertos import FreeRtosInspector
 from .freertos_layout import FreeRtosLayout
-from .source_project import normalize_config
+from .source_project import normalize_config, project_snapshot
 from .source_tasks import SourceTasks
 from .symbols import load_symbols_from_elf
 from .watch_rebinding import rebind_watches
@@ -50,15 +50,14 @@ class FirmwareServiceMixin:
             if self._source_tasks.running:
                 raise ProtocolError("source_task_busy", "编译或下载任务执行中，请等待任务完成。")
             config = normalize_config(self._source_project, dict(values))
-            if "firmwarePath" not in values:
+            if not require_file and config["firmwarePath"] == self._source_project["firmwarePath"]:
                 with self._lock:
                     self._source_project = config
-                    state = self.state_snapshot()
+                    state = {"sourceProject": project_snapshot(config)}
                 self._emit(EventName.STATE, state)
                 return {"state": state}
             text = str(config["firmwarePath"])
             path = Path(text) if text else None
-            # Saving settings also refreshes an existing file, even at the same path.
             image = self._parse_firmware(path, values.get("loadId")) if path and path.is_file() else None
             if require_file and image is None:
                 raise ProtocolError("file_not_found", "固件文件不存在。", text)
@@ -66,14 +65,14 @@ class FirmwareServiceMixin:
                 # Explicitly reopening unchanged symbols also acknowledges a
                 # download performed in an external IDE/programmer.
                 requires_download = bool(image and text == self._source_project["firmwarePath"]
-                    and ((self._firmware.get("requiresDownload") and not require_file)
-                         or (self._firmware["fingerprint"] and image.fingerprint != self._firmware["fingerprint"])))
+                    and self._firmware["fingerprint"] and image.fingerprint != self._firmware["fingerprint"])
                 self._commit_firmware(config, image, requires_download=requires_download)
                 state = self.state_snapshot()
             self._emit(EventName.STATE, state)
             return {"state": state}
 
-    def _commit_firmware(self, config, image, *, requires_download=False):
+    def _commit_firmware(self, config, image, *, requires_download=False, project_watches=None,
+                         breakpoint_settings=None):
         started = time.perf_counter()
         self._flush_pending_samples_locked()
         self._stop_memory_sampling_locked()
@@ -102,7 +101,8 @@ class FirmwareServiceMixin:
         self._debug.info = image.debug_info if image else DebugInfoIndex()
         self._debug.stopped_location, self._debug.registers = None, {}
         watches_started = time.perf_counter()
-        self._watches = rebind_watches(self._watches, symbols, previous_symbols) if image else {}
+        self._watches = (project_watches if project_watches is not None else
+                         rebind_watches(self._watches, symbols, previous_symbols) if image else {})
         # Preserve unavailable channel identities for historical curves only.
         self._symbols.update({watch.symbol.key: watch.symbol for watch in self._watches.values()
                               if watch.symbol.missing})
@@ -110,6 +110,13 @@ class FirmwareServiceMixin:
         breakpoints_started = time.perf_counter()
         if requires_download:
             self._debug.execution_state = "unknown"
+        if breakpoint_settings is not None:
+            self._debug.replace_breakpoints(
+                *breakpoint_settings, self._memory,
+                connected=self._connection_status == "connected",
+                pending_message="固件已变化，请重新下载后应用断点。" if requires_download else None,
+            )
+        elif requires_download:
             self._debug.mark_breakpoints_pending(message="固件已变化，请重新下载后应用断点。")
         else:
             self._debug.apply_breakpoints(self._memory, connected=self._connection_status == "connected")

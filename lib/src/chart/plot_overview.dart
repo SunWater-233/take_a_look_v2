@@ -43,8 +43,8 @@ class PlotOverview extends StatefulWidget {
 
 class _PlotOverviewState extends State<PlotOverview> {
   final _repaint = ValueNotifier(0);
-  final _histories = <String, PlotHistory>{};
-  final _historyEnds = <String, double>{};
+  late PlotHistoryQuery _history;
+  double? _historyEnd;
   final _focus = FocusNode(debugLabel: 'Plot time overview');
   Timer? _liveRefresh;
   _OverviewFrame? _frame;
@@ -60,6 +60,7 @@ class _PlotOverviewState extends State<PlotOverview> {
   @override
   void initState() {
     super.initState();
+    _history = controller.createPlotHistoryQuery(onChanged: _refreshData);
     _listenTo(controller);
   }
 
@@ -68,7 +69,9 @@ class _PlotOverviewState extends State<PlotOverview> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != controller) {
       _stopListeningTo(oldWidget.controller);
-      _clearHistories();
+      _history.dispose();
+      _history = controller.createPlotHistoryQuery(onChanged: _refreshData);
+      _historyEnd = null;
       _frame = null;
       _drag = null;
       _dragging = false;
@@ -116,18 +119,10 @@ class _PlotOverviewState extends State<PlotOverview> {
     }
   }
 
-  void _clearHistories() {
-    for (final history in _histories.values) {
-      history.dispose();
-    }
-    _histories.clear();
-    _historyEnds.clear();
-  }
-
   @override
   void dispose() {
     _stopListeningTo(controller);
-    _clearHistories();
+    _history.dispose();
     _repaint.dispose();
     _focus.dispose();
     super.dispose();
@@ -147,7 +142,10 @@ class _PlotOverviewState extends State<PlotOverview> {
     _dataDirty = false;
     final range = _dataRange;
     if (range == null || size.width <= 2 || size.height <= 2) {
-      if (range == null) _clearHistories();
+      if (range == null) {
+        _history.clear();
+        _historyEnd = null;
+      }
       return _frame = (size: size, viewport: null, series: const []);
     }
     final plot = (Offset.zero & size).deflate(1);
@@ -175,73 +173,41 @@ class _PlotOverviewState extends State<PlotOverview> {
   List<_OverviewSeries> _series(_TimeRange range, double pixelWidth) {
     final livePath = controller.rawRecording['historyPath'] as String?;
     final plotted = controller.watches.where((watch) => watch.plotted).toList();
-    final byPath = <String, List<WatchItem>>{};
-    for (final watch in plotted) {
-      final path =
-          watch.archivedHistoryPath ??
-          (watch.totalSampleCount > watch.samples.length ? livePath : null);
-      if (path != null) (byPath[path] ??= []).add(watch);
+    final actualEnd = controller.elapsedSeconds;
+    final refreshInterval = (controller.plotRetentionSeconds / 2).clamp(
+      0.5,
+      12.0,
+    );
+    final lastEnd = _historyEnd;
+    if (lastEnd == null ||
+        actualEnd < lastEnd ||
+        actualEnd - lastEnd >= refreshInterval) {
+      if (lastEnd != null && actualEnd < lastEnd) _history.clear();
+      _historyEnd = actualEnd;
     }
-    _histories.removeWhere((path, history) {
-      if (byPath.containsKey(path)) return false;
-      history.dispose();
-      _historyEnds.remove(path);
-      return true;
-    });
-    final cached = <String, PlotHistory>{};
-    for (final entry in byPath.entries) {
-      final path = entry.key;
-      final watches = entry.value;
-      final history = _histories.putIfAbsent(
-        path,
-        () => PlotHistory(onChanged: _refreshData),
-      );
-      final sourceEnd = path == livePath
-          ? controller.elapsedSeconds
-          : watches
-                .map((watch) => watch.archivedHistoryEndSeconds)
-                .reduce(math.max);
-      final previousEnd = _historyEnds[path];
-      // The recent buffer covers the tail while the indexed prefix is refreshed.
-      final refreshInterval = (controller.plotRetentionSeconds / 2).clamp(
-        0.5,
-        12.0,
-      );
-      if (previousEnd == null ||
-          sourceEnd < previousEnd ||
-          sourceEnd - previousEnd >= refreshInterval) {
-        if (previousEnd != null && sourceEnd < previousEnd) history.clear();
-        _historyEnds[path] = sourceEnd;
-      }
-      final end = _historyEnds[path]!;
-      history.update(
-        path: path,
-        keys: [for (final watch in watches) watch.symbol.key],
-        start: 0,
-        end: math.max(_minimumSpan, end),
-        sourceEnd: end,
-        pixelWidth: pixelWidth,
-        enabled: true,
-      );
-      for (final watch in watches) {
-        cached[watch.symbol.key] = history;
-      }
-    }
+    _history.update(
+      livePath: livePath,
+      watches: plotted,
+      start: range.start,
+      end: range.end,
+      liveEnd: _historyEnd!,
+      pixelWidth: pixelWidth,
+      enabled: true,
+      liveEnabled: plotted.any(
+        (watch) =>
+            watch.archivedHistoryPath == livePath &&
+                watch.archivedHistoryPath != null ||
+            watch.archivedHistoryPath == null &&
+                watch.totalSampleCount > watch.samples.length,
+      ),
+    );
     return [
       for (final watch in plotted)
-        (
-          color: watch.color,
-          points: _points(watch, cached[watch.symbol.key], range, pixelWidth),
-        ),
+        (color: watch.color, points: _points(watch, range, pixelWidth)),
     ];
   }
 
-  List<Offset> _points(
-    WatchItem watch,
-    PlotHistory? cache,
-    _TimeRange range,
-    double pixelWidth,
-  ) {
+  List<Offset> _points(WatchItem watch, _TimeRange range, double pixelWidth) {
     final recent = downsampleTelemetrySamples(
       watch.samples,
       xMin: range.start,
@@ -249,10 +215,7 @@ class _PlotOverviewState extends State<PlotOverview> {
       pixelWidth: pixelWidth,
       cacheResult: false,
     );
-    final history = cache?.samplesFor(
-      watch.symbol.key,
-      minimumTime: watch.historyStartSeconds,
-    );
+    final history = _history.samplesFor(watch);
     if (history == null) return recent;
     final cutoff = recent.isEmpty ? range.end : recent.first.dx;
     if (cutoff < range.start) return recent;

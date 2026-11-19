@@ -78,10 +78,9 @@ class TakeALookController extends ChangeNotifier {
     this.targetPackPicker,
     HistoryReader? historyReader,
     double Function()? monotonicSeconds,
-  }) : _historyReader = historyReader,
+  }) : _plotHistoryCache = PlotHistoryCache(historyReader),
        _samplingClock = SamplingDisplayClock(now: monotonicSeconds) {
-    plotHistory = PlotHistory(
-      reader: historyReader,
+    _plotHistory = createPlotHistoryQuery(
       onChanged: () {
         if (!_disposed) signals.plot.emit();
       },
@@ -124,6 +123,7 @@ class TakeALookController extends ChangeNotifier {
   int _symbolRevision = 0;
   bool _pickingFirmwareFile = false;
   bool _restoringProject = false;
+  void Function(Map<String, dynamic>)? _applyRestoredProject;
   WatchRefreshWarning? watchRefreshWarning;
   bool get isProjectRestoring => _restoringProject;
   int _nextSymbolLoadId = 0;
@@ -170,9 +170,12 @@ class TakeALookController extends ChangeNotifier {
 
   final ControllerState state = ControllerState();
   final TelemetryStore telemetryStore = TelemetryStore();
-  late final PlotHistory plotHistory;
-  final HistoryReader? _historyReader;
-  final Map<String, PlotHistory> _archivedPlotHistories = {};
+  final PlotHistoryCache _plotHistoryCache;
+  late final PlotHistoryQuery _plotHistory;
+  PlotHistory get plotHistory => _plotHistory.live;
+
+  PlotHistoryQuery createPlotHistoryQuery({required VoidCallback onChanged}) =>
+      PlotHistoryQuery(onChanged: onChanged, reader: _plotHistoryCache.read);
   double _plotPixelWidth = 1000;
   final ControllerSnapshotCodec snapshotCodec = const ControllerSnapshotCodec();
 
@@ -304,7 +307,13 @@ class TakeALookController extends ChangeNotifier {
   Listenable get clockChanges => signals.clock;
   Listenable get logChanges => signals.logs;
   Listenable get debugChanges => signals.debug;
+  Listenable get debugIndexChanges => signals.debugIndex;
+  int _debugIndexRevision = 0;
+  (int, int)? _sourceCatalogRevision;
+  List<String> _sourceCatalogFiles = const [];
+  int get debugIndexRevision => _debugIndexRevision;
   Listenable get sourceWorkspaceChanges => signals.sourceWorkspace;
+  Listenable get sourceProjectChanges => signals.sourceProject;
   Listenable get sourceToolsChanges => signals.sourceTools;
   Listenable get stateSyncChanges => signals.stateSync;
   Listenable get telemetrySyncChanges => signals.telemetrySync;
@@ -315,13 +324,7 @@ class TakeALookController extends ChangeNotifier {
     final recent = plottingPaused
         ? _frozenPlotSamples[watch.symbol.key] ?? watch.samples
         : watch.samples;
-    final source = watch.archivedHistoryPath == rawRecording['historyPath']
-        ? plotHistory
-        : _archivedPlotHistories[watch.archivedHistoryPath] ?? plotHistory;
-    final history = source.samplesFor(
-      watch.symbol.key,
-      minimumTime: watch.historyStartSeconds,
-    );
+    final history = _plotHistory.samplesFor(watch);
     final start = math.max(
       0.0,
       plotWindowEndSeconds - plotVisibleWindowSeconds,
@@ -674,10 +677,8 @@ class TakeALookController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
-    plotHistory.dispose();
-    for (final history in _archivedPlotHistories.values) {
-      history.dispose();
-    }
+    _plotHistory.dispose();
+    _plotHistoryCache.clear();
     _ticker?.cancel();
     _plotRefreshTimer?.cancel();
     _samplingClockTimer?.cancel();

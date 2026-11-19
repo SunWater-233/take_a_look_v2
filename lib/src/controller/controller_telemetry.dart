@@ -74,6 +74,19 @@ extension TakeALookControllerTelemetry on TakeALookController {
           applySnapshot(state);
           signals.stateSync.emit();
         }
+      case BackendEventType.projectRestored:
+        final state = _asMap(params);
+        if (state != null) {
+          final applyProject = _applyRestoredProject;
+          if (applyProject == null) {
+            _clearSampleHistory();
+            applySnapshot(state);
+            _emitState([signals.sampling, signals.telemetry]);
+            signals.telemetrySync.emit();
+          } else {
+            applyProject(state);
+          }
+        }
       case BackendEventType.samples:
         if (params is BackendSampleBatch) {
           applyBackendSampleBatch(params);
@@ -216,13 +229,8 @@ extension TakeALookControllerTelemetry on TakeALookController {
     final previousOverscroll = plotTimeOverscroll;
     state.acquisition.preserveMissingHistory = preserveMissing;
     if (advanceEpoch) state.acquisition.samplingEpoch++;
-    plotHistory.clear();
-    if (!preserveMissing) {
-      for (final history in _archivedPlotHistories.values) {
-        history.dispose();
-      }
-      _archivedPlotHistories.clear();
-    }
+    _plotHistory.clear(preserveArchived: preserveMissing);
+    _plotHistoryCache.clear();
     state.acquisition.rawRecording = {};
     elapsedSeconds = 0;
     _resetSamplingElapsedClock();

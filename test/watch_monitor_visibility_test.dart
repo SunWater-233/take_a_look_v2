@@ -174,7 +174,11 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       expect(enabled(commands), {'motor.loop.gain'});
       final restored =
-          (commands.lastWhere((c) => c.$1 == ControllerCommand.setWatches).$2
+          (commands
+                      .lastWhere(
+                        (c) => c.$1 == ControllerCommand.restoreProject,
+                      )
+                      .$2
                   as Map)['watches']
               as List;
       expect(
@@ -239,7 +243,7 @@ void main() {
     },
   );
 
-  testWidgets('table folding and whole frame collapse release monitor demand', (
+  testWidgets('closing the members section releases its monitor demand', (
     tester,
   ) async {
     final commands = <(ControllerCommand, Object?)>[];
@@ -250,39 +254,25 @@ void main() {
       tester,
       buildWorkspacePanel(WorkspacePanelId.watch, controller),
     );
-    expect(enabled(commands), isEmpty);
-    final motor = find.byKey(const ValueKey<String>('motor'));
-    await tester.tap(
-      find.descendant(of: motor, matching: find.byTooltip('展开')).first,
-    );
-    await tester.pumpAndSettle();
     expect(enabled(commands), {'motor.speed'});
     controller.setWatchPinned('motor.loop.gain', true);
     await tester.pumpAndSettle();
-    await tester.tap(find.byIcon(Icons.keyboard_arrow_down).first);
+    final header = find.byKey(const ValueKey('watch-members-section'));
+    await tester.tap(header);
     await tester.pumpAndSettle();
     expect(enabled(commands), {'motor.loop.gain'});
     controller.setWatchPinned('motor.loop.gain', false);
     await tester.pumpAndSettle();
     expect(enabled(commands), isEmpty);
-    await tester.tap(find.byIcon(Icons.keyboard_arrow_right).first);
-    await tester.pumpAndSettle();
-    final reopened = find.byKey(const ValueKey<String>('motor'));
-    await tester.tap(
-      find.descendant(of: reopened, matching: find.byTooltip('展开')).first,
-    );
+    await tester.tap(header);
     await tester.pumpAndSettle();
     expect(enabled(commands), {'motor.speed'});
     expect(watch(controller, 'capture').samplingEnabled, isTrue);
-    expect(
-      commands.every((c) => c.$1 == ControllerCommand.setMonitorVisibility),
-      isTrue,
-    );
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
   testWidgets(
-    'open table and compact views union demand until the last view closes',
+    'two watch views union demand until the last visible section closes',
     (tester) async {
       final commands = <(ControllerCommand, Object?)>[];
       final controller = fixture(commands);
@@ -299,26 +289,18 @@ void main() {
               children: [
                 Expanded(child: CompactWatchPanel(controller: controller)),
                 if (showTable)
-                  Expanded(child: WatchPanel(controller: controller)),
+                  Expanded(child: CompactWatchPanel(controller: controller)),
               ],
             );
           },
         ),
       );
-      final motor = find.byKey(const ValueKey<String>('motor'));
+      expect(enabled(commands), {'motor.speed'});
       await tester.tap(
-        find.descendant(of: motor, matching: find.byTooltip('展开')).first,
+        find.byKey(const ValueKey('watch-members-section')).first,
       );
       await tester.pumpAndSettle();
-      final loop = find.byKey(const ValueKey<String>('motor.loop'));
-      await tester.tap(
-        find.descendant(of: loop, matching: find.byTooltip('展开')).first,
-      );
-      await tester.pumpAndSettle();
-      expect(enabled(commands), {'motor.speed', 'motor.loop.gain'});
-      await tester.tap(find.byKey(const ValueKey('compact-watch-motor')));
-      await tester.pumpAndSettle();
-      expect(enabled(commands), {'motor.speed', 'motor.loop.gain'});
+      expect(enabled(commands), {'motor.speed'});
       update(() => showTable = false);
       await tester.pumpAndSettle();
       expect(enabled(commands), isEmpty);
@@ -349,13 +331,13 @@ void main() {
           },
         ),
       );
-      expect(enabled(commands), {'manual'});
+      expect(enabled(commands), {'motor.speed', 'manual'});
       update(() => assigned = false);
       await tester.pumpAndSettle();
       expect(enabled(commands), isEmpty);
       update(() => assigned = true);
       await tester.pumpAndSettle();
-      expect(enabled(commands), {'manual'});
+      expect(enabled(commands), {'motor.speed', 'manual'});
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );

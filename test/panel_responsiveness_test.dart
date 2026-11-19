@@ -84,11 +84,8 @@ void main() {
     await tester.pump();
   });
 
-  testWidgets('watch table remains horizontally scrollable in a narrow dock', (
-    tester,
-  ) async {
+  testWidgets('watch panel fits a narrow dock', (tester) async {
     final controller = TakeALookController();
-
     await tester.pumpWidget(
       MaterialApp(
         theme: buildTalTheme(),
@@ -104,79 +101,10 @@ void main() {
         ),
       ),
     );
-
     expect(tester.takeException(), isNull);
-    expect(find.text('绘制颜色'), findsOneWidget);
-    expect(find.byType(SingleChildScrollView), findsWidgets);
-
-    controller.dispose();
+    expect(find.byKey(const ValueKey('compact-watch-list')), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pump();
-  });
-
-  testWidgets('watch columns resize independently and right drag scales rows', (
-    tester,
-  ) async {
-    final controller = TakeALookController()..loadDemoSymbols();
-    controller.selectSymbols([demoSymbols.first.key]);
-    controller.addSelectedToWatch();
-
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: buildTalTheme(),
-        home: Scaffold(
-          body: SizedBox(
-            width: 600,
-            height: 420,
-            child: buildWorkspacePanel(WorkspacePanelId.watch, controller),
-          ),
-        ),
-      ),
-    );
-
-    final content = find.byKey(const ValueKey('watch-table-content'));
-    final resizeRegion = find.byKey(
-      const ValueKey('watch-table-resize-region'),
-    );
-    final row = find.byKey(ValueKey<String>(demoSymbols.first.key));
-    final initialWidth = tester.getSize(content).width;
-    final initialRowHeight = tester.getSize(row).height;
-    for (var index = 0; index < 10; index += 1) {
-      expect(
-        find.byKey(ValueKey('watch-column-resize-$index')),
-        findsOneWidget,
-      );
-    }
-    final columnGesture = await tester.startGesture(
-      tester.getCenter(find.byKey(const ValueKey('watch-column-resize-0'))),
-      kind: PointerDeviceKind.mouse,
-    );
-    await columnGesture.moveBy(const Offset(24, 0));
-    await columnGesture.up();
-    await tester.pump();
-
-    expect(tester.getSize(content).width, closeTo(initialWidth + 24, 0.01));
-    expect(tester.getSize(row).height, initialRowHeight);
-
-    final widthAfterColumnResize = tester.getSize(content).width;
-    final gesture = await tester.startGesture(
-      tester.getTopLeft(resizeRegion) + const Offset(250, 80),
-      kind: PointerDeviceKind.mouse,
-      buttons: kSecondaryMouseButton,
-    );
-    await gesture.moveBy(const Offset(20, 10));
-    await tester.pump();
-
-    expect(
-      tester.getSize(content).width,
-      closeTo(widthAfterColumnResize + 170, 0.01),
-    );
-    expect(tester.getSize(row).height, closeTo(initialRowHeight + 8.5, 0.01));
-
-    await gesture.up();
     controller.dispose();
-    await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pump();
   });
 
   testWidgets('watch color picker updates the plotted series color', (
@@ -185,6 +113,7 @@ void main() {
     final controller = TakeALookController()..loadDemoSymbols();
     controller.selectSymbols([demoSymbols.first.key]);
     controller.addSelectedToWatch();
+    controller.setAllWatchesPlotted(true);
     var plotEvents = 0;
     controller.plotChanges.addListener(() => plotEvents += 1);
 
@@ -201,14 +130,12 @@ void main() {
       ),
     );
 
-    await tester.drag(
-      find.byType(SingleChildScrollView),
-      const Offset(-180, 0),
+    final color = find.byKey(
+      ValueKey('compact-watch-color-${demoSymbols.first.key}'),
     );
-    await tester.pumpAndSettle();
-    await tester.tap(
-      find.byKey(ValueKey('watch-color-${demoSymbols.first.key}')),
-    );
+    await tester.tap(color);
+    await tester.pump(const Duration(milliseconds: 60));
+    await tester.tap(color);
     await tester.pumpAndSettle();
     expect(find.text('选择绘制颜色'), findsOneWidget);
 

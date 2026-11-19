@@ -3,6 +3,23 @@ part of 'controller.dart';
 extension TakeALookControllerDebug on TakeALookController {
   DebugState get debugState => state.debug;
 
+  List<String> get sourceCatalogFiles {
+    final revision = (symbolRevision, debugIndexRevision);
+    if (revision != _sourceCatalogRevision) {
+      _sourceCatalogRevision = revision;
+      final files = {
+        ...debugState.sourceFiles,
+        for (final symbol in _symbols)
+          if (!symbol.missing &&
+              symbol.source.isNotEmpty &&
+              symbol.source != '未知来源')
+            symbol.source,
+      }.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+      _sourceCatalogFiles = List.unmodifiable(files);
+    }
+    return _sourceCatalogFiles;
+  }
+
   Future<void> chooseSourceRoot() async {
     if (_isDetachedRemote) {
       _dispatchRemote(ControllerCommand.setSourceRoot);
@@ -275,42 +292,7 @@ extension TakeALookControllerDebug on TakeALookController {
     );
     debugState.sourceStepAvailable = data['sourceStepAvailable'] == true;
     debugState.stepOutAvailable = data['stepOutAvailable'] == true;
-    if (data['sourceFiles'] case final List rawFiles) {
-      debugState.sourceFiles
-        ..clear()
-        ..addAll(rawFiles.whereType<String>());
-    }
-    if (data.containsKey('sourceDefinitions')) {
-      final rawDefinitions = data['sourceDefinitions'];
-      debugState.hasSourceDefinitionIndex = rawDefinitions is List;
-      debugState.sourceDefinitions
-        ..clear()
-        ..addAll(
-          (rawDefinitions is List ? rawDefinitions : const [])
-              .whereType<Map>()
-              .map(
-                (raw) =>
-                    SourceDefinition.fromJson(Map<String, dynamic>.from(raw)),
-              ),
-        );
-    }
-    if (data['executableLines'] case final Map rawLines) {
-      debugState.executableLines
-        ..clear()
-        ..addEntries(
-          rawLines.entries
-              .where((entry) => entry.key is String && entry.value is List)
-              .map(
-                (entry) => MapEntry(
-                  entry.key as String,
-                  (entry.value as List)
-                      .whereType<int>()
-                      .where((line) => line > 0)
-                      .toSet(),
-                ),
-              ),
-        );
-    }
+    final indexChanged = _applyDebugIndex(data);
     final breakpointRevision = data['breakpointRevision'] as int?;
     if (breakpointRevision == null ||
         breakpointRevision >= debugState.breakpointRevision) {
@@ -348,7 +330,53 @@ extension TakeALookControllerDebug on TakeALookController {
             previousPc != debugState.programCounter)) {
       debugState.stopRevision++;
     }
-    if (emit) _emitState([signals.debug]);
+    if (emit) _emitState([signals.debug, if (indexChanged) signals.debugIndex]);
+  }
+
+  bool _applyDebugIndex(Map<String, dynamic> data) {
+    if (!data.containsKey('sourceFiles') &&
+        !data.containsKey('sourceDefinitions') &&
+        !data.containsKey('executableLines')) {
+      return false;
+    }
+    if (data['sourceFiles'] case final List rawFiles) {
+      debugState.sourceFiles
+        ..clear()
+        ..addAll(rawFiles.whereType<String>());
+    }
+    if (data.containsKey('sourceDefinitions')) {
+      final rawDefinitions = data['sourceDefinitions'];
+      debugState.hasSourceDefinitionIndex = rawDefinitions is List;
+      debugState.sourceDefinitions
+        ..clear()
+        ..addAll(
+          (rawDefinitions is List ? rawDefinitions : const [])
+              .whereType<Map>()
+              .map(
+                (raw) =>
+                    SourceDefinition.fromJson(Map<String, dynamic>.from(raw)),
+              ),
+        );
+    }
+    if (data['executableLines'] case final Map rawLines) {
+      debugState.executableLines
+        ..clear()
+        ..addEntries(
+          rawLines.entries
+              .where((entry) => entry.key is String && entry.value is List)
+              .map(
+                (entry) => MapEntry(
+                  entry.key as String,
+                  (entry.value as List)
+                      .whereType<int>()
+                      .where((line) => line > 0)
+                      .toSet(),
+                ),
+              ),
+        );
+    }
+    _debugIndexRevision++;
+    return true;
   }
 
   void _applyBreakpointState(Map<String, dynamic> data) {

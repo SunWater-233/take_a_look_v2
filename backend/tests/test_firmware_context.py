@@ -60,8 +60,65 @@ def test_root_change_keeps_the_explicit_absolute_firmware(tmp_path, backend):
     after = service.handle(RpcMethod.SET_SOURCE_PROJECT, {'sourceRoot': str(b)})['state']
     assert after['sourceProject']['firmwarePath'] == str(firmware)
     assert after['sourceProject']['buildCommand'] == 'build A'
-    assert after['firmware'] == before['firmware']
-    assert after['symbols'] == before['symbols']
+    assert set(after) == {'sourceProject'}
+    assert service.state_snapshot()['firmware'] == before['firmware']
+    assert service.state_snapshot()['symbols'] == before['symbols']
+
+
+def test_project_restore_validates_elf_bindings_before_rotating_capture(tmp_path, backend):
+    service, events, _ = backend
+    current = tmp_path / 'current.elf'
+    current.write_bytes(b'A')
+    other = tmp_path / 'other.elf'
+    other.write_bytes(b'other firmware')
+    service.handle(RpcMethod.LOAD_FIRMWARE, {'path': str(current)})
+    key = next(iter(service._symbols))
+    service.handle(RpcMethod.SET_WATCHES, {'watches': [{'key': key, 'readMode': 'capture'}]})
+    service._recording.append([(1.0, {key: 2.0})], {key: 'counter'})
+    before = service.state_snapshot()
+    settings = {
+        'sourceProject': {'firmwarePath': str(other)},
+        'connection': {'sampleRateHz': 1000},
+        'watches': [{'key': key, 'readMode': 'capture'}],
+        'samplingPaused': True, 'rttEnabled': False, 'rttProtocol': 'normal',
+    }
+    with pytest.raises(ProtocolError) as failed:
+        service.handle(RpcMethod.RESTORE_PROJECT, settings)
+    assert failed.value.code == 'unknown_symbol'
+    after = service.state_snapshot()
+    for field in ('sourceProject', 'firmware', 'watches', 'rawRecording', 'samplingPaused', 'sampleRateHz'):
+        assert after[field] == before[field]
+    assert all(name is not EventName.PROJECT_RESTORED for name, _ in events)
+
+    settings['watches'] = []
+    result = service.handle(RpcMethod.RESTORE_PROJECT, settings)
+    event, snapshot = events[-1]
+    assert event is EventName.PROJECT_RESTORED
+    assert result == {'firmwareRevision': snapshot['firmware']['revision']}
+    assert snapshot['sourceProject']['firmwarePath'] == str(other)
+    assert snapshot['sampleRateHz'] == 1000
+    assert snapshot['rawRecording']['sampleCount'] == 0
+
+
+def test_project_restore_reports_old_recording_close_error_and_commits_paused(tmp_path, backend):
+    service, events, _ = backend
+    firmware = tmp_path / 'motor.axf'
+    firmware.write_bytes(b'firmware')
+    service._recording.append([(1.0, {'a': 2.0})], {'a': 'a'})
+    settings = {
+        'sourceProject': {'firmwarePath': str(firmware)}, 'watches': [],
+        'samplingPaused': False, 'rttEnabled': False, 'rttProtocol': 'normal',
+    }
+    with patch('take_a_look_backend.services.recording.os.fsync', side_effect=OSError('disk failure')):
+        service.handle(RpcMethod.RESTORE_PROJECT, settings)
+
+    assert events[-2][0] is EventName.ERROR
+    assert events[-2][1]['code'] == 'recording_close_failed'
+    event, snapshot = events[-1]
+    assert event is EventName.PROJECT_RESTORED
+    assert snapshot['sourceProject']['firmwarePath'] == str(firmware)
+    assert snapshot['samplingPaused'] is True
+    assert snapshot['rawRecording']['path'] is None
 
 
 @pytest.mark.parametrize('method', [RpcMethod.LOAD_FIRMWARE, RpcMethod.SET_SOURCE_PROJECT])
@@ -106,7 +163,7 @@ def test_same_path_rebuild_refreshes_identity_and_rebinds_watch_addresses(tmp_pa
     symbol = next(iter(service._symbols.values()))
     service._watches = {symbol.key: WatchedVariable(symbol, '#ff0000', True, True)}
     firmware.write_bytes(b'new build')
-    second = service.handle(RpcMethod.SET_SOURCE_PROJECT, {'firmwarePath': str(firmware)})['state']
+    second = service.handle(RpcMethod.LOAD_FIRMWARE, {'path': str(firmware)})['state']
     assert second['firmware']['fingerprint'] != first['firmware']['fingerprint']
     assert second['firmware']['revision'] > first['firmware']['revision']
     assert next(iter(service._watches.values())).symbol.address == 0x20000009

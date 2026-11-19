@@ -126,11 +126,13 @@ class SamplePipeline:
 
     def rotate(self):
         self.drain()
-        self.recording.rotate()
-        self._pending, self._labels = [], {}
-        self._updated_at_ms, self._weight = None, 0
-        self.backpressure = self._error_reported = False
-        self.take_committed_count()
+        try:
+            self.recording.rotate()
+        finally:
+            self._pending, self._labels = [], {}
+            self._updated_at_ms, self._weight = None, 0
+            self.backpressure = self._error_reported = False
+            self.take_committed_count()
 
     def close(self):
         self.worker.close()

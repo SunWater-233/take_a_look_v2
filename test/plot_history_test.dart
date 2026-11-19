@@ -6,6 +6,47 @@ import 'package:take_a_look_v2/src/telemetry/numeric_history.dart';
 import 'package:take_a_look_v2/src/telemetry/plot_history.dart';
 
 void main() {
+  test(
+    'chart views share a covering history read and keep independent ranges',
+    () async {
+      final pending = Completer<HistoryWindow>();
+      var diskReads = 0;
+      final cache = PlotHistoryCache((_) {
+        diskReads++;
+        return pending.future;
+      });
+      const overview = HistoryRequest(
+        path: 'session',
+        keys: ['a'],
+        start: 0,
+        end: 100,
+        sourceEnd: 100,
+        buckets: 1000,
+      );
+      const chart = HistoryRequest(
+        path: 'session',
+        keys: ['a'],
+        start: 20,
+        end: 40,
+        sourceEnd: 100,
+        buckets: 100,
+      );
+      final first = cache.read(overview);
+      final second = cache.read(chart);
+      expect(diskReads, 1);
+      final window = HistoryWindow(
+        request: overview,
+        series: {},
+        reduced: true,
+      );
+      pending.complete(window);
+      expect(await first, same(window));
+      expect(await second, same(window));
+      expect(await cache.read(chart), same(window));
+      expect(diskReads, 1);
+    },
+  );
+
   testWidgets(
     'drag requests are throttled, single-flight, prefetched and replaced by the latest viewport',
     (tester) async {

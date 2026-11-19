@@ -114,8 +114,9 @@ extension TakeALookControllerFirmware on TakeALookController {
     Map<String, dynamic> arguments,
     String path, {
     bool propagateFailure = false,
+    BackendCommand? commandSender,
   }) async {
-    final sender = backendCommand!;
+    final sender = commandSender ?? backendCommand!;
     final startedAt = DateTime.now();
     final loadId = '${startedAt.microsecondsSinceEpoch}-${_nextSymbolLoadId++}';
     lastBackendError = null;

@@ -8,6 +8,7 @@ import 'package:take_a_look_v2/src/app/app.dart';
 import 'package:take_a_look_v2/src/controller/controller.dart';
 import 'package:take_a_look_v2/src/models/models.dart';
 import 'package:take_a_look_v2/src/protocol/commands.dart';
+import 'package:take_a_look_v2/src/protocol/events.dart';
 import 'package:take_a_look_v2/src/theme/theme.dart';
 import 'package:take_a_look_v2/src/workspace/panel_types.dart';
 import 'package:take_a_look_v2/src/workspace/project_document.dart';
@@ -292,7 +293,7 @@ void main() {
     expect(
       () => ProjectDocument.fromJson({
         'format': 'take-a-look-project',
-        'version': 2,
+        'version': ProjectDocument.formatVersion,
         'settings': settings,
         'layout': const WorkspaceLayoutSnapshot(
           groups: [],
@@ -349,35 +350,23 @@ void main() {
         },
         backendCommand: (command, args) async {
           commands.add(command);
-          if (command == ControllerCommand.configureProject) {
-            configurations.add(args as Map);
-          }
-          if (command == ControllerCommand.setSourceProject) {
-            restored.applySnapshot({
-              'sourceProject': args,
+          if (command == ControllerCommand.restoreProject) {
+            final params = args as Map;
+            configurations.add(params['connection'] as Map);
+            restored.applyBackendEvent(BackendEventType.projectRestored, {
+              'sourceProject': params['sourceProject'],
               'firmware': {'status': 'ready'},
-              'symbols': settings['symbols'],
-              'watches': [],
+              'symbols': [demoSymbols.first.toJson()],
+              'watches': params['watches'],
             });
-          }
-          if (command == ControllerCommand.setWatches) {
-            restored.applySnapshot({'watches': (args as Map)['watches']});
           }
         },
       );
       addTearDown(restored.dispose);
       await tester.runAsync(() => restored.restoreProjectSettings(settings));
       expect(restored.watches.single.symbol.key, demoSymbols.first.key);
-      expect(
-        commands,
-        containsAllInOrder([
-          ControllerCommand.configureProject,
-          ControllerCommand.setSamplingPaused,
-          ControllerCommand.clearSamples,
-          ControllerCommand.setSourceProject,
-          ControllerCommand.setWatches,
-        ]),
-      );
+      expect(commands, contains(ControllerCommand.restoreProject));
+      expect(commands, isNot(contains(ControllerCommand.clearSamples)));
       expect(commands, isNot(contains(ControllerCommand.writeWatch)));
       expect(commands, isNot(contains(ControllerCommand.startSourceTask)));
       for (final status in [

@@ -15,11 +15,11 @@ import '../app/file_pickers.dart';
 import '../workspace/keyboard_shortcuts.dart';
 import '../models/models.dart';
 import 'source_search.dart';
+import 'source_editor_session.dart';
+import 'source_documents.dart' show sourcePathSuffixLength;
+import 'source_references.dart' show SourceCodeLocation;
 import 'source_search_controller.dart';
 import 'source_highlighter.dart';
-import 'source_documents.dart';
-import 'source_references.dart';
-import 'source_navigation_history.dart';
 import 'source_peek.dart';
 import '../theme/theme.dart';
 
@@ -31,6 +31,7 @@ import 'source_file_drag_data.dart';
 part 'source_build_tools.dart';
 part 'source_breakpoints.dart';
 part 'source_navigation.dart';
+part 'source_search_view.dart';
 part 'source_peek_actions.dart';
 part 'workbench_output.dart';
 
@@ -65,10 +66,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
   String get _sourceViewId => identityHashCode(this).toString();
   final Map<String, GlobalKey> _tabKeys = <String, GlobalKey>{};
   final Set<String> _externalPathKeys = <String>{};
-  final SourceDocuments _sourceDocuments = SourceDocuments();
-  late final SourceSearchController _search = SourceSearchController(
-    _sourceDocuments,
-  );
+  final _editor = SourceEditorSession<_SourceNavigationLocation>();
   List<String> _sourceFiles = const [];
   final FocusNode _panelFocusNode = FocusNode();
   final FocusNode _searchFocusNode = FocusNode();
@@ -77,7 +75,6 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
   final GlobalKey _searchFieldLayoutKey = GlobalKey();
   String? _selectedPath;
   List<HighlightedSourceLine> _lines = const [];
-  final SourceHighlighter _highlighter = SourceHighlighter();
   int _maximumLineLength = 0;
   Set<int> _requestedLines = const {};
   Set<int> _executableLines = const {};
@@ -90,18 +87,16 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
   ({String path, int line})? _selectedBreakpoint;
   ({String path, int line})? _breakpointLocation;
   String? _loadError;
-  int _loadGeneration = 0;
   var _tabOverflow = (left: false, right: false);
   bool _draggingFiles = false;
   bool _searchVisible = false;
   SourceSearchMode _searchMode = SourceSearchMode.source;
-  List<SourceDefinition> _searchDefinitions = const [];
+  int _searchIndexRevision = -1;
   bool _searching = false;
   bool _searchSelectionChanged = false;
   int _activeSearchIndex = -1;
   int? _revealedSearchLine;
   _SourceTokenSelection? _sourceSelection;
-  final _navigation = SourceNavigationHistory<_SourceNavigationLocation>();
   bool _sourceTapWithModifier = false;
   _SourceTokenSelection? _hoveredToken;
   bool _hoveredTokenCanNavigate = false;
@@ -109,8 +104,6 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
   _SourcePeekSession? _sourcePeek;
   double? _sourcePeekHeight;
   double _visiblePeekHeight = 0;
-  late final SourceReferencesController _references =
-      SourceReferencesController(_sourceDocuments);
   List<SourceSearchResult> _searchResults = const [];
   String? _observedSourceRoot;
   int _observedFirmwareRevision = -1;
@@ -130,6 +123,8 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     HardwareKeyboard.instance.addHandler(_handleNavigationModifier);
     _tabController.addListener(_updateTabOverflow);
     controller.debugChanges.addListener(_handleDebugChange);
+    controller.debugIndexChanges.addListener(_handleDebugChange);
+    controller.sourceProjectChanges.addListener(_handleDebugChange);
     controller.symbolChanges.addListener(_handleDebugChange);
     controller.sourceWorkspaceChanges.addListener(_handleSourceWorkspaceChange);
     controller.sourceToolsChanges.addListener(_handleFirmwareTask);
@@ -169,6 +164,10 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
       return;
     }
     oldWidget.controller.debugChanges.removeListener(_handleDebugChange);
+    oldWidget.controller.debugIndexChanges.removeListener(_handleDebugChange);
+    oldWidget.controller.sourceProjectChanges.removeListener(
+      _handleDebugChange,
+    );
     oldWidget.controller.symbolChanges.removeListener(_handleDebugChange);
     oldWidget.controller.sourceToolsChanges.removeListener(_handleFirmwareTask);
     oldWidget.controller.sourceToolsChanges.removeListener(
@@ -182,6 +181,8 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     );
     oldWidget.controller.setSourceViewVisible(_sourceViewId, false);
     controller.debugChanges.addListener(_handleDebugChange);
+    controller.debugIndexChanges.addListener(_handleDebugChange);
+    controller.sourceProjectChanges.addListener(_handleDebugChange);
     controller.symbolChanges.addListener(_handleDebugChange);
     controller.sourceToolsChanges.addListener(_handleFirmwareTask);
     controller.sourceToolsChanges.addListener(_handleBreakpointAvailability);
@@ -193,18 +194,14 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     _selectedPath = null;
     _tabKeys.clear();
     _externalPathKeys.clear();
-    _sourceDocuments.clear();
+    _editor.invalidate(clearNavigation: true);
     _sourceFiles = const [];
-    _invalidateSearchFileIndex();
-    _search.cancel();
     _searchController.clear();
     _searchResults = const [];
-    _searchDefinitions = const [];
+    _searchIndexRevision = -1;
     _sourceSelection = null;
     _hoveredToken = null;
     _sourcePeek = null;
-    _references.cancel();
-    _navigation.clear();
     _searchVisible = false;
     _searching = false;
     _activeSearchIndex = -1;
@@ -223,8 +220,9 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_handleNavigationModifier);
-    _references.dispose();
     controller.debugChanges.removeListener(_handleDebugChange);
+    controller.debugIndexChanges.removeListener(_handleDebugChange);
+    controller.sourceProjectChanges.removeListener(_handleDebugChange);
     controller.symbolChanges.removeListener(_handleDebugChange);
     controller.sourceToolsChanges.removeListener(_handleFirmwareTask);
     controller.sourceToolsChanges.removeListener(_handleBreakpointAvailability);
@@ -239,22 +237,11 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     _panelFocusNode.dispose();
     _searchFocusNode.dispose();
     _searchController.dispose();
-    _search.dispose();
+    _editor.dispose();
     _tabController
       ..removeListener(_updateTabOverflow)
       ..dispose();
     super.dispose();
-  }
-
-  List<String> _collectSourceFiles() {
-    final files = <String>{...controller.debugState.sourceFiles};
-    for (final symbol in controller.symbols) {
-      if (symbol.source.isNotEmpty && symbol.source != '未知来源') {
-        files.add(symbol.source);
-      }
-    }
-    return files.toList()
-      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
   }
 
   void _restoreSourceWorkspace() {
@@ -306,10 +293,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     }
     if (sourceRootChanged || firmwareChanged) {
       _sourcePeek = null;
-      _references.cancel();
-      _navigation.clear();
-      _sourceDocuments.clear();
-      _invalidateSearchFileIndex();
+      _editor.invalidate(clearNavigation: true);
     }
     final currentSource = controller.debugState.currentSource;
     final currentLine = controller.debugState.currentLine;
@@ -320,7 +304,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     _observedCurrentSource = currentSource;
     _observedCurrentLine = currentLine;
     _observedStopRevision = controller.debugState.stopRevision;
-    final files = _collectSourceFiles();
+    final files = controller.sourceCatalogFiles;
     final sourceFilesChanged = !listEquals(files, _sourceFiles);
     _sourceFiles = files;
     String? nextPath = controller.sourceWorkspace.selectedPath;
@@ -346,10 +330,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
             sourceFilesChanged ||
             firmwareChanged ||
             (_searchMode == SourceSearchMode.source &&
-                !listEquals(
-                  _searchDefinitions,
-                  controller.debugState.sourceDefinitions,
-                )))) {
+                _searchIndexRevision != controller.debugIndexRevision))) {
       _queueSearch(_searchController.text, immediate: true);
     }
   }
@@ -363,8 +344,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
       return;
     }
     _refreshedFirmwareTask = task.id;
-    _sourceDocuments.clear();
-    _invalidateSearchFileIndex();
+    _editor.invalidate();
     if (_selectedPath != null) unawaited(_loadSource(_selectedPath));
     if (_searchVisible && _searchController.text.isNotEmpty) {
       _queueSearch(_searchController.text, immediate: true);
@@ -395,13 +375,13 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
       controller.openSourceFile(path, exactPath: exactPath);
       path = controller.openSourcePathFor(path, exactPath: exactPath) ?? path;
     }
-    final generation = ++_loadGeneration;
+    final generation = _editor.beginLoad();
     setState(() {
       _selectedPath = path;
       _sourceSelection = null;
       _hoveredToken = null;
       _sourcePeek = null;
-      _references.cancel();
+      _editor.references.cancel();
       _revealedSearchLine = revealLine;
       _lines = const [];
       _loadError = null;
@@ -409,12 +389,12 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     _ensureSelectedTabVisible();
     if (path == null) return;
     try {
-      final source = await _readSourceDocument(
+      final highlighted = await _editor.readHighlighted(
         path,
+        sourceRoot: controller.sourceProject.sourceRoot,
         localPath: verifiedLocalPath,
       );
-      final highlighted = await _highlighter.prepare(source, path: path);
-      if (!mounted || generation != _loadGeneration) return;
+      if (!mounted || generation != _editor.loadGeneration) return;
       setState(() {
         _lines = highlighted.lines;
         _maximumLineLength = highlighted.maximumLineLength;
@@ -428,7 +408,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
         _scrollToCurrentLine(immediate: true);
       }
     } on Object catch (error) {
-      if (!mounted || generation != _loadGeneration) return;
+      if (!mounted || generation != _editor.loadGeneration) return;
       setState(() => _loadError = error.toString());
     }
   }
@@ -437,7 +417,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     String path, {
     String? localPath,
   }) {
-    return _sourceDocuments.read(
+    return _editor.documents.read(
       path,
       sourceRoot: controller.sourceProject.sourceRoot,
       localPath: localPath,
@@ -579,7 +559,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
       if (path.isEmpty || !await File(path).exists()) continue;
       final key = _pathKey(path);
       _externalPathKeys.add(key);
-      _sourceDocuments.invalidate(key);
+      _editor.documents.invalidate(key);
       controller.openSourceFile(path, select: false);
       accepted.add(path);
     }
@@ -666,11 +646,11 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
   }
 
   void _closeSearch() {
-    _search.cancel();
+    _editor.search.cancel();
     setState(() {
       _searchVisible = false;
       _searching = false;
-      _searchDefinitions = const [];
+      _searchIndexRevision = -1;
       _searchResults = const [];
       _activeSearchIndex = -1;
       _revealedSearchLine = null;
@@ -680,10 +660,10 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
 
   void _queueSearch(String query, {bool immediate = false}) {
     if (query.trim().isEmpty) {
-      _search.cancel();
+      _editor.search.cancel();
       setState(() {
         _searching = false;
-        _searchDefinitions = const [];
+        _searchIndexRevision = -1;
         _searchResults = const [];
         _activeSearchIndex = -1;
         _revealedSearchLine = null;
@@ -696,13 +676,15 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
       _activeSearchIndex = -1;
       _searchSelectionChanged = false;
     });
-    _searchDefinitions = _searchMode == SourceSearchMode.source
+    _searchIndexRevision = controller.debugIndexRevision;
+    final List<SourceDefinition> definitions =
+        _searchMode == SourceSearchMode.source
         ? List.of(controller.debugState.sourceDefinitions)
         : const [];
-    _search.queue(
+    _editor.search.queue(
       query,
       mode: _searchMode,
-      definitions: _searchDefinitions,
+      definitions: definitions,
       immediate: immediate,
       getFiles: _getSearchFiles,
       readDocument: _readSearchDocument,
@@ -712,9 +694,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     );
   }
 
-  void _invalidateSearchFileIndex() => _search.invalidateIndex();
-
-  Future<List<SourceSearchFile>> _getSearchFiles() => _search.files(
+  Future<List<SourceSearchFile>> _getSearchFiles() => _editor.search.files(
     sourcePaths: [..._sourceFiles, ..._openPaths],
     sourceRoot: controller.sourceProject.sourceRoot,
   );
@@ -972,7 +952,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
   Future<String?> _resolveIncludedSource(String sourcePath, String line) async {
     final includeName = _includeNameFromLine(line);
     if (includeName == null) return null;
-    final sourceFile = await _sourceDocuments.resolve(
+    final sourceFile = await _editor.documents.resolve(
       sourcePath,
       controller.sourceProject.sourceRoot,
     );
@@ -1046,7 +1026,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     Offset localPosition,
   ) async {
     final line = _lines[lineIndex];
-    final generation = _loadGeneration;
+    final generation = _editor.loadGeneration;
     final hit = _tokenAtOffset(sourcePath, lineIndex, line, localPosition);
     setState(() => _sourceSelection = hit);
     final token = hit?.token;
@@ -1055,7 +1035,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
         : _symbolsForToken(token, sourcePath);
     final includeName = _includeNameFromLine(line.rawText);
     final includePath = await _resolveIncludedSource(sourcePath, line.rawText);
-    if (!context.mounted || generation != _loadGeneration) return;
+    if (!context.mounted || generation != _editor.loadGeneration) return;
 
     final itemHeight = TalUiTheme.of(context).menuItemHeight;
     final items = <PopupMenuEntry<String>>[];
@@ -1127,7 +1107,9 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
       position: _contextMenuPosition(menuContext, globalPosition),
       items: items,
     );
-    if (!context.mounted || generation != _loadGeneration || action == null) {
+    if (!context.mounted ||
+        generation != _editor.loadGeneration ||
+        action == null) {
       return;
     }
     if (action == 'definition' && hit != null) {
@@ -1154,7 +1136,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
   }
 
   Future<Map<String, List<String>>> _indexSourceRoot(String root) =>
-      _sourceDocuments.indexRoot(root);
+      _editor.documents.indexRoot(root);
 
   void _scrollToCurrentLine({bool immediate = false}) {
     final currentPath = controller.debugState.currentSource;
@@ -1249,7 +1231,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
                                   264.0,
                                 ),
                           onOpenLocation: (path, line) {
-                            _sourceDocuments.invalidate(path);
+                            _editor.documents.invalidate(path);
                             _openSource(path);
                             unawaited(_loadSource(path, revealLine: line));
                           },
@@ -1297,189 +1279,6 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
     );
   }
 
-  Widget _buildSearchField() {
-    final query = _searchController.text.trim();
-    final filesOnly = _searchMode == SourceSearchMode.files;
-    final status = _searching
-        ? '搜索中…'
-        : query.isEmpty
-        ? filesOnly
-              ? '输入文件名'
-              : '输入变量名或文本'
-        : _searchResults.isEmpty
-        ? '无结果'
-        : '${_activeSearchIndex + 1} / ${_searchResults.length}';
-    final ui = TalUiTheme.of(context);
-    return LayoutBuilder(
-      key: _searchFieldLayoutKey,
-      builder: (context, constraints) {
-        final width = constraints.maxWidth;
-        final buttonWidth = math.min(ui.iconButtonSize, width / 6);
-        return Container(
-          key: const ValueKey('source-search-area'),
-          color: TalColors.surfaceAlt,
-          height: ui.iconButtonSize + 1,
-          child: Row(
-            children: [
-              const SizedBox(width: 10),
-              const Icon(Icons.search, size: 16, color: TalColors.muted),
-              const SizedBox(width: 7),
-              Expanded(
-                child: TextField(
-                  key: const ValueKey('source-search-field'),
-                  controller: _searchController,
-                  focusNode: _searchFocusNode,
-                  autofocus: true,
-                  maxLines: 1,
-                  onChanged: _queueSearch,
-                  onSubmitted: (_) => _confirmSearchResult(),
-                  style: const TextStyle(
-                    color: TalColors.text,
-                    fontSize: 12,
-                    fontFamily: talFontFamily,
-                    fontFamilyFallback: talFontFamilyFallback,
-                  ),
-                  decoration: InputDecoration(
-                    isDense: true,
-                    hintText: filesOnly ? '查找文本文件名或路径' : '查找变量、文件名或源码内容',
-                    hintStyle: talMuted.copyWith(fontSize: 12),
-                    border: InputBorder.none,
-                    contentPadding: const EdgeInsets.symmetric(vertical: 8),
-                  ),
-                ),
-              ),
-              SizedBox(
-                width: math.min(106, width * .23),
-                child: Text(
-                  status,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.center,
-                  style: talMuted.copyWith(fontSize: 11),
-                ),
-              ),
-              for (final (name, label, icon, action) in [
-                (
-                  'previous',
-                  '上一个结果（↑）',
-                  Icons.keyboard_arrow_up,
-                  _searchResults.isEmpty ? null : () => _moveSearchResult(-1),
-                ),
-                (
-                  'next',
-                  '下一个结果（↓）',
-                  Icons.keyboard_arrow_down,
-                  _searchResults.isEmpty ? null : () => _moveSearchResult(1),
-                ),
-                ('close', '关闭搜索（Esc）', Icons.close, _closeSearch),
-              ])
-                SizedBox(
-                  width: buttonWidth,
-                  child: _DebugToolbarButton(
-                    key: ValueKey('source-search-$name'),
-                    tooltip: label,
-                    icon: icon,
-                    onPressed: action,
-                  ),
-                ),
-              const SizedBox(width: 4),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildSearchResults() => LayoutBuilder(
-    builder: (context, constraints) {
-      final labelWidth = math.min(220.0, constraints.maxWidth / 2);
-      return Container(
-        height: math.min(168.0, _searchResults.length * _searchResultHeight),
-        decoration: const BoxDecoration(
-          color: TalColors.surface,
-          border: Border.symmetric(
-            horizontal: BorderSide(color: TalColors.borderSoft),
-          ),
-        ),
-        child: ListView.builder(
-          key: const ValueKey('source-search-results'),
-          controller: _searchResultsController,
-          itemExtent: _searchResultHeight,
-          itemCount: _searchResults.length,
-          itemBuilder: (context, index) {
-            final result = _searchResults[index];
-            final selected = index == _activeSearchIndex;
-            final variableName = result.variableName;
-            final filename = _basename(result.path);
-            final label =
-                variableName ??
-                (result.isFile
-                    ? filename
-                    : '$filename:${result.line}:${result.column}');
-            return Tooltip(
-              message: result.isFile || variableName != null
-                  ? result.preview
-                  : result.path,
-              child: InkWell(
-                key: ValueKey('source-search-result-$index'),
-                onTap: () => _activateSearchResult(index),
-                child: ColoredBox(
-                  color: selected
-                      ? TalColors.selection.withValues(alpha: 0.55)
-                      : Colors.transparent,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    child: Row(
-                      children: [
-                        Icon(
-                          variableName != null
-                              ? Icons.data_object
-                              : result.isFile
-                              ? Icons.insert_drive_file_outlined
-                              : Icons.find_in_page_outlined,
-                          size: 14,
-                          color: TalColors.muted,
-                        ),
-                        const SizedBox(width: 6),
-                        SizedBox(
-                          width: labelWidth,
-                          child: Text(
-                            label,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: TalColors.text,
-                              fontSize: 11,
-                              fontFamily: talFontFamily,
-                              fontFamilyFallback: talFontFamilyFallback,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            result.preview,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: talMuted.copyWith(
-                              fontSize: 11,
-                              fontFamily: talFontFamily,
-                              fontFamilyFallback: talFontFamilyFallback,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            );
-          },
-        ),
-      );
-    },
-  );
-
   Widget _buildDebugControls() {
     final state = controller.debugState.executionState;
     final connected =
@@ -1521,7 +1320,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
           key: const ValueKey('source-navigation-back'),
           tooltip: '返回上一位置 (Alt+←)',
           icon: Icons.arrow_back,
-          onPressed: !_navigation.canGoBack
+          onPressed: !_editor.navigation.canGoBack
               ? null
               : () => _navigateHistory(back: true),
         ),
@@ -1529,7 +1328,7 @@ class _SourceDebugPanelState extends State<SourceDebugPanel> {
           key: const ValueKey('source-navigation-forward'),
           tooltip: '前往下一位置 (Alt+→)',
           icon: Icons.arrow_forward,
-          onPressed: !_navigation.canGoForward
+          onPressed: !_editor.navigation.canGoForward
               ? null
               : () => _navigateHistory(back: false),
         ),

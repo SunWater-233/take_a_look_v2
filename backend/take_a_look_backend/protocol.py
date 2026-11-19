@@ -40,6 +40,7 @@ class RpcMethod(StrEnum):
     EXPORT_CSV = "exportCsv"
     SHUTDOWN = "shutdown"
     SET_SOURCE_PROJECT = "setSourceProject"
+    RESTORE_PROJECT = "restoreProject"
     START_SOURCE_TASK = "startSourceTask"
     CANCEL_SOURCE_TASK = "cancelSourceTask"
     LIST_TARGETS = "listTargets"
@@ -54,6 +55,7 @@ class RpcMethod(StrEnum):
 class EventName(StrEnum):
     FREERTOS = "freeRtos"
     STATE = "state"
+    PROJECT_RESTORED = "projectRestored"
     SAMPLES = "samples"
     WATCH_VALUES = "watchValues"
     SAMPLES_CLEARED = "samplesCleared"

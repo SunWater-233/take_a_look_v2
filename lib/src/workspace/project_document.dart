@@ -5,6 +5,8 @@ import '../controller/controller.dart';
 import 'workspace_layout.dart';
 
 class ProjectDocument {
+  static const formatVersion = 3;
+
   const ProjectDocument({
     required this.settings,
     required this.layout,
@@ -19,7 +21,7 @@ class ProjectDocument {
 
   Map<String, dynamic> toJson() => {
     'format': 'take-a-look-project',
-    'version': 2,
+    'version': formatVersion,
     'settings': settings,
     'layout': layout.toJson(),
     'gridMode': gridMode,
@@ -27,7 +29,8 @@ class ProjectDocument {
   };
 
   factory ProjectDocument.fromJson(Map<String, dynamic> data) {
-    if (data['format'] != 'take-a-look-project' || data['version'] != 2) {
+    if (data['format'] != 'take-a-look-project' ||
+        data['version'] != formatVersion) {
       throw const FormatException('不支持的 Take A Look 项目格式。');
     }
     final settings = ValidatedProjectSettings(

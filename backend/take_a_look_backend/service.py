@@ -23,7 +23,7 @@ from take_a_look_backend.services.recording import RawRecording, export_recordin
 from take_a_look_backend.services.debug_info import DebugInfoIndex, load_debug_info_from_elf
 from take_a_look_backend.services.debug_session import DebugSession, SOURCE_STEP_ACTIONS
 from take_a_look_backend.services.symbols import load_symbols_from_elf
-from take_a_look_backend.services.source_project import default_config, project_snapshot
+from take_a_look_backend.services.source_project import default_config, normalize_config, project_snapshot
 from take_a_look_backend.services.firmware import FirmwareImage, FirmwareServiceMixin
 from take_a_look_backend.services.firmware_watch import FirmwareWatcher
 from take_a_look_backend.services.source_tasks import SourceTasks
@@ -199,7 +199,7 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
         # Catalog requests run on a worker while connection controls arrive on
         # stdin. Keep reconnect and configuration changes in one transaction.
         if method in {RpcMethod.CONNECT, RpcMethod.DISCONNECT, RpcMethod.TOGGLE_CONNECTION,
-                      RpcMethod.SET_CONFIG, RpcMethod.SELECT_TARGET}:
+                      RpcMethod.SET_CONFIG, RpcMethod.SELECT_TARGET, RpcMethod.RESTORE_PROJECT}:
             with self._connection_lock:
                 return self._handle_command(method, params)
         return self._handle_command(method, params)
@@ -273,9 +273,9 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
             self._emit(EventName.SOURCE_TASK, result)
             return {"sourceTask": result}
         if method is RpcMethod.SET_SOURCE_PROJECT:
-            if self._source_tasks.running:
-                raise ProtocolError("source_task_busy", "任务执行期间不能更换工程配置。")
             return self._set_source_project(params)
+        if method is RpcMethod.RESTORE_PROJECT:
+            return self._restore_project(params)
         if method is RpcMethod.START_SOURCE_TASK:
             kind = _required_string(params, "kind")
             if self._source_tasks.running:
@@ -680,6 +680,52 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
         self._wake.set()
         return {"state": state}
 
+    def _restore_project(self, params: Mapping[str, object]) -> dict[str, object]:
+        source = params.get("sourceProject")
+        connection = params.get("connection", {})
+        if not isinstance(source, dict) or not isinstance(connection, dict):
+            raise ProtocolError("invalid_request", "Invalid project settings.")
+        protocol = params.get("rttProtocol")
+        enabled, paused = params.get("rttEnabled"), params.get("samplingPaused")
+        if protocol not in ("normal", "plus") or not isinstance(enabled, bool) or not isinstance(paused, bool):
+            raise ProtocolError("invalid_request", "Invalid project acquisition settings.")
+        requested = _breakpoint_line_map(params.get("requestedBreakpoints", {}))
+        disabled = _breakpoint_line_map(params.get("disabledBreakpoints", {}))
+        with self._firmware_lock:
+            if self._source_tasks.running:
+                raise ProtocolError("source_task_busy", "任务执行期间不能打开项目。")
+            config = normalize_config(default_config(), source)
+            path = Path(str(config["firmwarePath"])) if config["firmwarePath"] else None
+            image = self._parse_firmware(path, params.get("loadId")) if path is not None and path.is_file() else None
+            symbols = {symbol.key: symbol for symbol in image.symbols} if image else {}
+            watches, _ = self._prepare_watches(params.get("watches"), symbols, {})
+            with self._lock:
+                if self._connection_status != "disconnected":
+                    connection = {key: connection[key] for key in ("sampleRateHz", "monitorRateHz", "rttSampleRateHz")
+                                  if key in connection}
+                requested_kind = connection.get("connectionKind", self._connection_kind)
+                if enabled and requested_kind == "gdb":
+                    raise ProtocolError("unsupported_operation", "独立 GDB 连接不提供 RTT。")
+                self._apply_config_locked(connection)
+                previous_fingerprint = self._firmware["fingerprint"]
+                needs_download = bool(image and (
+                    (self._firmware.get("requiresDownload") and path == Path(self._source_project["firmwarePath"]))
+                    or (self._connection_status == "connected" and previous_fingerprint
+                        and image.fingerprint != previous_fingerprint)
+                ))
+                if not needs_download:
+                    self._stop_rtt_locked()
+                self._commit_firmware(config, image, requires_download=needs_download, project_watches=watches,
+                                      breakpoint_settings=(requested, disabled, False))
+                self._monitor_schedule_revision += 1
+                self._rtt_enabled, self._rtt_protocol = enabled and not needs_download, protocol
+                self._sampling_paused = paused or needs_download
+                self._rotate_capture_locked()
+                state = self.state_snapshot()
+                self._emit(EventName.PROJECT_RESTORED, state)
+        self._wake.set()
+        return {"firmwareRevision": state["firmware"]["revision"]}
+
     def _reconnect_target_locked(self) -> None:
         if self._connection_status != "connected":
             return
@@ -692,58 +738,64 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
             self._reconcile_acquisition_clock_locked()
             self._emit(EventName.STATE, self._runtime_state_locked())
 
-    def _set_watches(self, params: Mapping[str, object]) -> dict[str, object]:
-        raw_watches = params.get("watches")
+    def _prepare_watches(self, raw_watches, symbols, previous):
         if not isinstance(raw_watches, list):
             raise ProtocolError("invalid_request", "watches must be an array.")
+        new_watches: dict[str, WatchedVariable] = {}
+        restored_missing: dict[str, SymbolInfo] = {}
+        for raw in raw_watches:
+            if not isinstance(raw, Mapping):
+                raise ProtocolError("invalid_request", "Each watch must be an object.")
+            key = _required_string(raw, "key")
+            if key in new_watches:
+                raise ProtocolError("invalid_request", "Duplicate watch key.", key)
+            symbol = symbols.get(key)
+            saved = raw.get("symbol")
+            if symbol is None and isinstance(saved, Mapping) and saved.get("missing") is True:
+                address, size = saved.get("address"), saved.get("size")
+                if not isinstance(address, int) or address < 0 or not isinstance(size, int) or size < 0:
+                    raise ProtocolError("invalid_request", "Invalid historical symbol metadata.")
+                symbol = SymbolInfo(_required_string(saved, "name"), address, size,
+                    _required_string(saved, "type"), _required_string(saved, "section"),
+                    _required_string(saved, "source"), encoding=_optional_string(saved, "encoding") or "",
+                    diagnostic="新固件中不存在或无法唯一匹配", missing=True)
+                if symbol.key != key:
+                    raise ProtocolError("invalid_request", "Historical symbol key does not match metadata.")
+                restored_missing[key] = symbol
+            if symbol is None:
+                raise ProtocolError("unknown_symbol", "Watch references an unknown symbol.", key)
+            old = previous.get(key)
+            read_mode = raw.get("readMode")
+            if read_mode is None:
+                read_mode = ("capture" if raw["sampling"] else "monitor") if "sampling" in raw else (old.mode if old else "capture")
+            if not isinstance(read_mode, str) or read_mode not in {"capture", "monitor", "manual"}:
+                raise ProtocolError("invalid_request", "readMode must be capture, monitor or manual.")
+            monitor_rate = raw.get("monitorRateHz", old.monitor_rate_hz if old else None)
+            monitor_enabled = raw.get("monitorEnabled", True)
+            if not isinstance(monitor_enabled, bool):
+                raise ProtocolError("invalid_request", "monitorEnabled must be a boolean.")
+            if monitor_rate is not None:
+                monitor_rate = _monitor_frequency(monitor_rate)
+            new_watches[key] = WatchedVariable(
+                symbol=symbol,
+                color=_optional_string(raw, "color") or (old.color if old else "#5EEAD4"),
+                plot_enabled=read_mode == "capture" and bool(raw.get("plotted", old.plot_enabled if old else False)),
+                sampling_enabled=read_mode == "capture",
+                value=old.value if old else "",
+                read_mode=str(read_mode),
+                monitor_rate_hz=monitor_rate,
+                monitor_enabled=monitor_enabled,
+                updated_at_ms=old.updated_at_ms if old else None,
+                next_monitor_at=(old.next_monitor_at if old and old.mode == read_mode
+                                 and (old.monitor_enabled or not monitor_enabled)
+                                 and old.monitor_rate_hz == monitor_rate else 0.0),
+            )
+        return new_watches, restored_missing
+
+    def _set_watches(self, params: Mapping[str, object]) -> dict[str, object]:
         with self._lock:
-            new_watches: dict[str, WatchedVariable] = {}
-            restored_missing: dict[str, SymbolInfo] = {}
-            for raw in raw_watches:
-                if not isinstance(raw, Mapping):
-                    raise ProtocolError("invalid_request", "Each watch must be an object.")
-                key = _required_string(raw, "key")
-                symbol = self._symbols.get(key)
-                saved = raw.get("symbol")
-                if symbol is None and isinstance(saved, Mapping) and saved.get("missing") is True:
-                    address, size = saved.get("address"), saved.get("size")
-                    if not isinstance(address, int) or address < 0 or not isinstance(size, int) or size < 0:
-                        raise ProtocolError("invalid_request", "Invalid historical symbol metadata.")
-                    symbol = SymbolInfo(_required_string(saved, "name"), address, size,
-                        _required_string(saved, "type"), _required_string(saved, "section"),
-                        _required_string(saved, "source"), encoding=_optional_string(saved, "encoding") or "",
-                        diagnostic="新固件中不存在或无法唯一匹配", missing=True)
-                    if symbol.key != key:
-                        raise ProtocolError("invalid_request", "Historical symbol key does not match metadata.")
-                    restored_missing[key] = symbol
-                if symbol is None:
-                    raise ProtocolError("unknown_symbol", "Watch references an unknown symbol.", key)
-                old = self._watches.get(key)
-                read_mode = raw.get("readMode")
-                if read_mode is None:
-                    read_mode = ("capture" if raw["sampling"] else "monitor") if "sampling" in raw else (old.mode if old else "capture")
-                if not isinstance(read_mode, str) or read_mode not in {"capture", "monitor", "manual"}:
-                    raise ProtocolError("invalid_request", "readMode must be capture, monitor or manual.")
-                monitor_rate = raw.get("monitorRateHz", old.monitor_rate_hz if old else None)
-                monitor_enabled = raw.get("monitorEnabled", True)
-                if not isinstance(monitor_enabled, bool):
-                    raise ProtocolError("invalid_request", "monitorEnabled must be a boolean.")
-                if monitor_rate is not None:
-                    monitor_rate = _monitor_frequency(monitor_rate)
-                new_watches[key] = WatchedVariable(
-                    symbol=symbol,
-                    color=_optional_string(raw, "color") or (old.color if old else "#5EEAD4"),
-                    plot_enabled=read_mode == "capture" and bool(raw.get("plotted", old.plot_enabled if old else False)),
-                    sampling_enabled=read_mode == "capture",
-                    value=old.value if old else "",
-                    read_mode=str(read_mode),
-                    monitor_rate_hz=monitor_rate,
-                    monitor_enabled=monitor_enabled,
-                    updated_at_ms=old.updated_at_ms if old else None,
-                    next_monitor_at=(old.next_monitor_at if old and old.mode == read_mode
-                                     and (old.monitor_enabled or not monitor_enabled)
-                                     and old.monitor_rate_hz == monitor_rate else 0.0),
-                )
+            new_watches, restored_missing = self._prepare_watches(
+                params.get("watches"), self._symbols, self._watches)
             # Seal the old acquisition policy without waiting for disk I/O.
             self._flush_pending_samples_locked(wait=False)
             membership_changed = set(new_watches) != set(self._watches)
@@ -936,15 +988,24 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
         with self._lock:
             self._stop_memory_sampling_locked()
             self._flush_pending_samples_locked()
-            self._pipeline.rotate()
-            self._last_sample_seconds = 0.0
-            self._reset_capture_timing_locked()
-            self._acquisition_clock.reset(running=self._acquisition_should_run())
+            self._rotate_capture_locked()
             state = {"elapsedSeconds": 0.0, "sampleCount": 0, "rawRecording": self._recording.status(),
+                     "samplingPaused": self._sampling_paused,
                      **self._sampling_clock_state()}
         self._emit(EventName.SAMPLES_CLEARED, {"preserveMissing": True} if preserve_missing else {})
         self._emit(EventName.STATE, state)
         return {"state": state}
+
+    def _rotate_capture_locked(self) -> None:
+        try:
+            self._pipeline.rotate()
+        except OSError as error:
+            self._sampling_paused = True
+            self._emit(EventName.ERROR, {"code": "recording_close_failed",
+                       "message": "旧采样记录关闭失败，已创建新会话并暂停采样。", "details": str(error)})
+        self._last_sample_seconds = 0.0
+        self._reset_capture_timing_locked()
+        self._acquisition_clock.reset(running=self._acquisition_should_run())
 
     def _reset_target(self, params: Mapping[str, object]) -> dict[str, object]:
         halt = params.get("halt", False)
@@ -1017,8 +1078,11 @@ class BackendService(SamplingServiceMixin, FreeRtosServiceMixin, FirmwareService
         rtt_rate = (_positive_number(params["rttSampleRateHz"], "rttSampleRateHz")
                     if "rttSampleRateHz" in params else None)
 
-        if name != self._target_name:
-            self._targets.select(name, legacy=True)
+        pack_id = params.get("targetPackId")
+        if "targetPackId" in params and not isinstance(pack_id, str):
+            raise ProtocolError("invalid_request", "targetPackId must be a string.")
+        if name != self._target_name or (pack_id is not None and pack_id != self._targets.selected.get("packId", "")):
+            self._targets.select(name, pack_id or "", legacy=pack_id is None)
             name = str(self._targets.selected["name"])
         self._connection_kind = kind
         self._remote_config = merged

@@ -77,7 +77,7 @@ extension _SourceNavigation on _SourceDebugPanelState {
   }
 
   void _navigateHistory({required bool back}) {
-    final location = _navigation.travel(
+    final location = _editor.navigation.travel(
       back: back,
       current: _captureNavigationLocation(),
     );
@@ -88,10 +88,10 @@ extension _SourceNavigation on _SourceDebugPanelState {
     _SourceNavigationLocation location,
   ) async {
     final loading = _loadSource(location.path, revealLine: location.line);
-    final generation = _loadGeneration;
+    final generation = _editor.loadGeneration;
     await loading;
     if (!mounted ||
-        generation != _loadGeneration ||
+        generation != _editor.loadGeneration ||
         _selectedPath == null ||
         !controller.sourcePathsMatch(_selectedPath!, location.path)) {
       return;
@@ -99,7 +99,7 @@ extension _SourceNavigation on _SourceDebugPanelState {
     _updateSourceSelection(location.selection);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted ||
-          generation != _loadGeneration ||
+          generation != _editor.loadGeneration ||
           !_horizontalController.hasClients) {
         return;
       }

@@ -32,6 +32,7 @@ class TelemetryChart extends StatefulWidget {
 class TelemetryChartState extends State<TelemetryChart> {
   final MenuController _desktopMenuController = MenuController();
   final ValueNotifier<Offset?> _hoverPosition = ValueNotifier(null);
+  final _paintFrame = TelemetryPaintFrame();
   final TelemetryHoverTracker _hoverTracker = TelemetryHoverTracker();
   final ValueNotifier<double?> _inspectionAnchorY = ValueNotifier(null);
   int? _dragPointer;
@@ -170,6 +171,7 @@ class TelemetryChartState extends State<TelemetryChart> {
                       paintInspection: false,
                       hoverPosition: _hoverPosition,
                       hoverTracker: _hoverTracker,
+                      frame: _paintFrame,
                       inspectionAnchorY: _inspectionAnchorY,
                     ),
                     isComplex: true,
@@ -184,6 +186,7 @@ class TelemetryChartState extends State<TelemetryChart> {
                                 controller,
                                 hoverPosition: _hoverPosition,
                                 hoverTracker: _hoverTracker,
+                                frame: _paintFrame,
                                 inspectionAnchorY: _inspectionAnchorY,
                               ),
                             ),

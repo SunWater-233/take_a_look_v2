@@ -10,7 +10,27 @@ import unittest
 from pathlib import Path
 
 from take_a_look_backend.stdio import StdioServer
-from take_a_look_backend.protocol import EventName
+from take_a_look_backend.models import SymbolInfo
+from take_a_look_backend.protocol import EventName, PROTOCOL_VERSION
+
+
+def test_source_root_rpc_only_publishes_configuration(tmp_path):
+    output = io.BytesIO()
+    server = StdioServer(io.StringIO(), output)
+    try:
+        symbols = [SymbolInfo(f"motor[{i}]", i * 4, 4, "float", ".bss") for i in range(1000)]
+        server._service._symbols = {symbol.key: symbol for symbol in symbols}
+        server._handle_line(json.dumps({
+            "v": PROTOCOL_VERSION, "id": 1, "method": "setSourceProject",
+            "params": {"sourceRoot": str(tmp_path)},
+        }))
+        server._output_worker.drain()
+        state, response = [json.loads(line) for line in output.getvalue().splitlines()]
+        assert set(state["params"]) == {"sourceProject"}
+        assert state["params"]["sourceProject"]["sourceRoot"] == str(tmp_path)
+        assert response["result"] == {}
+    finally:
+        server.close()
 
 
 class StdioIntegrationTests(unittest.TestCase):

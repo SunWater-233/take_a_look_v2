@@ -200,7 +200,8 @@ class _SourceProjectDialogState extends State<SourceProjectDialog> {
       await controller.saveSourceProject({
         'sourceRoot': _root.text.trim(),
         'buildCommand': _command.text.trim(),
-        'firmwarePath': _firmware.text.trim(),
+        if (_firmware.text.trim() != controller.firmwarePath)
+          'firmwarePath': _firmware.text.trim(),
         'shell': _shell,
         'afterDownload': _after,
         'extraPath': _extraPath.text.trim(),

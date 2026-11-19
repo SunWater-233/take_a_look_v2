@@ -25,7 +25,7 @@ extension TakeALookControllerSourceTools on TakeALookController {
       final closedTabs = _applySourceProjectConfig(values);
       _emitState([
         signals.sourceTools,
-        signals.debug,
+        signals.sourceProject,
         if (closedTabs) signals.sourceWorkspace,
       ]);
     }

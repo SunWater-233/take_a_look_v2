@@ -193,6 +193,7 @@ Future<JsonObject> executeControllerCommand(
     case ControllerCommand.redoWatchDeletion:
       controller.redoWatchDeletion();
     case ControllerCommand.configureProject:
+    case ControllerCommand.restoreProject:
       throw const FormatException(
         'Project configuration belongs to the main window.',
       );

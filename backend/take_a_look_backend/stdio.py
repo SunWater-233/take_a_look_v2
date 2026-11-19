@@ -86,6 +86,9 @@ class StdioServer:
                     raise ProtocolError("busy", "CSV 导出队列已满，请等待当前导出完成。")
                 return
             result = self._service.handle(method, params)
+            if method in {RpcMethod.SET_SOURCE_PROJECT, RpcMethod.LOAD_FIRMWARE}:
+                # The state event is already queued ahead of this response.
+                result = {key: value for key, value in result.items() if key != "state"}
             self._write(response(request_id, result))
         except ProtocolError as error:
             self._write(error_response(request_id if request_id is not None else error.request_id, error))
@@ -133,7 +136,7 @@ class StdioServer:
         if name is EventName.SAMPLES and isinstance(params, Mapping):
             self._write_samples(params)
             return
-        if name is EventName.STATE and isinstance(params, Mapping):
+        if name in {EventName.STATE, EventName.PROJECT_RESTORED} and isinstance(params, Mapping):
             self._update_schema_from_state(params)
         self._write(event(name, params))
 

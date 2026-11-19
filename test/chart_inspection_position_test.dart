@@ -102,10 +102,8 @@ void _expectAtBottomRight(WidgetTester tester) {
   expect(box.bottom, closeTo(plot.bottom - 8, 0.01));
 }
 
-void _expectAligned(WidgetTester tester, String key, {bool compact = true}) {
-  final row = find.byKey(
-    ValueKey(compact ? 'compact-watch-$key' : 'watch-row-$key'),
-  );
+void _expectAligned(WidgetTester tester, String key) {
+  final row = find.byKey(ValueKey('compact-watch-$key'));
   final chart = tester.renderObject<RenderBox>(_chart);
   final center = chart.globalToLocal(tester.getCenter(row)).dy;
   final plot = telemetryPlotRect(chart.size);
@@ -279,11 +277,11 @@ void main() {
   );
 
   _testWithController(
-    'full watch table supplies the selected row position too',
+    'wide watch panel supplies the selected row position too',
     (tester, controller) async {
       controller.setPlotHighlightedWatch('signal_3', selectWatchRow: true);
       await _pumpPanels(tester, controller, compact: false);
-      _expectAligned(tester, 'signal_3', compact: false);
+      _expectAligned(tester, 'signal_3');
     },
   );
 }

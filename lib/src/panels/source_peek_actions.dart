@@ -31,7 +31,7 @@ extension _SourcePeekActions on _SourceDebugPanelState {
       unawaited(_goToDefinition(selection));
       return;
     }
-    _references.cancel();
+    _editor.references.cancel();
     _updateSourceView(
       () => _sourcePeek = _SourcePeekSession(
         kind: SourcePeekKind.definitions,
@@ -62,7 +62,7 @@ extension _SourcePeekActions on _SourceDebugPanelState {
     _updateSourceView(() => _sourcePeek = session);
     _revealSourcePeek();
     unawaited(
-      _references.search(
+      _editor.references.search(
         selection.token,
         sourceRoot: controller.sourceProject.sourceRoot,
         currentPath: selection.path,
@@ -82,7 +82,7 @@ extension _SourcePeekActions on _SourceDebugPanelState {
 
   void _closeSourcePeek() {
     final session = _sourcePeek;
-    _references.cancel();
+    _editor.references.cancel();
     _updateSourceView(() => _sourcePeek = null);
     if (session != null) _scrollToLine(session.anchorLine, immediate: true);
     _restorePanelFocus();
@@ -132,8 +132,8 @@ extension _SourcePeekActions on _SourceDebugPanelState {
               searching: session.searching,
               truncated: session.truncated,
               unreadableFiles: session.unreadableFiles,
-              documents: _sourceDocuments,
-              highlighter: _highlighter,
+              documents: _editor.documents,
+              highlighter: _editor.highlighter,
               sourceRoot: controller.sourceProject.sourceRoot,
               onClose: _closeSourcePeek,
               onOpen: (location) =>
@@ -155,7 +155,7 @@ extension _SourcePeekActions on _SourceDebugPanelState {
     if (!widget.visible || widget.readOnlyPreview) return;
     final origin = _captureNavigationLocation();
     if (origin != null) {
-      _navigation.record(origin);
+      _editor.navigation.record(origin);
     }
     await _revealNavigationLocation((
       path: location.path,

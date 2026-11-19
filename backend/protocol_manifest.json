@@ -31,6 +31,7 @@
     "exportCsv",
     "shutdown",
     "setSourceProject",
+    "restoreProject",
     "startSourceTask",
     "cancelSourceTask",
     "configureFreeRtos",
@@ -39,6 +40,7 @@
   ],
   "events": [
     "state",
+    "projectRestored",
     "samples",
     "watchValues",
     "samplesCleared",

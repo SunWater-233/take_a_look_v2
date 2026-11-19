@@ -1,6 +1,7 @@
 enum BackendEventType {
   freeRtos,
   state,
+  projectRestored,
   samples,
   watchValues,
   samplesCleared,

@@ -74,14 +74,11 @@ Widget buildWorkspacePanelBody(
       defaultMonitor: workbench,
       onShowSource: onShowSource,
     ),
-    WorkspacePanelId.watch =>
-      workbench
-          ? CompactWatchPanel(
-              controller: controller,
-              onShowSymbols: onShowSymbols,
-              visible: visible,
-            )
-          : WatchPanel(controller: controller, visible: visible),
+    WorkspacePanelId.watch => CompactWatchPanel(
+      controller: controller,
+      onShowSymbols: onShowSymbols,
+      visible: visible,
+    ),
     WorkspacePanelId.connection => ConnectionPanel(controller: controller),
     WorkspacePanelId.plot => PlotPanel(controller: controller),
     WorkspacePanelId.analysis => LayoutBuilder(

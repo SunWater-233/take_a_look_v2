@@ -39,8 +39,7 @@ class SourceProjectConfig {
   bool get canBuild =>
       platform != 'web' && sourceRoot.isNotEmpty && buildCommand.isNotEmpty;
 
-  Map<String, dynamic> toJson() => {
-    'platform': platform,
+  Map<String, dynamic> settings() => {
     'sourceRoot': sourceRoot,
     'buildCommand': buildCommand,
     'firmwarePath': firmwarePath,
@@ -48,6 +47,11 @@ class SourceProjectConfig {
     'afterDownload': afterDownload,
     'extraPath': extraPath,
     'outputEncoding': outputEncoding,
+  };
+
+  Map<String, dynamic> toJson() => {
+    ...settings(),
+    'platform': platform,
     'shells': shells,
   };
 

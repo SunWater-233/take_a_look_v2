@@ -10,87 +10,81 @@ enum SnapshotDomain {
   logs,
   analysis,
   debug,
+  debugIndex,
   sourceWorkspace,
+  sourceProject,
   sourceTools,
 }
 
-/// A field's wire name, revision ownership, and project inclusion live together.
+/// A field's wire name, revision ownership describes the window synchronization contract.
 enum SnapshotField {
   freeRtos({SnapshotDomain.freeRtos}),
-  freeRtosSettings({SnapshotDomain.freeRtos}, persistInProject: true),
+  freeRtosSettings({SnapshotDomain.freeRtos}),
   connectionStatus({SnapshotDomain.connection}),
-  probeType({SnapshotDomain.connection}, persistInProject: true),
-  targetName({SnapshotDomain.connection}, persistInProject: true),
-  targetPackId({SnapshotDomain.connection}, persistInProject: true),
+  probeType({SnapshotDomain.connection}),
+  targetName({SnapshotDomain.connection}),
+  targetPackId({SnapshotDomain.connection}),
   targetPartNumber({SnapshotDomain.connection}),
   targetPackLabel({SnapshotDomain.connection}),
   targetPackMissing({SnapshotDomain.connection}),
   targetCatalogRevision({SnapshotDomain.targetCatalog}),
-  swdClock({SnapshotDomain.connection}, persistInProject: true),
-  serialNumber({SnapshotDomain.connection}, persistInProject: true),
-  connectionKind({SnapshotDomain.connection}, persistInProject: true),
+  swdClock({SnapshotDomain.connection}),
+  serialNumber({SnapshotDomain.connection}),
+  connectionKind({SnapshotDomain.connection}),
   connectionCapabilities({SnapshotDomain.connection}),
   gatewayProtocolVersion({SnapshotDomain.connection}),
-  remoteConfig({SnapshotDomain.connection}, persistInProject: true),
+  remoteConfig({SnapshotDomain.connection}),
   firmware({SnapshotDomain.symbols, SnapshotDomain.debug}),
   symbolLoad({}),
-  sampleRateHz({SnapshotDomain.sampling}, persistInProject: true),
-  monitorRateHz({SnapshotDomain.sampling}, persistInProject: true),
-  rttSampleRateHz({SnapshotDomain.sampling}, persistInProject: true),
-  displayRefreshMode({SnapshotDomain.plot}, persistInProject: true),
+  sampleRateHz({SnapshotDomain.sampling}),
+  monitorRateHz({SnapshotDomain.sampling}),
+  rttSampleRateHz({SnapshotDomain.sampling}),
+  displayRefreshMode({SnapshotDomain.plot}),
   samplingElapsedSeconds({}, alwaysRevised: true),
   samplingClockRunning({SnapshotDomain.sampling}),
   samplingEpoch({SnapshotDomain.sampling}),
   preserveMissingHistory({SnapshotDomain.sampling}),
   elapsedSeconds({}, alwaysRevised: true),
-  samplingPaused({SnapshotDomain.sampling}, persistInProject: true),
+  samplingPaused({SnapshotDomain.sampling}),
   rawRecording({SnapshotDomain.sampling}),
-  plottingPaused({SnapshotDomain.plot}, persistInProject: true),
+  plottingPaused({SnapshotDomain.plot}),
   plotVisibilityBeforeIsolation({SnapshotDomain.watches}),
   plotHighlightedWatchKey({SnapshotDomain.plot}),
   plotWatchSelectionRevision({SnapshotDomain.plot}),
-  rttEnabled({SnapshotDomain.sampling}, persistInProject: true),
-  rttProtocol({SnapshotDomain.sampling}, persistInProject: true),
-  followLatest({SnapshotDomain.plot}, persistInProject: true),
-  plotVisibleWindowSeconds({SnapshotDomain.plot}, persistInProject: true),
-  plotRetentionSeconds({SnapshotDomain.plot}, persistInProject: true),
-  plotAutoY({SnapshotDomain.plot}, persistInProject: true),
-  plotYMin({SnapshotDomain.plot}, persistInProject: true),
-  plotYMax({SnapshotDomain.plot}, persistInProject: true),
-  plotShowGrid({SnapshotDomain.plot}, persistInProject: true),
-  plotShowLegend({SnapshotDomain.plot}, persistInProject: true),
-  plotMouseXEnabled({SnapshotDomain.plot}, persistInProject: true),
-  plotMouseYEnabled({SnapshotDomain.plot}, persistInProject: true),
-  plotInvertX({SnapshotDomain.plot}, persistInProject: true),
-  plotInvertY({SnapshotDomain.plot}, persistInProject: true),
+  rttEnabled({SnapshotDomain.sampling}),
+  rttProtocol({SnapshotDomain.sampling}),
+  followLatest({SnapshotDomain.plot}),
+  plotVisibleWindowSeconds({SnapshotDomain.plot}),
+  plotRetentionSeconds({SnapshotDomain.plot}),
+  plotAutoY({SnapshotDomain.plot}),
+  plotYMin({SnapshotDomain.plot}),
+  plotYMax({SnapshotDomain.plot}),
+  plotShowGrid({SnapshotDomain.plot}),
+  plotShowLegend({SnapshotDomain.plot}),
+  plotMouseXEnabled({SnapshotDomain.plot}),
+  plotMouseYEnabled({SnapshotDomain.plot}),
+  plotInvertX({SnapshotDomain.plot}),
+  plotInvertY({SnapshotDomain.plot}),
   plotWindowEndSeconds({SnapshotDomain.plot}),
   plotTimeOverscroll({SnapshotDomain.plot}),
-  uiScale({}, persistInProject: true, alwaysRevised: true),
+  uiScale({}, alwaysRevised: true),
   lastBackendError({SnapshotDomain.connection}),
-  selectedSymbols({SnapshotDomain.symbols}, persistInProject: true),
-  symbols({}, persistInProject: true),
-  watches({SnapshotDomain.watches}, persistInProject: true),
+  selectedSymbols({SnapshotDomain.symbols}),
+  symbols({}),
+  watches({SnapshotDomain.watches}),
   canUndoWatchDeletion({SnapshotDomain.watches}),
   canRedoWatchDeletion({SnapshotDomain.watches}),
   logs({SnapshotDomain.logs}),
-  analysisSession({SnapshotDomain.analysis}, persistInProject: true),
-  sourceWorkspace({SnapshotDomain.sourceWorkspace}, persistInProject: true),
-  sourceProject({
-    SnapshotDomain.sourceTools,
-    SnapshotDomain.symbols,
-    SnapshotDomain.debug,
-  }, persistInProject: true),
+  analysisSession({SnapshotDomain.analysis}),
+  sourceWorkspace({SnapshotDomain.sourceWorkspace}),
+  sourceProject({SnapshotDomain.sourceProject}),
   sourceTask({SnapshotDomain.sourceTools}),
+  debugIndex({SnapshotDomain.debugIndex}),
   debug({SnapshotDomain.debug});
 
-  const SnapshotField(
-    this.revisedBy, {
-    this.persistInProject = false,
-    this.alwaysRevised = false,
-  });
+  const SnapshotField(this.revisedBy, {this.alwaysRevised = false});
 
   final Set<SnapshotDomain> revisedBy;
-  final bool persistInProject;
   final bool alwaysRevised;
 
   static final Map<String, SnapshotField> byWireName = Map.unmodifiable({
@@ -101,10 +95,6 @@ enum SnapshotField {
 class ControllerSnapshotSchema {
   static final Set<String> fields = Set.unmodifiable({
     for (final field in SnapshotField.values) field.name,
-  });
-  static final Set<String> projectFields = Set.unmodifiable({
-    for (final field in SnapshotField.values)
-      if (field.persistInProject) field.name,
   });
 
   static bool containsDomain(

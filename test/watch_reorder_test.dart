@@ -39,9 +39,7 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('long pressing a watch row allows it to be dragged into order', (
-    tester,
-  ) async {
+  testWidgets('dragging a watch row changes its section order', (tester) async {
     final controller = controllerWithWatches();
     await tester.pumpWidget(
       MaterialApp(
@@ -57,30 +55,31 @@ void main() {
     );
 
     final firstRow = find.byKey(
-      ValueKey<String>('watch-reorder-${controller.watches.first.symbol.key}'),
+      ValueKey<String>(
+        'watch-reorder-members-${controller.watches.first.symbol.key}',
+      ),
+    );
+    final secondRow = find.byKey(
+      ValueKey<String>(
+        'watch-reorder-members-${controller.watches[1].symbol.key}',
+      ),
     );
     final gesture = await tester.startGesture(
-      tester.getTopLeft(firstRow) + const Offset(450, 20),
-      kind: PointerDeviceKind.touch,
+      tester.getCenter(firstRow),
+      kind: PointerDeviceKind.mouse,
     );
-    await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
-    final dragProxy = find.byKey(const ValueKey('watch-drag-proxy'));
-    expect(dragProxy, findsOneWidget);
-    final proxyClip = tester.widget<ClipRect>(dragProxy);
-    final proxySize = tester.getSize(dragProxy);
-    expect(
-      proxyClip.clipper!.getClip(proxySize).width,
-      lessThan(proxySize.width),
-    );
-    await gesture.moveBy(const Offset(0, 120));
-    await tester.pump(const Duration(milliseconds: 300));
+    await gesture.moveBy(const Offset(0, 12));
+    await tester.pump();
+    final target = tester.getBottomLeft(secondRow) + const Offset(40, -2);
+    await gesture.moveTo(target);
+    await tester.pump();
     await gesture.up();
     await tester.pumpAndSettle();
 
-    expect(controller.watches.map((watch) => watch.symbol.name), [
-      'id_ref',
-      'iq_ref',
-      'speed_rpm',
+    expect(controller.compactWatchSectionOrders['members'], [
+      controller.watches[1].symbol.key,
+      controller.watches[0].symbol.key,
+      controller.watches[2].symbol.key,
     ]);
 
     controller.dispose();

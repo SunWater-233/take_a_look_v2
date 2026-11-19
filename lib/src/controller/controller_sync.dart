@@ -6,7 +6,8 @@ extension TakeALookControllerSync on TakeALookController {
     _resetPlotRefreshSchedule();
     _reconcileSamplingClock();
     if (!active && releaseHistory && _isDetachedRemote) {
-      plotHistory.clear();
+      _plotHistory.clear();
+      _plotHistoryCache.clear();
       for (final watch in _watches) {
         watch.samples.clear();
       }
@@ -22,25 +23,27 @@ extension TakeALookControllerSync on TakeALookController {
   void _touchSnapshotFields(Iterable<String> fields) =>
       _snapshotRevisions.touch(fields);
 
-  void _recordStateChanges(Set<ControllerSignal> changes) =>
-      _snapshotRevisions.record({
-        if (changes.contains(signals.freeRtos)) SnapshotDomain.freeRtos,
-        if (changes.contains(signals.connection)) SnapshotDomain.connection,
-        if (changes.contains(signals.sampling)) SnapshotDomain.sampling,
-        if (changes.contains(signals.targetCatalog))
-          SnapshotDomain.targetCatalog,
-        if (changes.contains(signals.symbols)) SnapshotDomain.symbols,
-        if (changes.contains(signals.watches)) SnapshotDomain.watches,
-        if (changes.contains(signals.plot) ||
-            changes.contains(signals.plotControls))
-          SnapshotDomain.plot,
-        if (changes.contains(signals.logs)) SnapshotDomain.logs,
-        if (changes.contains(signals.analysis)) SnapshotDomain.analysis,
-        if (changes.contains(signals.debug)) SnapshotDomain.debug,
-        if (changes.contains(signals.sourceWorkspace))
-          SnapshotDomain.sourceWorkspace,
-        if (changes.contains(signals.sourceTools)) SnapshotDomain.sourceTools,
-      });
+  void _recordStateChanges(
+    Set<ControllerSignal> changes,
+  ) => _snapshotRevisions.record({
+    if (changes.contains(signals.freeRtos)) SnapshotDomain.freeRtos,
+    if (changes.contains(signals.connection)) SnapshotDomain.connection,
+    if (changes.contains(signals.sampling)) SnapshotDomain.sampling,
+    if (changes.contains(signals.targetCatalog)) SnapshotDomain.targetCatalog,
+    if (changes.contains(signals.symbols)) SnapshotDomain.symbols,
+    if (changes.contains(signals.watches)) SnapshotDomain.watches,
+    if (changes.contains(signals.plot) ||
+        changes.contains(signals.plotControls))
+      SnapshotDomain.plot,
+    if (changes.contains(signals.logs)) SnapshotDomain.logs,
+    if (changes.contains(signals.analysis)) SnapshotDomain.analysis,
+    if (changes.contains(signals.debug)) SnapshotDomain.debug,
+    if (changes.contains(signals.debugIndex)) SnapshotDomain.debugIndex,
+    if (changes.contains(signals.sourceWorkspace))
+      SnapshotDomain.sourceWorkspace,
+    if (changes.contains(signals.sourceProject)) SnapshotDomain.sourceProject,
+    if (changes.contains(signals.sourceTools)) SnapshotDomain.sourceTools,
+  });
 
   JsonObject stateDeltaSnapshot(
     Map<String, int> acknowledged, {

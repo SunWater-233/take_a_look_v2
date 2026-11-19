@@ -69,6 +69,7 @@ void main() {
         'sourceRoot': directory.path,
         'firmwarePath': './build/../motor.axf',
       });
+      await detached.loadFirmware(image.path);
       expect(controller.firmwarePath, image.path);
       expect(detached.firmwarePath, image.path);
       expect(controller.state.firmware['fingerprint'], isNot(fingerprint));
@@ -100,7 +101,7 @@ void main() {
       final projectFile = File('${directory.path}/work.talproj');
       await document.write(projectFile);
       final saved = await ProjectDocument.read(projectFile);
-      expect(saved.toJson()['version'], 2);
+      expect(saved.toJson()['version'], ProjectDocument.formatVersion);
       expect(
         () => ProjectDocument.fromJson({...saved.toJson(), 'version': 1}),
         throwsFormatException,

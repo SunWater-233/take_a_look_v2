@@ -120,7 +120,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
     };
   }
 
-  void _applySnapshot(JsonObject data) {
+  void _applySnapshot(JsonObject data, {VoidCallback? beforeNotify}) {
     final previouslyAvailable = {
       for (final watch in _watches)
         if (!watch.symbol.missing) watch.symbol.identity,
@@ -459,9 +459,14 @@ extension TakeALookControllerSnapshot on TakeALookController {
         Map<String, dynamic>.from(data['analysisSession']! as Map),
       );
     }
+    final previousDebugIndexRevision = _debugIndexRevision;
+    if (data['debugIndex'] case final Map index) {
+      _applyDebugIndex(Map<String, dynamic>.from(index));
+    }
     if (hasDebugState && data['debug'] is Map) {
       final debug = Map<String, dynamic>.from(data['debug'] as Map);
       if (data.containsKey('symbols') &&
+          !data.containsKey('debugIndex') &&
           !debug.containsKey('sourceDefinitions')) {
         // Full legacy-backend snapshots cannot retain a previous ELF's index.
         debug['sourceDefinitions'] = null;
@@ -521,6 +526,7 @@ extension TakeALookControllerSnapshot on TakeALookController {
     }
     final deletedWatchesInvalidated = hadDeletedWatches && symbolsChanged;
     if (deletedWatchesInvalidated && !_isDetachedRemote) _syncWatchesBackend();
+    beforeNotify?.call();
     _emitState([
       if (data.containsKey('freeRtos') || data.containsKey('freeRtosSettings'))
         signals.freeRtos,
@@ -539,7 +545,8 @@ extension TakeALookControllerSnapshot on TakeALookController {
       if (data.containsKey('logs') || newlyMissing.isNotEmpty) signals.logs,
       if (hasAnalysisState) signals.analysis,
       if (hasDebugState) signals.debug,
-      if (data['sourceProject'] is Map && !hasDebugState) signals.debug,
+      if (previousDebugIndexRevision != _debugIndexRevision) signals.debugIndex,
+      if (data['sourceProject'] is Map) signals.sourceProject,
       if (hasSourceTools) signals.sourceTools,
       if (hasSourceWorkspace || closedSourceTabs) signals.sourceWorkspace,
     ], sync: false);

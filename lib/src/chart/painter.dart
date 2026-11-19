@@ -9,11 +9,55 @@ import 'cartesian_renderer.dart';
 import 'hover.dart';
 import 'viewport.dart';
 
+class TelemetryPaintFrame {
+  TakeALookController? _controller;
+  Size? _size;
+  ({CartesianPlotViewport viewport, List<TelemetryPlotSeries> series})? _frame;
+
+  ({CartesianPlotViewport viewport, List<TelemetryPlotSeries> series}) read(
+    TakeALookController controller,
+    Size size, {
+    bool refresh = false,
+  }) {
+    final frame = _frame;
+    if (!refresh &&
+        identical(_controller, controller) &&
+        _size == size &&
+        frame != null) {
+      return frame;
+    }
+    _controller = controller;
+    _size = size;
+    return _frame = _preparePaintFrame(controller, size);
+  }
+}
+
+({CartesianPlotViewport viewport, List<TelemetryPlotSeries> series})
+_preparePaintFrame(TakeALookController controller, Size size) {
+  final telemetry = telemetryViewport(controller, size);
+  final viewport = CartesianPlotViewport(
+    plot: telemetry.plot,
+    xMin: telemetry.xMin,
+    xMax: telemetry.xMax,
+    yMin: telemetry.yMin,
+    yMax: telemetry.yMax,
+    invertX: controller.plotInvertX,
+    invertY: controller.plotInvertY,
+  );
+  return (
+    viewport: viewport,
+    series: viewport.plot.width <= 1 || viewport.plot.height <= 1
+        ? const []
+        : telemetryPlotSeries(controller, viewport),
+  );
+}
+
 class TelemetryPainter extends CustomPainter {
   TelemetryPainter(
     this.controller, {
     this.hoverPosition,
     this.inspectionAnchorY,
+    this.frame,
     this.paintInspection = true,
     TelemetryHoverTracker? hoverTracker,
   }) : hoverTracker = hoverTracker ?? TelemetryHoverTracker(),
@@ -26,6 +70,7 @@ class TelemetryPainter extends CustomPainter {
        );
 
   final TakeALookController controller;
+  final TelemetryPaintFrame? frame;
   final ValueListenable<Offset?>? hoverPosition;
   final ValueListenable<double?>? inspectionAnchorY;
   final bool paintInspection;
@@ -33,16 +78,9 @@ class TelemetryPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final telemetry = telemetryViewport(controller, size);
-    final viewport = CartesianPlotViewport(
-      plot: telemetry.plot,
-      xMin: telemetry.xMin,
-      xMax: telemetry.xMax,
-      yMin: telemetry.yMin,
-      yMax: telemetry.yMax,
-      invertX: controller.plotInvertX,
-      invertY: controller.plotInvertY,
-    );
+    final (viewport: viewport, series: plotted) =
+        frame?.read(controller, size, refresh: true) ??
+        _preparePaintFrame(controller, size);
     final renderer = CartesianChartRenderer(
       canvas: canvas,
       size: size,
@@ -52,7 +90,6 @@ class TelemetryPainter extends CustomPainter {
     if (viewport.plot.width <= 1 || viewport.plot.height <= 1) return;
     renderer.drawGrid(visible: controller.plotShowGrid);
 
-    final plotted = telemetryPlotSeries(controller, viewport);
     final pointer = hoverPosition?.value;
     final hovered = !paintInspection
         ? null
@@ -229,6 +266,7 @@ class TelemetryInspectionPainter extends CustomPainter {
     this.controller, {
     required this.hoverPosition,
     this.inspectionAnchorY,
+    this.frame,
     TelemetryHoverTracker? hoverTracker,
   }) : hoverTracker = hoverTracker ?? TelemetryHoverTracker(),
        super(
@@ -240,25 +278,17 @@ class TelemetryInspectionPainter extends CustomPainter {
        );
 
   final TakeALookController controller;
+  final TelemetryPaintFrame? frame;
   final ValueListenable<Offset?> hoverPosition;
   final ValueListenable<double?>? inspectionAnchorY;
   final TelemetryHoverTracker hoverTracker;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final telemetry = telemetryViewport(controller, size);
-    final viewport = CartesianPlotViewport(
-      plot: telemetry.plot,
-      xMin: telemetry.xMin,
-      xMax: telemetry.xMax,
-      yMin: telemetry.yMin,
-      yMax: telemetry.yMax,
-      invertX: controller.plotInvertX,
-      invertY: controller.plotInvertY,
-    );
+    final (viewport: viewport, series: plotted) =
+        frame?.read(controller, size) ?? _preparePaintFrame(controller, size);
     if (viewport.plot.width <= 1 || viewport.plot.height <= 1) return;
     final pointer = hoverPosition.value;
-    final plotted = telemetryPlotSeries(controller, viewport);
     final hit = inspectTelemetrySeries(
       plotted,
       viewport,

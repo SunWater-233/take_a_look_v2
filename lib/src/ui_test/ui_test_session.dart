@@ -268,7 +268,9 @@ void motor_control_tick(void)
         );
         controller.addLog('模拟符号加载完成。');
       case BackendMethod.setSourceProject:
+        final previousPath = controller.firmwarePath;
         controller.applySnapshot({'sourceProject': call!.params});
+        if (previousPath == controller.firmwarePath) return;
         if (controller.firmwarePath.isNotEmpty) {
           _loadFixture(firmwarePath: controller.firmwarePath);
         } else {
@@ -278,6 +280,12 @@ void motor_control_tick(void)
             'watches': [],
           });
         }
+      case BackendMethod.restoreProject:
+        if (!_rotateRecording()) {
+          throw const BackendException('recording_failed', '无法切换模拟采样记录。');
+        }
+        _sampleRemainder = 0;
+        _writtenValues.clear();
       case BackendMethod.setConfig:
         controller.applySnapshot(call!.params);
       case BackendMethod.setSamplingPaused:

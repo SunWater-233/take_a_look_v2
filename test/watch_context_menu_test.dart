@@ -7,6 +7,11 @@ import 'package:take_a_look_v2/src/workspace/panel_types.dart';
 import 'package:take_a_look_v2/src/panels/panels.dart';
 import 'package:take_a_look_v2/src/theme/theme.dart';
 
+Finder member(String label) => find.descendant(
+  of: find.byKey(const ValueKey('compact-watch-list')),
+  matching: find.text(label),
+);
+
 void main() {
   Future<TakeALookController> pumpWatchTable(WidgetTester tester) async {
     final controller = TakeALookController()..loadDemoSymbols();
@@ -33,51 +38,7 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('watch header supports Shift selection and context visibility', (
-    tester,
-  ) async {
-    final controller = await pumpWatchTable(tester);
-
-    await tester.tap(find.text('类型'));
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
-    await tester.tap(find.text('当前值'));
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
-    await rightClick(tester, find.text('当前值'));
-
-    expect(find.text('隐藏所选列（2）'), findsOneWidget);
-    expect(find.text('显示全列'), findsOneWidget);
-    final desktopItem = tester.widget<PopupMenuItem<String>>(
-      find
-          .ancestor(
-            of: find.text('显示全列'),
-            matching: find.byType(PopupMenuItem<String>),
-          )
-          .first,
-    );
-    expect(desktopItem.height, 32);
-    final popupShape = Theme.of(
-      tester.element(find.text('显示全列')),
-    ).popupMenuTheme.shape;
-    expect(
-      (popupShape! as RoundedRectangleBorder).borderRadius,
-      BorderRadius.circular(8),
-    );
-    await tester.tap(find.text('隐藏所选列（2）'));
-    await tester.pumpAndSettle();
-    expect(find.text('类型'), findsNothing);
-    expect(find.text('当前值'), findsNothing);
-
-    await rightClick(tester, find.text('变量'));
-    await tester.tap(find.text('显示全列'));
-    await tester.pumpAndSettle();
-    expect(find.text('类型'), findsOneWidget);
-    expect(find.text('当前值'), findsOneWidget);
-
-    controller.dispose();
-    await tester.pumpWidget(const SizedBox.shrink());
-  });
-
-  testWidgets('watch table Delete and Ctrl+Z restore row selection and data', (
+  testWidgets('watch panel Delete and Ctrl+Z restore row selection and data', (
     tester,
   ) async {
     final controller = await pumpWatchTable(tester);
@@ -90,93 +51,48 @@ void main() {
         },
       ],
     });
-    await tester.tap(find.text('iq_ref'));
+    await tester.tap(member('iq_ref'));
     await tester.sendKeyEvent(LogicalKeyboardKey.delete);
     await tester.pump();
-    expect(find.text('iq_ref'), findsNothing);
+    expect(member('iq_ref'), findsNothing);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pump();
-    expect(find.text('iq_ref'), findsOneWidget);
+    expect(member('iq_ref'), findsOneWidget);
     expect(controller.watches.first.samples.single.dy, 12);
     await tester.sendKeyEvent(LogicalKeyboardKey.delete);
     await tester.pump();
-    expect(find.text('iq_ref'), findsNothing);
+    expect(member('iq_ref'), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
     controller.dispose();
-  });
-
-  testWidgets('watch header menu uses larger touch targets on long press', (
-    tester,
-  ) async {
-    final controller = await pumpWatchTable(tester);
-
-    Future<void> longPress(Finder finder) async {
-      final gesture = await tester.startGesture(
-        tester.getCenter(finder),
-        kind: PointerDeviceKind.touch,
-      );
-      await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
-      await gesture.up();
-      await tester.pumpAndSettle();
-    }
-
-    await longPress(find.text('类型'));
-    expect(find.text('隐藏该列'), findsOneWidget);
-    final headerItem = tester.widget<PopupMenuItem<String>>(
-      find
-          .ancestor(
-            of: find.text('隐藏该列'),
-            matching: find.byType(PopupMenuItem<String>),
-          )
-          .first,
-    );
-    expect(headerItem.height, 48);
-    controller.dispose();
-    await tester.pumpWidget(const SizedBox.shrink());
   });
 
   testWidgets('watch row menus honor Ctrl Shift and Ctrl+A selections', (
     tester,
   ) async {
-    String? copiedText;
-    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-      SystemChannels.platform,
-      (call) async {
-        if (call.method == 'Clipboard.setData') {
-          copiedText = (call.arguments as Map)['text'] as String?;
-        }
-        return null;
-      },
-    );
-    addTearDown(
-      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-        SystemChannels.platform,
-        null,
-      ),
-    );
     final controller = await pumpWatchTable(tester);
 
-    await tester.tap(find.text('iq_ref'));
+    final first = member('iq_ref');
+    final third = member('speed_rpm');
+    await tester.tap(first);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
-    await tester.tap(find.text('speed_rpm'));
+    await tester.tap(third);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
-    await rightClick(tester, find.text('speed_rpm'));
-    expect(find.text('复制所选命令名（3）'), findsOneWidget);
-    await tester.tap(find.text('复制所选命令名（3）'));
+    await rightClick(tester, third);
+    expect(find.text('删除所选变量（3）'), findsOneWidget);
+    await tester.tapAt(const Offset(1, 1));
     await tester.pumpAndSettle();
-    expect(copiedText, 'iq_ref\nid_ref\nspeed_rpm');
 
-    await tester.tap(find.text('iq_ref'));
+    await tester.tap(first);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-    await tester.tap(find.text('speed_rpm'));
+    await tester.tap(third);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
-    await rightClick(tester, find.text('iq_ref'));
-    expect(find.text('仅显示所选变量（2）'), findsOneWidget);
-    await tester.tap(find.text('仅显示所选变量（2）'));
+    await rightClick(tester, first);
+    expect(find.text('删除所选变量（2）'), findsOneWidget);
+    await tester.tap(find.text('孤立'));
     await tester.pumpAndSettle();
-    expect(controller.watches.map((watch) => watch.plotted), <bool>[
+    expect(controller.watches.map((watch) => watch.plotted), [
       true,
       false,
       true,
@@ -185,19 +101,9 @@ void main() {
     await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
-    await rightClick(tester, find.text('id_ref'));
-    expect(find.text('移除所选变量（3）'), findsOneWidget);
-    await tester.tap(find.text('全部隐藏'));
-    await tester.pumpAndSettle();
-    expect(controller.watches.every((watch) => !watch.plotted), isTrue);
-
-    await rightClick(tester, find.text('id_ref'));
-    await tester.tap(find.text('反转所选变量图表显示状态'));
-    await tester.pumpAndSettle();
-    expect(controller.watches.every((watch) => watch.plotted), isTrue);
-
-    await rightClick(tester, find.text('id_ref'));
-    await tester.tap(find.text('为所选变量设置曲线颜色（3）'));
+    await rightClick(tester, member('id_ref'));
+    expect(find.text('删除所选变量（3）'), findsOneWidget);
+    await tester.tap(find.text('颜色调整'));
     await tester.pumpAndSettle();
     await tester.tap(
       find.byKey(
@@ -210,40 +116,6 @@ void main() {
       controller.watches.every((watch) => watch.color == TalChartColors.blue),
       isTrue,
     );
-
-    await tester.tap(find.text('id_ref'));
-    await rightClick(
-      tester,
-      find.byKey(
-        ValueKey('watch-visibility-${controller.watches[1].symbol.key}'),
-      ),
-    );
-    expect(find.text('仅显示该栏'), findsOneWidget);
-    await tester.tap(find.text('仅显示该栏'));
-    await tester.pumpAndSettle();
-    expect(controller.watches.map((watch) => watch.plotted), <bool>[
-      false,
-      true,
-      false,
-    ]);
-
-    await rightClick(
-      tester,
-      find.byKey(
-        ValueKey('watch-visibility-${controller.watches[1].symbol.key}'),
-      ),
-    );
-    await tester.tap(find.text('全部显示'));
-    await tester.pumpAndSettle();
-    expect(controller.watches.every((watch) => watch.plotted), isTrue);
-
-    await rightClick(tester, find.text('id_ref'));
-    await tester.tap(find.text('移除该变量'));
-    await tester.pumpAndSettle();
-    expect(controller.watches.map((watch) => watch.symbol.name), [
-      'iq_ref',
-      'speed_rpm',
-    ]);
 
     controller.dispose();
     await tester.pumpWidget(const SizedBox.shrink());
@@ -295,6 +167,8 @@ void main() {
       );
       expect(controller.watches.every((watch) => !watch.plotted), isTrue);
 
+      controller.compactExpandedWatches.clear();
+      await tester.pumpWidget(const SizedBox.shrink());
       await tester.pumpWidget(
         MaterialApp(
           theme: buildTalTheme(),
@@ -307,19 +181,17 @@ void main() {
           ),
         ),
       );
-
-      expect(find.text('图标显示'), findsOneWidget);
-      expect(find.text('speed'), findsNothing);
-      await tester.tap(find.byKey(const ValueKey('watch-tree-toggle-motor')));
+      expect(member('speed'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('compact-watch-motor')));
       await tester.pump();
-      expect(find.text('speed'), findsOneWidget);
-      expect(find.text('current'), findsOneWidget);
+      expect(member('speed'), findsOneWidget);
+      expect(member('current'), findsOneWidget);
 
-      final mode = find.byKey(const ValueKey('watch-table-mode-motor.speed'));
+      final mode = find.byKey(
+        const ValueKey('compact-watch-capture-motor.speed'),
+      );
       await tester.ensureVisible(mode);
       await tester.tap(mode);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('采集').last);
       await tester.pumpAndSettle();
       final speed = controller.watches.firstWhere(
         (watch) => watch.symbol.key == 'motor.speed',
@@ -327,34 +199,34 @@ void main() {
       expect(speed.samplingEnabled, isTrue);
       expect(speed.plotted, isTrue);
       await tester.ensureVisible(
-        find.byKey(const ValueKey('watch-visibility-motor.speed')),
+        find.byKey(const ValueKey('compact-watch-plot-motor.speed')),
       );
       await tester.tap(
-        find.byKey(const ValueKey('watch-visibility-motor.speed')),
+        find.byKey(const ValueKey('compact-watch-plot-motor.speed')),
       );
       await tester.pump();
       expect(speed.samplingEnabled, isTrue);
       expect(speed.plotted, isFalse);
       await tester.tap(
-        find.byKey(const ValueKey('watch-visibility-motor.speed')),
+        find.byKey(const ValueKey('compact-watch-plot-motor.speed')),
       );
       await tester.pump();
       expect(speed.samplingEnabled, isTrue);
       expect(speed.plotted, isTrue);
       expect(find.byType(Checkbox), findsNothing);
 
-      await tester.ensureVisible(find.text('current'));
-      await rightClick(tester, find.text('current'));
+      await tester.ensureVisible(member('current'));
+      await rightClick(tester, member('current'));
       expect(find.text('恢复成员'), findsNothing);
-      await tester.tap(find.text('移除该变量'));
+      await tester.tap(find.text('删除变量'));
       await tester.pumpAndSettle();
-      expect(find.text('current'), findsNothing);
-      await tester.ensureVisible(find.text('motor'));
-      await rightClick(tester, find.text('motor'));
+      expect(member('current'), findsNothing);
+      await tester.ensureVisible(member('motor'));
+      await rightClick(tester, member('motor'));
       expect(find.text('恢复成员'), findsOneWidget);
       await tester.tap(find.text('恢复成员'));
       await tester.pumpAndSettle();
-      expect(find.text('current'), findsOneWidget);
+      expect(member('current'), findsOneWidget);
       expect(controller.watches.map((w) => w.symbol.key), [
         'motor',
         'motor.speed',

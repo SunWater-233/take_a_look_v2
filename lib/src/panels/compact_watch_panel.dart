@@ -1,37 +1,5 @@
 part of 'watch_panel.dart';
 
-Future<void> showFullWatchTable(
-  BuildContext context,
-  TakeALookController controller,
-) => showTalDialog<void>(
-  context: context,
-  builder: (context) => Dialog(
-    child: SizedBox(
-      width: 1180,
-      height: math.min(680, MediaQuery.sizeOf(context).height - 100),
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 8, 4),
-            child: Row(
-              children: [
-                const Text('完整变量表', style: talStrong),
-                const Spacer(),
-                TalIconButton(
-                  tooltip: '关闭完整变量表',
-                  onPressed: () => Navigator.pop(context),
-                  icon: const Icon(Icons.close, size: 18),
-                ),
-              ],
-            ),
-          ),
-          Expanded(child: WatchPanel(controller: controller)),
-        ],
-      ),
-    ),
-  ),
-);
-
 class _WatchMemberDetails extends StatelessWidget {
   const _WatchMemberDetails({
     super.key,

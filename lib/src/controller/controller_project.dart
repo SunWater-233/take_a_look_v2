@@ -1,5 +1,42 @@
 part of 'controller.dart';
 
+const _projectStateFields = {
+  'freeRtosSettings',
+  'probeType',
+  'targetName',
+  'targetPackId',
+  'swdClock',
+  'serialNumber',
+  'connectionKind',
+  'remoteConfig',
+  'sampleRateHz',
+  'monitorRateHz',
+  'rttSampleRateHz',
+  'displayRefreshMode',
+  'samplingPaused',
+  'plottingPaused',
+  'rttEnabled',
+  'rttProtocol',
+  'followLatest',
+  'plotVisibleWindowSeconds',
+  'plotRetentionSeconds',
+  'plotAutoY',
+  'plotYMin',
+  'plotYMax',
+  'plotShowGrid',
+  'plotShowLegend',
+  'plotMouseXEnabled',
+  'plotMouseYEnabled',
+  'plotInvertX',
+  'plotInvertY',
+  'uiScale',
+  'selectedSymbols',
+  'watches',
+  'analysisSession',
+  'sourceWorkspace',
+  'sourceProject',
+};
+
 /// An immutable copy of settings that have passed project validation.
 final class ValidatedProjectSettings
     extends UnmodifiableMapView<String, dynamic> {
@@ -25,42 +62,40 @@ final class ValidatedProjectSettings
 extension TakeALookControllerProject on TakeALookController {
   Map<String, dynamic> projectSettings() {
     final data = _encodeSnapshot(
-      fields: ControllerSnapshotSchema.projectFields,
+      fields: _projectStateFields.difference(const {
+        'watches',
+        'sourceProject',
+        'sourceWorkspace',
+      }),
       includeSamples: false,
       includeAnalysisData: true,
     );
-    // Kernel handles have a target lifetime and are never restored as raw watches.
-    final transientKeys = {
-      for (final w in _watches)
-        if (w.symbol.section == '.rodata.freertos') w.symbol.key,
-    };
-    (data['watches'] as List).removeWhere(
-      (raw) => transientKeys.contains((raw as Map)['key']),
-    );
-    (data['symbols'] as List).removeWhere(
-      (raw) => (raw as Map)['section'] == '.rodata.freertos',
-    );
-    // A project stores variable configuration and input drafts. Recorded values
-    // belong to recordings and must never be replayed as target writes.
-    for (final raw in data['watches'] as List) {
-      final originalVisibility =
-          state.plot.visibilityBeforeIsolation?[raw['key']];
-      if (originalVisibility != null) {
-        raw['plotted'] = originalVisibility && raw['sampling'] == true;
-      }
-      (raw as Map).removeWhere(
-        (key, _) => const {
-          'value',
-          'updatedAtMs',
-          'sampleCursor',
-          'historyStartSeconds',
-          'archivedHistoryPath',
-          'archivedHistoryEndSeconds',
-        }.contains(key),
-      );
-    }
+    final visibility = state.plot.visibilityBeforeIsolation;
     return {
       ...data,
+      'sourceProject': sourceProject.settings(),
+      'sourceWorkspace': {
+        'openPaths': sourceWorkspace.openPaths.toList(),
+        'selectedPath': sourceWorkspace.selectedPath,
+      },
+      'watches': [
+        for (final watch in _watches)
+          if (watch.symbol.section != '.rodata.freertos')
+            {
+              'key': watch.symbol.key,
+              'symbol': watch.symbol.toJson(),
+              'color': watch.color.toARGB32(),
+              'sampling': watch.samplingEnabled,
+              'readMode': watch.readMode.name,
+              'monitorRateHz': watch.monitorRateHz,
+              'plotted':
+                  watch.samplingEnabled &&
+                  (visibility?[watch.symbol.key] ?? watch.plotted),
+              'pinned': watch.pinned,
+              'standalone': watch.standalone,
+              'displayHex': watch.displayHex,
+            },
+      ],
       'watchInputDrafts': Map<String, String>.of(watchInputDrafts),
       'compactWatchSelection': compactWatchSelection,
       'compactExpandedWatches': compactExpandedWatches.toList(),
@@ -86,7 +121,7 @@ extension TakeALookControllerProject on TakeALookController {
     defaults.debugState.stopRevision = debugState.stopRevision;
     defaults.debugState.breakpointRevision = debugState.breakpointRevision;
     final localFirmwareState = defaults._encodeSnapshot(
-      fields: const {'firmware', 'debug'},
+      fields: const {'firmware', 'debug', 'debugIndex'},
     );
     defaults.dispose();
 
@@ -124,10 +159,9 @@ extension TakeALookControllerProject on TakeALookController {
         throw const FormatException('项目变量监视排序无效。');
       }
     }
-    if (data['symbols'] is! List ||
-        data['watches'] is! List ||
+    if (data['watches'] is! List ||
         data['sourceProject'] is! Map ||
-        !ControllerSnapshotSchema.projectFields.every(data.containsKey)) {
+        !_projectStateFields.every(data.containsKey)) {
       throw const FormatException('项目缺少变量或工程配置。');
     }
     final project = data['sourceProject'] as Map;
@@ -172,7 +206,12 @@ extension TakeALookControllerProject on TakeALookController {
     for (final raw in data['watches'] as List) {
       final watch = raw as Map;
       final rate = watch['monitorRateHz'];
-      if (watch['color'] is! int ||
+      if (watch['symbol'] is! Map ||
+          SymbolItem.fromJson(
+                Map<String, dynamic>.from(watch['symbol'] as Map),
+              ).key !=
+              watch['key'] ||
+          watch['color'] is! int ||
           watch['sampling'] is! bool ||
           watch['plotted'] is! bool ||
           (watch['pinned'] != null && watch['pinned'] is! bool) ||
@@ -192,7 +231,8 @@ extension TakeALookControllerProject on TakeALookController {
         throw const FormatException('FreeRTOS 面板设置无效。');
       }
       probe.applySnapshot({
-        for (final key in ControllerSnapshotSchema.projectFields)
+        'symbols': _projectWatchSymbols(data),
+        for (final key in _projectStateFields)
           if (data.containsKey(key)) key: data[key],
       });
       if (probe.watches.length != (data['watches'] as List).length ||
@@ -232,6 +272,7 @@ extension TakeALookControllerProject on TakeALookController {
     try {
       await _restoreProjectSettings(data);
     } finally {
+      _applyRestoredProject = null;
       _restoringProject = false;
       _lastMonitorEnabledKeys = null;
       _scheduleWatchMonitorSync();
@@ -241,7 +282,7 @@ extension TakeALookControllerProject on TakeALookController {
 
   Future<void> _restoreProjectSettings(Map<String, dynamic> data) async {
     final settings = <String, dynamic>{
-      for (final key in ControllerSnapshotSchema.projectFields)
+      for (final key in _projectStateFields)
         if (data.containsKey(key)) key: data[key],
     };
     // Project contents can change while a probe is attached. Keep the active
@@ -263,121 +304,150 @@ extension TakeALookControllerProject on TakeALookController {
     }
     final sender = projectBackendCommand ?? backendCommand;
     if (sender != null) {
-      if (!preserveConnection && targetCatalogRequest != null) {
-        await requestTargetCatalog('selectTarget', {
-          'name': data['targetName'],
-          'packId': data['targetPackId'] ?? '',
-        });
-      }
-      await sender(ControllerCommand.configureProject, {
-        for (final key in const [
-          'probeType',
-          'targetName',
-          'swdClock',
-          'serialNumber',
-          'connectionKind',
-          'remoteConfig',
-          'sampleRateHz',
-          'monitorRateHz',
-          'rttSampleRateHz',
-        ])
-          if (settings.containsKey(key)) key: settings[key],
-      });
-      await sender(ControllerCommand.setSamplingPaused, true);
-      await sender(ControllerCommand.clearSamples, null);
-      await saveSourceProject(
-        Map<String, dynamic>.from(data['sourceProject'] as Map),
-      );
-      if (firmwarePath.isNotEmpty) {
-        final loadedKeys = _symbols.map((s) => s.key).toSet();
-        if ((data['watches'] as List).any(
-          (w) =>
-              !loadedKeys.contains((w as Map)['key']) &&
-              (w['symbol'] as Map?)?['missing'] != true,
-        )) {
-          throw const FormatException('固件符号已变化，无法恢复项目变量，请使用保存项目时的 ELF / AXF。');
-        }
-      }
-      settings['symbols'] = [
-        for (final symbol in _symbols) symbol.toJson(),
-        for (final raw in data['watches'] as List)
-          if ((raw as Map)['symbol'] case final Map saved)
-            if (saved['missing'] == true &&
-                !_symbols.any((s) => s.key == saved['key']))
-              saved,
-      ];
-      settings['sourceProject'] = sourceProject.toJson();
-      // Await the backend before applying the UI, so a delayed state echo cannot
-      // replace the project's variables with the previous watch list.
-      final visibleMonitorKeys = <String>{
+      final visibleKeys = {
         for (final keys in _watchMonitorScopes.values) ...keys,
-        for (final symbol in _symbols)
-          if (symbol.dataSource == 'rtt') symbol.key,
       };
       final unrestrictedMonitors =
           !_watchMonitorVisibilityKnown ||
           (data['rttEnabled'] == true && data['rttProtocol'] == 'plus');
-      await sender(ControllerCommand.setWatches, {
+      _applyRestoredProject = (backend) =>
+          _commitRestoredProject(settings, data, backend);
+      final arguments = <String, dynamic>{
+        'sourceProject': data['sourceProject'],
+        'connection': {
+          for (final key in const [
+            'probeType',
+            'targetName',
+            'targetPackId',
+            'swdClock',
+            'serialNumber',
+            'connectionKind',
+            'remoteConfig',
+            'sampleRateHz',
+            'monitorRateHz',
+            'rttSampleRateHz',
+          ])
+            if (settings.containsKey(key)) key: settings[key],
+        },
+        'samplingPaused': data['samplingPaused'],
+        'rttEnabled': data['rttEnabled'],
+        'rttProtocol': data['rttProtocol'],
         'watches': [
-          for (final raw in data['watches'] as List)
+          for (final raw in (data['watches'] as List).cast<Map>())
             {
-              ...Map<String, dynamic>.from(raw as Map),
+              ...Map<String, dynamic>.from(raw),
               'monitorEnabled':
                   unrestrictedMonitors ||
                   raw['pinned'] == true ||
-                  visibleMonitorKeys.contains(raw['key']),
+                  (raw['symbol'] as Map)['dataSource'] == 'rtt' ||
+                  visibleKeys.contains(raw['key']),
               'color':
                   '#${(raw['color'] as int).toRadixString(16).padLeft(8, '0')}',
             },
         ],
-      });
-      await sender(ControllerCommand.setRttProtocol, data['rttProtocol']);
-      await sender(ControllerCommand.toggleRtt, data['rttEnabled'] == true);
-      await sender(
-        ControllerCommand.setSamplingPaused,
-        data['samplingPaused'] == true,
-      );
+        ...BreakpointSettings.fromJson(data).toJson(includePause: false),
+      };
+      final path = (data['sourceProject'] as Map)['firmwarePath'] as String;
+      if (path.isEmpty) {
+        await sender(ControllerCommand.restoreProject, arguments);
+      } else {
+        await _runFirmwareCommand(
+          ControllerCommand.restoreProject,
+          arguments,
+          path,
+          propagateFailure: true,
+          commandSender: sender,
+        );
+      }
+      if (_applyRestoredProject != null && projectBackendCommand != null) {
+        throw const BackendException('project_state_missing', '后端未提交项目状态。');
+      }
+      _applyRestoredProject?.call(const {});
+    } else {
+      _commitRestoredProject(settings, data, const {});
     }
+  }
+
+  void _commitRestoredProject(
+    Map<String, dynamic> settings,
+    Map<String, dynamic> data,
+    Map<String, dynamic> backend,
+  ) {
+    _applyRestoredProject = null;
+    if (_disposed) return;
+    _clearSampleHistory();
     _clearWatchDeletionHistory();
     _removedWatchKeys.clear();
     state.plot.visibilityBeforeIsolation = null;
     _watches.clear();
-    plotHistory.clear();
     _clearFrozenPlot();
-    state.acquisition.rawRecording = {};
     sourceLocationRequest = null;
-    applySnapshot({
-      ...settings,
-      'elapsedSeconds': 0,
-      'samplingElapsedSeconds': 0,
-    });
-    watchInputDrafts
-      ..clear()
-      ..addAll(
-        Map<String, String>.from(data['watchInputDrafts'] as Map? ?? {}),
-      );
-    compactWatchSelection = data['compactWatchSelection'] as String?;
-    compactWatchSummaryFraction = (data['compactWatchSummaryFraction'] as num?)
-        ?.toDouble();
-    compactWatchPinnedFraction = (data['compactWatchPinnedFraction'] as num?)
-        ?.toDouble();
-    compactWatchSectionOrders
-      ..clear()
-      ..addAll({
-        for (final entry
-            in (data['compactWatchSectionOrders'] as Map? ?? {}).entries)
-          entry.key as String: (entry.value as List).cast<String>().toList(),
-      });
-    compactExpandedWatches
-      ..clear()
-      ..addAll((data['compactExpandedWatches'] as List? ?? []).cast<String>());
-    _expandedSymbolTreeNodes
-      ..clear()
-      ..addAll((data['expandedSymbolTreeNodes'] as List? ?? []).cast<String>());
     final breakpoints = BreakpointSettings.fromJson(data)..paused = false;
-    await _commitBreakpointSettings(breakpoints, sender);
     _removedBreakpoints = null;
     debugState.breakpointUndoId = 0;
-    _emitState([signals.watches, signals.symbols, signals.debug]);
+    if (!backend.containsKey('debug')) {
+      debugState.breakpointSettings = breakpoints;
+      debugState.resolvedBreakpoints.clear();
+    }
+    final backendDebug = backend['debug'] as Map?;
+    _applySnapshot(
+      {
+        'symbols': _projectWatchSymbols(data),
+        ...settings,
+        ...backend,
+        'watches': settings['watches'],
+        'sourceWorkspace': {
+          ...(settings['sourceWorkspace'] as Map),
+          'viewedStopRevision':
+              backendDebug?['stopRevision'] ?? debugState.stopRevision,
+          'additionRevision': sourceWorkspace.additionRevision,
+        },
+        'elapsedSeconds': 0,
+        'samplingElapsedSeconds': 0,
+      },
+      beforeNotify: () {
+        watchInputDrafts
+          ..clear()
+          ..addAll(
+            Map<String, String>.from(data['watchInputDrafts'] as Map? ?? {}),
+          );
+        compactWatchSelection = data['compactWatchSelection'] as String?;
+        compactWatchSummaryFraction =
+            (data['compactWatchSummaryFraction'] as num?)?.toDouble();
+        compactWatchPinnedFraction =
+            (data['compactWatchPinnedFraction'] as num?)?.toDouble();
+        compactWatchSectionOrders
+          ..clear()
+          ..addAll({
+            for (final entry
+                in (data['compactWatchSectionOrders'] as Map? ?? {}).entries)
+              entry.key as String: (entry.value as List)
+                  .cast<String>()
+                  .toList(),
+          });
+        compactExpandedWatches
+          ..clear()
+          ..addAll(
+            (data['compactExpandedWatches'] as List? ?? []).cast<String>(),
+          );
+        _expandedSymbolTreeNodes
+          ..clear()
+          ..addAll(
+            (data['expandedSymbolTreeNodes'] as List? ?? []).cast<String>(),
+          );
+      },
+    );
+    _emitState([
+      signals.sampling,
+      signals.watches,
+      signals.symbols,
+      signals.debug,
+    ]);
+    signals.telemetrySync.emit();
   }
 }
+
+List<Map> _projectWatchSymbols(Map<String, dynamic> data) => [
+  for (final watch in (data['watches'] as List).cast<Map>())
+    watch['symbol'] as Map,
+];

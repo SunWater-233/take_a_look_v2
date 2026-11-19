@@ -15,59 +15,24 @@ extension TakeALookControllerPlot on TakeALookController {
     final end = plotWindowEndSeconds;
     final start = math.max(0.0, end - plotVisibleWindowSeconds);
     final plotted = _watches.where((watch) => watch.plotted).toList();
-    plotHistory.update(
-      path: rawRecording['historyPath'] as String?,
-      keys: [for (final watch in plotted) watch.symbol.key],
+    _plotHistory.update(
+      livePath: rawRecording['historyPath'] as String?,
+      watches: plotted,
       start: start,
       end: math.max(start + 0.2, end),
-      sourceEnd: elapsedSeconds,
+      liveEnd: elapsedSeconds,
       pixelWidth: _plotPixelWidth,
-      enabled:
-          _presentationActive &&
-          (plottingPaused ||
-              !followLatest ||
-              plotted.any(
-                (watch) =>
-                    watch.samples.isNotEmpty &&
-                    watch.samples.first.dx > start &&
-                    watch.totalSampleCount > watch.samples.length,
-              )),
+      enabled: _presentationActive,
+      liveEnabled:
+          plottingPaused ||
+          !followLatest ||
+          plotted.any(
+            (watch) =>
+                watch.samples.isNotEmpty &&
+                watch.samples.first.dx > start &&
+                watch.totalSampleCount > watch.samples.length,
+          ),
     );
-    final archived = <String, List<WatchItem>>{};
-    for (final watch in plotted) {
-      final path = watch.archivedHistoryPath;
-      if (path != null && path != rawRecording['historyPath']) {
-        (archived[path] ??= []).add(watch);
-      }
-    }
-    _archivedPlotHistories.removeWhere((path, history) {
-      if (archived.containsKey(path)) return false;
-      history.dispose();
-      return true;
-    });
-    for (final entry in archived.entries) {
-      final history = _archivedPlotHistories.putIfAbsent(
-        entry.key,
-        () => PlotHistory(
-          reader: _historyReader,
-          onChanged: () {
-            if (!_disposed) signals.plot.emit();
-          },
-        ),
-      );
-      history.update(
-        path: entry.key,
-        keys: entry.value.map((w) => w.symbol.key).toList(),
-        start: start,
-        end: math.max(start + 0.2, end),
-        sourceEnd: entry.value.fold<double>(
-          0,
-          (end, w) => math.max(end, w.archivedHistoryEndSeconds),
-        ),
-        pixelWidth: _plotPixelWidth,
-        enabled: _presentationActive,
-      );
-    }
   }
 
   void setPlotHighlightedWatch(String? key, {bool selectWatchRow = false}) {

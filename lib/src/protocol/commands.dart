@@ -59,6 +59,7 @@ enum ControllerCommand {
   undoWatchDeletion,
   redoWatchDeletion,
   configureProject,
+  restoreProject,
   reorderWatch,
   clearWatches,
   toggleWatchSampling,
@@ -107,6 +108,7 @@ enum BackendMethod {
   removeTargetPack,
   selectTarget,
   setSourceProject,
+  restoreProject,
   startSourceTask,
   cancelSourceTask,
   handshake,
@@ -167,6 +169,11 @@ class BackendCommandMapper {
       case ControllerCommand.configureProject:
         return BackendCall(
           BackendMethod.setConfig,
+          Map<String, Object?>.from(arguments! as Map),
+        );
+      case ControllerCommand.restoreProject:
+        return BackendCall(
+          BackendMethod.restoreProject,
           Map<String, Object?>.from(arguments! as Map),
         );
       case ControllerCommand.setSourceProject:

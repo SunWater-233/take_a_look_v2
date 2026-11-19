@@ -20,8 +20,9 @@
 | `requiresDownload` | 符号已更新，运行目标尚未确认同步；暂停地址相关的采样、读写与源码调试 |
 
 - `loadFirmware {path, loadId?}`：显式加载或刷新，文件必须存在。
-- `setSourceProject {..., firmwarePath, loadId?}`：保存配置时解析存在的固件，即使路径相同也重新解析。文件尚未生成时提交路径并清空旧符号、监视项、源码索引和 FreeRTOS 布局。
-- 只修改 `sourceRoot` 或编译选项时，保持当前固件和解析结果。
+- `setSourceProject {..., firmwarePath, loadId?}` 保存配置。路径变化时解析新固件；文件尚未生成时提交路径并清空旧符号、监视项、源码索引和 FreeRTOS 布局。
+- 只修改 `sourceRoot` 或编译选项时，状态事件只携带 `sourceProject`。显式刷新同一路径使用 `loadFirmware`。
+- `restoreProject` 在切换会话之前解析目标固件并验证监视变量。一次 `projectRestored` 事件提交完整结果并切换采样流。
 - 解析或配置验证失败时，不提交新配置和解析结果。
 - `startSourceTask`：只使用工程中的固件路径，没有下载路径兜底。
 
@@ -64,9 +65,9 @@
 
 ## 格式边界
 
-桌面 stdio 协议为 v3，工程文件为 v2。旧命令 `loadSymbols`、旧字段 `symbolFile`、
+桌面 stdio 协议为 v3，工程文件为 v3。旧命令 `loadSymbols`、旧字段 `symbolFile`、
 旧工程格式和 `source-projects.json` 不再读取，没有迁移或兼容分支。
-工程恢复只提交一次源码工程配置，不再单独加载另一个符号路径。
+工程文件保存监视项的定义及配置。符号表从 ELF/AXF 重新生成，停靠窗口按版本接收源码索引。
 
 ## 验证
 

@@ -95,26 +95,30 @@ class RawRecording:
         return self.path, self.committed_bytes, self.sample_count
 
     def rotate(self) -> None:
-        self.close()
-        self._closed = False
-        self.path = None
-        self._history = None
-        self._ids.clear()
-        self._channels.clear()
-        self.sample_count = self.committed_bytes = 0
-        self.failure = None
+        try:
+            self.close()
+        finally:
+            self._closed = False
+            self.path = None
+            self._history = None
+            self._ids.clear()
+            self._channels.clear()
+            self.sample_count = self.committed_bytes = 0
+            self.failure = None
 
     def close(self) -> None:
         self._closed = True
-        if self._history is not None:
-            self._history.close()
         stream, self._file = self._file, None
-        if stream is not None:
-            try:
-                stream.flush()
-                os.fsync(stream.fileno())
-            finally:
-                stream.close()
+        try:
+            if self._history is not None:
+                self._history.close()
+        finally:
+            if stream is not None:
+                try:
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                finally:
+                    stream.close()
 
 
 def _records(path: Path, byte_length: int):

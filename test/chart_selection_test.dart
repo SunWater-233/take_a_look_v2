@@ -174,14 +174,21 @@ void main() {
     );
   }
 
+  Finder memberLabel(String label) => find.descendant(
+    of: find.byKey(const ValueKey('compact-watch-list')),
+    matching: find.text(label),
+  );
+
   void expectRowSelected(WidgetTester tester, String key, bool selected) {
-    final row = tester.widget<Container>(
-      find.byKey(ValueKey('watch-row-$key')),
-    );
-    expect(
-      (row.decoration! as BoxDecoration).color,
-      selected ? TalColors.selection : TalColors.input,
-    );
+    final row = find.byKey(ValueKey('compact-watch-$key'));
+    final decoration = tester
+        .widgetList<Container>(
+          find.descendant(of: row, matching: find.byType(Container)),
+        )
+        .map((w) => w.decoration)
+        .whereType<BoxDecoration>()
+        .first;
+    expect(decoration.color, selected ? TalColors.selection : null);
   }
 
   testWidgets(
@@ -191,9 +198,9 @@ void main() {
       try {
         final chart = await pumpPanels(tester, controller);
         final mapping = mappingFor(controller, tester.getSize(chart));
-        await tester.tap(find.text('selected'));
+        await tester.tap(memberLabel('selected'));
         await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-        await tester.tap(find.text('other'));
+        await tester.tap(memberLabel('other'));
         await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
         await tester.pump();
         expectRowSelected(tester, 'selected', true);
@@ -281,17 +288,17 @@ void main() {
       final controller = controllerWithSeries({
         'motor': [],
         'motor.speed': [const Offset(0, 4), const Offset(10, 4)],
-      });
+      })..compactExpandedWatches.clear();
       try {
         final chart = await pumpPanels(tester, controller);
-        expect(find.text('speed'), findsNothing);
+        expect(memberLabel('speed'), findsNothing);
         final mapping = mappingFor(controller, tester.getSize(chart));
         await tester.tapAt(
           tester.getTopLeft(chart) + pixelFor(mapping, const Offset(5, 4)),
         );
         await tester.pumpAndSettle();
         expect(controller.plotHighlightedWatchKey, 'motor.speed');
-        expect(find.text('speed'), findsOneWidget);
+        expect(memberLabel('speed'), findsOneWidget);
         expectRowSelected(tester, 'motor.speed', true);
         expectRowSelected(tester, 'motor', false);
       } finally {
@@ -311,14 +318,14 @@ void main() {
     });
     try {
       final chart = await pumpPanels(tester, controller);
-      expect(find.text('variable_39').hitTestable(), findsNothing);
+      expect(memberLabel('variable_39').hitTestable(), findsNothing);
       final mapping = mappingFor(controller, tester.getSize(chart));
       await tester.tapAt(
         tester.getTopLeft(chart) + pixelFor(mapping, const Offset(5, 4)),
       );
       await tester.pumpAndSettle();
       expect(controller.plotHighlightedWatchKey, 'variable_39');
-      expect(find.text('variable_39').hitTestable(), findsOneWidget);
+      expect(memberLabel('variable_39').hitTestable(), findsOneWidget);
       expectRowSelected(tester, 'variable_39', true);
     } finally {
       controller.dispose();
@@ -373,7 +380,7 @@ void main() {
         final mapping = mappingFor(controller, size);
         TelemetryPainter painter() =>
             tester.widget<CustomPaint>(chart).painter! as TelemetryPainter;
-        await tester.tap(find.text('selected'));
+        await tester.tap(memberLabel('selected'));
         await tester.pump();
         expect(controller.plotHighlightedWatchKey, 'selected');
         expect(curvePaints(recordPainter(painter(), size)), hasLength(4));
@@ -427,7 +434,7 @@ void main() {
         expect(controller.plotHighlightedWatchKey, isNull);
         expect(curvePaints(recordPainter(painter(), size)), hasLength(2));
 
-        await tester.tap(find.text('other'));
+        await tester.tap(memberLabel('other'));
         await tester.pump();
         expect(controller.plotHighlightedWatchKey, 'other');
         await mouse.removePointer();
@@ -448,7 +455,7 @@ void main() {
         final controller = selectionController();
         try {
           final chart = await pumpPanels(tester, controller);
-          await tester.tap(find.text('selected'));
+          await tester.tap(memberLabel('selected'));
           await tester.pump();
           final start = tester.getCenter(chart);
           final drag = await tester.startGesture(
@@ -488,7 +495,7 @@ void main() {
       final controller = selectionController();
       try {
         final chart = await pumpPanels(tester, controller);
-        await tester.tap(find.text('selected'));
+        await tester.tap(memberLabel('selected'));
         await tester.sendEventToBinding(
           PointerScrollEvent(
             position: tester.getCenter(chart),

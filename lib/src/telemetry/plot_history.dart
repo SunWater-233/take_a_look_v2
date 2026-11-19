@@ -3,8 +3,155 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
+import '../models/models.dart';
 import 'numeric_history.dart';
 import 'sample_buffer.dart';
+
+/// Shared disk-read cache. Each view still owns its visible range and resolution.
+class PlotHistoryCache {
+  PlotHistoryCache(HistoryReader? reader)
+    : _reader = reader ?? readNumericHistory;
+
+  final HistoryReader _reader;
+  final _windows = <HistoryWindow>[];
+  final _pending = <HistoryRequest, Future<HistoryWindow>>{};
+  int _generation = 0;
+
+  Future<HistoryWindow> read(HistoryRequest request) async {
+    bool fits(HistoryRequest previous) =>
+        previous.path == request.path &&
+        listEquals(previous.keys, request.keys) &&
+        previous.start <= request.start &&
+        math.min(previous.end, previous.sourceEnd) >=
+            math.min(request.end, request.sourceEnd) &&
+        previous.sourceEnd <= request.sourceEnd;
+
+    for (final window in _windows) {
+      if (fits(window.request) &&
+          (!window.reduced ||
+              window.request.resolution <= request.resolution)) {
+        return window;
+      }
+    }
+    for (final entry in _pending.entries) {
+      if (fits(entry.key) &&
+          entry.key.resolution <= request.resolution &&
+          entry.key.maxPoints >= request.maxPoints) {
+        return entry.value;
+      }
+    }
+    final generation = _generation;
+    final pending = _reader(request);
+    _pending[request] = pending;
+    try {
+      final window = await pending;
+      if (generation == _generation) {
+        _windows.insert(0, window);
+        if (_windows.length > 2) _windows.removeLast();
+      }
+      return window;
+    } finally {
+      if (identical(_pending[request], pending)) _pending.remove(request);
+    }
+  }
+
+  void clear() {
+    _generation++;
+    _windows.clear();
+    _pending.clear();
+  }
+}
+
+/// Groups recording paths and resolves each channel's history for a viewport.
+class PlotHistoryQuery {
+  PlotHistoryQuery({required this.onChanged, required this.reader}) {
+    live = PlotHistory(onChanged: onChanged, reader: reader);
+  }
+
+  final VoidCallback onChanged;
+  final HistoryReader reader;
+  late final PlotHistory live;
+  final _archived = <String, PlotHistory>{};
+  String? _livePath;
+
+  void update({
+    required String? livePath,
+    required List<WatchItem> watches,
+    required double start,
+    required double end,
+    required double liveEnd,
+    required double pixelWidth,
+    required bool enabled,
+    required bool liveEnabled,
+  }) {
+    _livePath = livePath;
+    final archived = <String, List<WatchItem>>{};
+    final liveKeys = <String>[];
+    for (final watch in watches) {
+      final path = watch.archivedHistoryPath;
+      if (path != null && path != livePath) {
+        (archived[path] ??= []).add(watch);
+      } else {
+        liveKeys.add(watch.symbol.key);
+      }
+    }
+    live.update(
+      path: livePath,
+      keys: liveKeys,
+      start: start,
+      end: end,
+      sourceEnd: liveEnd,
+      pixelWidth: pixelWidth,
+      enabled: enabled && liveEnabled,
+    );
+    _archived.removeWhere((path, history) {
+      if (archived.containsKey(path)) return false;
+      history.dispose();
+      return true;
+    });
+    for (final entry in archived.entries) {
+      final history = _archived.putIfAbsent(
+        entry.key,
+        () => PlotHistory(onChanged: onChanged, reader: reader),
+      );
+      history.update(
+        path: entry.key,
+        keys: [for (final watch in entry.value) watch.symbol.key],
+        start: start,
+        end: end,
+        sourceEnd: entry.value.fold<double>(
+          0,
+          (end, watch) => math.max(end, watch.archivedHistoryEndSeconds),
+        ),
+        pixelWidth: pixelWidth,
+        enabled: enabled,
+      );
+    }
+  }
+
+  SampleBuffer? samplesFor(WatchItem watch) {
+    final path = watch.archivedHistoryPath;
+    final source = path == _livePath ? live : _archived[path] ?? live;
+    return source.samplesFor(
+      watch.symbol.key,
+      minimumTime: watch.historyStartSeconds,
+    );
+  }
+
+  void clear({bool preserveArchived = false}) {
+    live.clear();
+    if (preserveArchived) return;
+    for (final history in _archived.values) {
+      history.dispose();
+    }
+    _archived.clear();
+  }
+
+  void dispose() {
+    clear();
+    live.dispose();
+  }
+}
 
 /// A bounded viewport cache with one worker request and one replaceable pending
 /// request. Throttling (not trailing debounce) keeps history moving during drag.

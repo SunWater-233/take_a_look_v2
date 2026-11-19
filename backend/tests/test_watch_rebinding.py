@@ -205,7 +205,7 @@ def test_real_elf_rebuild_refreshes_watched_members(tmp_path, refresh, language,
         if refresh == 'reload':
             state = service.handle(RpcMethod.LOAD_FIRMWARE, {'path': str(firmware)})['state']
         elif refresh == 'settings':
-            state = service.handle(RpcMethod.SET_SOURCE_PROJECT, {'firmwarePath': str(firmware)})['state']
+            state = service.handle(RpcMethod.LOAD_FIRMWARE, {'path': str(firmware)})['state']
         else:
             assert service._refresh_changed_firmware(firmware)
             state = service.state_snapshot()

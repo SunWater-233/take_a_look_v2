@@ -172,11 +172,7 @@ class ControllerSnapshotCodec {
     SnapshotField.sourceWorkspace => source.state.sourceWorkspace.toJson(),
     SnapshotField.sourceProject => source.state.sourceProject.toJson(),
     SnapshotField.sourceTask => source.state.sourceTask.toJson(),
-    SnapshotField.debug => {
-      'stopRevision': source.state.debug.stopRevision,
-      'executionState': source.state.debug.executionState.name,
-      'sourceStepAvailable': source.state.debug.sourceStepAvailable,
-      'stepOutAvailable': source.state.debug.stepOutAvailable,
+    SnapshotField.debugIndex => {
       'sourceFiles': source.state.debug.sourceFiles,
       'sourceDefinitions': !source.state.debug.hasSourceDefinitionIndex
           ? null
@@ -188,6 +184,12 @@ class ControllerSnapshotCodec {
         for (final entry in source.state.debug.executableLines.entries)
           entry.key: entry.value.toList()..sort(),
       },
+    },
+    SnapshotField.debug => {
+      'stopRevision': source.state.debug.stopRevision,
+      'executionState': source.state.debug.executionState.name,
+      'sourceStepAvailable': source.state.debug.sourceStepAvailable,
+      'stepOutAvailable': source.state.debug.stepOutAvailable,
       'breakpoints': [
         for (final breakpoint in source.state.debug.resolvedBreakpoints)
           breakpoint.toJson(),

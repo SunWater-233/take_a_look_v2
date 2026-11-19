@@ -186,6 +186,7 @@ class BackendClient {
       if (const {
         ControllerCommand.loadFirmware,
         ControllerCommand.configureProject,
+        ControllerCommand.restoreProject,
         ControllerCommand.setSourceProject,
         ControllerCommand.startSourceTask,
         ControllerCommand.cancelSourceTask,
@@ -293,6 +294,7 @@ class BackendClient {
         const {
               BackendMethod.loadFirmware,
               BackendMethod.setSourceProject,
+              BackendMethod.restoreProject,
             }.contains(method)
             ? symbolLoadTimeout
             : const {
@@ -396,7 +398,7 @@ class BackendClient {
           _handleSampleSchema(params);
           return;
         }
-        if (event == 'state') {
+        if (event == 'state' || event == 'projectRestored') {
           final patch = _map(params);
           if (patch != null) _state = {..._state, ...patch};
         }

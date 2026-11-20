@@ -207,7 +207,7 @@ void main() {
     ) async {
       await tester.binding.setSurfaceSize(const Size(1000, 600));
       addTearDown(() => tester.binding.setSurfaceSize(null));
-      final controller = TakeALookController();
+      final controller = TakeALookController(backendCommand: (_, _) async {});
       addTearDown(controller.dispose);
       controller.setPresentationActive(false);
       await tester.pumpWidget(

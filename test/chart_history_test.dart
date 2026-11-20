@@ -42,8 +42,8 @@ void main() {
       expect(watch.samples.first.dx, greaterThan(238));
       controller.setPlotViewport(xMin: 20, xMax: 22);
       await _settleHistory(controller);
-      expect(controller.plotSamplesFor(watch).first.dx, 19);
-      expect(controller.plotSamplesFor(watch).last.dx, 23);
+      expect(controller.plotSamplesFor(watch).first.dx, lessThan(20));
+      expect(controller.plotSamplesFor(watch).last.dx, greaterThan(22));
       expect(watch.samples.first.dx, greaterThan(238));
       expect(controller.plotWindowEndSeconds, 22);
 
@@ -87,7 +87,8 @@ void main() {
       );
       controller.setPlotViewport(xMin: 5, xMax: 7);
       await _settleHistory(controller);
-      expect(controller.plotSamplesFor(watch).first.dx, 4);
+      expect(controller.plotSamplesFor(watch).first.dx, lessThan(5));
+      expect(controller.plotSamplesFor(watch).last.dx, greaterThan(7));
       expect(controller.plottingPaused, isTrue);
       controller.showAllPlotSamples();
       await _settleHistory(controller);

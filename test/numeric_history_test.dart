@@ -149,6 +149,32 @@ void main() {
     },
   );
 
+  test('a padded request stays within the committed source end', () async {
+    recording.append(
+      [
+        for (var i = 0; i < 200; i++)
+          {
+            'elapsed': i.toDouble(),
+            'values': <String, double>{'a': i.toDouble()},
+          },
+      ],
+      {'a': 'Alpha'},
+    );
+    final result = await readNumericHistory(
+      HistoryRequest(
+        path: recording.status['historyPath'] as String,
+        keys: ['a'],
+        start: 61,
+        end: 192,
+        sourceEnd: 67,
+        buckets: 500,
+      ),
+    );
+    expect(result.series['a'], [
+      for (var i = 61; i <= 67; i++) ...[i, i],
+    ]);
+  });
+
   test(
     'Dart reader consumes the production Python writer format',
     () async {

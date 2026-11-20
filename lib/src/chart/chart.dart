@@ -169,6 +169,9 @@ class TelemetryChartState extends State<TelemetryChart> {
                     painter: TelemetryPainter(
                       controller,
                       paintInspection: false,
+                      devicePixelRatio:
+                          View.of(context).devicePixelRatio *
+                          controller.uiScale,
                       hoverPosition: _hoverPosition,
                       hoverTracker: _hoverTracker,
                       frame: _paintFrame,

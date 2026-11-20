@@ -22,8 +22,7 @@ class PlotHistoryCache {
         previous.path == request.path &&
         listEquals(previous.keys, request.keys) &&
         previous.start <= request.start &&
-        math.min(previous.end, previous.sourceEnd) >=
-            math.min(request.end, request.sourceEnd) &&
+        previous.coveredEnd >= request.coveredEnd &&
         previous.sourceEnd <= request.sourceEnd;
 
     for (final window in _windows) {
@@ -153,8 +152,8 @@ class PlotHistoryQuery {
   }
 }
 
-/// A bounded viewport cache with one worker request and one replaceable pending
-/// request. Throttling (not trailing debounce) keeps history moving during drag.
+/// Aligned, overlapping time windows let panning reuse samples across frames.
+/// One background read can run at a time, with visible data taking priority.
 class PlotHistory {
   PlotHistory({required this.onChanged, HistoryReader? reader})
     : _reader = reader ?? readNumericHistory;
@@ -166,13 +165,20 @@ class PlotHistory {
   HistoryRequest? _active;
   String? _path;
   List<String> _keys = const [];
-  double _visibleStart = 0, _visibleEnd = 0;
+  double _visibleStart = 0, _visibleEnd = 0, _viewportEnd = 0;
+  double _blockSeconds = 0;
+  int _direction = 0;
   int _generation = 0;
   bool _disposed = false;
   String? error;
   DateTime? _retryAt;
+  bool _prefetchRetry = false;
+  static const _blocksPerWindow = 6;
 
-  bool get loading => _wanted != null && (_timer != null || _active != null);
+  bool get loading =>
+      _wanted != null &&
+      !hasVisibleWindow &&
+      (_timer != null || _active != null);
   int get retainedPoints =>
       _cache.fold(0, (sum, item) => sum + item.pointCount);
 
@@ -191,75 +197,129 @@ class PlotHistory {
       _path = path;
       _keys = List.of(keys);
     }
-    if (!enabled || path == null || keys.isEmpty) {
+    if (!enabled ||
+        path == null ||
+        keys.isEmpty ||
+        start > sourceEnd ||
+        end < 0) {
       error = null;
       _wanted = null;
+      _direction = 0;
       _timer?.cancel();
       _timer = null;
       return;
     }
-    _visibleStart = start;
-    _visibleEnd = math.min(end, sourceEnd);
     final span = math.max(0.2, end - start);
-    final left = math.max(0.0, start - span * 0.5);
-    final right = end + span * 0.5;
+    final shift = start - _visibleStart;
+    if (_wanted == null || (shift - (end - _viewportEnd)).abs() > span * 1e-6) {
+      _direction = 0;
+    } else if (shift.abs() > span * 1e-6) {
+      _direction = shift.isNegative ? -1 : 1;
+    }
+    _visibleStart = math.max(0, start);
+    _visibleEnd = math.min(end, sourceEnd);
+    _viewportEnd = end;
+    _blockSeconds = math
+        .pow(2, (math.log(span / 2) / math.ln2).floor())
+        .toDouble();
     final maxPoints = (131072 ~/ keys.length).clamp(512, 16384);
-    _wanted = HistoryRequest(
+    // Keep bucket boundaries aligned across adjacent windows at the same zoom.
+    final bucketsPerBlock = (_blockSeconds / span * pixelWidth).ceil().clamp(
+      1,
+      maxPoints ~/ (5 * _blocksPerWindow),
+    );
+    _wanted = _windowAt(
+      _visibleStart,
       path: path,
-      keys: _keys,
-      start: left,
-      end: right,
       sourceEnd: sourceEnd,
-      buckets: ((right - left) / span * pixelWidth).ceil().clamp(
-        1,
-        maxPoints ~/ 5,
-      ),
+      buckets: bucketsPerBlock * _blocksPerWindow,
       maxPoints: maxPoints,
     );
-    if (_satisfied) {
-      _timer?.cancel();
-      _timer = null;
-      return;
-    }
     _schedule();
   }
 
-  bool _covers(HistoryRequest request, {required bool reduced}) =>
-      request.start <= _visibleStart + 1e-9 &&
-      math.min(request.end, request.sourceEnd) >= _visibleEnd - 1e-9 &&
-      (!reduced || request.resolution <= _wanted!.resolution * 1.5);
+  HistoryRequest _windowAt(
+    double start, {
+    required String path,
+    required double sourceEnd,
+    required int buckets,
+    required int maxPoints,
+  }) {
+    final anchor = (start / _blockSeconds).floor() * _blockSeconds;
+    final left = math.max(0.0, anchor - _blockSeconds);
+    // Six blocks cover the viewport, including one block before its anchor.
+    return HistoryRequest(
+      path: path,
+      keys: _keys,
+      start: left,
+      end: left + _blocksPerWindow * _blockSeconds,
+      sourceEnd: sourceEnd,
+      buckets: buckets,
+      maxPoints: maxPoints,
+    );
+  }
 
-  bool get _satisfied =>
-      _wanted == null ||
-      _cache.any(
-        (item) => _covers(item.window.request, reduced: item.window.reduced),
-      );
+  _CachedWindow? _covering(double start, double end) {
+    final resolution = _wanted!.resolution * 1.5;
+    for (final item in _cache) {
+      final window = item.window;
+      if (window.request.start <= start + 1e-9 &&
+          item.end >= end - 1e-9 &&
+          (!window.reduced || window.request.resolution <= resolution)) {
+        return item;
+      }
+    }
+    return null;
+  }
+
+  HistoryRequest? _nextRequest() {
+    final wanted = _wanted;
+    if (wanted == null) return null;
+    if (!hasVisibleWindow) return wanted;
+    if (_direction == 0) return null;
+    final shift = _direction * _blockSeconds;
+    final start = math.max(0.0, _visibleStart + shift);
+    final end = math.min(wanted.sourceEnd, _viewportEnd + shift);
+    if (start >= end || _covering(start, end) != null) return null;
+    return _windowAt(
+      start,
+      path: wanted.path,
+      sourceEnd: wanted.sourceEnd,
+      buckets: wanted.buckets,
+      maxPoints: wanted.maxPoints,
+    );
+  }
 
   void _schedule() {
-    if (_disposed || _satisfied || _timer != null || _active != null) return;
-    if (_retryAt != null && DateTime.now().isBefore(_retryAt!)) return;
-    _timer = Timer(const Duration(milliseconds: 60), () {
+    if (_disposed || _timer != null || _active != null) return;
+    if (_retryAt != null &&
+        DateTime.now().isBefore(_retryAt!) &&
+        (!_prefetchRetry || hasVisibleWindow)) {
+      return;
+    }
+    if (_nextRequest() == null) return;
+    _timer = Timer(Duration.zero, () {
       _timer = null;
-      if (!_disposed && !_satisfied) unawaited(_load());
+      final request = _nextRequest();
+      if (request != null) unawaited(_load(request));
     });
   }
 
-  Future<void> _load() async {
-    final request = _wanted!;
+  Future<void> _load(HistoryRequest request) async {
     final generation = _generation;
     _active = request;
     try {
       final window = await _reader(request);
       if (_disposed || generation != _generation || _wanted == null) return;
-      // Never replace the visible data with a result for an obsolete viewport.
-      // Retain it as one of two neighbouring windows for quick backtracking.
+      // Keep neighbouring windows available for a quick reversal.
       _cache.insert(0, _CachedWindow(window));
-      if (_cache.length > 2) _cache.removeLast();
+      if (_cache.length > 3) _cache.removeLast();
       error = null;
       _retryAt = null;
     } catch (failure) {
       if (!_disposed && generation == _generation && _wanted != null) {
-        error = '历史数据读取失败：$failure';
+        _prefetchRetry = hasVisibleWindow;
+        if (!_prefetchRetry) error = '历史数据读取失败：$failure';
         _retryAt = DateTime.now().add(const Duration(seconds: 2));
       }
     } finally {
@@ -273,31 +333,36 @@ class PlotHistory {
 
   SampleBuffer? samplesFor(String key, {double minimumTime = 0}) {
     if (_wanted == null) return null;
+    final covering = _covering(_visibleStart, _visibleEnd);
+    if (covering != null) return covering.samplesFor(key, minimumTime);
+    // Use the largest overlap while a visible window is loading.
+    _CachedWindow? best;
+    var overlap = -1.0;
     for (final item in _cache) {
-      if (_covers(item.window.request, reduced: item.window.reduced)) {
-        return item.samplesFor(key, minimumTime);
+      final length =
+          math.min(item.end, _visibleEnd) -
+          math.max(item.window.request.start, _visibleStart);
+      if (length >= 0 && length > overlap) {
+        best = item;
+        overlap = length;
       }
     }
-    // Keep the overlapping curve visible while its neighbouring range loads.
-    for (final item in _cache) {
-      if (item.window.request.start <= _visibleEnd &&
-          item.window.request.end >= _visibleStart) {
-        return item.samplesFor(key, minimumTime);
-      }
-    }
-    return null;
+    return best?.samplesFor(key, minimumTime);
   }
 
-  bool get hasVisibleWindow => _wanted != null && _satisfied;
+  bool get hasVisibleWindow =>
+      _wanted != null && _covering(_visibleStart, _visibleEnd) != null;
 
   void clear() {
     _generation++;
     _timer?.cancel();
     _timer = null;
     _wanted = null;
+    _direction = 0;
     _cache.clear();
     error = null;
     _retryAt = null;
+    _prefetchRetry = false;
   }
 
   void dispose() {
@@ -319,6 +384,7 @@ class _CachedWindow {
     }
   }
   final HistoryWindow window;
+  double get end => window.request.coveredEnd;
   final Map<String, SampleBuffer> samples = {};
   final Map<String, ({double minimum, SampleBuffer buffer})> _trimmed = {};
   int pointCount = 0;

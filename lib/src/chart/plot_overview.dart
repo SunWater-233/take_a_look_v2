@@ -14,7 +14,11 @@ import 'downsampling.dart';
 import 'viewport.dart';
 
 typedef _TimeRange = ({double start, double end});
-typedef _OverviewSeries = ({Color color, List<Offset> points});
+typedef _OverviewSeries = ({
+  Color color,
+  List<Offset> points,
+  WaveformGeometry geometry,
+});
 typedef _OverviewFrame = ({
   Size size,
   CartesianPlotViewport? viewport,
@@ -43,6 +47,7 @@ class PlotOverview extends StatefulWidget {
 
 class _PlotOverviewState extends State<PlotOverview> {
   final _repaint = ValueNotifier(0);
+  final _geometry = <String, WaveformGeometry>{};
   late PlotHistoryQuery _history;
   double? _historyEnd;
   final _focus = FocusNode(debugLabel: 'Plot time overview');
@@ -143,6 +148,7 @@ class _PlotOverviewState extends State<PlotOverview> {
     final range = _dataRange;
     if (range == null || size.width <= 2 || size.height <= 2) {
       if (range == null) {
+        _geometry.clear();
         _history.clear();
         _historyEnd = null;
       }
@@ -201,9 +207,18 @@ class _PlotOverviewState extends State<PlotOverview> {
                 watch.totalSampleCount > watch.samples.length,
       ),
     );
+    final plottedKeys = {for (final watch in plotted) watch.symbol.key};
+    _geometry.removeWhere((key, _) => !plottedKeys.contains(key));
     return [
       for (final watch in plotted)
-        (color: watch.color, points: _points(watch, range, pixelWidth)),
+        (
+          color: watch.color,
+          points: _points(watch, range, pixelWidth),
+          geometry: _geometry.putIfAbsent(
+            watch.symbol.key,
+            WaveformGeometry.new,
+          ),
+        ),
     ];
   }
 
@@ -430,6 +445,8 @@ class _PlotOverviewState extends State<PlotOverview> {
                     frameFor: _frameFor,
                     window: () =>
                         _paintedWindow = telemetryTimeWindow(controller),
+                    devicePixelRatio:
+                        View.of(context).devicePixelRatio * controller.uiScale,
                     focused: _showFocus,
                     showRange: _dragging,
                     repaint: _repaint,
@@ -464,6 +481,7 @@ class _PlotOverviewPainter extends CustomPainter {
   _PlotOverviewPainter({
     required this.frameFor,
     required this.window,
+    required this.devicePixelRatio,
     required this.focused,
     required this.showRange,
     required Listenable repaint,
@@ -471,6 +489,7 @@ class _PlotOverviewPainter extends CustomPainter {
 
   final _OverviewFrame Function(Size) frameFor;
   final _TimeRange Function() window;
+  final double devicePixelRatio;
   final bool focused;
   final bool showRange;
 
@@ -581,18 +600,30 @@ class _PlotOverviewPainter extends CustomPainter {
         entry.points,
         entry.color.withValues(alpha: 0.45),
         strokeWidth: 1,
+        geometry: entry.geometry,
+        useMesh: useWaveformMesh,
+        devicePixelRatio: devicePixelRatio,
       );
     }
     if (box.width <= 0) return;
     canvas.save();
     canvas.clipRect(box);
     for (final entry in record) {
-      renderer.drawPolyline(entry.points, entry.color, strokeWidth: 1);
+      renderer.drawPolyline(
+        entry.points,
+        entry.color,
+        strokeWidth: 1,
+        geometry: entry.geometry,
+        useMesh: useWaveformMesh,
+        devicePixelRatio: devicePixelRatio,
+      );
     }
     canvas.restore();
   }
 
   @override
   bool shouldRepaint(covariant _PlotOverviewPainter oldDelegate) =>
-      focused != oldDelegate.focused || showRange != oldDelegate.showRange;
+      focused != oldDelegate.focused ||
+      showRange != oldDelegate.showRange ||
+      devicePixelRatio != oldDelegate.devicePixelRatio;
 }

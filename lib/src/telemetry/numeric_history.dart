@@ -184,6 +184,7 @@ class HistoryRequest {
   final List<String> keys;
   final double start, end, sourceEnd;
   final int buckets, maxPoints;
+  double get coveredEnd => math.min(end, sourceEnd);
   double get resolution => (end - start) / math.max(1, buckets);
 }
 
@@ -219,6 +220,7 @@ HistoryWindow readNumericHistorySync(HistoryRequest request) {
   final channels = manifest['channels'] as List;
   final ids = {for (var i = 0; i < channels.length; i++) channels[i]['key']: i};
   final series = <String, Float64List>{};
+  final coveredEnd = request.coveredEnd;
   var bytesRead = 0, rawPointsRead = 0, summaryNodesRead = 0;
   var reduced = false;
   for (final key in request.keys) {
@@ -246,11 +248,9 @@ HistoryWindow readNumericHistorySync(HistoryRequest request) {
         rawPointsRead += end - begin;
         for (var i = 0; i < end - begin; i++) {
           collector.add(
-            _Point(
-              begin + i,
-              data.getFloat64(i * 16, Endian.little),
-              data.getFloat64(i * 16 + 8, Endian.little),
-            ),
+            begin + i,
+            data.getFloat64(i * 16, Endian.little),
+            data.getFloat64(i * 16 + 8, Endian.little),
           );
         }
         return;
@@ -263,9 +263,9 @@ HistoryWindow readNumericHistorySync(HistoryRequest request) {
           final offset = i * _nodeBytes;
           final startTime = data.getFloat64(offset, Endian.little);
           final endTime = data.getFloat64(offset + 8, Endian.little);
-          if (endTime < request.start || startTime > request.end) continue;
+          if (endTime < request.start || startTime > coveredEnd) continue;
           if (startTime >= request.start &&
-              endTime <= request.end &&
+              endTime <= coveredEnd &&
               endTime - startTime <= request.resolution) {
             reduced = true;
             for (var p = 0; p < 5; p++) {
@@ -273,11 +273,9 @@ HistoryWindow readNumericHistorySync(HistoryRequest request) {
               final index = data.getFloat64(base, Endian.little).toInt();
               if (index >= 0) {
                 collector.add(
-                  _Point(
-                    index,
-                    data.getFloat64(base + 8, Endian.little),
-                    data.getFloat64(base + 16, Endian.little),
-                  ),
+                  index,
+                  data.getFloat64(base + 8, Endian.little),
+                  data.getFloat64(base + 16, Endian.little),
                 );
               }
             }
@@ -370,55 +368,57 @@ class _HistoryFile {
 }
 
 class _Collector {
-  _Collector(this.request);
+  _Collector(this.request)
+    : _end = request.coveredEnd,
+      _resolution = request.resolution;
   final HistoryRequest request;
+  final double _end, _resolution;
   Map<int, _Point>? exact = {};
   final Map<int, _Summary> buckets = {};
   bool get reduced => exact == null;
 
-  void add(_Point point) {
-    if (point.time < request.start ||
-        point.time > request.end ||
-        !point.time.isFinite) {
+  void add(int index, double time, double value) {
+    if (time < request.start || time > _end || !time.isFinite) {
       return;
     }
     final points = exact;
     if (points != null) {
-      points[point.index] = point;
+      points[index] = _Point(index, time, value);
       if (points.length <= request.maxPoints) return;
       exact = null;
       for (final item in points.values) {
-        _addBucket(item);
+        _addBucket(item.index, item.time, item.value);
       }
     } else {
-      _addBucket(point);
+      _addBucket(index, time, value);
     }
   }
 
-  void _addBucket(_Point point) {
-    final index = ((point.time - request.start) / request.resolution)
-        .floor()
-        .clamp(0, request.buckets - 1);
-    final bucket = buckets[index] ??= _Summary();
-    // Tree extrema may arrive out of order; endpoint selection uses raw indices.
-    final first = bucket.count == 0 || point.index < bucket.first.index
-        ? point
-        : bucket.first;
-    final last = bucket.count == 0 || point.index > bucket.last.index
-        ? point
-        : bucket.last;
-    bucket.add(
-      _Summary()
-        ..start = point.time
-        ..end = point.time
-        ..first = point
-        ..low = point
-        ..high = point
-        ..last = point
-        ..gap = point.value.isFinite ? _empty : point,
+  void _addBucket(int index, double time, double value) {
+    final slot = ((time - request.start) / _resolution).floor().clamp(
+      0,
+      request.buckets - 1,
     );
-    bucket.first = first;
-    bucket.last = last;
+    final bucket = buckets[slot] ??= _Summary();
+    // These points can arrive out of order when collected from tree summaries.
+    final empty = bucket.first.index < 0;
+    final finite = value.isFinite;
+    final first = empty || index < bucket.first.index;
+    final last = index > bucket.last.index;
+    final low =
+        empty ||
+        (finite && (!bucket.low.value.isFinite || value < bucket.low.value));
+    final high =
+        empty ||
+        (finite && (!bucket.high.value.isFinite || value > bucket.high.value));
+    final gap = !finite && bucket.gap.index < 0;
+    if (!(first || last || low || high || gap)) return;
+    final point = _Point(index, time, value);
+    if (first) bucket.first = point;
+    if (last) bucket.last = point;
+    if (low) bucket.low = point;
+    if (high) bucket.high = point;
+    if (gap) bucket.gap = point;
   }
 
   Float64List finish() {

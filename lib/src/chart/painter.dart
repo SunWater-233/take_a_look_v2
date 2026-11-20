@@ -13,6 +13,10 @@ class TelemetryPaintFrame {
   TakeALookController? _controller;
   Size? _size;
   ({CartesianPlotViewport viewport, List<TelemetryPlotSeries> series})? _frame;
+  final _geometry = <String, WaveformGeometry>{};
+
+  WaveformGeometry geometryFor(TelemetryPlotSeries series) =>
+      _geometry.putIfAbsent(series.watch.symbol.key, WaveformGeometry.new);
 
   ({CartesianPlotViewport viewport, List<TelemetryPlotSeries> series}) read(
     TakeALookController controller,
@@ -26,9 +30,15 @@ class TelemetryPaintFrame {
         frame != null) {
       return frame;
     }
+    if (!identical(_controller, controller)) _geometry.clear();
     _controller = controller;
     _size = size;
-    return _frame = _preparePaintFrame(controller, size);
+    final prepared = _preparePaintFrame(controller, size);
+    final keys = {
+      for (final series in prepared.series) series.watch.symbol.key,
+    };
+    _geometry.removeWhere((key, _) => !keys.contains(key));
+    return _frame = prepared;
   }
 }
 
@@ -59,6 +69,7 @@ class TelemetryPainter extends CustomPainter {
     this.inspectionAnchorY,
     this.frame,
     this.paintInspection = true,
+    this.devicePixelRatio = 1,
     TelemetryHoverTracker? hoverTracker,
   }) : hoverTracker = hoverTracker ?? TelemetryHoverTracker(),
        super(
@@ -74,6 +85,7 @@ class TelemetryPainter extends CustomPainter {
   final ValueListenable<Offset?>? hoverPosition;
   final ValueListenable<double?>? inspectionAnchorY;
   final bool paintInspection;
+  final double devicePixelRatio;
   final TelemetryHoverTracker hoverTracker;
 
   @override
@@ -104,7 +116,13 @@ class TelemetryPainter extends CustomPainter {
       canvas.save();
       canvas.clipRect(viewport.plot);
       for (final series in plotted) {
-        renderer.drawPolyline(series.points, series.watch.color);
+        renderer.drawPolyline(
+          series.points,
+          series.watch.color,
+          geometry: frame?.geometryFor(series),
+          useMesh: useWaveformMesh,
+          devicePixelRatio: devicePixelRatio,
+        );
       }
       if (hovered != null) {
         _drawHighlightedSeries(canvas, renderer, hovered);
@@ -180,15 +198,18 @@ class TelemetryPainter extends CustomPainter {
     TelemetryHoverHit hovered,
   ) {
     final series = hovered.series;
+    final geometry = frame?.geometryFor(series) ?? WaveformGeometry();
     renderer.drawPolyline(
       series.points,
       series.watch.color.withValues(alpha: 0.25),
       strokeWidth: 7,
+      geometry: geometry,
     );
     renderer.drawPolyline(
       series.points,
       Color.lerp(series.watch.color, TalChartColors.highlight, 0.3)!,
       strokeWidth: 3.4,
+      geometry: geometry,
     );
     canvas.drawCircle(hovered.position, 4, Paint()..color = series.watch.color);
     canvas.drawCircle(
@@ -257,6 +278,7 @@ class TelemetryPainter extends CustomPainter {
         oldDelegate.hoverPosition != hoverPosition ||
         oldDelegate.hoverTracker != hoverTracker ||
         oldDelegate.inspectionAnchorY != inspectionAnchorY ||
+        oldDelegate.devicePixelRatio != devicePixelRatio ||
         oldDelegate.paintInspection != paintInspection;
   }
 }
@@ -303,6 +325,7 @@ class TelemetryInspectionPainter extends CustomPainter {
     );
     final delegate = TelemetryPainter(
       controller,
+      frame: frame,
       inspectionAnchorY: inspectionAnchorY,
     );
     if (hit != null) {

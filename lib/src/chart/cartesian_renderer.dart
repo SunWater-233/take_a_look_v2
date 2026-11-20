@@ -1,10 +1,12 @@
 import 'dart:math' as math;
 import 'dart:typed_data';
-import 'dart:ui' show PointMode;
+import 'dart:ui' show PointMode, VertexMode, Vertices;
 
 import 'package:material_ui/material_ui.dart';
 
 import '../theme/theme.dart';
+
+part 'waveform_renderer.dart';
 
 /// Axis bounds and coordinate mapping shared by realtime and analysis charts.
 class CartesianPlotViewport {
@@ -226,40 +228,18 @@ class CartesianChartRenderer {
     Iterable<Offset> points,
     Color color, {
     double strokeWidth = 1.8,
+    WaveformGeometry? geometry,
+    bool useMesh = false,
+    double devicePixelRatio = 1,
   }) {
     final source = points is List<Offset> ? points : points.toList();
-    final vertices = Float32List(source.length * 2);
-    final paint = Paint()
-      ..color = color
-      ..strokeWidth = strokeWidth
-      ..style = PaintingStyle.stroke;
-    var count = 0;
-    void flush() {
-      if (count > 1) {
-        // Independent line segments avoid Skia's expensive round-join path
-        // tessellation for dense, often reversing min/max envelopes.
-        canvas.drawRawPoints(
-          PointMode.polygon,
-          Float32List.sublistView(vertices, 0, count * 2),
-          paint,
-        );
-      }
-      count = 0;
+    final line = geometry ?? WaveformGeometry();
+    line._prepare(source, viewport);
+    if (useMesh && source.length >= 128) {
+      line._drawMesh(canvas, color, strokeWidth, 1 / devicePixelRatio);
+    } else {
+      line._draw(canvas, color, strokeWidth);
     }
-
-    for (final point in source) {
-      if (!point.isFinite) {
-        flush();
-        continue;
-      }
-      if (point.dx < viewport.xMin || point.dx > viewport.xMax) continue;
-      final x = viewport.mapX(point.dx);
-      final y = viewport.mapY(point.dy);
-      vertices[count * 2] = x;
-      vertices[count * 2 + 1] = y;
-      count++;
-    }
-    flush();
   }
 
   void drawLegend(

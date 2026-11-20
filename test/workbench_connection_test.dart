@@ -27,6 +27,7 @@ void main() {
       },
     );
     addTearDown(controller.dispose);
+    controller.setPresentationActive(false);
     await tester.pumpWidget(
       MaterialApp(
         theme: buildTalTheme(),
@@ -208,6 +209,7 @@ void main() {
       addTearDown(() => tester.binding.setSurfaceSize(null));
       final controller = TakeALookController();
       addTearDown(controller.dispose);
+      controller.setPresentationActive(false);
       await tester.pumpWidget(
         MaterialApp(
           theme: buildTalTheme(inputMode: mode),
